@@ -1,0 +1,39 @@
+modules:
+  base:
+    description: 全環境共通の最小設定。
+  git-profile:
+    description: directory convention に基づく Git identity 分離。
+  supply-chain/git:
+    description: Git credential 漏洩防止と remote URL 検査。
+  supply-chain/npm:
+    description: npm hardening の report / enforce。
+  supply-chain/corepack:
+    description: Corepack availability と packageManager policy。
+  doctor:
+    description: 導入後の健康診断。
+  preflight:
+    description: 導入前の危険検知。
+  project-templates:
+    description: 新規 repository 用テンプレート。
+  runtime:
+    description: mise による runtime 管理。
+  shell-extra:
+    description: zsh / antidote / starship などの shell 強化。
+  vscode:
+    description: VS Code settings のみ管理。extensions は自動 install しない。
+  ssh-1password:
+    description: 1Password SSH Agent 用の SSH 設定。秘密鍵は管理しない。
+  direnv-policy:
+    description: direnv 利用方針。direnv allow は自動化しない。
+  update-policy:
+    description: 自動 upgrade を避ける更新方針。
+  gui-apps:
+    description: opt-in の GUI app install。
+  macos-defaults:
+    description: opt-in の macOS defaults。
+  git-signing:
+    description: 後続 module。commit / tag signing。
+  ai-policy:
+    description: AI agent 権限方針。
+  ai-tools:
+    description: 後続 module。AI tool install / 設定。

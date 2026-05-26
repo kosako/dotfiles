@@ -1,0 +1,32 @@
+packages:
+  cli:
+    base:
+      - chezmoi
+      - git
+      - ripgrep
+      - fd
+      - jq
+      - yq
+    runtime:
+      - mise
+      - direnv
+    shell-extra:
+      - antidote
+      - starship
+      - fzf
+      - tmux
+    lint:
+      - shellcheck
+      - shfmt
+    github:
+      - gh
+    secrets:
+      - 1password-cli
+  cask:
+    gui-apps:
+      - 1password
+      - iterm2
+      - google-chrome
+      - raycast
+      - tailscale
+      - visual-studio-code

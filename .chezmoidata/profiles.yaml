@@ -1,0 +1,89 @@
+profiles:
+  personal:
+    environmentKind: personal
+    modules:
+      - base
+      - git-profile
+      - supply-chain/git
+      - supply-chain/npm
+      - supply-chain/corepack
+      - doctor
+      - preflight
+      - project-templates
+      - runtime
+      - shell-extra
+      - vscode
+      - ssh-1password
+      - ai-policy
+    capabilities:
+      installPackages: true
+      installGuiApps: true
+      enableMacOSDefaults: false
+      enable1PasswordSSH: true
+      enableGitSigning: false
+      enableDirenv: true
+      enableRuntimeManagement: true
+      enableVsCodeSettings: true
+      enableVsCodeExtensions: false
+      npmHardeningMode: enforce
+      corepackMode: report
+      allowNetworkTunnels: true
+      allowSecretsAccess: true
+      enableAiTools: false
+      enableAiPolicy: true
+
+  work-minimal:
+    environmentKind: work
+    modules:
+      - base
+      - git-profile
+      - supply-chain/git
+      - doctor
+      - preflight
+      - ai-policy
+    capabilities:
+      installPackages: false
+      installGuiApps: false
+      enableMacOSDefaults: false
+      enable1PasswordSSH: false
+      enableGitSigning: false
+      enableDirenv: false
+      enableRuntimeManagement: false
+      enableVsCodeSettings: false
+      enableVsCodeExtensions: false
+      npmHardeningMode: report
+      corepackMode: report
+      allowNetworkTunnels: false
+      allowSecretsAccess: false
+      enableAiTools: false
+      enableAiPolicy: true
+
+  work-dev:
+    environmentKind: work
+    modules:
+      - base
+      - git-profile
+      - runtime
+      - shell-extra
+      - supply-chain/git
+      - supply-chain/npm
+      - doctor
+      - preflight
+      - project-templates
+      - ai-policy
+    capabilities:
+      installPackages: false
+      installGuiApps: false
+      enableMacOSDefaults: false
+      enable1PasswordSSH: false
+      enableGitSigning: false
+      enableDirenv: true
+      enableRuntimeManagement: true
+      enableVsCodeSettings: true
+      enableVsCodeExtensions: false
+      npmHardeningMode: report
+      corepackMode: report
+      allowNetworkTunnels: false
+      allowSecretsAccess: false
+      enableAiTools: false
+      enableAiPolicy: true
