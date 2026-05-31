@@ -12,19 +12,20 @@
 
 ## 作業ログ
 
-作業した日は、日単位の作業ログを残す。
+作業した日は、日単位の作業ログを残す。作業ログは repository には置かず、外部の project notes に保存する。
 
 保存先:
 
 ```text
-worklog/YYYY-MM-DD.md
+Notion dotfiles project page
 ```
 
 日付は Asia/Tokyo 基準にする。
 
 ### 作業開始時
 
-- 今日の `worklog/YYYY-MM-DD.md` がなければ作成する。
+- 今日の作業ログが Notion にあるか確認する。
+- なければ `作業ログ YYYY-MM-DD` として作成する。
 - 既にある場合は、最新の内容を読んでから作業する。
 - 前日の作業から続く場合は、前回の `Next` / `Open Questions` を確認する。
 
@@ -50,6 +51,14 @@ worklog/YYYY-MM-DD.md
 - 会社・クライアント固有の credential 情報
 
 必要な場合は、具体値ではなく抽象化した説明に留める。
+
+### repo に置かないもの
+
+- `worklog/`
+- 日次作業ログ
+- 長い設計背景
+- 試行錯誤
+- VM 個別環境のメモ
 
 ## コミット前チェック
 

@@ -2,3 +2,4 @@
 *.log
 .chezmoiignore.local
 .local/
+worklog/
