@@ -8,8 +8,9 @@ source "$SCRIPT_DIR/lib-policy.sh"
 profile="${1:-personal}"
 status=0
 
-info "doctor profile: $profile"
+section "doctor profile: $profile"
 
+section "policy"
 if ! "$SCRIPT_DIR/validate-policy.sh" "$profile"; then
   exit 1
 fi
@@ -17,15 +18,17 @@ fi
 environment_kind="$(profile_environment_kind "$profile")"
 ok "environmentKind: $environment_kind"
 
-info "modules"
-profile_modules "$profile" | sed 's/^/[info] - /'
+section "modules"
+while IFS= read -r module; do
+  item "$module"
+done < <(profile_modules "$profile")
 
-info "capabilities"
+section "capabilities"
 profile_capabilities "$profile" | while IFS= read -r capability; do
-  printf '[info] - %s=%s\n' "$capability" "$(capability_value "$profile" "$capability")"
+  item "$capability=$(capability_value "$profile" "$capability")"
 done
 
-info "chezmoi"
+section "chezmoi"
 if command -v chezmoi >/dev/null 2>&1; then
   ok "chezmoi: $(chezmoi --version 2>/dev/null | head -n 1)"
 else
@@ -33,7 +36,7 @@ else
 fi
 ok "source directory: $DOTFILES_ROOT"
 
-info "Git"
+section "Git"
 if command -v git >/dev/null 2>&1; then
   ok "git: $(git --version)"
   use_config_only="$(git config --global --get user.useConfigOnly || true)"
@@ -52,20 +55,20 @@ else
   warn "git not found"
 fi
 
-info "npm hardening"
+section "npm hardening"
 npm_mode="$(capability_value "$profile" npmHardeningMode)"
 ok "npmHardeningMode=$npm_mode"
 if command -v npm >/dev/null 2>&1; then
   ok "npm: $(npm --version)"
   for key in min-release-age ignore-scripts fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
-    printf '[info] npm %s=%s\n' "$key" "$value"
+    item "npm $key=$value"
   done
 else
   warn "npm not found"
 fi
 
-info "Corepack"
+section "Corepack"
 corepack_mode="$(capability_value "$profile" corepackMode)"
 ok "corepackMode=$corepack_mode"
 if command -v corepack >/dev/null 2>&1; then
@@ -74,12 +77,12 @@ else
   warn "corepack not found"
 fi
 
-info "runtime and shell"
+section "runtime and shell"
 for command_name in mise direnv zsh starship; do
   command_status "$command_name" || true
 done
 
-info "VS Code"
+section "VS Code"
 if [[ "$(capability_value "$profile" enableVsCodeSettings)" == "true" ]]; then
   command_status code || true
 else
@@ -91,7 +94,7 @@ else
   ok "VS Code extension auto-install disabled"
 fi
 
-info "1Password"
+section "1Password"
 if [[ "$(capability_value "$profile" allowSecretsAccess)" == "true" ]]; then
   if command -v op >/dev/null 2>&1; then
     if op whoami >/dev/null 2>&1; then
@@ -106,7 +109,7 @@ else
   ok "secret access disabled for profile"
 fi
 
-info "project roots"
+section "project roots"
 for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
   if [[ -d "$dir" ]]; then
     ok "exists: $dir"

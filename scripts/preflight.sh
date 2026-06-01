@@ -8,13 +8,14 @@ source "$SCRIPT_DIR/lib-policy.sh"
 profile="${1:-personal}"
 status=0
 
-info "preflight profile: $profile"
+section "preflight profile: $profile"
 
+section "policy"
 if ! "$SCRIPT_DIR/validate-policy.sh" "$profile"; then
   exit 1
 fi
 
-info "system"
+section "system"
 ok "arch: $(uname -m)"
 if command -v sw_vers >/dev/null 2>&1; then
   ok "macOS: $(sw_vers -productVersion)"
@@ -26,7 +27,7 @@ else
   warn "Xcode Command Line Tools: not configured"
 fi
 
-info "existing home files"
+section "existing home files"
 for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.gitconfig" "$HOME/.ssh/config" "$HOME/.npmrc"; do
   if [[ -e "$file" ]]; then
     warn "exists: $file"
@@ -35,19 +36,19 @@ for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.gitconfig" "$HOME/.ssh/conf
   fi
 done
 
-info "commands"
+section "commands"
 for command_name in git chezmoi brew op node npm corepack mise direnv code yq shellcheck shfmt; do
   command_status "$command_name" || true
 done
 
-info "Homebrew"
+section "Homebrew"
 if command -v brew >/dev/null 2>&1; then
   ok "brew prefix: $(brew --prefix)"
 else
   warn "brew unavailable"
 fi
 
-info "source directory"
+section "source directory"
 if [[ -d "$DOTFILES_ROOT" ]]; then
   ok "dotfiles root exists: $DOTFILES_ROOT"
 else
@@ -61,7 +62,7 @@ else
   warn "dotfiles root is not writable"
 fi
 
-info "known project roots"
+section "known project roots"
 for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
   if [[ -d "$dir" ]]; then
     ok "exists: $dir"

@@ -14,6 +14,14 @@ info() {
   printf '[info] %s\n' "$*"
 }
 
+section() {
+  printf '[info] == %s ==\n' "$*"
+}
+
+item() {
+  printf '[info] - %s\n' "$*"
+}
+
 warn() {
   printf '[warn] %s\n' "$*" >&2
 }
@@ -36,6 +44,16 @@ require_data_files() {
 profile_exists() {
   local profile="$1"
   awk -v profile="$profile" '$0 == "  " profile ":" { found = 1 } END { exit !found }' "$PROFILES_FILE"
+}
+
+known_profiles() {
+  awk '
+    /^  [^ ].*:[[:space:]]*$/ {
+      name = $1
+      sub(/:$/, "", name)
+      print name
+    }
+  ' "$PROFILES_FILE"
 }
 
 profile_environment_kind() {
@@ -127,6 +145,20 @@ capability_allowed_values() {
     }
     in_cap && in_values && /^    [A-Za-z]+:/ { exit }
   ' "$CAPABILITIES_FILE"
+}
+
+capability_value_is_allowed() {
+  local capability="$1"
+  local value="$2"
+  local allowed_value
+
+  while IFS= read -r allowed_value; do
+    if [[ "$allowed_value" == "$value" ]]; then
+      return 0
+    fi
+  done < <(capability_allowed_values "$capability")
+
+  return 1
 }
 
 is_allowed_environment_kind() {

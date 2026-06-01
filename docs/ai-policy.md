@@ -2,6 +2,8 @@
 
 AI tools は後続 module とする。ただし、AI agent の権限ポリシーは初期段階で定義する。
 
+`dotfiles` と別 project として管理する AI skills / agents repository の境界は [AI Environment Boundary](ai-environment-boundary.md) に定義する。
+
 ## Default
 
 AI agent は default deny。
