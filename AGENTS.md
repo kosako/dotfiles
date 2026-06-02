@@ -10,6 +10,19 @@
 - `doctor` は副作用なしを維持する。
 - `preflight` は導入前の危険検知に限定する。
 
+## GitHub 運用
+
+Phase 2 以降の作業は、原則として Issue 作成、branch 作成、Pull Request、merge の順で進める。
+
+詳細は `docs/github-workflow.md` に従う。
+
+- Notion は roadmap、設計背景、作業ログ、引き継ぎに使う。
+- GitHub Issues は実装単位の scope、done criteria、validation plan に使う。
+- GitHub Pull Requests は変更内容、検証結果、残リスク、merge 記録に使う。
+- `main` への直接 commit は例外扱いにする。
+- script、policy、capability、profile、install、secret、network、AI agent 境界に関わる変更は PR 必須。
+- main 直 commit の例外を使った場合は、Notion worklog または follow-up Issue に理由を残す。
+
 ## 作業ログ
 
 作業した日は、日単位の作業ログを残す。作業ログは repository には置かず、外部の project notes に保存する。

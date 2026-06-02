@@ -89,6 +89,18 @@ chezmoi apply --source ~/dotfiles
 - `doctor` は副作用を持たない。
 - `preflight` は導入前の危険検知に限定する。
 
+## GitHub Workflow
+
+Phase 2 以降の作業は Issue / Pull Request で管理する。
+
+```text
+Notion: roadmap / design background / worklog / handoff
+GitHub Issues: implementation scope / done criteria / validation plan
+GitHub PRs: change summary / validation result / residual risk / merge record
+```
+
+詳細は [docs/github-workflow.md](docs/github-workflow.md) を参照する。
+
 ## License
 
 MIT
