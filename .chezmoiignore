@@ -12,3 +12,9 @@ templates
 {{ if ne $caps.npmHardeningMode "enforce" }}
 .npmrc
 {{ end }}
+
+{{/* mise config is managed only when the profile enables runtime
+     management. */}}
+{{ if not $caps.enableRuntimeManagement }}
+.config/mise
+{{ end }}

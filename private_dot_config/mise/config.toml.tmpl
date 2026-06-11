@@ -1,0 +1,12 @@
+# Managed by chezmoi from kosako/dotfiles.
+# Global mise config stays minimal: no global tool versions.
+# Pin runtimes per project in .mise.toml with exact versions.
+# See docs/runtime.md.
+
+[settings]
+# Do not auto-install missing runtimes when a shim is invoked.
+# Installs happen only via an explicit `mise install`.
+not_found_auto_install = false
+
+[tools]
+# Intentionally empty. Global tool versions are not managed here.
