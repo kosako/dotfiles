@@ -89,6 +89,7 @@ chezmoi apply --source ~/dotfiles
 - `doctor` は副作用を持たない。
 - `preflight` は導入前の危険検知に限定する。
 - npm hardening の方針と `ignore-scripts=true` の逃げ道は [docs/supply-chain-npm.md](docs/supply-chain-npm.md) を参照する。
+- Corepack は暗黙に enable しない。方針は [docs/supply-chain-corepack.md](docs/supply-chain-corepack.md) を参照する。
 
 ## GitHub Workflow
 

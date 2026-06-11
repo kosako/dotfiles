@@ -137,10 +137,22 @@ fi
 section "Corepack"
 corepack_mode="$(capability_value "$profile" corepackMode)"
 ok "corepackMode=$corepack_mode"
-if command -v corepack >/dev/null 2>&1; then
-  ok "corepack: $(corepack --version 2>/dev/null || true)"
-else
+if [[ "$corepack_mode" == "off" ]]; then
+  ok "corepack intentionally unmanaged"
+elif ! command -v corepack >/dev/null 2>&1; then
   warn "corepack not found"
+else
+  ok "corepack: $(corepack --version 2>/dev/null || true)"
+  if [[ "$corepack_mode" == "enable" ]]; then
+    for pm in pnpm yarn; do
+      pm_path="$(command -v "$pm" 2>/dev/null || true)"
+      if [[ -n "$pm_path" ]]; then
+        item "$pm shim: $pm_path"
+      else
+        warn "corepackMode=enable but $pm not resolvable (run 'corepack enable' manually)"
+      fi
+    done
+  fi
 fi
 
 section "runtime and shell"
