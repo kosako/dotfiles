@@ -30,7 +30,7 @@ if [[ ! -f "$NPMRC_TEMPLATE" ]]; then
 fi
 
 check_file_contains "gated on enforce mode" "$NPMRC_TEMPLATE" 'eq $caps.npmHardeningMode "enforce"'
-for needle in "ignore-scripts=true" "save-exact=true" "fund=false" "audit=true" "min-release-age=10080"; do
+for needle in "ignore-scripts=true" "save-exact=true" "fund=false" "audit=true" "min-release-age=7"; do
   check_file_contains "hardening setting: $needle" "$NPMRC_TEMPLATE" "$needle"
 done
 

@@ -1,11 +1,14 @@
 {{- $caps := index .profiles .profile "capabilities" -}}
-{{/* Repo-management files are never applied to the home directory. */}}
+{{/* Repo-management files are never applied to the home directory.
+     chezmoi reads the source directory, not the git index, so even
+     gitignored local files must be listed here. */}}
 README.md
 AGENTS.md
 LICENSE
 docs
 scripts
 templates
+worklog
 
 {{/* .npmrc is managed only when the profile enforces npm hardening.
      In off/report modes the home .npmrc stays unmanaged. */}}
