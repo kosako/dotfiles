@@ -1,0 +1,38 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: bash syntax check
+        run: bash -n scripts/*.sh
+
+      - name: shellcheck (warning and above)
+        run: shellcheck -S warning scripts/*.sh
+
+      - name: validate policy
+        run: ./scripts/validate-policy.sh --all
+
+      - name: policy fail-closed tests
+        run: ./scripts/test-policy.sh
+
+      - name: gitconfig safety tests
+        run: ./scripts/test-gitconfig.sh
+
+      - name: npmrc hardening tests
+        run: ./scripts/test-npmrc.sh
+
+      - name: git diff check
+        run: git diff --check
