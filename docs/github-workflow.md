@@ -115,6 +115,12 @@ git diff --check
 ./scripts/doctor.sh work-minimal
 ```
 
+Git config template(`dot_gitconfig.tmpl`)を変更した場合:
+
+```sh
+./scripts/test-gitconfig.sh
+```
+
 ## 禁止事項
 
 - Issue なしで大きな scope を始める。

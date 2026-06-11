@@ -55,6 +55,19 @@ else
   warn "git not found"
 fi
 
+section "Git identity contexts"
+for context in personal work client sandbox agent; do
+  identity_file="$HOME/.config/git/$context.gitconfig"
+  project_root="$HOME/src/$context"
+  if [[ -f "$identity_file" ]]; then
+    ok "identity file exists: $identity_file"
+  elif [[ -d "$project_root" ]]; then
+    warn "project root exists but identity file missing: $identity_file"
+  else
+    item "context unused, identity file not configured: $context"
+  fi
+done
+
 section "npm hardening"
 npm_mode="$(capability_value "$profile" npmHardeningMode)"
 ok "npmHardeningMode=$npm_mode"

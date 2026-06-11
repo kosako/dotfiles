@@ -33,7 +33,12 @@ Git config では `user.useConfigOnly = true` を使い、known directory 外で
 
 [includeIf "gitdir:~/src/sandbox/"]
   path = ~/.config/git/sandbox.gitconfig
+
+[includeIf "gitdir:~/src/agent/"]
+  path = ~/.config/git/agent.gitconfig
 ```
+
+実体は `dot_gitconfig.tmpl` が管理する。identity file の置き場所と扱いは `docs/git-identity.md` に従う。
 
 ## Rules
 
