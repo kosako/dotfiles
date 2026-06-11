@@ -97,14 +97,41 @@ fi
 section "npm hardening"
 npm_mode="$(capability_value "$profile" npmHardeningMode)"
 ok "npmHardeningMode=$npm_mode"
-if command -v npm >/dev/null 2>&1; then
-  ok "npm: $(npm --version)"
-  for key in min-release-age ignore-scripts fund audit userconfig globalconfig; do
+if [[ "$npm_mode" == "off" ]]; then
+  ok "npm hardening intentionally unmanaged"
+elif ! command -v npm >/dev/null 2>&1; then
+  warn "npm not found"
+else
+  npm_version="$(npm --version)"
+  ok "npm: $npm_version"
+  for key in min-release-age ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
     item "npm $key=$value"
   done
-else
-  warn "npm not found"
+  npm_major="${npm_version%%.*}"
+  npm_minor="$(printf '%s' "$npm_version" | cut -d. -f2)"
+  if [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 6 ) ]] 2>/dev/null; then
+    ok "npm supports min-release-age (>= 11.6)"
+  else
+    warn "npm older than 11.6, min-release-age is not enforced"
+  fi
+  if [[ "$npm_mode" == "enforce" ]]; then
+    while IFS='=' read -r key expected; do
+      [[ -z "$key" ]] && continue
+      actual="$(npm config get "$key" 2>/dev/null || true)"
+      if [[ "$actual" == "$expected" ]]; then
+        ok "npm $key=$expected"
+      else
+        warn "enforce expects npm $key=$expected, current: $actual (apply pending?)"
+      fi
+    done <<'EOF'
+ignore-scripts=true
+save-exact=true
+fund=false
+audit=true
+min-release-age=10080
+EOF
+  fi
 fi
 
 section "Corepack"

@@ -88,6 +88,7 @@ chezmoi apply --source ~/dotfiles
 - unknown profile / module / capability は fail closed にする。
 - `doctor` は副作用を持たない。
 - `preflight` は導入前の危険検知に限定する。
+- npm hardening の方針と `ignore-scripts=true` の逃げ道は [docs/supply-chain-npm.md](docs/supply-chain-npm.md) を参照する。
 
 ## GitHub Workflow
 

@@ -50,7 +50,8 @@ policy validation が失敗した場合は exit 1。
 
 導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、Git remote URL(credential らしき userinfo の有無。URL の値は表示しない)、npm、Corepack、runtime、VS Code、1Password、project root の状態を表示する。
 副作用は持たない。設定不足や未導入 command の warning は report-only として exit 0 のままにする。
-remote URL scan の方針は `docs/supply-chain-git.md` に従う。
+remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検査は `docs/supply-chain-npm.md` に従う。
+`npmHardeningMode=enforce` の profile では、期待する npm config 値と現在値の不一致を `[warn]` で報告する(apply 前は不一致が正常)。
 
 ```sh
 ./scripts/doctor.sh personal
@@ -96,6 +97,24 @@ policy validation が失敗した場合は exit 1。
 - credential なし・username のみの remote URL は誤検出しないこと。
 
 fixture は一時 directory に作り、実際の home や global Git config には触れない。
+
+## test-npmrc.sh
+
+`dot_npmrc.tmpl` と `.chezmoiignore` の npm hardening 設定を静的に検証する。
+
+```sh
+./scripts/test-npmrc.sh
+```
+
+検証内容:
+
+- template が `npmHardeningMode=enforce` でのみ内容を出力するよう gate されていること。
+- 期待する hardening 設定(`ignore-scripts=true` など)が定義されていること。
+- token、registry 設定が含まれないこと。
+- `.chezmoiignore` が enforce 以外で `.npmrc` を管理対象外にすること。
+- template の設定値と `doctor.sh` の enforce 期待値が一致していること。
+
+chezmoi が未導入でも実行できるよう、render はせず静的検査に留める。
 
 ## lib-policy.sh
 

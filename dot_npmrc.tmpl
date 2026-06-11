@@ -1,0 +1,10 @@
+{{- $caps := index .profiles .profile "capabilities" -}}
+{{- if eq $caps.npmHardeningMode "enforce" -}}
+# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).
+# No tokens, no registry overrides. See docs/supply-chain-npm.md.
+ignore-scripts=true
+save-exact=true
+fund=false
+audit=true
+min-release-age=10080
+{{- end -}}
