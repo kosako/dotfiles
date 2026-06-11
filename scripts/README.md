@@ -37,7 +37,7 @@ unknown profile / module / capability や capability enum の不正値は policy
 
 ## preflight.sh
 
-導入前の危険検知を行う。既存 home file、必要 command、project root などを確認する。
+導入前の危険検知を行う。既存 home file、既存 Git config(`~/.gitconfig`、`~/.config/git/config`、global identity の設定有無。値は表示しない)、必要 command、project root などを確認する。
 副作用は持たない。既存 file や command 不足の warning は report-only として exit 0 のままにする。
 
 ```sh
@@ -48,7 +48,7 @@ policy validation が失敗した場合は exit 1。
 
 ## doctor.sh
 
-導入後または現状環境の健康診断を行う。chezmoi、Git、npm、Corepack、runtime、VS Code、1Password、project root の状態を表示する。
+導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、npm、Corepack、runtime、VS Code、1Password、project root の状態を表示する。
 副作用は持たない。設定不足や未導入 command の warning は report-only として exit 0 のままにする。
 
 ```sh
@@ -74,6 +74,25 @@ policy validation が失敗した場合は exit 1。
 - unknown module を拒否すること。
 - unknown capability を拒否すること。
 - capability enum の不正値を拒否すること。
+
+## test-gitconfig.sh
+
+`dot_gitconfig.tmpl` の Git identity 安全境界を検証する。
+
+```sh
+./scripts/test-gitconfig.sh
+```
+
+検証内容:
+
+- template に `user.useConfigOnly = true` と `transfer.credentialsInUrl = die` が含まれること。
+- 全 context(personal / work / client / sandbox / agent)の `includeIf` と include path が定義されていること。
+- template に identity 値(`name =` / `email =`、email らしき値)が含まれないこと。
+- local fixture で、known root 外では commit が失敗すること。
+- local fixture で、`~/src/personal/` 配下では identity file の identity が解決されること。
+- credential 入り remote URL が拒否されること。
+
+fixture は一時 directory に作り、実際の home や global Git config には触れない。
 
 ## lib-policy.sh
 

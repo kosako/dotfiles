@@ -36,6 +36,31 @@ for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.gitconfig" "$HOME/.ssh/conf
   fi
 done
 
+section "existing Git config"
+if [[ -e "$HOME/.config/git/config" ]]; then
+  warn "exists: $HOME/.config/git/config"
+else
+  ok "absent: $HOME/.config/git/config"
+fi
+for context in personal work client sandbox agent; do
+  identity_file="$HOME/.config/git/$context.gitconfig"
+  if [[ -e "$identity_file" ]]; then
+    item "identity file already present: $identity_file"
+  fi
+done
+if command -v git >/dev/null 2>&1; then
+  if git config --global --get user.name >/dev/null 2>&1; then
+    warn "global user.name is set (value not shown)"
+  else
+    ok "global user.name not set"
+  fi
+  if git config --global --get user.email >/dev/null 2>&1; then
+    warn "global user.email is set (value not shown)"
+  else
+    ok "global user.email not set"
+  fi
+fi
+
 section "commands"
 for command_name in git chezmoi brew op node npm corepack mise direnv code yq shellcheck shfmt; do
   command_status "$command_name" || true

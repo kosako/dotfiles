@@ -1,0 +1,27 @@
+# Managed by chezmoi from kosako/dotfiles.
+# This file must not contain real identity values.
+# Identity values live only in local files under ~/.config/git/.
+# See docs/git-identity.md.
+
+[user]
+	# Refuse to guess identity. Commits fail outside a configured context.
+	useConfigOnly = true
+
+[transfer]
+	# Refuse remote URLs that embed credentials.
+	credentialsInUrl = die
+
+[includeIf "gitdir:~/src/personal/"]
+	path = ~/.config/git/personal.gitconfig
+
+[includeIf "gitdir:~/src/work/"]
+	path = ~/.config/git/work.gitconfig
+
+[includeIf "gitdir:~/src/client/"]
+	path = ~/.config/git/client.gitconfig
+
+[includeIf "gitdir:~/src/sandbox/"]
+	path = ~/.config/git/sandbox.gitconfig
+
+[includeIf "gitdir:~/src/agent/"]
+	path = ~/.config/git/agent.gitconfig
