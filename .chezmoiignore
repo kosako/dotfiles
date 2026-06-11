@@ -1,0 +1,6 @@
+{{- $caps := index .profiles .profile "capabilities" -}}
+{{/* .npmrc is managed only when the profile enforces npm hardening.
+     In off/report modes the home .npmrc stays unmanaged. */}}
+{{ if ne $caps.npmHardeningMode "enforce" }}
+.npmrc
+{{ end }}
