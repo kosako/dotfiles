@@ -1,0 +1,4 @@
+# Pin runtimes per project with exact versions.
+# See ~/dotfiles/docs/runtime.md (global mise config stays minimal).
+[tools]
+python = "3.13.5"

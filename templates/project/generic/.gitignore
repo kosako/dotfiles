@@ -1,0 +1,8 @@
+.DS_Store
+*.log
+tmp/
+
+# Secrets stay out of git. Commit .env.example instead.
+.env
+.env.*
+!.env.example
