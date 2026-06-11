@@ -162,4 +162,25 @@ run_fail_contains \
   "policy validation failed for profile: personal" \
   "$fixture/scripts/validate-policy.sh" --all
 
+make_fixture
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      installPackages: true" "      bad-cap: true"
+run_fail_contains \
+  "rejects unknown kebab-case capability" \
+  "unknown capability in personal: bad-cap" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      installPackages: true" "      installPackages: true"
+run_fail_contains \
+  "rejects duplicate capability" \
+  "duplicate capability in personal: installPackages" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+: > "$fixture/.chezmoidata/capabilities.schema.yaml"
+run_fail_contains \
+  "fails closed on empty capability schema" \
+  "no capabilities parsed" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 ok "policy tests passed"

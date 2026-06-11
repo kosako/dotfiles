@@ -14,6 +14,7 @@ CLI usage error: exit 2
 
 `[warn]` は現状報告または注意喚起であり、それだけでは失敗扱いにしない。
 unknown profile / module / capability や capability enum の不正値は policy violation として fail closed する。
+`doctor.sh` / `preflight.sh` は冒頭の policy validation が失敗した場合のみ exit 1 で、それ以外は warning があっても常に exit 0(report-only)。
 
 ## validate-policy.sh
 
@@ -90,7 +91,8 @@ policy validation が失敗した場合は exit 1。
 - template に `user.useConfigOnly = true` と `transfer.credentialsInUrl = die` が含まれること。
 - 全 context(personal / work / client / sandbox / agent)の `includeIf` と include path が定義されていること。
 - template に identity 値(`name =` / `email =`、email らしき値)が含まれないこと。
-- local fixture で、known root 外では commit が失敗すること。
+- template に chezmoi のテンプレート構文が含まれないこと(fixture は raw template を git に直接渡すため)。
+- local fixture で、known root 外では commit が identity 未解決を理由に失敗すること。
 - local fixture で、`~/src/personal/` 配下では identity file の identity が解決されること。
 - credential 入り remote URL が拒否されること。
 - credential らしき remote URL(`scheme://user:password@host`)を `git_remotes_with_credentials` が検出すること。

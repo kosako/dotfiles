@@ -61,6 +61,17 @@ else
   ok "test passed: no email-like value in template"
 fi
 
+# The fixture checks below feed the raw template to git via
+# GIT_CONFIG_GLOBAL, which only works while it contains no template
+# directives. If templating becomes necessary, the fixtures must
+# render the template first.
+if grep -q '{{' "$GITCONFIG_TEMPLATE"; then
+  fail "test failed: template contains template directives; fixtures assume plain gitconfig"
+  status=1
+else
+  ok "test passed: template is directive-free"
+fi
+
 section "fixture checks: identity resolution"
 
 if ! command -v git >/dev/null 2>&1; then
@@ -80,6 +91,7 @@ run_git() {
   env -u EMAIL -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
     HOME="$fixture" \
     XDG_CONFIG_HOME="$fixture/.config" \
+    LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL="$GITCONFIG_TEMPLATE" \
     git -C "$repo" "$@"
@@ -98,8 +110,12 @@ if output="$(run_git "$fixture/outside/demo" commit --allow-empty -m test 2>&1)"
   printf '%s\n' "$output" >&2
   fail "test failed: commit succeeded outside known roots"
   status=1
+elif grep -Eqi 'no (email|name) was given|user\.useConfigOnly' <<< "$output"; then
+  ok "test passed: commit fails outside known roots (identity unresolved)"
 else
-  ok "test passed: commit fails outside known roots"
+  printf '%s\n' "$output" >&2
+  fail "test failed: commit failed outside known roots for another reason"
+  status=1
 fi
 
 run_git "$fixture/src/personal/demo" init --quiet --initial-branch=main

@@ -19,7 +19,7 @@ EOF
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type
+  local environment_kind module capability value type duplicate
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -58,6 +58,18 @@ validate_profile() {
       status=1
     fi
   done < <(profile_capabilities "$profile")
+
+  while IFS= read -r duplicate; do
+    [[ -z "$duplicate" ]] && continue
+    fail "duplicate capability in $profile: $duplicate"
+    status=1
+  done < <(profile_capabilities "$profile" | sort | uniq -d)
+
+  while IFS= read -r duplicate; do
+    [[ -z "$duplicate" ]] && continue
+    fail "duplicate module in $profile: $duplicate"
+    status=1
+  done < <(profile_modules "$profile" | sort | uniq -d)
 
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
@@ -132,14 +144,31 @@ trap 'rm -f "$known_modules_file" "$known_caps_file"' EXIT
 known_modules | sort > "$known_modules_file"
 known_capabilities | sort > "$known_caps_file"
 
+# Fail closed if the parsers return nothing: an empty known list would
+# otherwise validate zero items and pass vacuously.
+if [[ ! -s "$known_modules_file" ]]; then
+  fail "no modules parsed from $MODULES_FILE"
+  exit 1
+fi
+if [[ ! -s "$known_caps_file" ]]; then
+  fail "no capabilities parsed from $CAPABILITIES_FILE"
+  exit 1
+fi
+
 case "$command" in
   --all)
     status=0
+    profiles_found=0
     while IFS= read -r profile; do
       [[ -z "$profile" ]] && continue
+      profiles_found=1
       section "validating profile: $profile"
       validate_profile "$profile" || status=1
     done < <(known_profiles)
+    if [[ "$profiles_found" -eq 0 ]]; then
+      fail "no profiles parsed from $PROFILES_FILE"
+      exit 1
+    fi
     exit "$status"
     ;;
   --*)
