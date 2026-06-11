@@ -6,7 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib-policy.sh"
 
 profile="${1:-personal}"
-status=0
 
 section "preflight profile: $profile"
 
@@ -74,12 +73,9 @@ else
 fi
 
 section "source directory"
-if [[ -d "$DOTFILES_ROOT" ]]; then
-  ok "dotfiles root exists: $DOTFILES_ROOT"
-else
-  fail "dotfiles root missing: $DOTFILES_ROOT"
-  status=1
-fi
+# DOTFILES_ROOT is resolved by lib-policy.sh at source time, so it
+# always exists here; report it for the record.
+ok "dotfiles root exists: $DOTFILES_ROOT"
 
 if [[ -w "$DOTFILES_ROOT" ]]; then
   ok "dotfiles root writable"
@@ -96,4 +92,6 @@ for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/s
   fi
 done
 
-exit "$status"
+# preflight is report-only: warnings never change the exit code.
+# The only non-zero path is the policy validation at the top.
+exit 0

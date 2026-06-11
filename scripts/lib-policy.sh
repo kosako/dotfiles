@@ -71,7 +71,7 @@ profile_modules() {
     $0 == "  " profile ":" { in_profile = 1; next }
     in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
     in_profile && /^    modules:/ { in_modules = 1; next }
-    in_profile && /^    capabilities:/ { in_modules = 0 }
+    in_profile && /^    [A-Za-z0-9_-]+:/ { in_modules = 0 }
     in_profile && in_modules && /^      - / {
       sub(/^      - /, "")
       print
@@ -85,7 +85,7 @@ profile_capabilities() {
     $0 == "  " profile ":" { in_profile = 1; next }
     in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
     in_profile && /^    capabilities:/ { in_caps = 1; next }
-    in_profile && in_caps && /^      [A-Za-z0-9]+:/ {
+    in_profile && in_caps && /^      [A-Za-z0-9_-]+:/ {
       key = $1
       sub(/:$/, "", key)
       print key
@@ -116,7 +116,7 @@ known_modules() {
 
 known_capabilities() {
   awk '
-    /^  [A-Za-z0-9]+:[[:space:]]*$/ {
+    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
       name = $1
       sub(/:$/, "", name)
       print name
@@ -128,7 +128,7 @@ capability_type() {
   local capability="$1"
   awk -v capability="$capability" '
     $0 == "  " capability ":" { in_cap = 1; next }
-    in_cap && /^  [A-Za-z0-9]+:[[:space:]]*$/ { exit }
+    in_cap && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
     in_cap && /^    type:/ { print $2; exit }
   ' "$CAPABILITIES_FILE"
 }
@@ -137,13 +137,13 @@ capability_allowed_values() {
   local capability="$1"
   awk -v capability="$capability" '
     $0 == "  " capability ":" { in_cap = 1; next }
-    in_cap && /^  [A-Za-z0-9]+:[[:space:]]*$/ { exit }
+    in_cap && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
     in_cap && /^    values:/ { in_values = 1; next }
     in_cap && in_values && /^      - / {
       sub(/^      - /, "")
       print
     }
-    in_cap && in_values && /^    [A-Za-z]+:/ { exit }
+    in_cap && in_values && /^    [A-Za-z0-9_-]+:/ { exit }
   ' "$CAPABILITIES_FILE"
 }
 

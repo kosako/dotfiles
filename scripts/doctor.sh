@@ -6,7 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib-policy.sh"
 
 profile="${1:-personal}"
-status=0
 
 section "doctor profile: $profile"
 
@@ -206,4 +205,6 @@ for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/s
   fi
 done
 
-exit "$status"
+# doctor is report-only: warnings never change the exit code.
+# The only non-zero path is the policy validation at the top.
+exit 0

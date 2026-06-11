@@ -34,5 +34,5 @@ jobs:
       - name: npmrc hardening tests
         run: ./scripts/test-npmrc.sh
 
-      - name: git diff check
-        run: git diff --check
+      - name: whitespace check (committed tree)
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD

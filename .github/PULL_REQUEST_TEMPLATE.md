@@ -1,6 +1,6 @@
 ## Summary
 
-- 
+-
 
 ## Linked Issue
 
@@ -22,7 +22,7 @@ Add task-specific checks here.
 
 ## Residual Risk
 
-- 
+-
 
 ## Notes
 

@@ -22,6 +22,20 @@ check_file_contains() {
   fi
 }
 
+# Whole-line match: substring matches (e.g. a comment that mentions the
+# entry) must not satisfy ignore-entry presence checks.
+check_file_has_line() {
+  local name="$1"
+  local file="$2"
+  local line="$3"
+  if grep -Fxq "$line" "$file"; then
+    ok "test passed: $name"
+  else
+    fail "test failed: $name (missing exact line in $file: $line)"
+    status=1
+  fi
+}
+
 section "static checks: dot_npmrc.tmpl"
 
 if [[ ! -f "$NPMRC_TEMPLATE" ]]; then
@@ -48,15 +62,15 @@ if [[ ! -f "$CHEZMOIIGNORE" ]]; then
   exit 1
 fi
 
-check_file_contains "ignores .npmrc outside enforce" "$CHEZMOIIGNORE" ".npmrc"
+check_file_has_line "ignores .npmrc outside enforce" "$CHEZMOIIGNORE" ".npmrc"
 check_file_contains "ignore gated on npmHardeningMode" "$CHEZMOIIGNORE" 'ne $caps.npmHardeningMode "enforce"'
 
-for entry in README.md AGENTS.md LICENSE docs scripts templates; do
-  check_file_contains "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
+for entry in README.md AGENTS.md LICENSE docs scripts templates worklog; do
+  check_file_has_line "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
 done
 
 check_file_contains "ignores mise config when runtime management disabled" "$CHEZMOIIGNORE" 'not $caps.enableRuntimeManagement'
-check_file_contains "mise config ignore target" "$CHEZMOIIGNORE" ".config/mise"
+check_file_has_line "mise config ignore target" "$CHEZMOIIGNORE" ".config/mise"
 
 section "consistency: doctor enforce expectations"
 
