@@ -51,6 +51,10 @@ fi
 check_file_contains "ignores .npmrc outside enforce" "$CHEZMOIIGNORE" ".npmrc"
 check_file_contains "ignore gated on npmHardeningMode" "$CHEZMOIIGNORE" 'ne $caps.npmHardeningMode "enforce"'
 
+for entry in README.md AGENTS.md LICENSE docs scripts templates; do
+  check_file_contains "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
+done
+
 section "consistency: doctor enforce expectations"
 
 while IFS= read -r line; do

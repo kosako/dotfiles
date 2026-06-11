@@ -112,6 +112,7 @@ fixture は一時 directory に作り、実際の home や global Git config に
 - 期待する hardening 設定(`ignore-scripts=true` など)が定義されていること。
 - token、registry 設定が含まれないこと。
 - `.chezmoiignore` が enforce 以外で `.npmrc` を管理対象外にすること。
+- `.chezmoiignore` が repo 管理用 file(README、docs、scripts、templates など)を home に apply しないこと。
 - template の設定値と `doctor.sh` の enforce 期待値が一致していること。
 
 chezmoi が未導入でも実行できるよう、render はせず静的検査に留める。

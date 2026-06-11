@@ -1,0 +1,9 @@
+{
+  "name": "CHANGE_ME",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=22"
+  }
+}
