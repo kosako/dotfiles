@@ -55,6 +55,9 @@ for entry in README.md AGENTS.md LICENSE docs scripts templates; do
   check_file_contains "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
 done
 
+check_file_contains "ignores mise config when runtime management disabled" "$CHEZMOIIGNORE" 'not $caps.enableRuntimeManagement'
+check_file_contains "mise config ignore target" "$CHEZMOIIGNORE" ".config/mise"
+
 section "consistency: doctor enforce expectations"
 
 while IFS= read -r line; do

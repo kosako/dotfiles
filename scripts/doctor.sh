@@ -156,7 +156,17 @@ else
 fi
 
 section "runtime and shell"
-for command_name in mise direnv zsh starship; do
+if [[ "$(capability_value "$profile" enableRuntimeManagement)" == "true" ]]; then
+  command_status mise || true
+else
+  ok "runtime management disabled for profile"
+fi
+if [[ "$(capability_value "$profile" enableDirenv)" == "true" ]]; then
+  command_status direnv || true
+else
+  ok "direnv disabled for profile"
+fi
+for command_name in zsh starship; do
   command_status "$command_name" || true
 done
 
