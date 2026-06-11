@@ -190,3 +190,4 @@ command_status() {
   warn "$command_name: not found"
   return 1
 }
+if [[
