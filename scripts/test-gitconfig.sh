@@ -128,6 +128,33 @@ else
   status=1
 fi
 
+section "fixture checks: remote URL credentials"
+
+# Write remote URLs via `git config` so the check never depends on
+# transport behavior. Values stay inside the fixture.
+run_git "$fixture/src/personal/demo" config remote.origin.url "https://invalid.example/repo.git"
+run_git "$fixture/src/personal/demo" config remote.upstream.url "https://user@invalid.example/repo.git"
+
+flagged="$(git_remotes_with_credentials "$fixture/src/personal/demo")"
+if [[ -z "$flagged" ]]; then
+  ok "test passed: clean and username-only remotes are not flagged"
+else
+  fail "test failed: unexpected flagged remotes: $flagged"
+  status=1
+fi
+
+mkdir -p "$fixture/src/personal/remote-demo"
+run_git "$fixture/src/personal/remote-demo" init --quiet --initial-branch=main
+run_git "$fixture/src/personal/remote-demo" config remote.origin.url "https://user:secret-placeholder@invalid.example/repo.git"
+
+flagged="$(git_remotes_with_credentials "$fixture/src/personal/remote-demo")"
+if [[ "$flagged" == "origin" ]]; then
+  ok "test passed: credential-like remote URL detected"
+else
+  fail "test failed: expected flagged remote 'origin', got: ${flagged:-<none>}"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "gitconfig tests passed"
 fi

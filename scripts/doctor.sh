@@ -68,6 +68,32 @@ for context in personal work client sandbox agent; do
   fi
 done
 
+section "Git remote URLs"
+if ! command -v git >/dev/null 2>&1; then
+  warn "git not found, skipping remote URL scan"
+else
+  scanned_repos=0
+  flagged_remotes=0
+  for root in "$DOTFILES_ROOT" "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
+    [[ -d "$root" ]] || continue
+    while IFS= read -r git_marker; do
+      repo="$(dirname "$git_marker")"
+      scanned_repos=$((scanned_repos + 1))
+      while IFS= read -r remote_name; do
+        [[ -z "$remote_name" ]] && continue
+        flagged_remotes=$((flagged_remotes + 1))
+        warn "credential-like userinfo in remote URL: repo=$repo remote=$remote_name (URL not shown)"
+      done < <(git_remotes_with_credentials "$repo")
+    done < <(find "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)
+  done
+  ok "scanned repositories: $scanned_repos"
+  if [[ "$flagged_remotes" -eq 0 ]]; then
+    ok "no credential-like userinfo in remote URLs"
+  else
+    warn "remotes with credential-like userinfo: $flagged_remotes"
+  fi
+fi
+
 section "npm hardening"
 npm_mode="$(capability_value "$profile" npmHardeningMode)"
 ok "npmHardeningMode=$npm_mode"

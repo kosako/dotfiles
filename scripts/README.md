@@ -48,8 +48,9 @@ policy validation が失敗した場合は exit 1。
 
 ## doctor.sh
 
-導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、npm、Corepack、runtime、VS Code、1Password、project root の状態を表示する。
+導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、Git remote URL(credential らしき userinfo の有無。URL の値は表示しない)、npm、Corepack、runtime、VS Code、1Password、project root の状態を表示する。
 副作用は持たない。設定不足や未導入 command の warning は report-only として exit 0 のままにする。
+remote URL scan の方針は `docs/supply-chain-git.md` に従う。
 
 ```sh
 ./scripts/doctor.sh personal
@@ -91,10 +92,12 @@ policy validation が失敗した場合は exit 1。
 - local fixture で、known root 外では commit が失敗すること。
 - local fixture で、`~/src/personal/` 配下では identity file の identity が解決されること。
 - credential 入り remote URL が拒否されること。
+- credential らしき remote URL(`scheme://user:password@host`)を `git_remotes_with_credentials` が検出すること。
+- credential なし・username のみの remote URL は誤検出しないこと。
 
 fixture は一時 directory に作り、実際の home や global Git config には触れない。
 
 ## lib-policy.sh
 
 他 script から source される共通 helper。
-data file path、profile/module/capability 取得、出力 helper、command availability check を提供する。
+data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)を提供する。

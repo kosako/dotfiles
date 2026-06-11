@@ -168,6 +168,19 @@ is_allowed_environment_kind() {
   esac
 }
 
+# Print names of remotes whose URL embeds password-like userinfo
+# (scheme://user:password@host). URL values are never printed.
+git_remotes_with_credentials() {
+  local repo="$1"
+  git -C "$repo" config --local --get-regexp '^remote\..*\.url$' 2>/dev/null |
+    awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
+      name = $1
+      sub(/^remote\./, "", name)
+      sub(/\.url$/, "", name)
+      print name
+    }'
+}
+
 command_status() {
   local command_name="$1"
   if command -v "$command_name" >/dev/null 2>&1; then
