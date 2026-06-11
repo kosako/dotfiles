@@ -99,12 +99,14 @@ main 直 commit は例外扱いにする。
 
 ## 最低限の validation
 
-変更内容に応じて実行する。
+以下は GitHub Actions(`.github/workflows/validate.yml`)が PR ごとに自動実行する(shellcheck は warning 以上で fail)。手元での事前実行も引き続き推奨する。
 
 ```sh
 ./scripts/validate-policy.sh --all
 ./scripts/test-policy.sh
-bash -n scripts/lib-policy.sh scripts/validate-policy.sh scripts/preflight.sh scripts/doctor.sh scripts/test-policy.sh
+./scripts/test-gitconfig.sh
+./scripts/test-npmrc.sh
+bash -n scripts/*.sh
 git diff --check
 ```
 
