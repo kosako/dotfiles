@@ -68,13 +68,28 @@ base + modules + profiles + machine + policy + capabilities
 
 ## Chezmoi
 
-まず差分を確認する。
+最初に init で profile を設定する。これをしないと `diff` / `apply` はテンプレートエラーで失敗する。
+
+```sh
+chezmoi init --source ~/dotfiles
+```
+
+init は profile(personal / work-minimal / work-dev)などを prompt で聞く。
+回答は `~/.config/chezmoi/chezmoi.toml` に保存され、repo には入らない。
+
+次に差分を確認する。
 
 ```sh
 chezmoi diff --source ~/dotfiles
 ```
 
-適用は差分確認後に行う。
+適用は差分確認後に行う。初回は target を絞って適用する(Issue #9 参照)。
+
+```sh
+chezmoi apply --source ~/dotfiles ~/.gitconfig
+```
+
+全体適用は、diff の対象をすべて理解してから行う。
 
 ```sh
 chezmoi apply --source ~/dotfiles

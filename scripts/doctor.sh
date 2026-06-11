@@ -110,10 +110,10 @@ else
   done
   npm_major="${npm_version%%.*}"
   npm_minor="$(printf '%s' "$npm_version" | cut -d. -f2)"
-  if [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 6 ) ]] 2>/dev/null; then
-    ok "npm supports min-release-age (>= 11.6)"
+  if [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]] 2>/dev/null; then
+    ok "npm supports min-release-age (>= 11.10)"
   else
-    warn "npm older than 11.6, min-release-age is not enforced"
+    warn "npm older than 11.10, min-release-age is not enforced"
   fi
   if [[ "$npm_mode" == "enforce" ]]; then
     while IFS='=' read -r key expected; do
@@ -129,7 +129,7 @@ ignore-scripts=true
 save-exact=true
 fund=false
 audit=true
-min-release-age=10080
+min-release-age=7
 EOF
   fi
 fi
