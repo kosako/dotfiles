@@ -1,0 +1,9 @@
+{{- /* Fail fast with a readable message when .profile is missing or
+       not defined in .chezmoidata/profiles.yaml. Without this guard a
+       typo'd profile dies with "index of nil pointer". */ -}}
+{{- if not (hasKey . "profile") -}}
+{{-   fail "profile is not set; run: chezmoi init --source ~/dotfiles" -}}
+{{- end -}}
+{{- if not (hasKey .profiles .profile) -}}
+{{-   fail (printf "unknown profile %q (known: %s)" .profile (keys .profiles | sortAlpha | join ", ")) -}}
+{{- end -}}

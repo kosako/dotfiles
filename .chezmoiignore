@@ -1,3 +1,4 @@
+{{- template "require-profile" . -}}
 {{- $caps := index .profiles .profile "capabilities" -}}
 {{/* Repo-management files are never applied to the home directory.
      chezmoi reads the source directory, not the git index, so even
