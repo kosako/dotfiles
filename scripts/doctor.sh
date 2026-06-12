@@ -196,6 +196,76 @@ else
   ok "secret access disabled for profile"
 fi
 
+section "managed-path orphans"
+# A file that carries the managed-by header but whose path is not
+# managed for this profile is likely left over from another profile
+# (e.g. ~/.npmrc after switching personal -> work-minimal). Report
+# only; nothing is removed. Only the header line is inspected.
+orphan_count=0
+while IFS= read -r module; do
+  [[ -z "$module" ]] && continue
+  while IFS= read -r managed_path; do
+    [[ -z "$managed_path" ]] && continue
+    target="$HOME/$managed_path"
+    candidates=()
+    if [[ -f "$target" ]]; then
+      candidates=("$target")
+    elif [[ -d "$target" ]]; then
+      while IFS= read -r found_file; do
+        candidates+=("$found_file")
+      done < <(find "$target" -maxdepth 3 -type f 2>/dev/null)
+    fi
+    [[ "${#candidates[@]}" -eq 0 ]] && continue
+    for candidate in "${candidates[@]}"; do
+      grep -q "Managed by chezmoi" "$candidate" 2>/dev/null || continue
+      if module_active_for_profile "$profile" "$module"; then
+        item "managed and active: $candidate"
+      else
+        orphan_count=$((orphan_count + 1))
+        warn "managed-by header but not managed for profile $profile: $candidate (orphan from another profile?)"
+      fi
+    done
+  done < <(module_paths "$module")
+done < <(known_modules)
+if [[ "$orphan_count" -eq 0 ]]; then
+  ok "no managed-path orphans"
+fi
+
+section "AI policy"
+if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
+  ok "enableAiPolicy=true (policy docs + report-only checks; see docs/ai-policy.md)"
+  item "boundary today: directory convention + Git identity separation + policy docs"
+  if [[ -d "$HOME/src/agent" ]]; then
+    ok "agent project root exists: $HOME/src/agent"
+  else
+    warn "agent project root missing: $HOME/src/agent"
+  fi
+else
+  ok "AI policy checks disabled for profile"
+fi
+if [[ "$(capability_value "$profile" enableAiTools)" == "true" ]]; then
+  warn "enableAiTools=true but the ai-tools module is not implemented yet (nothing is managed)"
+else
+  ok "AI tool install/sync not managed (enableAiTools=false)"
+fi
+
+section "network tunnels"
+allow_tunnels="$(capability_value "$profile" allowNetworkTunnels)"
+ok "allowNetworkTunnels=$allow_tunnels"
+tunnel_tools_found=0
+for tunnel_tool in tailscale cloudflared ngrok zerotier-cli; do
+  command -v "$tunnel_tool" >/dev/null 2>&1 || continue
+  tunnel_tools_found=$((tunnel_tools_found + 1))
+  if [[ "$allow_tunnels" == "true" ]]; then
+    item "tunnel tool present: $tunnel_tool"
+  else
+    warn "tunnel tool present but allowNetworkTunnels=false: $tunnel_tool (not removed automatically)"
+  fi
+done
+if [[ "$tunnel_tools_found" -eq 0 ]]; then
+  ok "no tunnel tools found"
+fi
+
 section "project roots"
 for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
   if [[ -d "$dir" ]]; then
