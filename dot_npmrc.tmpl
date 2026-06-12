@@ -1,3 +1,4 @@
+{{- template "require-profile" . -}}
 {{- $caps := index .profiles .profile "capabilities" -}}
 {{- if eq $caps.npmHardeningMode "enforce" -}}
 # Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).
