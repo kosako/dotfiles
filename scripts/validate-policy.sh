@@ -171,7 +171,7 @@ case "$command" in
     fi
     exit "$status"
     ;;
-  --*)
+  -*)
     fail "unknown option: $command"
     usage >&2
     exit 2

@@ -32,7 +32,7 @@ insert_once() {
   local insert="$3"
   local tmp="$file.tmp"
 
-  awk -v target="$target" -v insert="$insert" '
+  if ! awk -v target="$target" -v insert="$insert" '
     {
       print
       if ($0 == target && !done) {
@@ -41,7 +41,11 @@ insert_once() {
       }
     }
     END { if (!done) exit 1 }
-  ' "$file" > "$tmp"
+  ' "$file" > "$tmp"; then
+    rm -f "$tmp"
+    fail "insert_once: target line not found in $file: $target"
+    return 1
+  fi
   mv "$tmp" "$file"
 }
 
@@ -51,7 +55,7 @@ replace_once() {
   local replacement="$3"
   local tmp="$file.tmp"
 
-  awk -v target="$target" -v replacement="$replacement" '
+  if ! awk -v target="$target" -v replacement="$replacement" '
     $0 == target && !done {
       print replacement
       done = 1
@@ -59,7 +63,11 @@ replace_once() {
     }
     { print }
     END { if (!done) exit 1 }
-  ' "$file" > "$tmp"
+  ' "$file" > "$tmp"; then
+    rm -f "$tmp"
+    fail "replace_once: target line not found in $file: $target"
+    return 1
+  fi
   mv "$tmp" "$file"
 }
 
@@ -182,5 +190,11 @@ run_fail_contains \
   "fails closed on empty capability schema" \
   "no capabilities parsed" \
   "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+run_fail_contains \
+  "rejects single-dash option as usage error" \
+  "unknown option: -x" \
+  "$fixture/scripts/validate-policy.sh" -x
 
 ok "policy tests passed"
