@@ -35,6 +35,9 @@ unknown profile / module / capability や capability enum の不正値は policy
 - すべての定義済み capability が profile に存在すること。
 - boolean capability が `true` または `false` であること。
 - enum capability が schema の `values` に含まれること。
+- module の `paths:` が home 相対であること。同一 path を複数 module が宣言していないこと。
+- module の `requires:` の capability が定義済みで、値が schema の型に適合すること。
+- `requires:` があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 
 ## preflight.sh
 
@@ -113,9 +116,9 @@ fixture は一時 directory に作り、実際の home や global Git config に
 - template が `npmHardeningMode=enforce` でのみ内容を出力するよう gate されていること。
 - 期待する hardening 設定(`ignore-scripts=true` など)が定義されていること。
 - token、registry 設定が含まれないこと。
-- `.chezmoiignore` が enforce 以外で `.npmrc` を管理対象外にすること。
+- `.chezmoiignore` が module の `paths:` からループ生成されていること。
 - `.chezmoiignore` が repo 管理用 file(README、docs、scripts、templates など)を home に apply しないこと。
-- `.chezmoiignore` が `enableRuntimeManagement=false` で mise config を管理対象外にすること。
+- modules.yaml の宣言で `.npmrc` が `npmHardeningMode=enforce` のみ、mise config が `enableRuntimeManagement=true` のみで管理されること。
 - template の設定値と `doctor.sh` の enforce 期待値が一致していること。
 
 chezmoi が未導入でも実行できるよう、render はせず静的検査に留める。

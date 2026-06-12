@@ -62,15 +62,32 @@ if [[ ! -f "$CHEZMOIIGNORE" ]]; then
   exit 1
 fi
 
-check_file_has_line "ignores .npmrc outside enforce" "$CHEZMOIIGNORE" ".npmrc"
-check_file_contains "ignore gated on npmHardeningMode" "$CHEZMOIIGNORE" 'ne $caps.npmHardeningMode "enforce"'
+check_file_contains "ignore generated from module paths" "$CHEZMOIIGNORE" 'range $module.paths'
 
 for entry in README.md AGENTS.md LICENSE docs scripts templates worklog; do
   check_file_has_line "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
 done
 
-check_file_contains "ignores mise config when runtime management disabled" "$CHEZMOIIGNORE" 'not $caps.enableRuntimeManagement'
-check_file_has_line "mise config ignore target" "$CHEZMOIIGNORE" ".config/mise"
+section "consistency: module path gates (modules.yaml)"
+
+check_module_gate() {
+  local name="$1"
+  local module="$2"
+  local expected_paths="$3"
+  local expected_requires="$4"
+  if [[ "$(module_paths "$module")" == "$expected_paths" \
+     && "$(module_requires "$module")" == "$expected_requires" ]]; then
+    ok "test passed: $name"
+  else
+    fail "test failed: $name (paths/requires mismatch for $module)"
+    status=1
+  fi
+}
+
+check_module_gate ".npmrc managed only with npmHardeningMode=enforce" \
+  "supply-chain/npm" ".npmrc" "npmHardeningMode enforce"
+check_module_gate "mise config managed only with enableRuntimeManagement" \
+  "runtime" ".config/mise" "enableRuntimeManagement true"
 
 section "consistency: doctor enforce expectations"
 

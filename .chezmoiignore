@@ -1,5 +1,7 @@
 {{- template "require-profile" . -}}
-{{- $caps := index .profiles .profile "capabilities" -}}
+{{- $prof := index .profiles .profile -}}
+{{- $caps := index $prof "capabilities" -}}
+{{- $profileModules := index $prof "modules" -}}
 {{/* Repo-management files are never applied to the home directory.
      chezmoi reads the source directory, not the git index, so even
      gitignored local files must be listed here. */}}
@@ -11,14 +13,24 @@ scripts
 templates
 worklog
 
-{{/* .npmrc is managed only when the profile enforces npm hardening.
-     In off/report modes the home .npmrc stays unmanaged. */}}
-{{ if ne $caps.npmHardeningMode "enforce" }}
-.npmrc
-{{ end }}
-
-{{/* mise config is managed only when the profile enables runtime
-     management. */}}
-{{ if not $caps.enableRuntimeManagement }}
-.config/mise
-{{ end }}
+{{/* Module-declared paths (.chezmoidata/modules.yaml) are managed only
+     when the profile lists the module and every capability in its
+     requires: matches. Everything else is ignored, so a path is only
+     applied when a module explicitly claims it. */}}
+{{- range $name, $module := .modules }}
+{{- if hasKey $module "paths" }}
+{{- $enabled := has $name $profileModules }}
+{{- if hasKey $module "requires" }}
+{{- range $capability, $want := $module.requires }}
+{{- if ne (index $caps $capability) $want }}
+{{- $enabled = false }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if not $enabled }}
+{{- range $module.paths }}
+{{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

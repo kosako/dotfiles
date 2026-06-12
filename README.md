@@ -16,7 +16,7 @@ base + modules + profiles + policy + capabilities
 
 - `profile`: ユーザーが選びやすい用途別プリセット。
 - `environmentKind`: `personal` / `work` / `client` / `sandbox` / `agent` の環境種別。
-- `modules`: 使う機能のまとまり。
+- `modules`: 機能のまとまり。`paths:` で管理対象 file を宣言し、`.chezmoiignore` の生成を駆動する。
 - `capabilities`: 実際に許可する操作や副作用。
 - `policy`: 何を許可し、何を禁止するかの判断基準。
 

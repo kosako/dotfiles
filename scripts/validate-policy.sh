@@ -16,6 +16,95 @@ Validate profile/module/capability policy data.
 EOF
 }
 
+# Modules that declare paths drive .chezmoiignore generation, so their
+# declarations must be valid on their own (independent of any profile).
+validate_modules() {
+  local status=0
+  local module path capability value type paths_count requires_count
+  local all_paths_file
+  all_paths_file="$(mktemp)"
+
+  while IFS= read -r module; do
+    [[ -z "$module" ]] && continue
+
+    paths_count=0
+    while IFS= read -r path; do
+      [[ -z "$path" ]] && continue
+      paths_count=$((paths_count + 1))
+      case "$path" in
+        /*|*..*)
+          fail "module path must be home-relative: $module: $path"
+          status=1
+          ;;
+        *)
+          ok "module path: $module: $path"
+          printf '%s\n' "$path" >> "$all_paths_file"
+          ;;
+      esac
+    done < <(module_paths "$module")
+
+    requires_count=0
+    while read -r capability value; do
+      [[ -z "$capability" ]] && continue
+      requires_count=$((requires_count + 1))
+      if ! grep -Fxq -- "$capability" "$known_caps_file"; then
+        fail "unknown capability in $module requires: $capability"
+        status=1
+        continue
+      fi
+      if [[ -z "$value" ]]; then
+        fail "missing value in $module requires: $capability"
+        status=1
+        continue
+      fi
+      type="$(capability_type "$capability")"
+      case "$type" in
+        boolean)
+          if [[ "$value" == "true" || "$value" == "false" ]]; then
+            ok "module requires: $module: $capability=$value"
+          else
+            fail "module requires must be boolean: $module: $capability=$value"
+            status=1
+          fi
+          ;;
+        enum)
+          if capability_value_is_allowed "$capability" "$value"; then
+            ok "module requires: $module: $capability=$value"
+          else
+            fail "module requires enum invalid: $module: $capability=$value"
+            status=1
+          fi
+          ;;
+        *)
+          fail "unknown capability type for $capability: $type"
+          status=1
+          ;;
+      esac
+    done < <(module_requires "$module")
+
+    if [[ "$requires_count" -gt 0 && "$paths_count" -eq 0 ]]; then
+      fail "module has requires but no paths: $module"
+      status=1
+    fi
+  done < "$known_modules_file"
+
+  # A path claimed by two modules would make the ignore gate ambiguous.
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    fail "path declared by multiple modules: $path"
+    status=1
+  done < <(sort "$all_paths_file" | uniq -d)
+  rm -f "$all_paths_file"
+
+  if [[ "$status" -eq 0 ]]; then
+    ok "module validation passed"
+  else
+    fail "module validation failed"
+  fi
+
+  return "$status"
+}
+
 validate_profile() {
   local profile="$1"
   local status=0
@@ -164,6 +253,8 @@ fi
 case "$command" in
   --all)
     status=0
+    section "validating modules"
+    validate_modules || status=1
     profiles_found=0
     while IFS= read -r profile; do
       [[ -z "$profile" ]] && continue
@@ -183,7 +274,9 @@ case "$command" in
     exit 2
     ;;
   *)
-    validate_profile "$command"
-    exit "$?"
+    status=0
+    validate_modules || status=1
+    validate_profile "$command" || status=1
+    exit "$status"
     ;;
 esac
