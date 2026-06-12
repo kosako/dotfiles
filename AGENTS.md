@@ -75,13 +75,6 @@ Notion dotfiles project page
 
 ## コミット前チェック
 
-最低限、変更内容に応じて以下を実行する。
-
-```sh
-./scripts/validate-policy.sh personal
-./scripts/validate-policy.sh work-minimal
-./scripts/validate-policy.sh work-dev
-bash -n scripts/lib-policy.sh scripts/validate-policy.sh scripts/preflight.sh scripts/doctor.sh
-```
+検証コマンドは `docs/github-workflow.md` の「最低限の validation」に従う。CI(`.github/workflows/validate.yml`)も同じ内容を実行するため、コマンド一覧はそちらを single source of truth とし、ここには重複して書かない。
 
 `doctor` / `preflight` は環境依存の warning が出ることがある。policy violation と report-only warning を混同しない。

@@ -1,8 +1,5 @@
 {{- $profile := promptStringOnce . "profile" "Profile (personal, work-minimal, work-dev)" "personal" -}}
-[data]
-profile = {{ $profile | quote }}
 sourceDir = {{ joinPath .chezmoi.homeDir "dotfiles" | quote }}
 
-[data.onepassword]
-vault = {{ promptStringOnce . "opVault" "1Password vault" "Private" | quote }}
-item = {{ promptStringOnce . "opItem" "1Password item for development environment" "Dev Environment" | quote }}
+[data]
+profile = {{ $profile | quote }}
