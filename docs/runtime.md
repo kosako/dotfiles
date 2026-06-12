@@ -8,7 +8,7 @@
 - version pin は project 側の `.mise.toml` の責務。exact version で pin する(例: `templates/project/python/.mise.toml`)。
 - runtime の自動 install はしない。`not_found_auto_install = false` を設定し、install は明示的な `mise install` で行う。
 - `mise trust` / `direnv allow` は自動化しない。
-- `enableRuntimeManagement=false` の profile では、`.chezmoiignore` により mise config を chezmoi 管理対象外にする。
+- `enableRuntimeManagement=false` の profile では、mise config を chezmoi 管理対象外にする。この gate は `runtime` module の `paths:` / `requires:` 宣言(`.chezmoidata/modules.yaml`)から `.chezmoiignore` に生成される。
 
 ## capability との対応
 

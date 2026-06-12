@@ -185,6 +185,35 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture
+insert_once "$fixture/.chezmoidata/modules.yaml" "      enableRuntimeManagement: true" "      notACapability: true"
+run_fail_contains \
+  "rejects unknown capability in module requires" \
+  "unknown capability in runtime requires: notACapability" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/modules.yaml" "      npmHardeningMode: enforce" "      npmHardeningMode: strict"
+run_fail_contains \
+  "rejects invalid enum in module requires" \
+  "module requires enum invalid: supply-chain/npm: npmHardeningMode=strict" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/modules.yaml" "      - .npmrc" "      - .gitconfig"
+run_fail_contains \
+  "rejects path declared by multiple modules" \
+  "path declared by multiple modules: .gitconfig" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/modules.yaml" "    description: 全環境共通の最小設定。" "    requires:"
+insert_once "$fixture/.chezmoidata/modules.yaml" "    requires:" "      enableDirenv: true"
+run_fail_contains \
+  "rejects module requires without paths" \
+  "module has requires but no paths: base" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiPolicy: true" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
 run_ok \

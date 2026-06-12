@@ -116,6 +116,36 @@ known_modules() {
   ' "$MODULES_FILE"
 }
 
+module_paths() {
+  local module="$1"
+  awk -v module="$module" '
+    $0 == "  " module ":" { in_module = 1; next }
+    in_module && /^  [^ ].*:[[:space:]]*$/ { exit }
+    in_module && /^    paths:/ { in_paths = 1; next }
+    in_module && /^    [A-Za-z0-9_-]+:/ { in_paths = 0 }
+    in_module && in_paths && /^      - / {
+      sub(/^      - /, "")
+      print
+    }
+  ' "$MODULES_FILE"
+}
+
+# Print "capability value" pairs from a module requires: section.
+module_requires() {
+  local module="$1"
+  awk -v module="$module" '
+    $0 == "  " module ":" { in_module = 1; next }
+    in_module && /^  [^ ].*:[[:space:]]*$/ { exit }
+    in_module && /^    requires:/ { in_requires = 1; next }
+    in_module && /^    [A-Za-z0-9_-]+:/ { in_requires = 0 }
+    in_module && in_requires && /^      [A-Za-z0-9_-]+:/ {
+      key = $1
+      sub(/:$/, "", key)
+      print key, $2
+    }
+  ' "$MODULES_FILE"
+}
+
 known_capabilities() {
   awk '
     /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {

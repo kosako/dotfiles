@@ -3,10 +3,16 @@ modules:
     description: 全環境共通の最小設定。
   git-profile:
     description: directory convention に基づく Git identity 分離。
+    paths:
+      - .gitconfig
   supply-chain/git:
     description: Git credential 漏洩防止と remote URL 検査。
   supply-chain/npm:
     description: npm hardening の report / enforce。
+    paths:
+      - .npmrc
+    requires:
+      npmHardeningMode: enforce
   supply-chain/corepack:
     description: Corepack availability と packageManager policy。
   doctor:
@@ -17,6 +23,10 @@ modules:
     description: 新規 repository 用テンプレート。
   runtime:
     description: mise による runtime 管理。
+    paths:
+      - .config/mise
+    requires:
+      enableRuntimeManagement: true
   shell-extra:
     description: zsh / antidote / starship などの shell 強化。
   vscode:

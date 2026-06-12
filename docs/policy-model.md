@@ -7,10 +7,20 @@
 ```text
 profile = ユーザーが選びやすい用途別プリセット
 environmentKind = personal / work / client / sandbox / agent
-modules = 有効化する機能単位
+modules = 機能単位。管理対象 path の宣言を持つ
 capabilities = 実際に許可される操作・副作用
 policy = 何を許可/禁止するかの判断基準
 ```
+
+## Modules
+
+modules は装飾ラベルではなく、管理対象 path を宣言する単位(2026-06-13 決定。それまでは情報ラベルだった)。
+
+- module は `.chezmoidata/modules.yaml` の `paths:` で home 配下の管理対象を宣言する。
+- ある path が chezmoi の管理対象になるのは、profile がその module を列挙し、かつ module の `requires:` にある capability 条件をすべて満たすときだけ。
+- それ以外の path は `.chezmoiignore` の生成によって除外される(fail closed)。
+- `paths:` を持たない module は現時点では情報ラベル(実装が入る時点で `paths:` を宣言する)。
+- `requires:` の capability 名・値は `validate-policy.sh` が schema と突き合わせて検証する。複数 module による同一 path の宣言は fail。
 
 ## Rules
 
