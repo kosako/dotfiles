@@ -34,6 +34,9 @@ jobs:
       - name: npmrc hardening tests
         run: ./scripts/test-npmrc.sh
 
+      - name: doctor orphan tests
+        run: ./scripts/test-doctor.sh
+
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 

@@ -106,6 +106,7 @@ main 直 commit は例外扱いにする。
 ./scripts/test-policy.sh
 ./scripts/test-gitconfig.sh
 ./scripts/test-npmrc.sh
+./scripts/test-doctor.sh
 ./scripts/test-render.sh
 bash -n scripts/*.sh
 git diff --check

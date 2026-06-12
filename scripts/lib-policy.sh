@@ -146,6 +146,22 @@ module_requires() {
   ' "$MODULES_FILE"
 }
 
+# A module's paths are managed for a profile when the profile lists the
+# module and every requires: condition matches the profile's value.
+# Mirrors the .chezmoiignore generation logic.
+module_active_for_profile() {
+  local profile="$1"
+  local module="$2"
+  local capability value
+
+  profile_modules "$profile" | grep -Fxq -- "$module" || return 1
+  while read -r capability value; do
+    [[ -z "$capability" ]] && continue
+    [[ "$(capability_value "$profile" "$capability")" == "$value" ]] || return 1
+  done < <(module_requires "$module")
+  return 0
+}
+
 known_capabilities() {
   awk '
     /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
