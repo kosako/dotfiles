@@ -11,7 +11,7 @@ Mac用ポータブル開発環境を管理する `chezmoi` repository。
 基本モデル:
 
 ```text
-base + modules + profiles + machine + policy + capabilities
+base + modules + profiles + policy + capabilities
 ```
 
 - `profile`: ユーザーが選びやすい用途別プリセット。
@@ -21,6 +21,8 @@ base + modules + profiles + machine + policy + capabilities
 - `policy`: 何を許可し、何を禁止するかの判断基準。
 
 `profile` は権限そのものではない。実際に何を許可するかは `capabilities` で判定する。
+
+AI agent 境界は、現時点では directory convention(`~/src/agent`)と Git identity 分離、docs の方針記述([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md))で構成されており、`enableAiPolicy` capability を消費する実装はまだない。
 
 ## プロジェクトの置き場所
 
@@ -74,8 +76,14 @@ base + modules + profiles + machine + policy + capabilities
 chezmoi init --source ~/dotfiles
 ```
 
-init は profile(personal / work-minimal / work-dev)などを prompt で聞く。
+init は profile を prompt で聞く。デフォルトはないため、`personal` / `work-minimal` / `work-dev` のいずれかを明示的に入力する。typo は render 時に known profile 一覧つきのエラーで fail する。
 回答は `~/.config/chezmoi/chezmoi.toml` に保存され、repo には入らない。
+
+非対話で profile を指定する場合:
+
+```sh
+chezmoi init --source ~/dotfiles --promptString profile=personal
+```
 
 次に差分を確認する。
 

@@ -41,7 +41,7 @@ validate_profile() {
 
   while IFS= read -r module; do
     [[ -z "$module" ]] && continue
-    if grep -Fxq "$module" "$known_modules_file"; then
+    if grep -Fxq -- "$module" "$known_modules_file"; then
       ok "module allowed: $module"
     else
       fail "unknown module in $profile: $module"
@@ -51,7 +51,7 @@ validate_profile() {
 
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
-    if grep -Fxq "$capability" "$known_caps_file"; then
+    if grep -Fxq -- "$capability" "$known_caps_file"; then
       ok "capability allowed: $capability"
     else
       fail "unknown capability in $profile: $capability"
@@ -132,7 +132,13 @@ require_data_files || exit 1
 
 case "$command" in
   --list-profiles)
-    known_profiles
+    profiles="$(known_profiles)"
+    # Fail closed: an empty parse must not look like "no profiles, all fine".
+    if [[ -z "$profiles" ]]; then
+      fail "no profiles parsed from $PROFILES_FILE"
+      exit 1
+    fi
+    printf '%s\n' "$profiles"
     exit 0
     ;;
 esac

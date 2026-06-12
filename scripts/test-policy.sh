@@ -185,6 +185,20 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiPolicy: true" "    extraSection:"
+insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
+run_ok \
+  "ignores sections after capabilities" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+: > "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "fails closed on empty profiles for --list-profiles" \
+  "no profiles parsed" \
+  "$fixture/scripts/validate-policy.sh" --list-profiles
+
+make_fixture
 : > "$fixture/.chezmoidata/capabilities.schema.yaml"
 run_fail_contains \
   "fails closed on empty capability schema" \

@@ -120,6 +120,25 @@ fixture は一時 directory に作り、実際の home や global Git config に
 
 chezmoi が未導入でも実行できるよう、render はせず静的検査に留める。
 
+## test-render.sh
+
+chezmoi で各 profile を throwaway destination に render(apply)し、managed target 一覧を期待値と比較する。実 home には触れない。
+
+```sh
+./scripts/test-render.sh
+```
+
+検証内容:
+
+- 全 profile が template エラーなしで apply できること。
+- 各 profile の managed target 一覧が期待値と一致すること(profile を追加・変更したら期待値の更新が必要)。
+- typo profile が known profile 一覧つきのエラーで fail すること。
+- profile 未設定が init 誘導メッセージで fail すること。
+- 非対話 init(`--promptString profile=<name>`)が動くこと。
+- profile 無回答の init が fail すること(default を持たない)。
+
+chezmoi が必要(CI では version pin して導入する)。
+
 ## lib-policy.sh
 
 他 script から source される共通 helper。

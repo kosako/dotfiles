@@ -1,5 +1,9 @@
-{{- $profile := promptStringOnce . "profile" "Profile (personal, work-minimal, work-dev)" "personal" -}}
-sourceDir = {{ joinPath .chezmoi.homeDir "dotfiles" | quote }}
+{{- /* No default on purpose: a profile must be chosen explicitly.
+       Valid profiles live in .chezmoidata/profiles.yaml; a typo fails
+       at render time via .chezmoitemplates/require-profile.
+       Non-interactive init: chezmoi init --promptString profile=<name> */ -}}
+{{- $profile := promptStringOnce . "profile" "profile" -}}
+sourceDir = {{ .chezmoi.sourceDir | quote }}
 
 [data]
 profile = {{ $profile | quote }}
