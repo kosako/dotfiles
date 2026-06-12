@@ -36,3 +36,26 @@ jobs:
 
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+  render:
+    runs-on: ubuntu-latest
+    env:
+      CHEZMOI_VERSION: 2.70.5
+      CHEZMOI_SHA256: 6a76a0ac3718f0d45b34b4b57067f9556f8f6042e3da710a3c496838362aca14
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      # Download outside the checkout: a stray file in the source
+      # directory would show up as an unexpected managed target.
+      - name: install chezmoi (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o chezmoi.tar.gz "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_linux_amd64.tar.gz"
+          echo "${CHEZMOI_SHA256}  chezmoi.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf chezmoi.tar.gz -C "$HOME/.local/bin" chezmoi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: chezmoi render and managed-set tests
+        run: ./scripts/test-render.sh

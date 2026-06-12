@@ -1,54 +1,39 @@
 capabilities:
   installPackages:
     type: boolean
-    default: false
   installGuiApps:
     type: boolean
-    default: false
   enableMacOSDefaults:
     type: boolean
-    default: false
   enable1PasswordSSH:
     type: boolean
-    default: false
   enableGitSigning:
     type: boolean
-    default: false
   enableDirenv:
     type: boolean
-    default: false
   enableRuntimeManagement:
     type: boolean
-    default: false
   enableVsCodeSettings:
     type: boolean
-    default: false
   enableVsCodeExtensions:
     type: boolean
-    default: false
   npmHardeningMode:
     type: enum
-    default: report
     values:
       - off
       - report
       - enforce
   corepackMode:
     type: enum
-    default: report
     values:
       - off
       - report
       - enable
   allowNetworkTunnels:
     type: boolean
-    default: false
   allowSecretsAccess:
     type: boolean
-    default: false
   enableAiTools:
     type: boolean
-    default: false
   enableAiPolicy:
     type: boolean
-    default: true

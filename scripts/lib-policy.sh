@@ -85,6 +85,7 @@ profile_capabilities() {
     $0 == "  " profile ":" { in_profile = 1; next }
     in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
     in_profile && /^    capabilities:/ { in_caps = 1; next }
+    in_profile && /^    [A-Za-z0-9_-]+:/ { in_caps = 0 }
     in_profile && in_caps && /^      [A-Za-z0-9_-]+:/ {
       key = $1
       sub(/:$/, "", key)
@@ -100,6 +101,7 @@ capability_value() {
     $0 == "  " profile ":" { in_profile = 1; next }
     in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
     in_profile && /^    capabilities:/ { in_caps = 1; next }
+    in_profile && /^    [A-Za-z0-9_-]+:/ { in_caps = 0 }
     in_profile && in_caps && $1 == capability ":" { print $2; exit }
   ' "$PROFILES_FILE"
 }
