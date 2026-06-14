@@ -83,7 +83,7 @@ policy validation が失敗した場合は exit 1。
 
 ## test-gitconfig.sh
 
-`dot_gitconfig.tmpl` の Git identity 安全境界を検証する。
+`dot_gitconfig` の Git identity 安全境界を検証する。
 
 ```sh
 ./scripts/test-gitconfig.sh
@@ -91,10 +91,10 @@ policy validation が失敗した場合は exit 1。
 
 検証内容:
 
-- template に `user.useConfigOnly = true` と `transfer.credentialsInUrl = die` が含まれること。
+- source に `user.useConfigOnly = true` と `transfer.credentialsInUrl = die` が含まれること。
 - 全 context(personal / work / client / sandbox / agent)の `includeIf` と include path が定義されていること。
-- template に identity 値(`name =` / `email =`、email らしき値)が含まれないこと。
-- template に chezmoi のテンプレート構文が含まれないこと(fixture は raw template を git に直接渡すため)。
+- source に identity 値(`name =` / `email =`、email らしき値)が含まれないこと。
+- source に chezmoi のテンプレート構文が含まれないこと(fixture は source を git に直接渡すため)。
 - local fixture で、known root 外では commit が identity 未解決を理由に失敗すること。
 - local fixture で、`~/src/personal/` 配下では identity file の identity が解決されること。
 - credential 入り remote URL が拒否されること。

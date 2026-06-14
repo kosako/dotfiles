@@ -9,6 +9,7 @@
 - package install、GUI app install、macOS defaults、secret access、network tunnel、Git remote mutation は暗黙に実行しない。
 - `doctor` は副作用なしを維持する。
 - `preflight` は導入前の危険検知に限定する。
+- 新しい capability は、最低限 `doctor` が読む section を同梱して導入する。宣言だけで何も駆動しない capability(宣言と実装の乖離)を作らない。後続 module 用の placeholder capability も、`doctor` が「未実装」を report する形にする。
 
 ## GitHub 運用
 

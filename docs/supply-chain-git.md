@@ -4,7 +4,7 @@
 
 ## 二段構え
 
-1. 予防: `transfer.credentialsInUrl = die`(`dot_gitconfig.tmpl`)
+1. 予防: `transfer.credentialsInUrl = die`(`dot_gitconfig`)
    - password 部を含む URL での fetch / push / clone を Git 自体が拒否する。
 2. 検出: `doctor.sh` の remote URL scan(report-only)
    - すでに設定済みの remote URL に credential らしき userinfo(`scheme://user:password@host`)が残っていないかを検査する。
