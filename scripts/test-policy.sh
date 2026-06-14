@@ -240,11 +240,25 @@ run_fail_contains \
   "unknown option: -x" \
   "$fixture/scripts/validate-policy.sh" -x
 
-# Restrict PATH so yq is not resolvable; coreutils stay available.
+# require_yq must reject a wrong yq, not just a missing one. Shadow yq
+# with a fake earlier in PATH so the test is independent of whatever yq
+# the host has (CI runners ship one in /usr/bin).
 make_fixture
+mkdir -p "$fixture/fakebin"
+printf '#!/bin/sh\necho "yq 3.4.3 (python)"\n' > "$fixture/fakebin/yq"
+chmod +x "$fixture/fakebin/yq"
 run_fail_contains \
-  "fails closed when yq is unavailable" \
-  "yq not found" \
-  env PATH=/usr/bin:/bin "$fixture/scripts/validate-policy.sh" personal
+  "fails closed on a non-mikefarah yq" \
+  "wrong yq variant" \
+  env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+mkdir -p "$fixture/fakebin"
+printf '#!/bin/sh\necho "yq (https://github.com/mikefarah/yq/) version v3.4.0"\n' > "$fixture/fakebin/yq"
+chmod +x "$fixture/fakebin/yq"
+run_fail_contains \
+  "fails closed on yq older than v4" \
+  "yq v4+ required" \
+  env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal
 
 ok "policy tests passed"
