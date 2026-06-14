@@ -83,7 +83,7 @@ policy validation が失敗した場合は exit 1。
 
 ## test-gitconfig.sh
 
-`dot_gitconfig.tmpl` の Git identity 安全境界を検証する。
+`dot_gitconfig` の Git identity 安全境界を検証する。
 
 ```sh
 ./scripts/test-gitconfig.sh

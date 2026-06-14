@@ -121,7 +121,7 @@ git diff --check
 ./scripts/doctor.sh work-minimal
 ```
 
-Git config template(`dot_gitconfig.tmpl`)を変更した場合:
+Git config source(`dot_gitconfig`)を変更した場合:
 
 ```sh
 ./scripts/test-gitconfig.sh

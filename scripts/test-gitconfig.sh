@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
-GITCONFIG_TEMPLATE="$DOTFILES_ROOT/dot_gitconfig.tmpl"
+GITCONFIG_SOURCE="$DOTFILES_ROOT/dot_gitconfig"
 
 status=0
 tmp_roots=()
@@ -24,7 +24,7 @@ trap cleanup EXIT
 check_contains() {
   local name="$1"
   local needle="$2"
-  if grep -Fq "$needle" "$GITCONFIG_TEMPLATE"; then
+  if grep -Fq "$needle" "$GITCONFIG_SOURCE"; then
     ok "test passed: $name"
   else
     fail "test failed: $name (missing: $needle)"
@@ -32,10 +32,10 @@ check_contains() {
   fi
 }
 
-section "static checks: dot_gitconfig.tmpl"
+section "static checks: dot_gitconfig"
 
-if [[ ! -f "$GITCONFIG_TEMPLATE" ]]; then
-  fail "missing template: $GITCONFIG_TEMPLATE"
+if [[ ! -f "$GITCONFIG_SOURCE" ]]; then
+  fail "missing source: $GITCONFIG_SOURCE"
   exit 1
 fi
 
@@ -47,29 +47,29 @@ for context in personal work client sandbox agent; do
   check_contains "include path for $context" "path = ~/.config/git/$context.gitconfig"
 done
 
-if grep -Eq '^[[:space:]]*(name|email)[[:space:]]*=' "$GITCONFIG_TEMPLATE"; then
+if grep -Eq '^[[:space:]]*(name|email)[[:space:]]*=' "$GITCONFIG_SOURCE"; then
   fail "test failed: template contains an identity assignment"
   status=1
 else
   ok "test passed: no identity assignment in template"
 fi
 
-if grep -q '@' "$GITCONFIG_TEMPLATE"; then
+if grep -q '@' "$GITCONFIG_SOURCE"; then
   fail "test failed: template contains an @ (possible email value)"
   status=1
 else
   ok "test passed: no email-like value in template"
 fi
 
-# The fixture checks below feed the raw template to git via
-# GIT_CONFIG_GLOBAL, which only works while it contains no template
-# directives. If templating becomes necessary, the fixtures must
-# render the template first.
-if grep -q '{{' "$GITCONFIG_TEMPLATE"; then
-  fail "test failed: template contains template directives; fixtures assume plain gitconfig"
+# The fixture checks below feed the source file to git via
+# GIT_CONFIG_GLOBAL, which only works while it is a plain gitconfig.
+# dot_gitconfig is intentionally not a .tmpl; if templating becomes
+# necessary, rename it back and render before the fixtures use it.
+if grep -q '{{' "$GITCONFIG_SOURCE"; then
+  fail "test failed: source contains template directives; fixtures assume plain gitconfig"
   status=1
 else
-  ok "test passed: template is directive-free"
+  ok "test passed: source is directive-free"
 fi
 
 section "fixture checks: identity resolution"
@@ -93,7 +93,7 @@ run_git() {
     XDG_CONFIG_HOME="$fixture/.config" \
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL="$GITCONFIG_TEMPLATE" \
+    GIT_CONFIG_GLOBAL="$GITCONFIG_SOURCE" \
     git -C "$repo" "$@"
 }
 

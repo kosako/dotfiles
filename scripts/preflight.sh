@@ -35,6 +35,23 @@ for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.gitconfig" "$HOME/.ssh/conf
   fi
 done
 
+section "config directory permission"
+# private_dot_config makes chezmoi manage ~/.config itself at 0700.
+# On an existing host where ~/.config is 0755, the first apply changes
+# it. Surface that here so it is never a surprise (see
+# docs/directory-convention.md).
+config_dir="$HOME/.config"
+if [[ -d "$config_dir" ]]; then
+  config_mode="$(stat -f '%Lp' "$config_dir" 2>/dev/null || stat -c '%a' "$config_dir" 2>/dev/null || echo unknown)"
+  if [[ "$config_mode" == "700" ]]; then
+    ok "~/.config mode already 0700"
+  else
+    warn "~/.config mode is $config_mode; apply manages it at 0700 (private_dot_config)"
+  fi
+else
+  item "~/.config absent; apply will create it at 0700"
+fi
+
 section "existing Git config"
 if [[ -e "$HOME/.config/git/config" ]]; then
   warn "exists: $HOME/.config/git/config"
