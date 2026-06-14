@@ -27,11 +27,31 @@ else
 fi
 
 section "existing home files"
-for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.gitconfig" "$HOME/.ssh/config" "$HOME/.npmrc"; do
+for file in "$HOME/.gitconfig" "$HOME/.ssh/config" "$HOME/.npmrc"; do
   if [[ -e "$file" ]]; then
     warn "exists: $file"
   else
     ok "absent: $file"
+  fi
+done
+
+section "shell config (apply impact)"
+# When shell-extra is active for this profile, apply replaces ~/.zshrc
+# and ~/.zprofile with managed versions. Surface that, and point to the
+# local-override files so machine-specific lines are not lost.
+if module_active_for_profile "$profile" "shell-extra"; then
+  shell_managed=1
+else
+  shell_managed=0
+fi
+for file in "$HOME/.zshrc" "$HOME/.zprofile"; do
+  base="$(basename "$file")"
+  if [[ ! -e "$file" ]]; then
+    ok "absent: $file"
+  elif [[ "$shell_managed" -eq 1 ]]; then
+    warn "exists: $file — apply (shell-extra) replaces it; move machine-specific lines to ~/$base.local first (see docs/shell.md)"
+  else
+    item "exists: $file — not managed for profile $profile (left as-is)"
   fi
 done
 

@@ -30,7 +30,8 @@ personal project として段階的に作っている。現時点の実装状況
 | project templates / mise runtime | 実装済み(未適用) |
 | doctor / preflight(report-only の健康診断) | 実装済み |
 | agent-tools との report-only 連携 | 実装済み(opt-in) |
-| zsh / VS Code / SSH の管理 | 未着手 |
+| zsh(shell-extra)の管理 | 実装済み(未適用) |
+| VS Code / SSH の管理 | 未着手 |
 
 「実機適用済み」は、現時点でこの author の Mac 上で `~/.gitconfig` が稼働しているという意味。shell・editor・SSH はまだ chezmoi 管理に載せていない。
 
