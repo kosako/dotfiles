@@ -1,32 +1,66 @@
 # dotfiles
 
-Mac用ポータブル開発環境を管理する `chezmoi` repository。
+Mac 用のポータブル開発環境を [chezmoi](https://www.chezmoi.io/) で管理する personal repository。
 
-目的は、個人Mac・会社Mac・クライアント環境・sandbox・AI agent 環境で、共通化してよい設定だけを安全に共有すること。
+ねらいは「どこでも同じ設定にする」ことではなく、**個人 / 会社 / クライアント / sandbox / AI agent の環境が、Git identity・secret・install policy・AI agent 権限の面で混ざらないこと**を最優先にすること。便利さよりも、境界を壊さないことを優先する。
 
-「全部をどこでも同じにする」のではなく、Git identity、secret、install policy、AI agent の権限が混ざらないことを優先する。
+> personal project だが repository は public。会社名・クライアント名・内部 URL・secret は core に一切含めない方針で運用している(後述の「安全モデル」)。
+
+## なぜ
+
+複数の環境(個人 Mac・会社 Mac・クライアント案件・実験用・AI agent 用)を扱うと、こういう事故が起きやすい。
+
+- 会社の commit に個人のメールアドレスが乗る(またはその逆)。
+- 会社マシンで個人用の package を勝手に入れる、secret に触れる。
+- credential 入りの remote URL を push してしまう。
+- AI agent が触ってよい範囲が曖昧なまま広がる。
+
+この repository は、これらを**設定の作りからして起きにくく**する。判定の基準は「project をどの directory に置いたか」(`~/src/<context>/`)。
+
+## いま管理しているもの
+
+personal project として段階的に作っている。現時点の実装状況は次のとおり。
+
+| 領域 | 状態 |
+| --- | --- |
+| Git identity 分離(context 別、fail-closed) | 実装済み・実機適用済み |
+| policy / capabilities / profile 検証(fail-closed) | 実装済み |
+| environmentKind による capability 制約の強制 | 実装済み |
+| supply-chain(git credential scan / npm hardening / Corepack policy) | 実装済み(npm は未適用) |
+| project templates / mise runtime | 実装済み(未適用) |
+| doctor / preflight(report-only の健康診断) | 実装済み |
+| agent-tools との report-only 連携 | 実装済み(opt-in) |
+| zsh / VS Code / SSH の管理 | 未着手 |
+
+「実機適用済み」は、現時点でこの author の Mac 上で `~/.gitconfig` が稼働しているという意味。shell・editor・SSH はまだ chezmoi 管理に載せていない。
 
 ## 考え方
 
-基本モデル:
-
 ```text
-base + modules + profiles + policy + capabilities
+profile + environmentKind + modules + capabilities + policy
 ```
 
-- `profile`: ユーザーが選びやすい用途別プリセット。
-- `environmentKind`: `personal` / `work` / `client` / `sandbox` / `agent` の環境種別。
-- `modules`: 機能のまとまり。`paths:` で管理対象 file を宣言し、`.chezmoiignore` の生成を駆動する。
-- `capabilities`: 実際に許可する操作や副作用。
-- `policy`: 何を許可し、何を禁止するかの判断基準。
+- **profile**: 用途別プリセット(`personal` / `work-minimal` / `work-dev`)。選びやすさのための入口で、権限そのものではない。
+- **environmentKind**: `personal` / `work` / `client` / `sandbox` / `agent` の環境種別。許可される capability に制約をかける(下記)。
+- **modules**: 機能単位。`paths:` で管理対象 file を宣言し、`.chezmoiignore` の生成を駆動する。
+- **capabilities**: 実際に許可する操作・副作用(install、secret access、npm hardening mode など)。**何が起きるかは最終的に capabilities が決める**。
+- **policy**: 何を許可・禁止するかの判断基準([docs/policy-model.md](docs/policy-model.md))。
 
-`profile` は権限そのものではない。実際に何を許可するかは `capabilities` で判定する。
+### environmentKind は制約を強制する
 
-AI agent 境界は、現時点では directory convention(`~/src/agent`)と Git identity 分離、docs の方針記述([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md))で構成されており、`enableAiPolicy` capability を消費する実装はまだない。
+environmentKind は飾りラベルではない。`validate-policy.sh` が、環境種別が禁止する capability を **hard fail** で検査する(違反した PR は CI で止まる)。
 
-## プロジェクトの置き場所
+| environmentKind | false 必須の capability |
+| --- | --- |
+| work / client / agent | installPackages, installGuiApps, enableMacOSDefaults, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| sandbox | allowSecretsAccess |
+| personal | (制約なし) |
 
-開発 project は以下に置く。
+つまり「会社 profile なのに package を自動 install する」ような設定は、構造的に作れない。
+
+## ディレクトリ規約
+
+開発 project はここに置く。この階層が Git identity・secret access・install policy・AI agent policy の判定基準になる。
 
 ```text
 ~/src/personal/<repo>
@@ -36,95 +70,78 @@ AI agent 境界は、現時点では directory convention(`~/src/agent`)と Git 
 ~/src/agent/<repo>
 ```
 
-この階層を Git identity、secret access、install policy、AI agent policy の判定基準にする。
+例えば `~/src/work/...` 配下では work の Git identity が自動で選ばれ、`~/src/` の外では identity が解決されず commit が(意図的に)失敗する。
 
-## Profiles
+## Quickstart
 
-初期 profile はこの3つ。
+### 前提
 
-- `personal`
-- `work-minimal`
-- `work-dev`
+- [chezmoi](https://www.chezmoi.io/)(home file の apply)
+- [mikefarah/yq](https://github.com/mikefarah/yq) v4(policy script が使用)
+- macOS
 
-確認:
+この repository は `~/dotfiles` に置く前提で運用している。
 
-```sh
-./scripts/validate-policy.sh personal
-./scripts/preflight.sh personal
-./scripts/doctor.sh personal
-```
-
-## いまのスコープ
-
-この初期 scaffold では、まだ以下を実行しない。
-
-- package install
-- GUI app install
-- macOS defaults apply
-- `direnv allow`
-- secret fetch
-- Git remote mutation
-- 既存 home 設定の削除や上書き
-
-最初に作るのは policy / profiles / capabilities / preflight / doctor の土台。
-
-## Chezmoi
-
-最初に init で profile を設定する。これをしないと `diff` / `apply` はテンプレートエラーで失敗する。
+### 導入
 
 ```sh
-chezmoi init --source ~/dotfiles
-```
-
-init は profile を prompt で聞く。デフォルトはないため、`personal` / `work-minimal` / `work-dev` のいずれかを明示的に入力する。typo は render 時に known profile 一覧つきのエラーで fail する。
-回答は `~/.config/chezmoi/chezmoi.toml` に保存され、repo には入らない。
-
-非対話で profile を指定する場合:
-
-```sh
+# 1. profile を選んで init(default は無いので明示する)
 chezmoi init --source ~/dotfiles --promptString profile=personal
-```
 
-次に差分を確認する。
-
-```sh
+# 2. 何が適用されるかを全て確認する
 chezmoi diff --source ~/dotfiles
-```
 
-適用は差分確認後に行う。初回は target を絞って適用する(Issue #9 参照)。
-
-```sh
+# 3. 初回は target を絞って適用する(例: gitconfig だけ)
 chezmoi apply --source ~/dotfiles ~/.gitconfig
 ```
 
-全体適用は、diff の対象をすべて理解してから行う。
+Git identity の実値は repository に入れない。使う context の identity file を手で置く。
 
 ```sh
-chezmoi apply --source ~/dotfiles
+mkdir -p ~/.config/git
+cat > ~/.config/git/personal.gitconfig <<'EOF'
+[user]
+	name = Your Name
+	email = you@example.com
+EOF
 ```
 
-## 安全ルール
+### 日常
 
-- secret は repository に含めない。
-- SSH 秘密鍵は repository に含めない。
-- 会社名・クライアント名・社内URL・private registry URL は core に入れない。
+普段はほとんど意識しない。`~/src/<context>/` 配下に project を置いて commit すれば、その context の identity が自動で使われる。状態を確認したいときは次を実行する(どちらも何も変更しない)。
+
+```sh
+./scripts/doctor.sh personal    # 導入後の健康診断
+./scripts/preflight.sh personal # 新マシン適用前の危険検知
+```
+
+## 何が得られるか
+
+- **Git identity が context を跨いで漏れない。** `user.useConfigOnly=true` と `includeIf` により、context 外では identity が解決されず commit が止まる(間違った identity で commit するより安全側に倒れる)。
+- **credential 入りの remote URL を Git が拒否する**(`transfer.credentialsInUrl=die`)。加えて既存 remote の credential を doctor が scan する(URL の値は表示しない)。
+- **work / client 環境が構造的に lockdown される**(environmentKind の制約強制)。
+- **supply-chain hardening。** npm の `ignore-scripts` などの強制、Corepack の暗黙有効化なし、runtime の自動 install なし([docs/supply-chain-npm.md](docs/supply-chain-npm.md) ほか)。
+- **fail-closed かつ report-only。** unknown profile・不正データ・依存欠如は黙って進まず止まる。`doctor` / `preflight` は状態を報告するだけで何も変更しない。
+
+## 安全モデル
+
+- secret・SSH 秘密鍵・実 credential は repository に含めない。
+- 会社名・クライアント名・社内 URL・private registry URL は core に入れない(public repository 前提)。
 - unknown profile / module / capability は fail closed にする。
-- `doctor` は副作用を持たない。
-- `preflight` は導入前の危険検知に限定する。
-- npm hardening の方針と `ignore-scripts=true` の逃げ道は [docs/supply-chain-npm.md](docs/supply-chain-npm.md) を参照する。
-- Corepack は暗黙に enable しない。方針は [docs/supply-chain-corepack.md](docs/supply-chain-corepack.md) を参照する。
+- `doctor` は副作用を持たない。`preflight` は導入前の危険検知に限定する。
+- package install / GUI app install / macOS defaults / secret fetch / network tunnel / Git remote mutation / 既存 home 設定の上書きは、暗黙には実行しない。
+- 別 repository(agent-tools)の status 取得は、別 repo のコード実行になるため `enableAgentToolsStatus` での明示 opt-in 時のみ行う([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md))。
 
-## GitHub Workflow
+## repository の構成
 
-Phase 2 以降の作業は Issue / Pull Request で管理する。
+- `scripts/` — policy 検証 / doctor / preflight / テスト([scripts/README.md](scripts/README.md))。
+- `.chezmoidata/` — profiles / modules / capabilities schema。
+- `docs/` — policy model、Git identity、supply-chain、runtime、AI 境界などの方針。
+- `dot_*` / `private_dot_*` — chezmoi が管理する home file の source。
 
-```text
-Notion: roadmap / design background / worklog / handoff
-GitHub Issues: implementation scope / done criteria / validation plan
-GitHub PRs: change summary / validation result / residual risk / merge record
-```
+## 開発フロー
 
-詳細は [docs/github-workflow.md](docs/github-workflow.md) を参照する。
+変更は Issue → branch → Pull Request → CI → merge で進める([docs/github-workflow.md](docs/github-workflow.md))。CI(`.github/workflows/validate.yml`)が policy 検証・各種テスト・shellcheck・chezmoi render を PR ごとに実行する。roadmap や作業ログは repository の外(Notion)で管理する。
 
 ## License
 
