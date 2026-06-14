@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
+require_yq || exit 1
+
 NPMRC_TEMPLATE="$DOTFILES_ROOT/dot_npmrc.tmpl"
 CHEZMOIIGNORE="$DOTFILES_ROOT/.chezmoiignore"
 

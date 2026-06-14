@@ -30,6 +30,30 @@ fail() {
   printf '[fail] %s\n' "$*" >&2
 }
 
+# The policy parsers below require mikefarah/yq v4. Fail closed and
+# loudly on a missing binary or the unrelated Python "yq", so a wrong
+# tool never silently parses nothing and passes vacuously.
+require_yq() {
+  if ! command -v yq >/dev/null 2>&1; then
+    fail "yq not found; install mikefarah/yq v4 (brew install yq). See docs/policy-model.md"
+    return 1
+  fi
+  local version major
+  version="$(yq --version 2>/dev/null)"
+  if [[ "$version" != *mikefarah* ]]; then
+    fail "wrong yq variant: need mikefarah/yq v4, got: ${version:-unknown}"
+    return 1
+  fi
+  major="${version##*version }"
+  major="${major#v}"
+  major="${major%%.*}"
+  if [[ ! "$major" =~ ^[0-9]+$ ]] || ((major < 4)); then
+    fail "yq v4+ required, got: $version"
+    return 1
+  fi
+  return 0
+}
+
 require_data_files() {
   local missing=0
   for file in "$PROFILES_FILE" "$MODULES_FILE" "$CAPABILITIES_FILE"; do
@@ -41,109 +65,60 @@ require_data_files() {
   [[ "$missing" -eq 0 ]]
 }
 
+# Names are passed to yq via strenv(), never interpolated into the
+# expression, so a name with special characters cannot break or inject
+# into the query.
+
 profile_exists() {
   local profile="$1"
-  awk -v profile="$profile" '$0 == "  " profile ":" { found = 1 } END { exit !found }' "$PROFILES_FILE"
+  [[ "$(p="$profile" yq '.profiles // {} | has(strenv(p))' "$PROFILES_FILE" 2>/dev/null)" == "true" ]]
 }
 
 known_profiles() {
-  awk '
-    /^  [^ ].*:[[:space:]]*$/ {
-      name = $1
-      sub(/:$/, "", name)
-      print name
-    }
-  ' "$PROFILES_FILE"
+  yq '.profiles // {} | keys | .[]' "$PROFILES_FILE"
 }
 
 profile_environment_kind() {
   local profile="$1"
-  awk -v profile="$profile" '
-    $0 == "  " profile ":" { in_profile = 1; next }
-    in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
-    in_profile && /^    environmentKind:/ { print $2; exit }
-  ' "$PROFILES_FILE"
+  # environmentKind is always a string, so // "" only fires on absence.
+  p="$profile" yq '.profiles[strenv(p)].environmentKind // ""' "$PROFILES_FILE"
 }
 
 profile_modules() {
   local profile="$1"
-  awk -v profile="$profile" '
-    $0 == "  " profile ":" { in_profile = 1; next }
-    in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
-    in_profile && /^    modules:/ { in_modules = 1; next }
-    in_profile && /^    [A-Za-z0-9_-]+:/ { in_modules = 0 }
-    in_profile && in_modules && /^      - / {
-      sub(/^      - /, "")
-      print
-    }
-  ' "$PROFILES_FILE"
+  p="$profile" yq '.profiles[strenv(p)].modules[]?' "$PROFILES_FILE"
 }
 
 profile_capabilities() {
   local profile="$1"
-  awk -v profile="$profile" '
-    $0 == "  " profile ":" { in_profile = 1; next }
-    in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
-    in_profile && /^    capabilities:/ { in_caps = 1; next }
-    in_profile && /^    [A-Za-z0-9_-]+:/ { in_caps = 0 }
-    in_profile && in_caps && /^      [A-Za-z0-9_-]+:/ {
-      key = $1
-      sub(/:$/, "", key)
-      print key
-    }
-  ' "$PROFILES_FILE"
+  # // {} guards an absent capabilities map; duplicate keys are kept in
+  # the output so callers can detect them with `sort | uniq -d`.
+  p="$profile" yq '.profiles[strenv(p)].capabilities // {} | keys | .[]' "$PROFILES_FILE"
 }
 
 capability_value() {
   local profile="$1"
   local capability="$2"
-  awk -v profile="$profile" -v capability="$capability" '
-    $0 == "  " profile ":" { in_profile = 1; next }
-    in_profile && /^  [^ ].*:[[:space:]]*$/ { exit }
-    in_profile && /^    capabilities:/ { in_caps = 1; next }
-    in_profile && /^    [A-Za-z0-9_-]+:/ { in_caps = 0 }
-    in_profile && in_caps && $1 == capability ":" { print $2; exit }
-  ' "$PROFILES_FILE"
+  # select(has()) yields nothing when the key is absent while keeping a
+  # literal false value; a bare `// ""` would collapse false into "".
+  p="$profile" c="$capability" \
+    yq '.profiles[strenv(p)].capabilities // {} | select(has(strenv(c))) | .[strenv(c)]' "$PROFILES_FILE"
 }
 
 known_modules() {
-  awk '
-    /^  [^ ].*:[[:space:]]*$/ {
-      name = $1
-      sub(/:$/, "", name)
-      print name
-    }
-  ' "$MODULES_FILE"
+  yq '.modules // {} | keys | .[]' "$MODULES_FILE"
 }
 
 module_paths() {
   local module="$1"
-  awk -v module="$module" '
-    $0 == "  " module ":" { in_module = 1; next }
-    in_module && /^  [^ ].*:[[:space:]]*$/ { exit }
-    in_module && /^    paths:/ { in_paths = 1; next }
-    in_module && /^    [A-Za-z0-9_-]+:/ { in_paths = 0 }
-    in_module && in_paths && /^      - / {
-      sub(/^      - /, "")
-      print
-    }
-  ' "$MODULES_FILE"
+  m="$module" yq '.modules[strenv(m)].paths[]?' "$MODULES_FILE"
 }
 
 # Print "capability value" pairs from a module requires: section.
 module_requires() {
   local module="$1"
-  awk -v module="$module" '
-    $0 == "  " module ":" { in_module = 1; next }
-    in_module && /^  [^ ].*:[[:space:]]*$/ { exit }
-    in_module && /^    requires:/ { in_requires = 1; next }
-    in_module && /^    [A-Za-z0-9_-]+:/ { in_requires = 0 }
-    in_module && in_requires && /^      [A-Za-z0-9_-]+:/ {
-      key = $1
-      sub(/:$/, "", key)
-      print key, $2
-    }
-  ' "$MODULES_FILE"
+  m="$module" \
+    yq '.modules[strenv(m)].requires // {} | to_entries | .[] | .key + " " + (.value | tostring)' "$MODULES_FILE"
 }
 
 # A module's paths are managed for a profile when the profile lists the
@@ -152,9 +127,14 @@ module_requires() {
 module_active_for_profile() {
   local profile="$1"
   local module="$2"
-  local capability value
+  local capability value modules
 
-  profile_modules "$profile" | grep -Fxq -- "$module" || return 1
+  # Capture, then test against a here-string. A `yq | grep -q` pipe
+  # would make yq exit with SIGPIPE once grep -q closes it early, which
+  # trips callers running under `set -o pipefail` (e.g. doctor.sh).
+  modules="$(profile_modules "$profile")"
+  grep -Fxq -- "$module" <<< "$modules" || return 1
+
   while read -r capability value; do
     [[ -z "$capability" ]] && continue
     [[ "$(capability_value "$profile" "$capability")" == "$value" ]] || return 1
@@ -163,36 +143,18 @@ module_active_for_profile() {
 }
 
 known_capabilities() {
-  awk '
-    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-      name = $1
-      sub(/:$/, "", name)
-      print name
-    }
-  ' "$CAPABILITIES_FILE"
+  yq '.capabilities // {} | keys | .[]' "$CAPABILITIES_FILE"
 }
 
 capability_type() {
   local capability="$1"
-  awk -v capability="$capability" '
-    $0 == "  " capability ":" { in_cap = 1; next }
-    in_cap && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
-    in_cap && /^    type:/ { print $2; exit }
-  ' "$CAPABILITIES_FILE"
+  # type is always a string, so // "" only fires on absence.
+  c="$capability" yq '.capabilities[strenv(c)].type // ""' "$CAPABILITIES_FILE"
 }
 
 capability_allowed_values() {
   local capability="$1"
-  awk -v capability="$capability" '
-    $0 == "  " capability ":" { in_cap = 1; next }
-    in_cap && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
-    in_cap && /^    values:/ { in_values = 1; next }
-    in_cap && in_values && /^      - / {
-      sub(/^      - /, "")
-      print
-    }
-    in_cap && in_values && /^    [A-Za-z0-9_-]+:/ { exit }
-  ' "$CAPABILITIES_FILE"
+  c="$capability" yq '.capabilities[strenv(c)].values[]?' "$CAPABILITIES_FILE"
 }
 
 capability_value_is_allowed() {
