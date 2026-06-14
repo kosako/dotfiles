@@ -35,5 +35,7 @@ capabilities:
     type: boolean
   enableAiTools:
     type: boolean
+  enableAgentToolsStatus:
+    type: boolean
   enableAiPolicy:
     type: boolean

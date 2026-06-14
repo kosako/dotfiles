@@ -33,6 +33,7 @@ profiles:
       allowNetworkTunnels: true
       allowSecretsAccess: true
       enableAiTools: false
+      enableAgentToolsStatus: false
       enableAiPolicy: true
 
   work-minimal:
@@ -62,6 +63,7 @@ profiles:
       allowNetworkTunnels: false
       allowSecretsAccess: false
       enableAiTools: false
+      enableAgentToolsStatus: false
       enableAiPolicy: true
 
   work-dev:
@@ -96,4 +98,5 @@ profiles:
       allowNetworkTunnels: false
       allowSecretsAccess: false
       enableAiTools: false
+      enableAgentToolsStatus: false
       enableAiPolicy: true
