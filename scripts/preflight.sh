@@ -42,7 +42,7 @@ section "config directory permission"
 # docs/directory-convention.md).
 config_dir="$HOME/.config"
 if [[ -L "$config_dir" ]]; then
-  warn "~/.config is a symlink; apply may replace or follow it (verify with chezmoi diff)"
+  warn "$config_dir is a symlink; apply may replace or follow it (verify with chezmoi diff)"
 elif [[ -d "$config_dir" ]]; then
   # BSD (macOS) and GNU stat take different flags; pick by OS rather
   # than chaining them, since `stat -f` means --file-system on GNU.
@@ -52,12 +52,12 @@ elif [[ -d "$config_dir" ]]; then
     config_mode="$(stat -c '%a' "$config_dir" 2>/dev/null || echo unknown)"
   fi
   if [[ "$config_mode" == "700" ]]; then
-    ok "~/.config mode already 0700"
+    ok "$config_dir mode already 0700"
   else
-    warn "~/.config mode is $config_mode; apply manages it at 0700 (private_dot_config)"
+    warn "$config_dir mode is $config_mode; apply manages it at 0700 (private_dot_config)"
   fi
 else
-  item "~/.config absent; apply will create it at 0700"
+  item "$config_dir absent; apply will create it at 0700"
 fi
 
 section "existing Git config"
