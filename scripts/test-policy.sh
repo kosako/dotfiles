@@ -240,4 +240,11 @@ run_fail_contains \
   "unknown option: -x" \
   "$fixture/scripts/validate-policy.sh" -x
 
+# Restrict PATH so yq is not resolvable; coreutils stay available.
+make_fixture
+run_fail_contains \
+  "fails closed when yq is unavailable" \
+  "yq not found" \
+  env PATH=/usr/bin:/bin "$fixture/scripts/validate-policy.sh" personal
+
 ok "policy tests passed"

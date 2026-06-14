@@ -22,6 +22,10 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 - `paths:` を持たない module は現時点では情報ラベル(実装が入る時点で `paths:` を宣言する)。
 - `requires:` の capability 名・値は `validate-policy.sh` が schema と突き合わせて検証する。複数 module による同一 path の宣言は fail。
 
+## データ読み取り
+
+`.chezmoidata/*.yaml`(profiles / modules / capabilities.schema)の読み取りは shell script 側では mikefarah/yq v4 で行う(chezmoi template 側は Go template が読む)。yq が無い・別 variant の場合は `require_yq` が fail closed する。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない(injection 防止)。
+
 ## Rules
 
 - profile 名だけで副作用を許可しない。

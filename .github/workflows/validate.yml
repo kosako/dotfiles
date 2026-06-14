@@ -9,12 +9,27 @@ on:
 permissions:
   contents: read
 
+env:
+  YQ_VERSION: 4.53.3
+  YQ_SHA256: fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      # The policy scripts require mikefarah/yq v4. Download outside the
+      # checkout so a stray file never affects the working tree.
+      - name: install yq (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  yq" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 yq "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: bash syntax check
         run: bash -n scripts/*.sh
@@ -58,6 +73,15 @@ jobs:
           echo "${CHEZMOI_SHA256}  chezmoi.tar.gz" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           tar -xzf chezmoi.tar.gz -C "$HOME/.local/bin" chezmoi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: install yq (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  yq" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 yq "$HOME/.local/bin/yq"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: chezmoi render and managed-set tests

@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
+require_yq || exit 1
+
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; render tests require it"
   exit 1

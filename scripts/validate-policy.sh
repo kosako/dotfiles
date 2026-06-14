@@ -217,6 +217,7 @@ case "$command" in
     ;;
 esac
 
+require_yq || exit 1
 require_data_files || exit 1
 
 case "$command" in
