@@ -90,12 +90,13 @@ else
   status=1
 fi
 
-# Throwaway repo copy with the opt-in enabled for personal.
+# Throwaway repo copy with the opt-in enabled for every profile, so the
+# test does not depend on which profile comes first.
 optin_root="$fixture_home/.dotfiles-optin"
 mkdir -p "$optin_root/.chezmoidata"
 cp -R "$DOTFILES_ROOT/scripts" "$optin_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$optin_root/.chezmoidata/"
-awk '!done && $0 == "      enableAgentToolsStatus: false" { print "      enableAgentToolsStatus: true"; done = 1; next } { print }' \
+awk '$0 == "      enableAgentToolsStatus: false" { print "      enableAgentToolsStatus: true"; next } { print }' \
   "$optin_root/.chezmoidata/profiles.yaml" > "$optin_root/.chezmoidata/profiles.yaml.tmp"
 mv "$optin_root/.chezmoidata/profiles.yaml.tmp" "$optin_root/.chezmoidata/profiles.yaml"
 
@@ -150,6 +151,40 @@ if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)
 else
   printf '%s\n' "$at_out" >&2
   fail "test failed: doctor must stay exit 0 when status.sh missing"
+  status=1
+fi
+
+# F) Opt-in + status.sh exits non-zero: warning, still exit 0.
+cat > "$agent_scripts/status.sh" <<'SH'
+#!/bin/sh
+exit 1
+SH
+chmod +x "$agent_scripts/status.sh"
+if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "no usable output" <<< "$at_out"; then
+    ok "test passed: status.sh failure is a warning (exit 0)"
+  else
+    printf '%s\n' "$at_out" >&2
+    fail "test failed: status.sh failure not handled"
+    status=1
+  fi
+else
+  printf '%s\n' "$at_out" >&2
+  fail "test failed: doctor must stay exit 0 when status.sh exits non-zero"
+  status=1
+fi
+
+# G) Opt-in + malformed status JSON: doctor must not break, exit 0.
+cat > "$agent_scripts/status.sh" <<'SH'
+#!/bin/sh
+[ "$1" = "--json" ] || exit 1
+echo 'this is not json {{{'
+SH
+chmod +x "$agent_scripts/status.sh"
+if HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal >/dev/null 2>&1; then
+  ok "test passed: malformed status JSON keeps doctor at exit 0"
+else
+  fail "test failed: malformed status JSON must not break doctor"
   status=1
 fi
 
