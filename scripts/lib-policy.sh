@@ -178,6 +178,30 @@ is_allowed_environment_kind() {
   esac
 }
 
+# Boolean capabilities that must be false for a given environmentKind.
+# Encodes the policy that work / client / agent environments do not carry
+# elevated permissions (install, system mutation, secrets, network, AI
+# tooling) by default, and that sandbox forbids secret access. personal
+# is unconstrained; enum capabilities are out of scope here. See
+# docs/policy-model.md. agent has no profile yet; the row is defined so
+# the constraint takes effect the moment an agent profile is added.
+environment_kind_forbidden_capabilities() {
+  case "$1" in
+    work | client | agent)
+      printf '%s\n' \
+        installPackages \
+        installGuiApps \
+        enableMacOSDefaults \
+        allowSecretsAccess \
+        allowNetworkTunnels \
+        enableAiTools
+      ;;
+    sandbox)
+      printf '%s\n' allowSecretsAccess
+      ;;
+  esac
+}
+
 # Print names of remotes whose URL embeds password-like userinfo
 # (scheme://user:password@host). URL values are never printed.
 git_remotes_with_credentials() {

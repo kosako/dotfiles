@@ -30,10 +30,25 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 
 - profile 名だけで副作用を許可しない。
 - unknown profile / module / capability は fail closed。
-- destructive な操作は work / client でデフォルト無効。
+- destructive な操作は work / client / agent でデフォルト無効(environmentKind の制約として `validate-policy.sh` が hard fail で強制。下記参照)。
 - secret access、network tunnel、AI tools は personal でも明示的に扱う。
 - boolean で足りない capability は enum にする。
 - `report` は検査のみ、`enforce` / `enable` は実際の適用を意味する。
+
+## environmentKind の制約
+
+environmentKind は飾りラベルではなく、capability の不変条件を駆動する。`validate-policy.sh` が各 profile を検証するとき、environmentKind が禁止する boolean capability が `true` だと **hard fail**(report-only の warning ではない)する。「work 環境なのに `installPackages=true`」のような矛盾を CI で止めるための invariant(2026-06-14 決定)。
+
+| environmentKind | false 必須の capability |
+| --- | --- |
+| work / client / agent | installPackages, installGuiApps, enableMacOSDefaults, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| sandbox | allowSecretsAccess |
+| personal | (制約なし) |
+
+- 表は `scripts/lib-policy.sh` の `environment_kind_forbidden_capabilities` が持つ。
+- `personal` は明示許可前提なので無制約。`agent` は profile がまだ無いが、最小権限を明示するため先行定義してある(agent profile 追加時に即発効)。
+- enum capability(`npmHardeningMode` など)への制約は今回の対象外(必要なら別 follow-up)。
+- 将来 work 等で禁止 capability を正当に許したくなった場合は、warning で迂回せず、この表自体を見直す。
 
 ## Capability Modes
 

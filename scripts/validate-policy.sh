@@ -108,7 +108,7 @@ validate_modules() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type duplicate
+  local environment_kind module capability value type duplicate forbidden ek_violations
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -193,6 +193,23 @@ validate_profile() {
         ;;
     esac
   done < "$known_caps_file"
+
+  # environmentKind cross-check: capabilities the environmentKind forbids
+  # must be false. This makes the work/client/agent/sandbox restrictions a
+  # hard invariant rather than a convention (see docs/policy-model.md).
+  ek_violations=0
+  while IFS= read -r forbidden; do
+    [[ -z "$forbidden" ]] && continue
+    value="$(capability_value "$profile" "$forbidden")"
+    if [[ "$value" == "true" ]]; then
+      fail "environmentKind $environment_kind forbids $forbidden=true (profile $profile)"
+      status=1
+      ek_violations=$((ek_violations + 1))
+    fi
+  done < <(environment_kind_forbidden_capabilities "$environment_kind")
+  if [[ "$ek_violations" -eq 0 ]]; then
+    ok "environmentKind constraints satisfied: $environment_kind"
+  fi
 
   if [[ "$status" -eq 0 ]]; then
     ok "policy validation passed for profile: $profile"

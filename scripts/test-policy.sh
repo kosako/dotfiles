@@ -213,6 +213,37 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# environmentKind cross-check: a forbidden capability set true must fail.
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "      installPackages: false" "      installPackages: true"
+run_fail_contains \
+  "work environmentKind forbids installPackages=true" \
+  "environmentKind work forbids installPackages=true" \
+  "$fixture/scripts/validate-policy.sh" work-minimal
+
+# client / sandbox / agent have no profile yet; retag personal (which has
+# elevated capabilities) to prove each row's constraint fires.
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: client"
+run_fail_contains \
+  "client environmentKind forbids elevated capabilities" \
+  "environmentKind client forbids" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: sandbox"
+run_fail_contains \
+  "sandbox environmentKind forbids allowSecretsAccess" \
+  "environmentKind sandbox forbids allowSecretsAccess=true" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: agent"
+run_fail_contains \
+  "agent environmentKind forbids elevated capabilities" \
+  "environmentKind agent forbids" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiPolicy: true" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
