@@ -213,6 +213,49 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# environmentKind cross-check. Every deny entry for work/client/agent
+# must actually fire: retag personal (already elevated) to work and force
+# the two caps it leaves false to true, then assert all six are flagged.
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: work"
+replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableMacOSDefaults: false" "      enableMacOSDefaults: true"
+replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
+ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1 || true)"
+ek_missing=""
+for cap in installPackages installGuiApps enableMacOSDefaults allowSecretsAccess allowNetworkTunnels enableAiTools; do
+  grep -Fq "environmentKind work forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
+done
+if [[ -z "$ek_missing" ]]; then
+  ok "test passed: every work deny capability is enforced"
+else
+  printf '%s\n' "$ek_output" >&2
+  fail "test failed: work deny not enforced for:$ek_missing"
+  exit 1
+fi
+
+# client / sandbox / agent have no profile yet; retag personal (which has
+# elevated capabilities) to prove each row's constraint fires.
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: client"
+run_fail_contains \
+  "client environmentKind forbids elevated capabilities" \
+  "environmentKind client forbids" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: sandbox"
+run_fail_contains \
+  "sandbox environmentKind forbids allowSecretsAccess" \
+  "environmentKind sandbox forbids allowSecretsAccess=true" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: agent"
+run_fail_contains \
+  "agent environmentKind forbids elevated capabilities" \
+  "environmentKind agent forbids" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiPolicy: true" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
