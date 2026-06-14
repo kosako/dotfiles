@@ -251,9 +251,11 @@ fi
 
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
-# agent-tools; it only reads the status contract (its scripts/status.sh
-# --json, report-only by contract). See docs/ai-environment-boundary.md
-# and the agent-tools status-manifest-contract (contract_version 2).
+# agent-tools. Presence is always reported, but running its status.sh
+# (executing code from another repo) is opt-in via enableAgentToolsStatus
+# so doctor's no-side-effects invariant is never delegated implicitly.
+# See docs/ai-environment-boundary.md and the agent-tools
+# status-manifest-contract (contract_version 2).
 if [[ "$(capability_value "$profile" enableAiPolicy)" != "true" ]]; then
   ok "AI policy disabled; skipping agent-tools check"
 else
@@ -261,6 +263,8 @@ else
   agent_tools_status="$agent_tools_dir/scripts/status.sh"
   if [[ ! -d "$agent_tools_dir" ]]; then
     warn "agent-tools not present at $agent_tools_dir (not auto-cloned)"
+  elif [[ "$(capability_value "$profile" enableAgentToolsStatus)" != "true" ]]; then
+    ok "agent-tools present; status read disabled (set enableAgentToolsStatus=true to let doctor run its status.sh)"
   elif [[ ! -x "$agent_tools_status" ]]; then
     warn "agent-tools present but scripts/status.sh is missing or not executable"
   elif ! status_json="$("$agent_tools_status" --json 2>/dev/null)" || [[ -z "$status_json" ]]; then
