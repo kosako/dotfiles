@@ -48,17 +48,17 @@ for context in personal work client sandbox agent; do
 done
 
 if grep -Eq '^[[:space:]]*(name|email)[[:space:]]*=' "$GITCONFIG_SOURCE"; then
-  fail "test failed: template contains an identity assignment"
+  fail "test failed: source contains an identity assignment"
   status=1
 else
-  ok "test passed: no identity assignment in template"
+  ok "test passed: no identity assignment in source"
 fi
 
 if grep -q '@' "$GITCONFIG_SOURCE"; then
-  fail "test failed: template contains an @ (possible email value)"
+  fail "test failed: source contains an @ (possible email value)"
   status=1
 else
-  ok "test passed: no email-like value in template"
+  ok "test passed: no email-like value in source"
 fi
 
 # The fixture checks below feed the source file to git via
