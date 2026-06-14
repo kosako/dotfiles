@@ -249,6 +249,78 @@ else
   ok "AI tool install/sync not managed (enableAiTools=false)"
 fi
 
+section "agent-tools (report-only)"
+# Report-only companion check. dotfiles never clones/pulls/syncs
+# agent-tools; it only reads the status contract (its scripts/status.sh
+# --json, report-only by contract). See docs/ai-environment-boundary.md
+# and the agent-tools status-manifest-contract (contract_version 2).
+if [[ "$(capability_value "$profile" enableAiPolicy)" != "true" ]]; then
+  ok "AI policy disabled; skipping agent-tools check"
+else
+  agent_tools_dir="$HOME/src/agent/agent-tools"
+  agent_tools_status="$agent_tools_dir/scripts/status.sh"
+  if [[ ! -d "$agent_tools_dir" ]]; then
+    warn "agent-tools not present at $agent_tools_dir (not auto-cloned)"
+  elif [[ ! -x "$agent_tools_status" ]]; then
+    warn "agent-tools present but scripts/status.sh is missing or not executable"
+  elif ! status_json="$("$agent_tools_status" --json 2>/dev/null)" || [[ -z "$status_json" ]]; then
+    warn "agent-tools status.sh produced no usable output (skipping summary)"
+  else
+    # Null-safe queries plus `|| true` keep doctor report-only even if
+    # the JSON is malformed (a failed substitution would trip set -e).
+    sj() { printf '%s' "$status_json" | yq -p json "$1" 2>/dev/null || true; }
+    contract_version="$(sj '.contract_version // ""')"
+    if [[ "$contract_version" != "2" ]]; then
+      warn "agent-tools status contract_version=${contract_version:-unknown}, expected 2 (not interpreting fields)"
+    else
+      ok "agent-tools present; status contract v2"
+
+      if [[ "$(sj '.repo.clean // false')" == "true" ]]; then
+        ok "agent-tools working tree clean"
+      else
+        warn "agent-tools working tree not clean"
+      fi
+
+      item "assets: $(sj '.assets.total // 0') (manifest errors: $(sj '.assets.manifest_errors // 0'))"
+      if [[ "$(sj '.assets.manifest_errors // 0')" != "0" ]]; then
+        warn "agent-tools manifest validation errors present"
+      fi
+
+      for check in manifest_validation prompt_injection_static; do
+        result="$(sj ".checks.$check // \"not_run\"")"
+        if [[ "$result" == "pass" ]]; then
+          ok "check $check: pass"
+        else
+          warn "check $check: $result"
+        fi
+      done
+
+      item "generated: $(sj '.generated.total // 0') (stale: $(sj '.generated.stale // 0'))"
+      if [[ "$(sj '.generated.stale // 0')" != "0" ]]; then
+        warn "agent-tools has stale generated artifacts"
+      fi
+
+      if [[ "$(sj '.register.catalog_present // false')" == "true" ]]; then
+        item "register: registered=$(sj '.register.registered // 0') human_review=$(sj '.register.human_review_required // 0') unsupported=$(sj '.register.unsupported // 0')"
+        if [[ "$(sj '.register.human_review_required // 0')" != "0" ]]; then
+          warn "agent-tools assets require human review"
+        fi
+      else
+        item "register: catalog not present"
+      fi
+
+      item "sync targets: $(sj '.sync_targets // [] | length')"
+      if [[ "$(sj '[.sync_targets[]? | select(.state == "conflict")] | length')" != "0" ]]; then
+        warn "agent-tools sync conflicts (unmanaged same-name targets); sync must not change them"
+      fi
+      if [[ "$(sj '[.sync_targets[]? | select(.state == "stale")] | length')" != "0" ]]; then
+        warn "agent-tools has stale sync targets (generated artifact newer than target)"
+      fi
+    fi
+    unset -f sj
+  fi
+fi
+
 section "network tunnels"
 allow_tunnels="$(capability_value "$profile" allowNetworkTunnels)"
 ok "allowNetworkTunnels=$allow_tunnels"

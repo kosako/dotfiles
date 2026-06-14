@@ -80,6 +80,7 @@ AI skills / agents project は、`dotfiles` の policy を前提に動く。poli
 - `dotfiles` は AI skills / agents project の path を表示してよい。
 - `dotfiles` は AI skills / agents project を自動更新しない。
 - `dotfiles` は AI skills / agents project の secret を読まない。
+- `dotfiles` の `doctor` は、`~/src/agent/agent-tools` の presence と、存在すれば status contract(`scripts/status.sh --json`、report-only、`contract_version: 2`)の安全な summary を report する(Issue #7)。`conflict` / `stale` / 失敗 check などは warning にするが、clone / pull / sync は一切しない。
 - AI skills / agents project は `dotfiles` の capability を前提条件として参照してよい。
 - AI skills / agents project が install、network tunnel、secret access を必要とする場合は、`dotfiles` 側の capability と approval policy に従う。
 
