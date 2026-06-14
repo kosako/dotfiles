@@ -213,13 +213,25 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
-# environmentKind cross-check: a forbidden capability set true must fail.
+# environmentKind cross-check. Every deny entry for work/client/agent
+# must actually fire: retag personal (already elevated) to work and force
+# the two caps it leaves false to true, then assert all six are flagged.
 make_fixture
-replace_once "$fixture/.chezmoidata/profiles.yaml" "      installPackages: false" "      installPackages: true"
-run_fail_contains \
-  "work environmentKind forbids installPackages=true" \
-  "environmentKind work forbids installPackages=true" \
-  "$fixture/scripts/validate-policy.sh" work-minimal
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: work"
+replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableMacOSDefaults: false" "      enableMacOSDefaults: true"
+replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
+ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1 || true)"
+ek_missing=""
+for cap in installPackages installGuiApps enableMacOSDefaults allowSecretsAccess allowNetworkTunnels enableAiTools; do
+  grep -Fq "environmentKind work forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
+done
+if [[ -z "$ek_missing" ]]; then
+  ok "test passed: every work deny capability is enforced"
+else
+  printf '%s\n' "$ek_output" >&2
+  fail "test failed: work deny not enforced for:$ek_missing"
+  exit 1
+fi
 
 # client / sandbox / agent have no profile yet; retag personal (which has
 # elevated capabilities) to prove each row's constraint fires.
