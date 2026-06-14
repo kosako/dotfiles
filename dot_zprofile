@@ -1,0 +1,9 @@
+# Managed by chezmoi from kosako/dotfiles.
+# Login-shell environment. Machine-specific entries go in
+# ~/.zprofile.local (not managed, never committed). See docs/shell.md.
+
+# Homebrew (Apple Silicon). No-op if brew is not at this path.
+[ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# Local overrides win.
+[ -r "$HOME/.zprofile.local" ] && source "$HOME/.zprofile.local"

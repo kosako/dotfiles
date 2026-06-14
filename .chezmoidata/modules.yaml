@@ -28,7 +28,10 @@ modules:
     requires:
       enableRuntimeManagement: true
   shell-extra:
-    description: zsh / antidote / starship などの shell 強化。
+    description: zsh shell 設定(oh-my-zsh ベース、local override 対応)。
+    paths:
+      - .zshrc
+      - .zprofile
   vscode:
     description: VS Code settings のみ管理。extensions は自動 install しない。
   ssh-1password:
