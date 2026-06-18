@@ -1,4 +1,4 @@
-# Pin runtimes per project with exact versions.
-# See ~/dotfiles/docs/runtime.md (global mise config stays minimal).
+# Pin runtimes per project with exact versions. The project .mise.toml
+# overrides the global baseline (lts / major lines). See docs/runtime.md.
 [tools]
 python = "3.13.5"
