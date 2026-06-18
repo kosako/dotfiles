@@ -241,6 +241,22 @@ run_fail_contains \
   "duplicate package name: chezmoi" \
   "$fixture/scripts/validate-policy.sh" personal
 
+make_fixture
+replace_once "$fixture/.chezmoidata/packages.yaml" \
+  "  - { name: chezmoi, source: brew_formula }" \
+  "  - { name: chezmoi, source: brew_formula, track_only: tru }"
+run_fail_contains \
+  "rejects invalid track_only value" \
+  "package track_only must be true or false: chezmoi: tru" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+: > "$fixture/.chezmoidata/packages.yaml"
+run_fail_contains \
+  "fails closed on empty packages catalog" \
+  "no packages parsed" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 # environmentKind cross-check. Every deny entry for work/client/agent
 # must actually fire: retag personal (already elevated) to work and force
 # the two caps it leaves false to true, then assert all six are flagged.

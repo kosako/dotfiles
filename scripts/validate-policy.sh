@@ -111,14 +111,28 @@ validate_modules() {
 # or app id), and names must be unique.
 validate_packages() {
   local status=0
-  local name source pkg bin track_only duplicate
+  local name source pkg bin track_only duplicate entry_ok rows
   local sources_file names_file
   sources_file="$(mktemp)"
   names_file="$(mktemp)"
   known_package_sources | sort > "$sources_file"
 
+  # Fail closed: a yq error or a missing/empty packages list must not pass
+  # vacuously (mirrors the profiles / modules / capabilities guards).
+  if ! rows="$(catalog_packages)"; then
+    fail "could not parse packages from $PACKAGES_FILE"
+    rm -f "$sources_file" "$names_file"
+    return 1
+  fi
+  if [[ -z "$rows" ]]; then
+    fail "no packages parsed from $PACKAGES_FILE"
+    rm -f "$sources_file" "$names_file"
+    return 1
+  fi
+
   while IFS='|' read -r name source pkg bin track_only; do
     [[ -z "$name$source$pkg$bin$track_only" ]] && continue
+    entry_ok=1
     if [[ -z "$name" ]]; then
       fail "package missing name (source=${source:-none})"
       status=1
@@ -135,16 +149,25 @@ validate_packages() {
       continue
     fi
     printf '%s\n' "$name" >> "$names_file"
+    case "$track_only" in
+      true | false | "") ;;
+      *)
+        fail "package track_only must be true or false: $name: $track_only"
+        status=1
+        entry_ok=0
+        ;;
+    esac
     if [[ "$track_only" != "true" && -z "$pkg" ]]; then
       case "$source" in
-        go_install|mas)
+        go_install | mas)
           fail "$source package needs an explicit pkg (canonical id): $name"
           status=1
+          entry_ok=0
           ;;
       esac
     fi
-    ok "package: $name ($source)"
-  done < <(catalog_packages)
+    [[ "$entry_ok" -eq 1 ]] && ok "package: $name ($source)"
+  done <<< "$rows"
 
   while IFS= read -r duplicate; do
     [[ -z "$duplicate" ]] && continue
