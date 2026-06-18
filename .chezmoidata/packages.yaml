@@ -1,32 +1,47 @@
-packages:
+# Software catalog: the tools this setup intends to have, each with its
+# canonical install source. Read by scripts via mikefarah/yq v4; drift
+# against what is actually installed is reported by doctor (report-only).
+#
+# source_preference is advisory only: the order to prefer when choosing a
+# source for a new tool. Drift detection compares the catalog's declared
+# source to reality; it does not enforce this order. Cross-source
+# availability checks (is X also on a higher-preference source?) are
+# unreliable, so the order guides humans at add-time instead.
+source_preference:
   cli:
-    base:
-      - chezmoi
-      - git
-      - ripgrep
-      - fd
-      - jq
-      - yq
-    runtime:
-      - mise
-      - direnv
-    shell-extra:
-      - antidote
-      - starship
-      - fzf
-      - tmux
-    lint:
-      - shellcheck
-      - shfmt
-    github:
-      - gh
-    secrets:
-      - 1password-cli
-  cask:
-    gui-apps:
-      - 1password
-      - iterm2
-      - google-chrome
-      - raycast
-      - tailscale
-      - visual-studio-code
+    - brew_formula
+    - npm_global
+    - go_install
+    - manual
+  gui:
+    - brew_cask
+    - mas
+    - manual
+
+# Each entry:
+#   name        display name (and the default for pkg / bin).
+#   source      one of: brew_formula, brew_cask, npm_global, go_install,
+#               mas, manual.
+#   pkg         canonical install id for the source when it differs from
+#               name: npm scoped name, go package path, mas numeric app id.
+#               Required for go_install and mas (unless track_only).
+#   bin         command used to check presence when it differs from name.
+#   track_only  inventory only; never installed by tooling (also implied
+#               by source: manual).
+#
+# Drift matching uses the canonical id (pkg, defaulting to name) per
+# source. Language runtimes (node, go, uv) are mise's domain
+# (see docs/runtime.md) and are intentionally absent here.
+packages:
+  - { name: chezmoi, source: brew_formula }
+  - { name: gh, source: brew_formula }
+  - { name: mise, source: brew_formula }
+  - { name: tmux, source: brew_formula }
+  - { name: yq, source: brew_formula }
+  - { name: copilot-cli, source: brew_cask }
+  - { name: iterm2, source: brew_cask }
+  - { name: swiftbar, source: brew_cask }
+  - { name: claude-code, source: npm_global, pkg: "@anthropic-ai/claude-code", bin: claude }
+  - { name: codex, source: npm_global, pkg: "@openai/codex" }
+  - { name: goreleaser, source: go_install, pkg: "github.com/goreleaser/goreleaser/v2" }
+  - { name: tacho, source: go_install, pkg: "github.com/kosako/tachograph/cmd/tacho" }
