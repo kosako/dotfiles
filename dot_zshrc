@@ -12,5 +12,9 @@ plugins=(git)
 # iTerm2 shell integration (no-op when the integration file is absent).
 [ -e "$HOME/.iterm2_shell_integration.zsh" ] && source "$HOME/.iterm2_shell_integration.zsh"
 
+# mise runtime activation (no-op when mise is not installed). Provides the
+# baseline runtimes from ~/.config/mise/config.toml. See docs/runtime.md.
+command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
+
 # Local overrides win: machine-specific PATH, tool env, secrets.
 [ -r "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"
