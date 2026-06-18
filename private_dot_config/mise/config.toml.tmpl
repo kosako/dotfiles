@@ -1,7 +1,14 @@
 # Managed by chezmoi from kosako/dotfiles.
-# Global mise config stays minimal: no global tool versions.
-# Pin runtimes per project in .mise.toml with exact versions.
-# See docs/runtime.md.
+# Global mise config: baseline runtimes for global tooling only.
+#
+# Scope split (see docs/runtime.md):
+#   - global (this file): the minimal baseline runtimes that global CLIs
+#     (npm-global / go-installed tools) need to run outside any project.
+#     Declared as lts / major lines, NOT reproducibility pins.
+#   - project (.mise.toml): pins exact versions and overrides the baseline.
+#
+# uv is a Python tool manager (a tool), not Python runtime management;
+# Python runtime pinning is a separate scope and is not declared here.
 
 [settings]
 # Do not auto-install missing runtimes when a shim is invoked.
@@ -9,4 +16,9 @@
 not_found_auto_install = false
 
 [tools]
-# Intentionally empty. Global tool versions are not managed here.
+# Baseline runtimes for global tooling. Projects override with exact
+# versions in their own .mise.toml.
+node = "lts"
+go = "1.26"
+# uv: Python tool manager (tool), provided so global `uv` works.
+uv = "latest"
