@@ -213,6 +213,34 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# Software catalog (packages.yaml) validation.
+make_fixture
+replace_once "$fixture/.chezmoidata/packages.yaml" \
+  "  - { name: chezmoi, source: brew_formula }" \
+  "  - { name: chezmoi, source: bogus_source }"
+run_fail_contains \
+  "rejects unknown package source" \
+  "unknown package source: chezmoi: bogus_source" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/packages.yaml" \
+  '  - { name: tacho, source: go_install, pkg: "github.com/kosako/tachograph/cmd/tacho" }' \
+  "  - { name: tacho, source: go_install }"
+run_fail_contains \
+  "rejects go_install package without a canonical pkg" \
+  "go_install package needs an explicit pkg (canonical id): tacho" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/packages.yaml" \
+  "  - { name: chezmoi, source: brew_formula }" \
+  "  - { name: chezmoi, source: brew_cask }"
+run_fail_contains \
+  "rejects duplicate package name" \
+  "duplicate package name: chezmoi" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 # environmentKind cross-check. Every deny entry for work/client/agent
 # must actually fire: retag personal (already elevated) to work and force
 # the two caps it leaves false to true, then assert all six are flagged.

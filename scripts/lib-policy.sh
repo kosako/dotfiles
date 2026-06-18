@@ -5,6 +5,7 @@ DOTFILES_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROFILES_FILE="$DOTFILES_ROOT/.chezmoidata/profiles.yaml"
 MODULES_FILE="$DOTFILES_ROOT/.chezmoidata/modules.yaml"
 CAPABILITIES_FILE="$DOTFILES_ROOT/.chezmoidata/capabilities.schema.yaml"
+PACKAGES_FILE="$DOTFILES_ROOT/.chezmoidata/packages.yaml"
 
 ok() {
   printf '[ok] %s\n' "$*"
@@ -56,7 +57,7 @@ require_yq() {
 
 require_data_files() {
   local missing=0
-  for file in "$PROFILES_FILE" "$MODULES_FILE" "$CAPABILITIES_FILE"; do
+  for file in "$PROFILES_FILE" "$MODULES_FILE" "$CAPABILITIES_FILE" "$PACKAGES_FILE"; do
     if [[ ! -f "$file" ]]; then
       fail "missing data file: $file"
       missing=1
@@ -200,6 +201,38 @@ environment_kind_forbidden_capabilities() {
       printf '%s\n' allowSecretsAccess
       ;;
   esac
+}
+
+# Valid sources for the software catalog (packages.yaml). Validation and
+# drift detection check against this set; an unknown source is a
+# fail-closed error. See docs/policy-model.md.
+known_package_sources() {
+  printf '%s\n' \
+    brew_formula \
+    brew_cask \
+    npm_global \
+    go_install \
+    mas \
+    manual
+}
+
+# Emit one row per catalog package as pipe-joined fields:
+#   name|source|pkg|bin|track_only
+# pkg and bin are raw (empty when unset) so validation can detect a missing
+# canonical id; consumers default pkg and bin to name. A non-whitespace
+# delimiter is used on purpose: `read` collapses consecutive IFS-whitespace
+# (tab/space), which would drop empty fields, while "|" never appears in a
+# package identifier. Read it back with IFS='|'. Drift matching uses the
+# canonical id (pkg, defaulting to name) per source. This reads the data
+# file, not user input, so values are not passed through strenv.
+catalog_packages() {
+  yq '.packages[]? | [(.name // ""), (.source // ""), (.pkg // ""), (.bin // ""), ((.track_only // false) | tostring)] | join("|")' "$PACKAGES_FILE"
+}
+
+# Emit the advisory source-preference order for a category (cli / gui).
+catalog_source_preference() {
+  local category="$1"
+  c="$category" yq '.source_preference[strenv(c)][]?' "$PACKAGES_FILE"
 }
 
 # Print names of remotes whose URL embeds password-like userinfo
