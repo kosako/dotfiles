@@ -1,0 +1,12 @@
+# Managed by chezmoi from kosako/dotfiles.
+# Read by every zsh (interactive and non-interactive, login and non-login),
+# so keep this minimal: PATH only, no heavy work or side effects. Machine
+# -specific PATH, tool env, and secrets belong in ~/.zshrc.local. See
+# docs/shell.md and docs/runtime.md.
+
+# Put the mise shims on PATH so mise-managed runtimes (node, etc.) resolve
+# in non-interactive shells too. `mise activate` lives in ~/.zshrc and only
+# runs in interactive shells; the shims cover the rest (child processes,
+# CI, tool subshells). No-op when mise is absent (the dir just won't exist).
+# Default data dir; adjust if MISE_DATA_DIR is set. See docs/runtime.md.
+export PATH="$HOME/.local/share/mise/shims:$PATH"

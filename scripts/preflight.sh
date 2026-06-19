@@ -36,15 +36,15 @@ for file in "$HOME/.gitconfig" "$HOME/.ssh/config" "$HOME/.npmrc"; do
 done
 
 section "shell config (apply impact)"
-# When shell-extra is active for this profile, apply replaces ~/.zshrc
-# and ~/.zprofile with managed versions. Surface that, and point to the
-# local-override files so machine-specific lines are not lost.
+# When shell-extra is active for this profile, apply replaces ~/.zshenv,
+# ~/.zshrc and ~/.zprofile with managed versions. Surface that, and point
+# to the local-override files so machine-specific lines are not lost.
 if module_active_for_profile "$profile" "shell-extra"; then
   shell_managed=1
 else
   shell_managed=0
 fi
-for file in "$HOME/.zshrc" "$HOME/.zprofile"; do
+for file in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.zprofile"; do
   base="$(basename "$file")"
   if [[ ! -e "$file" ]]; then
     ok "absent: $file"
