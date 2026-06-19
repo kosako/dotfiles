@@ -257,6 +257,68 @@ run_fail_contains \
   "no packages parsed" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# Private-backup catalog (backup-paths.yaml) validation.
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - { path: /etc/passwd, type: file }"
+run_fail_contains \
+  "rejects an absolute backup path" \
+  "backup path must be home-relative (no leading /): /etc/passwd" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - { path: ../evil, type: file }"
+run_fail_contains \
+  "rejects a backup path with .." \
+  "backup path must not contain ..: ../evil" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  '  - { path: ".config/x*", type: file }'
+run_fail_contains \
+  "rejects a backup path with glob metacharacters" \
+  "backup path must not contain glob metacharacters: .config/x*" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - { path: somefile, type: socket }"
+run_fail_contains \
+  "rejects an unknown backup path type" \
+  "unknown backup path type: somefile: socket" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - { path: .zshrc.local, type: file }"
+run_fail_contains \
+  "rejects a duplicate backup path" \
+  "duplicate backup path: .zshrc.local" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - {}"
+run_fail_contains \
+  "rejects an empty backup path entry (no vacuous pass)" \
+  "backup path entry missing path" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+: > "$fixture/.chezmoidata/backup-paths.yaml"
+run_fail_contains \
+  "fails closed on empty backup-paths catalog" \
+  "no backup paths parsed" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 # environmentKind cross-check. Every deny entry for work/client/agent
 # must actually fire: retag personal (already elevated) to work and force
 # the two caps it leaves false to true, then assert all six are flagged.
@@ -402,8 +464,8 @@ EOF
   done
 
   # Default inventory == the reality-seed catalog (drift-free baseline).
-  printf '%s\n' chezmoi gh mise tmux yq > "$drift_dir/brew_formulae"
-  printf '%s\n' chezmoi gh mise tmux yq > "$drift_dir/brew_leaves"
+  printf '%s\n' age chezmoi gh mise tmux yq > "$drift_dir/brew_formulae"
+  printf '%s\n' age chezmoi gh mise tmux yq > "$drift_dir/brew_leaves"
   printf '%s\n' copilot-cli iterm2 swiftbar > "$drift_dir/brew_casks"
   # npm and corepack are node-bundled; including them proves they are
   # filtered out and never reported as undeclared.

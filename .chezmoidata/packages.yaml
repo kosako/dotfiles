@@ -33,6 +33,7 @@ source_preference:
 # source. Language runtimes (node, go, uv) are mise's domain
 # (see docs/runtime.md) and are intentionally absent here.
 packages:
+  - { name: age, source: brew_formula }
   - { name: chezmoi, source: brew_formula }
   - { name: gh, source: brew_formula }
   - { name: mise, source: brew_formula }

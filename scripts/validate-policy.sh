@@ -185,6 +185,85 @@ validate_packages() {
   return "$status"
 }
 
+# The private-backup catalog (backup-paths.yaml) is profile-independent
+# data. Every entry needs a home-relative path (no leading "/", no "..",
+# no glob metacharacters), an optional type from a known set, and paths
+# must be unique. Public-safety of the listed paths is a human review
+# concern (this file is committed to a public repo); validation enforces
+# the mechanical safety rules only.
+validate_backup_paths() {
+  local status=0
+  local path type category duplicate entry_ok rows
+  local types_file paths_file
+  types_file="$(mktemp)"
+  paths_file="$(mktemp)"
+  known_backup_path_types | sort > "$types_file"
+
+  # Fail closed: a yq error or a missing/empty list must not pass vacuously.
+  if ! rows="$(backup_paths)"; then
+    fail "could not parse backup paths from $BACKUP_PATHS_FILE"
+    rm -f "$types_file" "$paths_file"
+    return 1
+  fi
+  if [[ -z "$rows" ]]; then
+    fail "no backup paths parsed from $BACKUP_PATHS_FILE"
+    rm -f "$types_file" "$paths_file"
+    return 1
+  fi
+
+  # path is the last field, so a "|" in the path is preserved by read. An
+  # entry that resolves to an empty path (a null/empty list item, or a
+  # missing path: key) must fail closed, not be silently skipped: backup_paths
+  # always emits at least two "|" per entry, so there are no blank rows to skip.
+  while IFS='|' read -r type category path; do
+    entry_ok=1
+    if [[ -z "$path" ]]; then
+      fail "backup path entry missing path"
+      status=1
+      continue
+    fi
+    case "$path" in
+      /*)
+        fail "backup path must be home-relative (no leading /): $path"
+        status=1
+        entry_ok=0
+        ;;
+      *..*)
+        fail "backup path must not contain ..: $path"
+        status=1
+        entry_ok=0
+        ;;
+      *[*?[]*)
+        fail "backup path must not contain glob metacharacters: $path"
+        status=1
+        entry_ok=0
+        ;;
+    esac
+    if [[ -n "$type" ]] && ! grep -Fxq -- "$type" "$types_file"; then
+      fail "unknown backup path type: $path: $type"
+      status=1
+      entry_ok=0
+    fi
+    printf '%s\n' "$path" >> "$paths_file"
+    [[ "$entry_ok" -eq 1 ]] && ok "backup path: $path"
+  done <<< "$rows"
+
+  while IFS= read -r duplicate; do
+    [[ -z "$duplicate" ]] && continue
+    fail "duplicate backup path: $duplicate"
+    status=1
+  done < <(sort "$paths_file" | uniq -d)
+  rm -f "$types_file" "$paths_file"
+
+  if [[ "$status" -eq 0 ]]; then
+    ok "backup path validation passed"
+  else
+    fail "backup path validation failed"
+  fi
+
+  return "$status"
+}
+
 validate_profile() {
   local profile="$1"
   local status=0
@@ -359,6 +438,8 @@ case "$command" in
     validate_modules || status=1
     section "validating packages"
     validate_packages || status=1
+    section "validating backup paths"
+    validate_backup_paths || status=1
     profiles_found=0
     while IFS= read -r profile; do
       [[ -z "$profile" ]] && continue
@@ -381,6 +462,7 @@ case "$command" in
     status=0
     validate_modules || status=1
     validate_packages || status=1
+    validate_backup_paths || status=1
     validate_profile "$command" || status=1
     exit "$status"
     ;;

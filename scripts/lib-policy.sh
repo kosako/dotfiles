@@ -6,6 +6,7 @@ PROFILES_FILE="$DOTFILES_ROOT/.chezmoidata/profiles.yaml"
 MODULES_FILE="$DOTFILES_ROOT/.chezmoidata/modules.yaml"
 CAPABILITIES_FILE="$DOTFILES_ROOT/.chezmoidata/capabilities.schema.yaml"
 PACKAGES_FILE="$DOTFILES_ROOT/.chezmoidata/packages.yaml"
+BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 
 ok() {
   printf '[ok] %s\n' "$*"
@@ -57,7 +58,7 @@ require_yq() {
 
 require_data_files() {
   local missing=0
-  for file in "$PROFILES_FILE" "$MODULES_FILE" "$CAPABILITIES_FILE" "$PACKAGES_FILE"; do
+  for file in "$PROFILES_FILE" "$MODULES_FILE" "$CAPABILITIES_FILE" "$PACKAGES_FILE" "$BACKUP_PATHS_FILE"; do
     if [[ ! -f "$file" ]]; then
       fail "missing data file: $file"
       missing=1
@@ -478,6 +479,27 @@ report_catalog_drift() {
 
   rm -f "${drift_tmp[@]}"
   return 0
+}
+
+# Valid `type` values for a backup-paths entry. An unknown type is a
+# fail-closed validation error. See docs/private-backup.md.
+known_backup_path_types() {
+  printf '%s\n' \
+    file \
+    dir
+}
+
+# Emit one row per backup-paths entry as pipe-joined fields:
+#   type|category|path
+# type and category are raw (empty when unset). path is emitted LAST so a
+# reader using `IFS='|' read -r type category path` captures the whole path
+# even if it contains a "|" (read assigns the remainder to the last field),
+# making the row unambiguous regardless of the path's contents. A "|" is a
+# non-whitespace delimiter so empty leading fields are not collapsed. This
+# reads the data file, not user input, so values are not passed through
+# strenv.
+backup_paths() {
+  yq '.backup_paths[]? | [(.type // ""), (.category // ""), (.path // "")] | join("|")' "$BACKUP_PATHS_FILE"
 }
 
 # Print names of remotes whose URL embeds password-like userinfo
