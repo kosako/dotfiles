@@ -514,9 +514,14 @@ resolve_runtime_profile() {
   if ! command -v chezmoi >/dev/null 2>&1; then
     return 1
   fi
-  local profile
-  profile="$(chezmoi data --format=json 2>/dev/null \
-    | yq -p json '.profile // ""' 2>/dev/null)" || return 1
+  # Capture `chezmoi data` separately rather than piping it straight into
+  # yq: a `chezmoi data | yq` pipeline reports only yq's exit status, so a
+  # `chezmoi data` that fails yet still prints parseable JSON would be
+  # masked by a successful yq and slip through. The gate must not depend
+  # on the caller having `set -o pipefail`, so check chezmoi's status first.
+  local data profile
+  data="$(chezmoi data --format=json 2>/dev/null)" || return 1
+  profile="$(printf '%s\n' "$data" | yq -p json '.profile // ""' 2>/dev/null)" || return 1
   [[ -n "$profile" && "$profile" != "null" ]] || return 1
   printf '%s\n' "$profile"
 }

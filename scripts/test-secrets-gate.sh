@@ -59,7 +59,63 @@ else
   pass "require_secrets_access refuses without chezmoi"
 fi
 
-# 4. Consistency with the live host, only when chezmoi can resolve a
+# 4. Fixture chezmoi on PATH: drive resolve_runtime_profile / the gate
+#    deterministically (no real chezmoi needed, so this is stable in CI).
+#    A fake `chezmoi` echoes a chosen `chezmoi data` payload and exit code;
+#    real yq stays resolvable because the fixture dir is only prepended.
+fixture_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gate-test.XXXXXX")"
+trap 'rm -rf "$fixture_bin"' EXIT
+fake_chezmoi() {
+  # $1 = stdout payload, $2 = exit code
+  cat > "$fixture_bin/chezmoi" <<SH
+#!/bin/sh
+printf '%s\n' '$1'
+exit $2
+SH
+  chmod +x "$fixture_bin/chezmoi"
+}
+with_fixture() { ( PATH="$fixture_bin:$PATH"; "$@" >/dev/null 2>&1 ); }
+
+# 4a. The must case: chezmoi prints a valid profile but exits non-zero.
+#     The gate must fail closed, not trust the masked payload.
+fake_chezmoi '{"profile":"personal"}' 3
+if with_fixture resolve_runtime_profile; then
+  miss "resolve must fail closed when chezmoi exits non-zero (even with valid JSON)"
+else
+  pass "resolve fails closed on chezmoi non-zero exit despite valid JSON"
+fi
+if with_fixture require_secrets_access; then
+  miss "gate must refuse when chezmoi exits non-zero"
+else
+  pass "gate refuses on chezmoi non-zero exit"
+fi
+
+# 4b. Healthy chezmoi resolving an allowed profile -> granted.
+fake_chezmoi '{"profile":"personal"}' 0
+if with_fixture require_secrets_access; then
+  pass "gate grants for resolved personal profile"
+else
+  miss "gate should grant for resolved personal profile"
+fi
+
+# 4c. Healthy chezmoi resolving a denied profile -> refused.
+fake_chezmoi '{"profile":"work-minimal"}' 0
+if with_fixture require_secrets_access; then
+  miss "gate must refuse for resolved work-minimal profile"
+else
+  pass "gate refuses for resolved work-minimal profile"
+fi
+
+# 4d. Healthy chezmoi but no profile key -> fail closed (empty profile).
+fake_chezmoi '{}' 0
+if with_fixture resolve_runtime_profile; then
+  miss "resolve must fail closed on empty profile"
+else
+  pass "resolve fails closed on empty profile"
+fi
+rm -f "$fixture_bin/chezmoi"
+
+# 5. Consistency with the live host, only when chezmoi can resolve a
 #    profile (skipped in CI). The gate's verdict must match the pure check
 #    for whatever profile the machine actually runs — never more permissive.
 if resolved="$(resolve_runtime_profile 2>/dev/null)"; then
