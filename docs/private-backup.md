@@ -97,7 +97,8 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
    手動起動なので、ここでは手で入れる。verify / restore が age に依存する。
 3. **1Password を用意する(信頼の起点・手動)**: 1Password app と `op` CLI を入れ、sign-in する。
    **backup から復元しない** —— backup を復号する identity がまだ無いため。op の設定 / sign-in
-   材料を「backup にだけ置く」ことは禁止([docs/secrets.md](secrets.md):復元チェーンの循環回避)。
+   材料を「backup にだけ置く」ことは禁止([docs/secrets.md](secrets.md) の責務範囲・対象外:
+   実 fetch は利用者側で、dotfiles は secret 素材を保持しない)。
 4. **age identity を 1Password から取り出す**: identity は `op read` で**参照**する(値を
    ディスクに落とさない)。dotfiles はこの fetch を実行せず、利用者の手元操作に閉じる(secrets.md)。
 5. **restore する**: まず dry-run で差分を確認し、問題なければ `--apply`。
