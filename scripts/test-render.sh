@@ -53,13 +53,13 @@ expected_managed() {
   local profile="$1"
   case "$profile" in
     personal)
-      printf '%s\n' .config .config/mise .config/mise/config.toml .gitconfig .npmrc .zprofile .zshrc
+      printf '%s\n' .config .config/mise .config/mise/config.toml .gitconfig .npmrc .zprofile .zshenv .zshrc
       ;;
     work-minimal)
       printf '%s\n' .config .gitconfig
       ;;
     work-dev)
-      printf '%s\n' .config .config/mise .config/mise/config.toml .gitconfig .zprofile .zshrc
+      printf '%s\n' .config .config/mise .config/mise/config.toml .gitconfig .zprofile .zshenv .zshrc
       ;;
     *)
       return 1

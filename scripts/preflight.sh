@@ -36,20 +36,26 @@ for file in "$HOME/.gitconfig" "$HOME/.ssh/config" "$HOME/.npmrc"; do
 done
 
 section "shell config (apply impact)"
-# When shell-extra is active for this profile, apply replaces ~/.zshrc
-# and ~/.zprofile with managed versions. Surface that, and point to the
-# local-override files so machine-specific lines are not lost.
+# When shell-extra is active for this profile, apply replaces ~/.zshenv,
+# ~/.zshrc and ~/.zprofile with managed versions. Surface that, and point
+# to the local-override files so machine-specific lines are not lost.
 if module_active_for_profile "$profile" "shell-extra"; then
   shell_managed=1
 else
   shell_managed=0
 fi
-for file in "$HOME/.zshrc" "$HOME/.zprofile"; do
+for file in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.zprofile"; do
   base="$(basename "$file")"
   if [[ ! -e "$file" ]]; then
     ok "absent: $file"
   elif [[ "$shell_managed" -eq 1 ]]; then
-    warn "exists: $file — apply (shell-extra) replaces it; move machine-specific lines to ~/$base.local first (see docs/shell.md)"
+    if [[ "$base" == ".zshenv" ]]; then
+      # .zshenv has no ~/.zshenv.local override (it must stay minimal), so do
+      # not tell users to move lines there — they would be lost. See docs/shell.md.
+      warn "exists: $file — apply (shell-extra) replaces it; back up and diff first. .zshenv has no ~/.zshenv.local: move interactive lines to ~/.zshrc.local; non-interactive needs must go into managed .zshenv (see docs/shell.md)"
+    else
+      warn "exists: $file — apply (shell-extra) replaces it; move machine-specific lines to ~/$base.local first (see docs/shell.md)"
+    fi
   else
     item "exists: $file — not managed for profile $profile (left as-is)"
   fi

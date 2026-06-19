@@ -30,6 +30,7 @@ modules:
   shell-extra:
     description: zsh shell 設定(oh-my-zsh ベース、local override 対応)。
     paths:
+      - .zshenv
       - .zshrc
       - .zprofile
   vscode:
