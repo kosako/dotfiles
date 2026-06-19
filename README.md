@@ -126,7 +126,7 @@ EOF
 
 ## 安全モデル
 
-- secret・SSH 秘密鍵・実 credential は repository に含めない。
+- secret・SSH 秘密鍵・実 credential は repository に含めない。正しい供給方式(op + direnv の実行時注入、平文を置かない)は規約として定義し、dotfiles 自体は fetch しない([docs/secrets.md](docs/secrets.md))。
 - 会社名・クライアント名・社内 URL・private registry URL は core に入れない(public repository 前提)。
 - unknown profile / module / capability は fail closed にする。
 - `doctor` は副作用を持たない。`preflight` は導入前の危険検知に限定する。

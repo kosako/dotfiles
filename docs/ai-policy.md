@@ -9,7 +9,7 @@ AI tools は後続 module とする。ただし、AI agent の権限ポリシー
 AI agent は default deny。
 
 - 許可された project directory のみ読む。
-- secret store は直接読ませない。
+- secret store は直接読ませない。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
 - token は短命・scope限定にする。
 - work / client では会社・クライアントポリシーを優先する。
 - install / network tunnel / production access は明示承認が必要。
