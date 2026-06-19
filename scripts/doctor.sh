@@ -202,6 +202,56 @@ else
   ok "secret access disabled for profile"
 fi
 
+section "private-backup (report-only)"
+# Report-only and contents-blind (issue #60). Resolve the PUBLIC baseline
+# (backup-paths.yaml) and show whether each target exists; the local
+# supplement is reported by EXISTENCE ONLY — never parsed, counted, or
+# read, per docs/local-overrides.md. The state marker (repo-external)
+# gives backup presence and last-success time. doctor never reads any
+# captured file, the archive, or the supplement's contents.
+if [[ -f "$BACKUP_PATHS_FILE" ]]; then
+  baseline_present=0
+  baseline_total=0
+  while IFS='|' read -r _bp_type _bp_category bp_path; do
+    [[ -z "$bp_path" ]] && continue
+    baseline_total=$((baseline_total + 1))
+    if [[ -e "$HOME/$bp_path" ]]; then
+      item "baseline present: $bp_path"
+      baseline_present=$((baseline_present + 1))
+    else
+      item "baseline absent: $bp_path"
+    fi
+  done < <(backup_paths 2>/dev/null)
+  ok "baseline targets: $baseline_present/$baseline_total present"
+else
+  warn "backup catalog missing: $BACKUP_PATHS_FILE"
+fi
+
+# Local supplement: existence only. Do not parse, count, or read it.
+backup_supplement="$HOME/.config/dotfiles/backup-paths.local"
+if [[ -f "$backup_supplement" ]]; then
+  item "local supplement present (contents not inspected)"
+else
+  item "local supplement absent"
+fi
+
+# State marker: presence + last success + basename + count, nothing else.
+backup_marker="$HOME/.local/state/dotfiles/private-backup.json"
+if [[ -f "$backup_marker" ]]; then
+  bm() { yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null || true; }
+  marker_last="$(bm '.last_success // ""')"
+  marker_archive="$(bm '.archive // ""')"
+  marker_count="$(bm '.file_count // ""')"
+  if [[ -n "$marker_last" ]]; then
+    ok "last backup: $marker_last (archive: ${marker_archive:-unknown}, files: ${marker_count:-unknown})"
+  else
+    warn "backup marker present but unreadable"
+  fi
+  unset -f bm
+else
+  warn "no backup recorded yet (run private-backup.sh backup)"
+fi
+
 section "managed-path orphans"
 # A file that carries the managed-by header but whose path is not
 # managed for this profile is likely left over from another profile

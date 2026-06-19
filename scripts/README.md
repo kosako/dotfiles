@@ -52,7 +52,7 @@ policy validation が失敗した場合は exit 1。
 
 ## doctor.sh
 
-導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、Git remote URL(credential らしき userinfo の有無。URL の値は表示しない)、npm、Corepack、runtime、VS Code、1Password、managed-path orphan(managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出)、AI policy(`enableAiPolicy` / `enableAiTools` の現状)、network tunnels(`allowNetworkTunnels` と tunnel tool の存在)、agent-tools(report-only。`~/src/agent/agent-tools` の presence を表示し、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --json`)を実行して安全な summary を出す。clone / pull / sync はしない)、project root の状態を表示する。
+導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、Git remote URL(credential らしき userinfo の有無。URL の値は表示しない)、npm、Corepack、runtime、VS Code、1Password、managed-path orphan(managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出)、AI policy(`enableAiPolicy` / `enableAiTools` の現状)、network tunnels(`allowNetworkTunnels` と tunnel tool の存在)、agent-tools(report-only。`~/src/agent/agent-tools` の presence を表示し、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --json`)を実行して安全な summary を出す。clone / pull / sync はしない)、private-backup(report-only。public baseline の各 target の存在と marker からのバックアップ有無/最終日時を表示。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない)、project root の状態を表示する。
 副作用は持たない。設定不足や未導入 command の warning は report-only として exit 0 のままにする。
 remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検査は `docs/supply-chain-npm.md`、Corepack の検査は `docs/supply-chain-corepack.md` に従う。
 `npmHardeningMode=enforce` の profile では、期待する npm config 値と現在値の不一致を `[warn]` で報告する(apply 前は不一致が正常)。
@@ -139,6 +139,8 @@ fixture HOME で doctor の managed-path orphan 検出を検証する。実 home
 - agent-tools の status.sh 実行が opt-in であること(`enableAgentToolsStatus=false` では実行マーカーが作られない)。
 - opt-in 時は status を summary し `conflict` を warning にすること。
 - contract version 不一致 / status.sh 欠如 / agent-tools 不在でも warning のみで exit 0 になること。
+- private-backup section: marker 不在で「no backup recorded」、marker ありで最終成功時刻 /
+  archive / 件数を表示すること。local 補足は **存在のみ**で中身(secret らしき行)を漏らさないこと。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
 ## private-backup.sh

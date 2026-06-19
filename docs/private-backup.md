@@ -68,12 +68,13 @@ private-backup.sh verify --in PATH (--identity PATH | --identity-command CMD)
 
 ## 段階
 
-- **第1段**: リスト schema + parser + validate + `age` を catalog に追加(宣言レイヤ)。
+- **第1段(完了)**: リスト schema + parser + validate + `age` を catalog に追加(宣言レイヤ)。
   runtime secrets gate。backup(machine-neutral manifest + age identity 暗号化 +
-  指定先書き出し + local 補足同梱)+ verify。← ここまで実装済み。残り = doctor の
-  report-only section。
-- **後続**: restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 / 0700 temp /
-  symlink・path traversal 防御)。
+  指定先書き出し + local 補足同梱)+ verify。doctor の report-only section
+  (public baseline の解決 + marker からバックアップ有無/最終日時。local 補足は存在のみ・
+  中身は読まない)。
+- **第2段(後続)**: restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 / 0700 temp /
+  symlink・path traversal 防御)。冒頭で `require_secrets_access` を通す。
 
 ## 安全境界(後続スクリプトが守る規約)
 
