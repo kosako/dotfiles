@@ -1,0 +1,22 @@
+# Private-config backup catalog: the public-safe baseline of home-relative
+# paths that the private-backup tooling captures into an age-encrypted
+# archive (see docs/private-backup.md, issue #60). This is the declarative
+# layer only; the backup / restore scripts come in later stages.
+#
+# Public-safety: this file is committed to a public repo, so it may list
+# only paths that are safe to disclose. Client- or host-specific paths go
+# in the non-committed local supplement (~/.config/dotfiles/backup-paths.local),
+# which travels inside the encrypted archive instead.
+#
+# Each entry:
+#   path      home-relative path (required). A leading "/" or any ".." is
+#             rejected, as are glob metacharacters (* ? [ ]); the backup
+#             captures exactly these paths, never a pattern.
+#   type      file | dir (optional). Declares what the path is expected to
+#             be so the tooling can validate and restore it correctly.
+#   category  free-form public-safe label (optional), e.g. shell / ssh.
+#
+# Read by scripts via mikefarah/yq v4; validated by validate-policy.sh.
+backup_paths:
+  - { path: .zshrc.local, type: file, category: shell }
+  - { path: .ssh/config.local, type: file, category: ssh }
