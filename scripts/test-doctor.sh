@@ -263,6 +263,24 @@ else
   status=1
 fi
 
+# K) A malformed/null marker must not break doctor: report "unreadable"
+#    and stay exit 0 (guards the set -euo pipefail paths in the section).
+printf 'this is not valid json {{{\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "backup marker present but unreadable" <<< "$pb_out"; then
+    ok "test passed: malformed backup marker reported unreadable (exit 0)"
+  else
+    printf '%s\n' "$pb_out" >&2
+    fail "test failed: malformed backup marker not handled"
+    status=1
+  fi
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: doctor must stay exit 0 on a malformed backup marker"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi
