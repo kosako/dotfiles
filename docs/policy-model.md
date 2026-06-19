@@ -26,7 +26,15 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 
 `.chezmoidata/*.yaml`(profiles / modules / capabilities.schema / packages)の読み取りは shell script 側では mikefarah/yq v4 で行う(chezmoi template 側は Go template が読む)。yq が無い・別 variant の場合は `require_yq` が fail closed する。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない(injection 防止)。
 
-`packages`(`.chezmoidata/packages.yaml`)は software catalog。各 entry の `source`(brew_formula / brew_cask / npm_global / go_install / mas / manual)と canonical id を宣言する。`validate-policy.sh` が source の妥当性・go_install/mas の pkg 必須・name 重複を fail closed で検査する。実機との drift(未 install / 台帳外 / source ズレ)は `doctor.sh` が report-only で報告する(install action は後続 phase)。
+`packages`(`.chezmoidata/packages.yaml`)は software catalog。各 entry の `source`(brew_formula / brew_cask / npm_global / go_install / mas / manual)と canonical id を宣言する。`validate-policy.sh` が source の妥当性・go_install/mas の pkg 必須・name 重複を fail closed で検査する。
+
+実機との drift は `doctor.sh` の `software catalog` section(`report_catalog_drift`)が **report-only**(常に exit 0、欠けている package manager は skip)で報告する。検出は 3 種:
+
+- **未 install**(宣言済みだが入っていない)→ `warn`。
+- **台帳外**(undeclared / sprawl: 入っているが catalog に無い)→ `warn`。brew は `brew leaves`(top-level のみ。依存は拾わない)、npm は node 同梱の `npm` / `corepack` を除外(runtime の領分、node/go/uv と同じ扱い)、mas は App Store の無関係アプリが大量に誤検知されるため undeclared は出さない(宣言済み mas entry の presence のみ確認)。
+- **source ズレ**(宣言 source の inventory には無いが `command` が PATH 上に在る = 別 source で入っている疑い)→ `info`。manager 横断の名前照合(脆い)はやらず、PATH 上の存在という堅い信号だけを使う。
+
+照合は source ごとの canonical id(`pkg`、無ければ `name`)で行う。install action は後続 phase。
 
 ## Rules
 

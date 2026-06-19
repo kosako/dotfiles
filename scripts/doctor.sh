@@ -154,6 +154,12 @@ else
   fi
 fi
 
+section "software catalog (report-only)"
+# Drift between packages.yaml and what is actually installed. report_catalog_drift
+# is report-only (always returns 0) and skips any missing package manager;
+# the only fail path in doctor stays the policy validation at the top.
+report_catalog_drift || true
+
 section "runtime and shell"
 if [[ "$(capability_value "$profile" enableRuntimeManagement)" == "true" ]]; then
   command_status mise || true
