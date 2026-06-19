@@ -141,6 +141,56 @@ fixture HOME で doctor の managed-path orphan 検出を検証する。実 home
 - contract version 不一致 / status.sh 欠如 / agent-tools 不在でも warning のみで exit 0 になること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
+## private-backup.sh
+
+private な設定(`.local` 上書き + curated アプリ設定)を **age identity 鍵**で単一アーカイブに
+退避し(`backup`)、そのアーカイブを検証する(`verify`)。災害復旧用の単方向 backup→restore で、
+restore は後続段。手動起動のみ・`chezmoi apply` 非結合。冒頭で runtime secrets gate
+(`require_secrets_access`)を通り、`allowSecretsAccess != true` の profile では実行拒否。
+
+```sh
+./scripts/private-backup.sh backup --out PATH [--recipient AGE1... | --recipients-file PATH] \
+                            [--local-supplement PATH] [--yes]
+./scripts/private-backup.sh verify --in PATH (--identity PATH | --identity-command CMD)
+```
+
+- **backup**: baseline(`.chezmoidata/backup-paths.yaml`)+ local 補足を解決 → 0700 temp に
+  staging → machine-neutral manifest(時刻 / tool version / 各 file の type・mode・sha256。
+  絶対 home path・host 名は入れない)生成 → `tar | age -r recipient` を pipe(平文 tar を
+  ディスクに残さない)→ `--out` へ書き出し → marker(`~/.local/state/dotfiles/private-backup.json`、
+  最終成功時刻 / archive basename / 件数のみ)更新。捕捉 0 件は空アーカイブを書かず fail。
+- **verify**: `--identity` / `--identity-command`(op seam)で 0700 temp に**復号**し、
+  **展開前に全 tar member を検査**(非正規 member = symlink/hardlink/special を拒否、
+  絶対パス・`..`・制御文字・台帳外 member 名を拒否)してから展開。recipient は公開鍵なので
+  悪性アーカイブも復号可能 → 展開で HOME 外へ逃げないよう member 検査を前段に置く。展開後は
+  manifest と突き合わせ(checksum・mode・余剰ファイル・home-relative・symlink 拒否)。
+  HOME には一切書かない read-only。復号物・展開物は trap で確実削除。
+  `--identity-command` はユーザー指定の shell コマンド列(`op read op://...` 想定)で、
+  quoting のため shell 実行する。アーカイブ由来ではなく呼び出し側が管理するため注入面ではない。
+- recipient / identity が解決できなければ fail-closed。仕様は `docs/private-backup.md`。
+
+`age` と mikefarah/yq v4 が必要。
+
+## test-private-backup.sh
+
+`private-backup.sh` の round-trip と安全性を hermetic に検証する(fixture HOME・fake chezmoi で
+gate profile を与える・throwaway age 鍵)。実 home には触れない。`age` / `age-keygen` が無い環境
+では skip(exit 0)。
+
+```sh
+./scripts/test-private-backup.sh
+```
+
+検証内容:
+
+- backup がアーカイブと machine-neutral marker(絶対 home path を漏らさない)を書くこと。
+- verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
+- `--identity-command`(op seam)経由でも verify できること。
+- manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
+- 拒否 profile(work-minimal)では backup が実行拒否し、アーカイブを書かないこと。
+- 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
+- recipient 未指定は usage error(exit 2)になること。
+
 ## test-secrets-gate.sh
 
 private-backup の runtime gate(issue #60)を検証する。backup / restore は host の
