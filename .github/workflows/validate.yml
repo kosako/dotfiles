@@ -52,6 +52,9 @@ jobs:
       - name: doctor orphan tests
         run: ./scripts/test-doctor.sh
 
+      - name: private-backup secrets-gate tests
+        run: ./scripts/test-secrets-gate.sh
+
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 

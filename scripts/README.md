@@ -141,6 +141,28 @@ fixture HOME で doctor の managed-path orphan 検出を検証する。実 home
 - contract version 不一致 / status.sh 欠如 / agent-tools 不在でも warning のみで exit 0 になること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
+## test-secrets-gate.sh
+
+private-backup の runtime gate(issue #60)を検証する。backup / restore は host の
+**実 profile** が `allowSecretsAccess=true` のときだけ実行できる。gate は fail-closed で、
+profile を解決できない・未知の profile・`true` 以外の値はすべて拒否する。
+
+```sh
+./scripts/test-secrets-gate.sh
+```
+
+検証内容:
+
+- `profile_allows_secrets_access` が `allowSecretsAccess=true` の profile(personal)だけ許可し、
+  `false` の profile(work-minimal / work-dev)と未知 profile を拒否すること(vacuously true にしない)。
+- chezmoi が見つからないとき `resolve_runtime_profile` / `require_secrets_access` が fail-closed で
+  拒否すること(default profile に倒さない)。
+- chezmoi が profile を解決できる環境では、gate の判定が実 profile の純検査と一致すること
+  (より緩くならない。chezmoi 不在の CI では skip)。
+
+実 profile は `chezmoi data` から取得し、CLI 引数では渡さない(呼び出し側が gate を
+より緩い profile に誘導できないようにするため)。
+
 ## test-render.sh
 
 chezmoi で各 profile を throwaway destination に render(apply)し、managed target 一覧を期待値と比較する。実 home には触れない。

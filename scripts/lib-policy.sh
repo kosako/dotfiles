@@ -502,6 +502,60 @@ backup_paths() {
   yq '.backup_paths[]? | [(.type // ""), (.category // ""), (.path // "")] | join("|")' "$BACKUP_PATHS_FILE"
 }
 
+# Resolve the machine's actual profile from the live chezmoi config,
+# fail-closed. Prints the profile name on success; on any failure
+# (chezmoi absent, config unreadable, empty/null profile) prints nothing
+# and returns non-zero. The private-backup runtime gate (issue #60) must
+# never fall back to a default profile: an environment whose profile
+# cannot be proven must refuse, not silently assume personal. This reads
+# the real config (`chezmoi data`), not a CLI argument, so a caller cannot
+# talk the gate into a more permissive profile than the host actually has.
+resolve_runtime_profile() {
+  if ! command -v chezmoi >/dev/null 2>&1; then
+    return 1
+  fi
+  local profile
+  profile="$(chezmoi data --format=json 2>/dev/null \
+    | yq -p json '.profile // ""' 2>/dev/null)" || return 1
+  [[ -n "$profile" && "$profile" != "null" ]] || return 1
+  printf '%s\n' "$profile"
+}
+
+# Pure capability check for a named profile (no chezmoi dependency, so it
+# is unit-testable). Returns 0 only when the profile is defined and its
+# allowSecretsAccess capability is literally true. A missing profile, a
+# missing capability, or any non-true value (false / absent) returns 1.
+profile_allows_secrets_access() {
+  local profile="$1"
+  profile_exists "$profile" || return 1
+  [[ "$(capability_value "$profile" allowSecretsAccess)" == "true" ]]
+}
+
+# Runtime gate for the private-backup tooling (issue #60). The archive may
+# contain secrets, so backup / restore may run only where the host's real
+# profile grants allowSecretsAccess (personal today; work / client / agent
+# / sandbox are forbidden by policy). Fail-closed at every step: an
+# unresolvable profile, an unknown profile, or allowSecretsAccess != true
+# all refuse with exit-worthy non-zero. Prints a one-line reason; never
+# prints secrets or paths.
+require_secrets_access() {
+  local profile
+  if ! profile="$(resolve_runtime_profile)"; then
+    fail "cannot resolve the machine profile from chezmoi config; refusing (private-backup needs allowSecretsAccess=true). Run: chezmoi init --source ~/dotfiles"
+    return 1
+  fi
+  if ! profile_exists "$profile"; then
+    fail "machine profile '$profile' is not defined in profiles.yaml; refusing private-backup"
+    return 1
+  fi
+  if ! profile_allows_secrets_access "$profile"; then
+    fail "profile '$profile' does not grant secret access (allowSecretsAccess != true); private-backup refuses to run here"
+    return 1
+  fi
+  ok "secret access granted for profile '$profile'"
+  return 0
+}
+
 # Print names of remotes whose URL embeds password-like userinfo
 # (scheme://user:password@host). URL values are never printed.
 git_remotes_with_credentials() {
