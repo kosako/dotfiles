@@ -147,7 +147,9 @@ else
   miss "verify missed an undeclared archive file"
 fi
 
-# 8. A symlink smuggled into the archive is rejected, not followed.
+# 8. A symlink smuggled into the archive is rejected BEFORE extraction
+#    (the recipient is public, so a hostile archive can decrypt; tar must
+#    not process the symlink and let it escape the 0700 temp).
 slink="$fixture_home/stage-symlink"
 mkdir -p "$slink/files"
 ln -s /etc/passwd "$slink/files/evil"
@@ -158,10 +160,51 @@ yq -n -o=json '{
 }' > "$slink/manifest.json"
 make_archive "$slink" "$fixture_home/out/symlink.age"
 out="$(run verify --in "$fixture_home/out/symlink.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "symlink" <<< "$out"; then
-  pass "verify rejects a symlink entry"
+if grep -Fq "symlink" <<< "$out" && grep -Fq "before extraction" <<< "$out"; then
+  pass "verify rejects a symlink member before extraction"
 else
-  miss "verify did not reject a symlink entry"
+  printf '%s\n' "$out" >&2
+  miss "verify did not reject a symlink member before extraction"
+fi
+
+# 8b. A disallowed top-level member (not manifest/supplement/files) is
+#     rejected before extraction (name pass).
+ddir="$fixture_home/stage-disallowed"
+mkdir -p "$ddir/files"
+printf 'x\n' > "$ddir/files/ok"
+printf 'pwn\n' > "$ddir/evil.sh"
+yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [], "files": []
+}' > "$ddir/manifest.json"
+make_archive "$ddir" "$fixture_home/out/disallowed.age"
+out="$(run verify --in "$fixture_home/out/disallowed.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
+if grep -Fq "disallowed member name" <<< "$out"; then
+  pass "verify rejects a disallowed member name before extraction"
+else
+  printf '%s\n' "$out" >&2
+  miss "verify did not reject a disallowed member name"
+fi
+
+# 8c. A mode mismatch (manifest mode != extracted file mode) is caught.
+mdir="$fixture_home/stage-mode"
+mkdir -p "$mdir/files"
+printf 'content\n' > "$mdir/files/.zshrc.local"
+chmod 644 "$mdir/files/.zshrc.local"
+msum="$(shasum -a 256 "$mdir/files/.zshrc.local" | awk '{print $1}')"
+msize="$(wc -c < "$mdir/files/.zshrc.local" | tr -d ' ')"
+SUM="$msum" SZ="$msize" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": ".zshrc.local", "mode": "600", "size": (strenv(SZ) | tonumber), "sha256": strenv(SUM)}]
+}' > "$mdir/manifest.json"
+make_archive "$mdir" "$fixture_home/out/mode.age"
+out="$(run verify --in "$fixture_home/out/mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
+if grep -Fq "mode mismatch" <<< "$out"; then
+  pass "verify detects a mode mismatch"
+else
+  printf '%s\n' "$out" >&2
+  miss "verify missed a mode mismatch"
 fi
 
 # 9. Runtime gate: a denied profile refuses to back up.

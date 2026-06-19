@@ -58,6 +58,59 @@ sha256_of() {
   shasum -a 256 "$1" | awk '{print $1}'
 }
 
+# Whether a single tar member NAME is allowed in a private-backup archive.
+# Members carry a leading "./"; after stripping it (and any trailing "/"
+# on directory entries) only manifest.json, backup-paths.local, the files/
+# tree, and the implied directories are permitted. Rejects absolute paths,
+# "..", control characters, and anything outside that set. Returns 0/1;
+# prints nothing.
+member_name_is_allowed() {
+  local n="${1#./}"
+  n="${n%/}"
+  [[ -z "$n" || "$n" == "." ]] && return 0
+  case "$n" in
+    /* | *..* | *[[:cntrl:]]*) return 1 ;;
+  esac
+  case "$n" in
+    manifest.json | backup-paths.local | files) return 0 ;;
+    files/*) backup_path_is_safe "${n#files/}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Validate every member of a tar BEFORE extracting it. The backup
+# recipient is a public key, so anyone holding it can craft an archive
+# that decrypts cleanly; tar would otherwise process path traversal,
+# absolute paths, and symlink-write-through during extraction, before any
+# manifest check runs. Reject the whole archive on (a) any member whose
+# type is not a regular file or directory (symlink / hardlink / device /
+# fifo), or (b) any disallowed or unsafe member name. Returns 0 if every
+# member is safe to extract into an isolated temp.
+validate_tar_members() {
+  local archive="$1"
+  # Type pass: the ls-style first character of `tar -tvf` is portable
+  # across BSD (macOS) and GNU tar. Anything but "-" (regular) or "d"
+  # (directory) is rejected.
+  local tc
+  while IFS= read -r tc; do
+    [[ -z "$tc" ]] && continue
+    if [[ "$tc" != "-" && "$tc" != "d" ]]; then
+      fail "archive has a non-regular member (symlink/hardlink/special); rejected before extraction"
+      return 1
+    fi
+  done < <(tar -tvf "$archive" 2>/dev/null | awk '{print substr($1,1,1)}')
+  # Name pass: reject traversal / absolute / disallowed members.
+  local name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if ! member_name_is_allowed "$name"; then
+      fail "archive has a disallowed member name; rejected before extraction"
+      return 1
+    fi
+  done < <(tar -tf "$archive" 2>/dev/null)
+  return 0
+}
+
 # Require age and yq up front; both are fail-closed dependencies.
 require_tools() {
   local missing=0
@@ -214,10 +267,25 @@ cmd_backup() {
         continue
       fi
       # Capture regular files only (find -type f excludes symlinks and
-      # special files), preserving the home-relative path layout.
-      while IFS= read -r f; do
-        local rel mode size hash
+      # special files), preserving the home-relative path layout. NUL
+      # delimiting tolerates odd names; each captured path still gets the
+      # same safety checks as a declared entry (a control character or a
+      # ".." segment would otherwise corrupt the manifest or trip verify).
+      local f rel mode size hash
+      while IFS= read -r -d '' f; do
         rel="${f#"$HOME"/}"
+        if ! backup_path_is_safe "$rel"; then
+          warn "skip unsafe captured path under $path"
+          skipped=$((skipped + 1))
+          continue
+        fi
+        case "$rel" in
+          *[[:cntrl:]]*)
+            warn "skip captured path with control characters under $path"
+            skipped=$((skipped + 1))
+            continue
+            ;;
+        esac
         mode="$(file_mode "$f")"
         size="$(wc -c < "$f" | tr -d ' ')"
         hash="$(sha256_of "$f")"
@@ -226,7 +294,7 @@ cmd_backup() {
         P="$rel" M="$mode" SZ="$size" H="$hash" \
           yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
         captured=$((captured + 1))
-      done < <(find "$target" -type f 2>/dev/null)
+      done < <(find "$target" -type f -print0 2>/dev/null)
     else
       if [[ ! -f "$target" ]]; then
         warn "declared file is not a regular file (skipped): $path"
@@ -340,7 +408,10 @@ cmd_verify() {
   section "private-backup: decrypt"
   # Resolve the identity. --identity-command output is fed through a
   # process substitution so the secret key never touches disk; its exit
-  # status is checked first so a failed `op read` fails closed.
+  # status is checked first so a failed `op read` fails closed. The command
+  # is a user-supplied shell command line (e.g. `op read op://...`), run via
+  # the shell on purpose so quoting works; the caller controls it (it is not
+  # archive-derived), so this is not an injection surface. See README.
   local age_identity_args=()
   local identity_material=""
   if [[ -n "$identity" ]]; then
@@ -353,18 +424,30 @@ cmd_verify() {
     fi
   fi
 
+  # Decrypt to a plaintext tar inside the 0700 temp (never piped straight
+  # into extraction): the members must be validated before tar touches the
+  # filesystem, so the archive cannot escape the temp via traversal or a
+  # symlink. The plaintext tar is wiped by the EXIT trap with everything else.
+  local cipher_tar="$workdir/archive.tar"
   local decrypt_ok=1
   if [[ -n "$identity" ]]; then
-    age -d "${age_identity_args[@]}" "$in" 2>/dev/null | tar -xf - -C "$extract" || decrypt_ok=0
+    age -d "${age_identity_args[@]}" -o "$cipher_tar" "$in" 2>/dev/null || decrypt_ok=0
   else
-    age -d -i <(printf '%s' "$identity_material") "$in" 2>/dev/null | tar -xf - -C "$extract" || decrypt_ok=0
+    age -d -i <(printf '%s' "$identity_material") -o "$cipher_tar" "$in" 2>/dev/null || decrypt_ok=0
   fi
   identity_material=""
   if [[ "$decrypt_ok" -ne 1 ]]; then
-    fail "could not decrypt/extract archive (wrong identity or corrupt archive)"
+    fail "could not decrypt archive (wrong identity or corrupt archive)"
     return 1
   fi
-  ok "decrypted and extracted to 0700 temp"
+  ok "decrypted to 0700 temp"
+
+  validate_tar_members "$cipher_tar" || return 1
+  if ! tar -xf "$cipher_tar" -C "$extract" 2>/dev/null; then
+    fail "could not extract archive"
+    return 1
+  fi
+  ok "members validated and extracted to 0700 temp"
 
   local manifest="$extract/manifest.json"
   [[ -f "$manifest" ]] || { fail "archive has no manifest.json"; return 1; }
@@ -380,8 +463,8 @@ cmd_verify() {
   # below, and the path is the last field so other content stays intact.
   local manifest_paths="$workdir/manifest_paths"
   yq -p=json -o=tsv '.files[].path' "$manifest" > "$manifest_paths"
-  local count=0 path sha actual f
-  while IFS=$'\t' read -r sha path; do
+  local count=0 path sha mode actual actual_mode f
+  while IFS=$'\t' read -r sha mode path; do
     [[ -z "$path" ]] && continue
     count=$((count + 1))
     if ! backup_path_is_safe "$path"; then
@@ -409,7 +492,13 @@ cmd_verify() {
       status=1
       continue
     fi
-  done < <(yq -p=json -o=tsv '.files[] | [.sha256, .path]' "$manifest")
+    actual_mode="$(file_mode "$f")"
+    if [[ "$actual_mode" != "$mode" ]]; then
+      fail "mode mismatch: $path (manifest $mode, archive $actual_mode)"
+      status=1
+      continue
+    fi
+  done < <(yq -p=json -o=tsv '.files[] | [.sha256, .mode, .path]' "$manifest")
 
   # No extra files beyond the manifest's declared files (manifest.json and
   # backup-paths.local live outside files/, so they are not flagged).
