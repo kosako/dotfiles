@@ -75,19 +75,28 @@ SH
   chmod +x "$fixture_bin/chezmoi"
 }
 with_fixture() { ( PATH="$fixture_bin:$PATH"; "$@" >/dev/null 2>&1 ); }
+# The must case must be exercised with pipefail OFF: this test file runs
+# under `set -o pipefail`, which a subshell inherits, and under pipefail a
+# `chezmoi(fail) | yq(ok)` pipeline already reports non-zero — so the old
+# buggy pipeline would pass this test too. Turning pipefail off makes the
+# test fail against the old code and pass only with the exit-status check,
+# pinning that the gate does not depend on the caller having pipefail.
+with_fixture_no_pipefail() {
+  ( set +o pipefail; PATH="$fixture_bin:$PATH"; "$@" >/dev/null 2>&1 )
+}
 
 # 4a. The must case: chezmoi prints a valid profile but exits non-zero.
 #     The gate must fail closed, not trust the masked payload.
 fake_chezmoi '{"profile":"personal"}' 3
-if with_fixture resolve_runtime_profile; then
-  miss "resolve must fail closed when chezmoi exits non-zero (even with valid JSON)"
+if with_fixture_no_pipefail resolve_runtime_profile; then
+  miss "resolve must fail closed when chezmoi exits non-zero (even with valid JSON, no pipefail)"
 else
-  pass "resolve fails closed on chezmoi non-zero exit despite valid JSON"
+  pass "resolve fails closed on chezmoi non-zero exit despite valid JSON (no pipefail)"
 fi
-if with_fixture require_secrets_access; then
-  miss "gate must refuse when chezmoi exits non-zero"
+if with_fixture_no_pipefail require_secrets_access; then
+  miss "gate must refuse when chezmoi exits non-zero (no pipefail)"
 else
-  pass "gate refuses on chezmoi non-zero exit"
+  pass "gate refuses on chezmoi non-zero exit (no pipefail)"
 fi
 
 # 4b. Healthy chezmoi resolving an allowed profile -> granted.
