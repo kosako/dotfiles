@@ -20,7 +20,7 @@
 ## 管理対象と gate
 
 - `shell-extra` module の `paths:` に `.zshenv` / `.zshrc` / `.zprofile` を宣言している(`.chezmoidata/modules.yaml`)。
-- `shell-extra` module を持つ profile(`personal` / `work-dev`)でのみ管理対象になる。持たない `work-minimal` では `.chezmoiignore` の生成によって除外され、既存の `~/.zshrc` はそのまま残る。
+- `shell-extra` module を持つ profile(`personal` / `work-dev`)でのみ管理対象になる。持たない `work-minimal` では `.zshenv` / `.zshrc` / `.zprofile` がいずれも `.chezmoiignore` の生成によって除外され、既存ファイルはそのまま残る。
 
 ## local override(repo に入れない)
 
