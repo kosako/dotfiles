@@ -17,7 +17,11 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
   (`docs/local-overrides.md`)。よって **age 暗号化は必須**。1Password は secret の
   system-of-record(意図的な単独 secret はそちらに置き、この backup を secret 倉庫に
   しない)であって、設定に混入する secret を捕捉することとは排他ではない。
-- **暗号化は age + パスフレーズ(scrypt)**。パスフレーズは 1Password に保管する。
+- **暗号化は age identity 鍵(X25519)**。長期 secret は identity(`AGE-SECRET-KEY-1...`)で、
+  1Password に保管する(「1Password に単一 secret」を維持)。backup は公開鍵(recipient
+  `age1...`)で暗号化するので secret 不要。verify / restore は identity で復号する。
+  当初は passphrase(scrypt)方式だったが、age CLI が passphrase を実 TTY からしか読めず
+  op からの非対話供給(#51)ができないため identity 鍵方式へ変更した(経緯は issue #60)。
 - **保管先はユーザー指定パス。** 固定 git repo に縛らない(外付け / クラウド同期
   フォルダ等)。成果物生成と保管場所を分離する。指定先を選ばないため、成果物自体を
   暗号化しておく。
@@ -42,13 +46,34 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 `validate-policy.sh` がこれらを機械的に検査する(home-relative / glob 禁止 / type 既定値 /
 path 重複を fail-closed)。パスの public-safety 自体は人間レビューの責務。
 
+## スクリプト
+
+`scripts/private-backup.sh`(手動起動のみ):
+
+```sh
+# backup: baseline + local 補足を解決し、暗号化アーカイブと marker を書く
+private-backup.sh backup --out PATH [--recipient AGE1... | --recipients-file PATH] \
+                         [--local-supplement PATH] [--yes]
+# verify: アーカイブを 0700 temp に復号し manifest と突き合わせ検証(HOME には書かない)
+private-backup.sh verify --in PATH (--identity PATH | --identity-command CMD)
+```
+
+- recipient は flag か非コミットの `~/.config/dotfiles/private-backup.recipient` から取得。
+  無ければ fail-closed(平文や宛先なしのアーカイブを作らない)。公開鍵は repo にコミットしない。
+- identity は `--identity PATH` か `--identity-command CMD`(= #51 の op seam、`op read op://...`
+  を想定)。後者は出力を /dev/fd 経由で age に渡し、秘密鍵をディスクに置かない。
+- archive は `tar | age` を pipe して平文 tar をディスクに残さない。アーカイブ内のパスは
+  home 相対(`-C` で絶対パスを含めない)。
+- backup は捕捉 0 件なら空アーカイブを書かず fail。symlink / 不在 / 非正規ファイルは skip(warn)。
+
 ## 段階
 
-- **第1段(本ドキュメント時点)**: リスト schema + parser + validate + `age` を catalog に追加。
-  宣言レイヤのみ(backup / restore スクリプトは未実装)。
-- **後続**: backup(machine-neutral manifest + age 暗号化 + 指定先書き出し + local 補足同梱)
-  + verify + doctor report、続いて restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 /
-  0700 temp / symlink・path traversal 防御)。
+- **第1段**: リスト schema + parser + validate + `age` を catalog に追加(宣言レイヤ)。
+  runtime secrets gate。backup(machine-neutral manifest + age identity 暗号化 +
+  指定先書き出し + local 補足同梱)+ verify。← ここまで実装済み。残り = doctor の
+  report-only section。
+- **後続**: restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 / 0700 temp /
+  symlink・path traversal 防御)。
 
 ## 安全境界(後続スクリプトが守る規約)
 

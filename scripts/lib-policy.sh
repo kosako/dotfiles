@@ -498,8 +498,32 @@ known_backup_path_types() {
 # non-whitespace delimiter so empty leading fields are not collapsed. This
 # reads the data file, not user input, so values are not passed through
 # strenv.
+backup_paths_in() {
+  local file="$1"
+  yq '.backup_paths[]? | [(.type // ""), (.category // ""), (.path // "")] | join("|")' "$file"
+}
+
 backup_paths() {
-  yq '.backup_paths[]? | [(.type // ""), (.category // ""), (.path // "")] | join("|")' "$BACKUP_PATHS_FILE"
+  backup_paths_in "$BACKUP_PATHS_FILE"
+}
+
+# Single source of truth for the mechanical safety rules a backup-paths
+# entry must satisfy: a non-empty, home-relative path with no ".." segment
+# and no glob metacharacters (* ? [). Returns 0 if safe, 1 otherwise;
+# prints nothing (the caller decides how to report). Shared by
+# validate-policy.sh (catalog validation) and the private-backup tooling
+# (runtime target resolution) so the rule cannot drift between them. The
+# private-backup runtime additionally rejects control characters and
+# symlinks; those are runtime concerns, not catalog-shape rules.
+backup_path_is_safe() {
+  local path="$1"
+  [[ -n "$path" ]] || return 1
+  case "$path" in
+    /*) return 1 ;;
+    *..*) return 1 ;;
+    *[*?[]*) return 1 ;;
+  esac
+  return 0
 }
 
 # Resolve the machine's actual profile from the live chezmoi config,

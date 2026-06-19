@@ -222,23 +222,20 @@ validate_backup_paths() {
       status=1
       continue
     fi
-    case "$path" in
-      /*)
-        fail "backup path must be home-relative (no leading /): $path"
-        status=1
-        entry_ok=0
-        ;;
-      *..*)
-        fail "backup path must not contain ..: $path"
-        status=1
-        entry_ok=0
-        ;;
-      *[*?[]*)
-        fail "backup path must not contain glob metacharacters: $path"
-        status=1
-        entry_ok=0
-        ;;
-    esac
+    # backup_path_is_safe (lib-policy.sh) is the single authority on
+    # whether a path is accepted; the case below only derives a specific
+    # message for the rejection. Keeping the decision in one place stops
+    # the safety rule from drifting between validation and the runtime.
+    if ! backup_path_is_safe "$path"; then
+      status=1
+      entry_ok=0
+      case "$path" in
+        /*) fail "backup path must be home-relative (no leading /): $path" ;;
+        *..*) fail "backup path must not contain ..: $path" ;;
+        *[*?[]*) fail "backup path must not contain glob metacharacters: $path" ;;
+        *) fail "unsafe backup path: $path" ;;
+      esac
+    fi
     if [[ -n "$type" ]] && ! grep -Fxq -- "$type" "$types_file"; then
       fail "unknown backup path type: $path: $type"
       status=1

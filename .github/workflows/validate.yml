@@ -12,6 +12,8 @@ permissions:
 env:
   YQ_VERSION: 4.53.3
   YQ_SHA256: fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4
+  AGE_VERSION: 1.3.1
+  AGE_SHA256: bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377
 
 jobs:
   validate:
@@ -29,6 +31,19 @@ jobs:
           echo "${YQ_SHA256}  yq" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           install -m 0755 yq "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # The private-backup round-trip test needs age + age-keygen. Pin and
+      # checksum-verify like every other downloaded tool.
+      - name: install age (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o age.tar.gz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz"
+          echo "${AGE_SHA256}  age.tar.gz" | sha256sum -c -
+          tar -xzf age.tar.gz age/age age/age-keygen
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 age/age "$HOME/.local/bin/age"
+          install -m 0755 age/age-keygen "$HOME/.local/bin/age-keygen"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: bash syntax check
@@ -54,6 +69,9 @@ jobs:
 
       - name: private-backup secrets-gate tests
         run: ./scripts/test-secrets-gate.sh
+
+      - name: private-backup backup/verify tests
+        run: ./scripts/test-private-backup.sh
 
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
