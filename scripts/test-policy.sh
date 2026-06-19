@@ -452,4 +452,11 @@ rm -f "$drift_fakebin/brew"
 run_drift "catalog drift: skips a missing package manager (report-only)" \
   "brew: not found (brew sources skipped)"
 
+setup_drift
+# go absent must be a skip, not "not installed": a go-built binary can linger
+# in GOPATH/bin without go, but the contract treats an absent manager as skip.
+rm -f "$drift_fakebin/go"
+run_drift "catalog drift: skips go_install when go is absent" \
+  "skip goreleaser: go not available"
+
 ok "policy tests passed"

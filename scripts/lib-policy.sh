@@ -287,7 +287,7 @@ report_catalog_drift() {
   # Inventories (read-only). A failing probe leaves the list empty via
   # `|| true`; per-source availability flags gate whether absence means
   # "not installed" or "manager not present, skip".
-  local have_brew=0 have_npm=0 have_mas=0 gobin=""
+  local have_brew=0 have_npm=0 have_go=0 have_mas=0 gobin=""
   if command -v brew >/dev/null 2>&1; then
     have_brew=1
     brew list --formula -1 2>/dev/null | sort > "$brew_formulae" || true
@@ -300,15 +300,18 @@ report_catalog_drift() {
       | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null \
       | grep -vxE 'npm|corepack' | sort > "$npm_globals" || true
   fi
+  # A go-built binary persists in GOPATH/bin even if `go` is later removed,
+  # but treating go like the other managers (absent -> skip, not "not
+  # installed") keeps the contract uniform and avoids guessing GOPATH when
+  # go cannot tell us where it is.
   if command -v go >/dev/null 2>&1; then
+    have_go=1
     gobin="$(go env GOBIN 2>/dev/null || true)"
     [[ -z "$gobin" ]] && gobin="$(go env GOPATH 2>/dev/null || true)/bin"
-  else
-    gobin="${GOPATH:-$HOME/go}/bin"
-  fi
-  if [[ -n "$gobin" && -d "$gobin" ]]; then
-    find "$gobin" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null \
-      | sort > "$go_bins" || true
+    if [[ -n "$gobin" && -d "$gobin" ]]; then
+      find "$gobin" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null \
+        | sort > "$go_bins" || true
+    fi
   fi
   if command -v mas >/dev/null 2>&1; then
     have_mas=1
@@ -328,7 +331,11 @@ report_catalog_drift() {
   else
     item "npm: not found (npm_global sources skipped)"
   fi
-  item "go bin: ${gobin:-unknown}"
+  if [[ "$have_go" -eq 1 ]]; then
+    item "go bin: ${gobin:-unknown}"
+  else
+    item "go: not found (go_install sources skipped)"
+  fi
   if [[ "$have_mas" -eq 1 ]]; then
     item "mas: $(command -v mas)"
   else
@@ -400,7 +407,9 @@ report_catalog_drift() {
         fi
         ;;
       go_install)
-        if grep -Fxq -- "$bincmd" "$go_bins"; then
+        if [[ "$have_go" -eq 0 ]]; then
+          item "skip $name: go not available"
+        elif grep -Fxq -- "$bincmd" "$go_bins"; then
           ok "installed: $name (go_install)"
         elif command -v "$bincmd" >/dev/null 2>&1; then
           info "source drift: $name declared go_install, absent from go bin; '$bincmd' on PATH (installed elsewhere?)"
@@ -453,13 +462,15 @@ report_catalog_drift() {
       }
     done < "$npm_globals"
   fi
-  while IFS= read -r b; do
-    [[ -z "$b" ]] && continue
-    grep -Fxq -- "$b" "$decl_go_bins" || {
-      warn "undeclared: $b (go binary not in catalog)"
-      drift_count=$((drift_count + 1))
-    }
-  done < "$go_bins"
+  if [[ "$have_go" -eq 1 ]]; then
+    while IFS= read -r b; do
+      [[ -z "$b" ]] && continue
+      grep -Fxq -- "$b" "$decl_go_bins" || {
+        warn "undeclared: $b (go binary not in catalog)"
+        drift_count=$((drift_count + 1))
+      }
+    done < "$go_bins"
+  fi
 
   if [[ "$drift_count" -eq 0 ]]; then
     ok "no catalog drift"
