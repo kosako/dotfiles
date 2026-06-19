@@ -211,8 +211,11 @@ validate_backup_paths() {
     return 1
   fi
 
-  while IFS='|' read -r path type category; do
-    [[ -z "$path$type$category" ]] && continue
+  # path is the last field, so a "|" in the path is preserved by read. An
+  # entry that resolves to an empty path (a null/empty list item, or a
+  # missing path: key) must fail closed, not be silently skipped: backup_paths
+  # always emits at least two "|" per entry, so there are no blank rows to skip.
+  while IFS='|' read -r type category path; do
     entry_ok=1
     if [[ -z "$path" ]]; then
       fail "backup path entry missing path"

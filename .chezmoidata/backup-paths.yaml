@@ -10,7 +10,7 @@
 #
 # Each entry:
 #   path      home-relative path (required). A leading "/" or any ".." is
-#             rejected, as are glob metacharacters (* ? [ ]); the backup
+#             rejected, as are glob metacharacters (* ? [); the backup
 #             captures exactly these paths, never a pattern.
 #   type      file | dir (optional). Declares what the path is expected to
 #             be so the tooling can validate and restore it correctly.

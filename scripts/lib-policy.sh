@@ -490,13 +490,16 @@ known_backup_path_types() {
 }
 
 # Emit one row per backup-paths entry as pipe-joined fields:
-#   path|type|category
-# type and category are raw (empty when unset). A non-whitespace delimiter
-# is used so `read` does not collapse empty fields; "|" never appears in a
-# home-relative path. This reads the data file, not user input, so values
-# are not passed through strenv.
+#   type|category|path
+# type and category are raw (empty when unset). path is emitted LAST so a
+# reader using `IFS='|' read -r type category path` captures the whole path
+# even if it contains a "|" (read assigns the remainder to the last field),
+# making the row unambiguous regardless of the path's contents. A "|" is a
+# non-whitespace delimiter so empty leading fields are not collapsed. This
+# reads the data file, not user input, so values are not passed through
+# strenv.
 backup_paths() {
-  yq '.backup_paths[]? | [(.path // ""), (.type // ""), (.category // "")] | join("|")' "$BACKUP_PATHS_FILE"
+  yq '.backup_paths[]? | [(.type // ""), (.category // ""), (.path // "")] | join("|")' "$BACKUP_PATHS_FILE"
 }
 
 # Print names of remotes whose URL embeds password-like userinfo

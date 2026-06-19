@@ -35,7 +35,7 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 
 | field | 必須 | 内容 |
 | --- | --- | --- |
-| `path` | ✓ | home-relative パス。先頭 `/`・`..`・glob メタ文字(`* ? [`)は禁止 |
+| `path` | ✓ | home-relative パス。先頭 `/`・`..`・glob メタ文字(`* ? [`)は禁止。`path` を最後に持つ行形式なので path 中の `|` も曖昧にならない |
 | `type` | | `file` / `dir`(期待する種別)|
 | `category` | | public-safe な自由ラベル(例 `shell` / `ssh`)|
 

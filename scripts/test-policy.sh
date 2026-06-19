@@ -304,6 +304,15 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - {}"
+run_fail_contains \
+  "rejects an empty backup path entry (no vacuous pass)" \
+  "backup path entry missing path" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
 : > "$fixture/.chezmoidata/backup-paths.yaml"
 run_fail_contains \
   "fails closed on empty backup-paths catalog" \
