@@ -348,4 +348,122 @@ run_fail_contains \
   "yq v4+ required" \
   env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal
 
+# ---- Software catalog drift (report_catalog_drift) ----
+# report_catalog_drift probes real package managers, so tests run it against
+# fake brew / npm / go on a minimal PATH (only the fakes, a symlinked yq,
+# and coreutils). This keeps the inventory fully controlled and independent
+# of whatever is installed on the host or CI runner. Every assertion also
+# proves the report-only contract: run_ok_contains requires exit 0, so the
+# drift cases confirm drift never changes the exit code.
+
+# Globals set by setup_drift: drift_dir (fake inventory + go bin),
+# drift_fakebin (fake managers + yq symlink). Reuses `fixture` from
+# make_fixture for the sourced lib-policy.sh and packages.yaml.
+setup_drift() {
+  make_fixture
+  drift_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-drift.XXXXXX")"
+  tmp_roots+=("$drift_dir")
+  drift_fakebin="$drift_dir/bin"
+  mkdir -p "$drift_fakebin" "$drift_dir/go/bin"
+
+  cat > "$drift_fakebin/brew" <<'EOF'
+#!/bin/sh
+case "$*" in
+  "list --formula"*) cat "$DRIFT_DIR/brew_formulae" 2>/dev/null ;;
+  "leaves"*) cat "$DRIFT_DIR/brew_leaves" 2>/dev/null ;;
+  "list --cask"*) cat "$DRIFT_DIR/brew_casks" 2>/dev/null ;;
+esac
+exit 0
+EOF
+  cat > "$drift_fakebin/npm" <<'EOF'
+#!/bin/sh
+case "$*" in
+  "ls -g"*) cat "$DRIFT_DIR/npm.json" 2>/dev/null ;;
+  "root -g") echo "$DRIFT_DIR/npm-global" ;;
+esac
+exit 0
+EOF
+  cat > "$drift_fakebin/go" <<'EOF'
+#!/bin/sh
+if [ "$1" = "env" ] && [ "$2" = "GOBIN" ]; then echo ""; exit 0; fi
+if [ "$1" = "env" ] && [ "$2" = "GOPATH" ]; then echo "$FAKE_GOPATH"; exit 0; fi
+exit 0
+EOF
+  chmod +x "$drift_fakebin/brew" "$drift_fakebin/npm" "$drift_fakebin/go"
+  # Make the fake bin fully self-contained so report_catalog_drift runs with
+  # PATH=$drift_fakebin only. A minimal PATH that still included /usr/bin
+  # would leak host tools: GitHub's ubuntu runner ships a real `go` in
+  # /usr/bin, which would defeat the go-absent test. Symlinking the few real
+  # tools the function needs keeps manager presence controlled by the fakes
+  # alone (and host-independent).
+  local tool
+  for tool in bash sh cat dirname mktemp sort grep find basename awk rm yq; do
+    ln -s "$(command -v "$tool")" "$drift_fakebin/$tool"
+  done
+
+  # Default inventory == the reality-seed catalog (drift-free baseline).
+  printf '%s\n' chezmoi gh mise tmux yq > "$drift_dir/brew_formulae"
+  printf '%s\n' chezmoi gh mise tmux yq > "$drift_dir/brew_leaves"
+  printf '%s\n' copilot-cli iterm2 swiftbar > "$drift_dir/brew_casks"
+  # npm and corepack are node-bundled; including them proves they are
+  # filtered out and never reported as undeclared.
+  printf '%s' '{"dependencies":{"@anthropic-ai/claude-code":{},"@openai/codex":{},"npm":{},"corepack":{}}}' \
+    > "$drift_dir/npm.json"
+  touch "$drift_dir/go/bin/goreleaser" "$drift_dir/go/bin/tacho"
+  chmod +x "$drift_dir/go/bin/goreleaser" "$drift_dir/go/bin/tacho"
+}
+
+run_drift() {
+  local name="$1"
+  local expected="$2"
+  run_ok_contains "$name" "$expected" \
+    env "PATH=$drift_fakebin" \
+        "DRIFT_DIR=$drift_dir" \
+        "FAKE_GOPATH=$drift_dir/go" \
+        "LIBPOLICY=$fixture/scripts/lib-policy.sh" \
+        bash -c 'set -euo pipefail; source "$LIBPOLICY"; report_catalog_drift'
+}
+
+setup_drift
+run_drift "catalog drift: clean when reality matches the catalog" "no catalog drift"
+
+setup_drift
+printf 'librsvg\n' >> "$drift_dir/brew_leaves"
+run_drift "catalog drift: flags an undeclared brew leaf" \
+  "undeclared: librsvg (brew_formula leaf not in catalog)"
+
+setup_drift
+printf '%s\n' gh mise tmux yq > "$drift_dir/brew_formulae"
+printf '%s\n' gh mise tmux yq > "$drift_dir/brew_leaves"
+run_drift "catalog drift: flags a declared package that is not installed" \
+  "not installed: chezmoi (brew_formula)"
+
+setup_drift
+# Declared via brew but absent from brew, while the command resolves on
+# PATH -> source drift (info), not "not installed".
+printf '%s\n' chezmoi mise tmux yq > "$drift_dir/brew_formulae"
+printf '%s\n' chezmoi mise tmux yq > "$drift_dir/brew_leaves"
+printf '#!/bin/sh\nexit 0\n' > "$drift_fakebin/gh"
+chmod +x "$drift_fakebin/gh"
+run_drift "catalog drift: source mismatch is info when the command is on PATH" \
+  "source drift: gh declared brew_formula"
+
+setup_drift
+touch "$drift_dir/go/bin/stray-tool"
+chmod +x "$drift_dir/go/bin/stray-tool"
+run_drift "catalog drift: flags an undeclared go binary" \
+  "undeclared: stray-tool (go binary not in catalog)"
+
+setup_drift
+rm -f "$drift_fakebin/brew"
+run_drift "catalog drift: skips a missing package manager (report-only)" \
+  "brew: not found (brew sources skipped)"
+
+setup_drift
+# go absent must be a skip, not "not installed": a go-built binary can linger
+# in GOPATH/bin without go, but the contract treats an absent manager as skip.
+rm -f "$drift_fakebin/go"
+run_drift "catalog drift: skips go_install when go is absent" \
+  "skip goreleaser: go not available"
+
 ok "policy tests passed"

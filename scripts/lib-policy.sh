@@ -235,6 +235,251 @@ catalog_source_preference() {
   c="$category" yq '.source_preference[strenv(c)][]?' "$PACKAGES_FILE"
 }
 
+# Report drift between the declared catalog (packages.yaml) and what is
+# actually installed, per source. Report-only: every path returns 0 so a
+# caller under `set -e` (doctor.sh) keeps its exit code, and all probes are
+# read-only with a missing package manager skipped rather than failed.
+#
+# Three drift kinds (see docs/policy-model.md):
+#   - declared but not installed          -> warn (suggest installing)
+#   - installed but not declared (sprawl) -> warn (undeclared)
+#   - declared source vs reality mismatch -> info (declared in source S,
+#                                            absent from S, yet the command
+#                                            resolves on PATH)
+#
+# Matching uses the canonical installed id (pkg, defaulting to name) per
+# source, never a cross-manager name table: the catalog design rejected
+# cross-source availability checks as unreliable. The source-mismatch
+# signal is deliberately weak ("not in S's inventory but on PATH") because
+# it never guesses which other manager owns the tool. Undeclared detection
+# uses `brew leaves` (top-level installs) so dependencies are not flagged,
+# excludes node-bundled npm globals (npm, corepack: runtime domain, like
+# node/go/uv), and is skipped for mas (the App Store carries many apps
+# unrelated to the dev catalog; flagging them all would be noise).
+report_catalog_drift() {
+  if ! require_yq; then
+    warn "yq unavailable; skipping catalog drift"
+    return 0
+  fi
+  if [[ ! -f "$PACKAGES_FILE" ]]; then
+    warn "catalog missing: $PACKAGES_FILE; skipping drift"
+    return 0
+  fi
+
+  local rows
+  if ! rows="$(catalog_packages)" || [[ -z "$rows" ]]; then
+    warn "could not read catalog packages; skipping drift"
+    return 0
+  fi
+
+  local brew_formulae brew_leaves brew_casks npm_globals go_bins mas_ids
+  local decl_brew_formula decl_brew_cask decl_npm decl_go_bins
+  brew_formulae="$(mktemp)"; brew_leaves="$(mktemp)"; brew_casks="$(mktemp)"
+  npm_globals="$(mktemp)"; go_bins="$(mktemp)"; mas_ids="$(mktemp)"
+  decl_brew_formula="$(mktemp)"; decl_brew_cask="$(mktemp)"
+  decl_npm="$(mktemp)"; decl_go_bins="$(mktemp)"
+  local drift_tmp=(
+    "$brew_formulae" "$brew_leaves" "$brew_casks" "$npm_globals" "$go_bins"
+    "$mas_ids" "$decl_brew_formula" "$decl_brew_cask" "$decl_npm"
+    "$decl_go_bins"
+  )
+
+  # Inventories (read-only). A failing probe leaves the list empty via
+  # `|| true`; per-source availability flags gate whether absence means
+  # "not installed" or "manager not present, skip".
+  local have_brew=0 have_npm=0 have_go=0 have_mas=0 gobin=""
+  if command -v brew >/dev/null 2>&1; then
+    have_brew=1
+    brew list --formula -1 2>/dev/null | sort > "$brew_formulae" || true
+    brew leaves 2>/dev/null | sort > "$brew_leaves" || true
+    brew list --cask -1 2>/dev/null | sort > "$brew_casks" || true
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    have_npm=1
+    npm ls -g --depth=0 --json 2>/dev/null \
+      | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null \
+      | grep -vxE 'npm|corepack' | sort > "$npm_globals" || true
+  fi
+  # A go-built binary persists in GOPATH/bin even if `go` is later removed,
+  # but treating go like the other managers (absent -> skip, not "not
+  # installed") keeps the contract uniform and avoids guessing GOPATH when
+  # go cannot tell us where it is.
+  if command -v go >/dev/null 2>&1; then
+    have_go=1
+    gobin="$(go env GOBIN 2>/dev/null || true)"
+    [[ -z "$gobin" ]] && gobin="$(go env GOPATH 2>/dev/null || true)/bin"
+    if [[ -n "$gobin" && -d "$gobin" ]]; then
+      find "$gobin" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null \
+        | sort > "$go_bins" || true
+    fi
+  fi
+  if command -v mas >/dev/null 2>&1; then
+    have_mas=1
+    mas list 2>/dev/null | awk '{print $1}' | sort > "$mas_ids" || true
+  fi
+
+  # Report which inventories were inspected. npm's global root differs by
+  # active node (mise-managed vs system); naming it avoids misreading a
+  # shim-shadowed inventory (same root cause as the mise shims problem).
+  if [[ "$have_brew" -eq 1 ]]; then
+    item "brew: $(command -v brew)"
+  else
+    item "brew: not found (brew sources skipped)"
+  fi
+  if [[ "$have_npm" -eq 1 ]]; then
+    item "npm: $(command -v npm) (global root: $(npm root -g 2>/dev/null || echo unknown))"
+  else
+    item "npm: not found (npm_global sources skipped)"
+  fi
+  if [[ "$have_go" -eq 1 ]]; then
+    item "go bin: ${gobin:-unknown}"
+  else
+    item "go: not found (go_install sources skipped)"
+  fi
+  if [[ "$have_mas" -eq 1 ]]; then
+    item "mas: $(command -v mas)"
+  else
+    item "mas: not found (mas sources skipped)"
+  fi
+
+  local drift_count=0
+  local name source pkg bin track_only canonical bincmd
+  while IFS='|' read -r name source pkg bin track_only; do
+    [[ -z "$name$source" ]] && continue
+    canonical="${pkg:-$name}"
+    bincmd="${bin:-$name}"
+
+    # Accumulate declared sets (track-only included: a declared track-only
+    # entry must not later surface as undeclared sprawl).
+    case "$source" in
+      brew_formula) printf '%s\n' "$canonical" >> "$decl_brew_formula" ;;
+      brew_cask) printf '%s\n' "$canonical" >> "$decl_brew_cask" ;;
+      npm_global) printf '%s\n' "$canonical" >> "$decl_npm" ;;
+      go_install) printf '%s\n' "$bincmd" >> "$decl_go_bins" ;;
+    esac
+
+    # track-only / manual entries are inventory only; never installed by
+    # tooling, so they produce no "not installed" drift.
+    if [[ "$track_only" == "true" || "$source" == "manual" ]]; then
+      if command -v "$bincmd" >/dev/null 2>&1; then
+        item "track-only present: $name ($source)"
+      else
+        item "track-only, not present: $name ($source)"
+      fi
+      continue
+    fi
+
+    case "$source" in
+      brew_formula)
+        if [[ "$have_brew" -eq 0 ]]; then
+          item "skip $name: brew not available"
+        elif grep -Fxq -- "$canonical" "$brew_formulae"; then
+          ok "installed: $name (brew_formula)"
+        elif command -v "$bincmd" >/dev/null 2>&1; then
+          info "source drift: $name declared brew_formula, absent from brew; '$bincmd' on PATH (installed elsewhere?)"
+          drift_count=$((drift_count + 1))
+        else
+          warn "not installed: $name (brew_formula)"
+          drift_count=$((drift_count + 1))
+        fi
+        ;;
+      brew_cask)
+        if [[ "$have_brew" -eq 0 ]]; then
+          item "skip $name: brew not available"
+        elif grep -Fxq -- "$canonical" "$brew_casks"; then
+          ok "installed: $name (brew_cask)"
+        else
+          warn "not installed: $name (brew_cask)"
+          drift_count=$((drift_count + 1))
+        fi
+        ;;
+      npm_global)
+        if [[ "$have_npm" -eq 0 ]]; then
+          item "skip $name: npm not available"
+        elif grep -Fxq -- "$canonical" "$npm_globals"; then
+          ok "installed: $name (npm_global)"
+        elif command -v "$bincmd" >/dev/null 2>&1; then
+          info "source drift: $name declared npm_global, absent from npm -g; '$bincmd' on PATH (installed elsewhere?)"
+          drift_count=$((drift_count + 1))
+        else
+          warn "not installed: $name (npm_global)"
+          drift_count=$((drift_count + 1))
+        fi
+        ;;
+      go_install)
+        if [[ "$have_go" -eq 0 ]]; then
+          item "skip $name: go not available"
+        elif grep -Fxq -- "$bincmd" "$go_bins"; then
+          ok "installed: $name (go_install)"
+        elif command -v "$bincmd" >/dev/null 2>&1; then
+          info "source drift: $name declared go_install, absent from go bin; '$bincmd' on PATH (installed elsewhere?)"
+          drift_count=$((drift_count + 1))
+        else
+          warn "not installed: $name (go_install)"
+          drift_count=$((drift_count + 1))
+        fi
+        ;;
+      mas)
+        if [[ "$have_mas" -eq 0 ]]; then
+          item "skip $name: mas not available"
+        elif grep -Fxq -- "$canonical" "$mas_ids"; then
+          ok "installed: $name (mas)"
+        else
+          warn "not installed: $name (mas)"
+          drift_count=$((drift_count + 1))
+        fi
+        ;;
+      *)
+        # validate-policy rejects unknown sources; defensive skip here.
+        item "skip $name: unhandled source $source"
+        ;;
+    esac
+  done <<< "$rows"
+
+  # Undeclared (sprawl): installed top-level items absent from the catalog.
+  if [[ "$have_brew" -eq 1 ]]; then
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      grep -Fxq -- "$f" "$decl_brew_formula" || {
+        warn "undeclared: $f (brew_formula leaf not in catalog)"
+        drift_count=$((drift_count + 1))
+      }
+    done < "$brew_leaves"
+    while IFS= read -r c; do
+      [[ -z "$c" ]] && continue
+      grep -Fxq -- "$c" "$decl_brew_cask" || {
+        warn "undeclared: $c (brew_cask not in catalog)"
+        drift_count=$((drift_count + 1))
+      }
+    done < "$brew_casks"
+  fi
+  if [[ "$have_npm" -eq 1 ]]; then
+    while IFS= read -r n; do
+      [[ -z "$n" ]] && continue
+      grep -Fxq -- "$n" "$decl_npm" || {
+        warn "undeclared: $n (npm global not in catalog)"
+        drift_count=$((drift_count + 1))
+      }
+    done < "$npm_globals"
+  fi
+  if [[ "$have_go" -eq 1 ]]; then
+    while IFS= read -r b; do
+      [[ -z "$b" ]] && continue
+      grep -Fxq -- "$b" "$decl_go_bins" || {
+        warn "undeclared: $b (go binary not in catalog)"
+        drift_count=$((drift_count + 1))
+      }
+    done < "$go_bins"
+  fi
+
+  if [[ "$drift_count" -eq 0 ]]; then
+    ok "no catalog drift"
+  fi
+
+  rm -f "${drift_tmp[@]}"
+  return 0
+}
+
 # Print names of remotes whose URL embeds password-like userinfo
 # (scheme://user:password@host). URL values are never printed.
 git_remotes_with_credentials() {
