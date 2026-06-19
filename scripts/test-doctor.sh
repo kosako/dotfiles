@@ -204,6 +204,83 @@ else
   status=1
 fi
 
+# private-backup report-only section (issue #60). doctor must report
+# backup presence and the local supplement's EXISTENCE ONLY, never parse
+# or read the supplement, and always stay exit 0.
+
+# H) No marker yet: doctor reports "no backup recorded" and stays exit 0.
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "no backup recorded yet" <<< "$pb_out"; then
+    ok "test passed: missing backup marker reported (exit 0)"
+  else
+    printf '%s\n' "$pb_out" >&2
+    fail "test failed: missing backup marker not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: doctor must stay exit 0 with no backup marker"
+  status=1
+fi
+
+# I) With a marker, doctor surfaces the last-success time / archive / count.
+mkdir -p "$fixture_home/.local/state/dotfiles"
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "last backup: 2026-06-19T00:00:00Z" <<< "$pb_out" \
+    && grep -Fq "backup.age" <<< "$pb_out"; then
+    ok "test passed: backup marker last-success reported"
+  else
+    printf '%s\n' "$pb_out" >&2
+    fail "test failed: backup marker details not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: doctor must stay exit 0 with a backup marker"
+  status=1
+fi
+
+# J) The local supplement is reported by existence only — never parsed or
+#    its contents/count shown. A supplement with a recognisable secret-ish
+#    line must not have that line (or an entry count) appear in output.
+mkdir -p "$fixture_home/.config/dotfiles"
+printf 'backup_paths:\n  - { path: .secret-canary-zzz, type: file }\n' \
+  > "$fixture_home/.config/dotfiles/backup-paths.local"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "local supplement present" <<< "$pb_out" \
+    && ! grep -Fq "secret-canary-zzz" <<< "$pb_out"; then
+    ok "test passed: local supplement reported by existence only (contents not leaked)"
+  else
+    printf '%s\n' "$pb_out" >&2
+    fail "test failed: local supplement contents leaked or not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: doctor must stay exit 0 with a local supplement"
+  status=1
+fi
+
+# K) A malformed/null marker must not break doctor: report "unreadable"
+#    and stay exit 0 (guards the set -euo pipefail paths in the section).
+printf 'this is not valid json {{{\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "backup marker present but unreadable" <<< "$pb_out"; then
+    ok "test passed: malformed backup marker reported unreadable (exit 0)"
+  else
+    printf '%s\n' "$pb_out" >&2
+    fail "test failed: malformed backup marker not handled"
+    status=1
+  fi
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: doctor must stay exit 0 on a malformed backup marker"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi

@@ -202,6 +202,68 @@ else
   ok "secret access disabled for profile"
 fi
 
+section "private-backup (report-only)"
+# Report-only and contents-blind (issue #60). Resolve the PUBLIC baseline
+# (backup-paths.yaml) and show whether each target exists; the local
+# supplement is reported by EXISTENCE ONLY — never parsed, counted, or
+# read, per docs/local-overrides.md. The state marker (repo-external)
+# gives backup presence and last-success time. doctor never reads any
+# captured file, the archive, or the supplement's contents.
+if [[ ! -f "$BACKUP_PATHS_FILE" ]]; then
+  warn "backup catalog missing: $BACKUP_PATHS_FILE"
+elif ! baseline_rows="$(backup_paths 2>/dev/null)"; then
+  # Capture first so a yq/parse failure becomes a warning instead of a
+  # healthy-looking "0/0 present" (a failed process substitution would not
+  # fail the while loop).
+  warn "could not read backup catalog; skipping baseline resolution"
+else
+  baseline_present=0
+  baseline_total=0
+  while IFS='|' read -r _bp_type _bp_category bp_path; do
+    [[ -z "$bp_path" ]] && continue
+    baseline_total=$((baseline_total + 1))
+    if [[ -e "$HOME/$bp_path" ]]; then
+      item "baseline present: $bp_path"
+      baseline_present=$((baseline_present + 1))
+    else
+      item "baseline absent: $bp_path"
+    fi
+  done <<< "$baseline_rows"
+  ok "baseline targets: $baseline_present/$baseline_total present"
+fi
+
+# Local supplement: existence only. Do not parse, count, or read it.
+backup_supplement="$HOME/.config/dotfiles/backup-paths.local"
+if [[ -f "$backup_supplement" ]]; then
+  item "local supplement present (contents not inspected)"
+else
+  item "local supplement absent"
+fi
+
+# State marker: presence + last success + basename + count, nothing else.
+# The marker is repo-external and could be stale or hand-edited, so treat
+# its fields as untrusted: drop non-printable chars, basename the archive,
+# and require a numeric count — anything odd is shown as "unknown" rather
+# than echoed verbatim to the terminal.
+backup_marker="$HOME/.local/state/dotfiles/private-backup.json"
+if [[ -f "$backup_marker" ]]; then
+  bm() { yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null | tr -dc '[:print:]' || true; }
+  marker_last="$(bm '.last_success // ""')"
+  marker_archive_raw="$(bm '.archive // ""')"
+  marker_count="$(bm '.file_count // ""')"
+  marker_archive="unknown"
+  [[ -n "$marker_archive_raw" ]] && marker_archive="$(basename "$marker_archive_raw")"
+  [[ "$marker_count" =~ ^[0-9]+$ ]] || marker_count="unknown"
+  if [[ -n "$marker_last" ]]; then
+    ok "last backup: $marker_last (archive: $marker_archive, files: $marker_count)"
+  else
+    warn "backup marker present but unreadable"
+  fi
+  unset -f bm
+else
+  warn "no backup recorded yet (run private-backup.sh backup)"
+fi
+
 section "managed-path orphans"
 # A file that carries the managed-by header but whose path is not
 # managed for this profile is likely left over from another profile
