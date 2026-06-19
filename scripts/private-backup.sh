@@ -32,6 +32,8 @@ usage:
   $TOOL_NAME backup --out PATH [--recipient AGE1... | --recipients-file PATH]
                     [--local-supplement PATH] [--yes]
   $TOOL_NAME verify --in PATH (--identity PATH | --identity-command CMD)
+  $TOOL_NAME restore --in PATH (--identity PATH | --identity-command CMD)
+                     [--apply] [--skip-existing] [--target-home DIR]
 
 backup: resolve the public baseline (.chezmoidata/backup-paths.yaml) plus the
   local supplement, capture the files into a machine-neutral, age-encrypted
@@ -40,8 +42,12 @@ backup: resolve the public baseline (.chezmoidata/backup-paths.yaml) plus the
 verify: decrypt --in into a 0700 temp dir and check it against its manifest
   (checksums, modes, no extra files, safe home-relative paths). Read-only;
   never writes into \$HOME.
+restore: verify --in, then restore its files into \$HOME (or --target-home).
+  Dry-run by default; --apply performs it, moving any displaced file into a
+  timestamped backup dir first. --skip-existing leaves existing files
+  untouched. Refuses to write through a symlinked parent directory.
 
-Both refuse unless the host profile grants allowSecretsAccess.
+All refuse unless the host profile grants allowSecretsAccess.
 EOF
 }
 
@@ -386,75 +392,36 @@ cmd_backup() {
   return 0
 }
 
-cmd_verify() {
-  local in="" identity="" identity_command=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --in) in="${2:-}"; shift 2 ;;
-      --identity) identity="${2:-}"; shift 2 ;;
-      --identity-command) identity_command="${2:-}"; shift 2 ;;
-      *) fail "unknown verify argument: $1"; usage; return 2 ;;
-    esac
-  done
-
-  if [[ -z "$in" ]]; then
-    fail "verify requires --in PATH"
-    usage
-    return 2
-  fi
-  if [[ -n "$identity" && -n "$identity_command" ]]; then
-    fail "use only one of --identity / --identity-command"
-    return 2
-  fi
-  if [[ -z "$identity" && -z "$identity_command" ]]; then
-    fail "verify requires --identity PATH or --identity-command CMD"
-    return 2
-  fi
-  [[ -f "$in" ]] || { fail "archive not found: $in"; return 2; }
-
-  require_secrets_access || return 1
-  require_tools || return 1
-
-  # Script-global (not local) so the deferred EXIT trap still sees it.
-  workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-verify.XXXXXX")"
-  chmod 700 "$workdir"
-  # Decrypted plaintext only ever lives in this 0700 dir; wipe on exit.
-  trap 'rm -rf "$workdir"' EXIT
-
-  local extract="$workdir/extract"
-  mkdir -p "$extract"
+# Resolve the identity, decrypt --in to a plaintext tar inside the 0700
+# temp, validate every member, and extract into <extract>. Shared by
+# verify and restore. Args: in identity identity_command workdir extract.
+# Returns 0 on success, 2 on a usage error (missing identity file), 1 on a
+# decrypt/extract failure. The --identity-command output is fed through a
+# process substitution so the secret key never touches disk; its exit
+# status is checked first so a failed `op read` fails closed. The command
+# is a user-supplied shell command line (e.g. `op read op://...`), run via
+# the shell on purpose so quoting works; the caller controls it (it is not
+# archive-derived), so this is not an injection surface. See README.
+decrypt_and_extract() {
+  local in="$1" identity="$2" identity_command="$3" workdir="$4" extract="$5"
+  local identity_material="" cipher_tar="$workdir/archive.tar" decrypt_ok=1
 
   section "private-backup: decrypt"
-  # Resolve the identity. --identity-command output is fed through a
-  # process substitution so the secret key never touches disk; its exit
-  # status is checked first so a failed `op read` fails closed. The command
-  # is a user-supplied shell command line (e.g. `op read op://...`), run via
-  # the shell on purpose so quoting works; the caller controls it (it is not
-  # archive-derived), so this is not an injection surface. See README.
-  local age_identity_args=()
-  local identity_material=""
+  # Decrypt to a plaintext tar inside the 0700 temp (never piped straight
+  # into extraction): members must be validated before tar touches the
+  # filesystem, so the archive cannot escape the temp via traversal or a
+  # symlink. The tar is wiped by the EXIT trap with everything else.
   if [[ -n "$identity" ]]; then
     [[ -f "$identity" ]] || { fail "identity file not found: $identity"; return 2; }
-    age_identity_args=(-i "$identity")
+    age -d -i "$identity" -o "$cipher_tar" "$in" 2>/dev/null || decrypt_ok=0
   else
     if ! identity_material="$(eval "$identity_command")" || [[ -z "$identity_material" ]]; then
       fail "identity command produced no key; refusing"
       return 1
     fi
-  fi
-
-  # Decrypt to a plaintext tar inside the 0700 temp (never piped straight
-  # into extraction): the members must be validated before tar touches the
-  # filesystem, so the archive cannot escape the temp via traversal or a
-  # symlink. The plaintext tar is wiped by the EXIT trap with everything else.
-  local cipher_tar="$workdir/archive.tar"
-  local decrypt_ok=1
-  if [[ -n "$identity" ]]; then
-    age -d "${age_identity_args[@]}" -o "$cipher_tar" "$in" 2>/dev/null || decrypt_ok=0
-  else
     age -d -i <(printf '%s' "$identity_material") -o "$cipher_tar" "$in" 2>/dev/null || decrypt_ok=0
+    identity_material=""
   fi
-  identity_material=""
   if [[ "$decrypt_ok" -ne 1 ]]; then
     fail "could not decrypt archive (wrong identity or corrupt archive)"
     return 1
@@ -467,19 +434,22 @@ cmd_verify() {
     return 1
   fi
   ok "members validated and extracted to 0700 temp"
+  return 0
+}
 
+# Check the extracted archive against its manifest: every listed file is
+# present with a matching sha256 and mode, is a regular file (no symlink),
+# carries a safe home-relative path, and no file exists beyond the
+# manifest. Args: extract workdir. Returns 0 if the archive is intact.
+# Inspects only the extracted copy; never writes into $HOME.
+check_manifest() {
+  local extract="$1" workdir="$2"
   local manifest="$extract/manifest.json"
   [[ -f "$manifest" ]] || { fail "archive has no manifest.json"; return 1; }
-
-  section "private-backup: verify manifest"
   local status=0
-
-  # Each manifest file must exist in the archive with a matching checksum,
-  # be a regular file (no symlink/hardlink slipped in), and carry a safe
-  # home-relative path. We never write into $HOME — this only inspects the
-  # extracted copy. Read sha256+path as TSV in one pass: tab-delimited, so
-  # a tab in a path would split it, but tabs (control chars) are rejected
-  # below, and the path is the last field so other content stays intact.
+  # Read sha256+mode+path as TSV in one pass: tab-delimited, so a tab in a
+  # path would split it, but tabs (control chars) are rejected below, and
+  # path is the last field so other content stays intact.
   local manifest_paths="$workdir/manifest_paths"
   yq -p=json -o=tsv '.files[].path' "$manifest" > "$manifest_paths"
   local count=0 path sha mode actual actual_mode f
@@ -539,12 +509,204 @@ cmd_verify() {
   return "$status"
 }
 
+# Whether any existing ancestor directory of <base>/<rel> (below <base>)
+# is a symlink. Restore refuses such targets so a symlinked parent cannot
+# redirect a write outside the intended tree. <base> itself is trusted
+# (it is $HOME or an explicit --target-home). Returns 0 if a symlinked
+# parent exists.
+path_has_symlinked_parent() {
+  local rel="$2" cur="$1" comp dir
+  dir="$(dirname "$rel")"
+  [[ "$dir" == "." ]] && return 1
+  local IFS='/' comps=()
+  read -ra comps <<< "$dir"
+  for comp in "${comps[@]}"; do
+    [[ -z "$comp" ]] && continue
+    cur="$cur/$comp"
+    [[ -L "$cur" ]] && return 0
+  done
+  return 1
+}
+
+cmd_verify() {
+  local in="" identity="" identity_command=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in) in="${2:-}"; shift 2 ;;
+      --identity) identity="${2:-}"; shift 2 ;;
+      --identity-command) identity_command="${2:-}"; shift 2 ;;
+      *) fail "unknown verify argument: $1"; usage; return 2 ;;
+    esac
+  done
+
+  if [[ -z "$in" ]]; then
+    fail "verify requires --in PATH"
+    usage
+    return 2
+  fi
+  if [[ -n "$identity" && -n "$identity_command" ]]; then
+    fail "use only one of --identity / --identity-command"
+    return 2
+  fi
+  if [[ -z "$identity" && -z "$identity_command" ]]; then
+    fail "verify requires --identity PATH or --identity-command CMD"
+    return 2
+  fi
+  [[ -f "$in" ]] || { fail "archive not found: $in"; return 2; }
+
+  require_secrets_access || return 1
+  require_tools || return 1
+
+  # Script-global (not local) so the deferred EXIT trap still sees it.
+  workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-verify.XXXXXX")"
+  chmod 700 "$workdir"
+  trap 'rm -rf "$workdir"' EXIT
+  local extract="$workdir/extract"
+  mkdir -p "$extract"
+
+  local rc=0
+  decrypt_and_extract "$in" "$identity" "$identity_command" "$workdir" "$extract" || rc=$?
+  [[ "$rc" -eq 0 ]] || return "$rc"
+
+  section "private-backup: verify manifest"
+  check_manifest "$extract" "$workdir"
+}
+
+cmd_restore() {
+  local in="" identity="" identity_command="" apply=0 skip_existing=0
+  local target_home="$HOME"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in) in="${2:-}"; shift 2 ;;
+      --identity) identity="${2:-}"; shift 2 ;;
+      --identity-command) identity_command="${2:-}"; shift 2 ;;
+      --apply) apply=1; shift ;;
+      --skip-existing) skip_existing=1; shift ;;
+      --target-home) target_home="${2:-}"; shift 2 ;;
+      *) fail "unknown restore argument: $1"; usage; return 2 ;;
+    esac
+  done
+
+  if [[ -z "$in" ]]; then
+    fail "restore requires --in PATH"
+    usage
+    return 2
+  fi
+  if [[ -n "$identity" && -n "$identity_command" ]]; then
+    fail "use only one of --identity / --identity-command"
+    return 2
+  fi
+  if [[ -z "$identity" && -z "$identity_command" ]]; then
+    fail "restore requires --identity PATH or --identity-command CMD"
+    return 2
+  fi
+  [[ -f "$in" ]] || { fail "archive not found: $in"; return 2; }
+  [[ -d "$target_home" ]] || { fail "target home is not a directory: $target_home"; return 2; }
+
+  require_secrets_access || return 1
+  require_tools || return 1
+
+  workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-restore.XXXXXX")"
+  chmod 700 "$workdir"
+  trap 'rm -rf "$workdir"' EXIT
+  local extract="$workdir/extract"
+  mkdir -p "$extract"
+
+  local rc=0
+  decrypt_and_extract "$in" "$identity" "$identity_command" "$workdir" "$extract" || rc=$?
+  [[ "$rc" -eq 0 ]] || return "$rc"
+
+  # Never restore from an archive that fails its own integrity check.
+  section "private-backup: verify before restore"
+  check_manifest "$extract" "$workdir" || {
+    fail "archive failed verification; refusing to restore"
+    return 1
+  }
+
+  local manifest="$extract/manifest.json"
+  local label="dry-run"
+  [[ "$apply" -eq 1 ]] && label="apply"
+  section "private-backup: restore ($label)"
+  if [[ "$apply" -ne 1 ]]; then
+    item "dry-run: no files will be written (pass --apply to perform)"
+  fi
+
+  # On apply, displaced files move here (repo-external) before being
+  # overwritten, so a restore is reversible and never silently destroys
+  # content. The backup root's own path must be symlink-free for the same
+  # reason payload targets are: a symlinked ~/.local (or state/dotfiles)
+  # would otherwise redirect the displaced file outside the target tree.
+  # mktemp -d gives a unique dir (no same-second collision) at mode 0700.
+  local backup_dir=""
+  if [[ "$apply" -eq 1 ]]; then
+    if path_has_symlinked_parent "$target_home" ".local/state/dotfiles/x"; then
+      fail "refusing: backup state path contains a symlink ($target_home/.local/state/dotfiles)"
+      return 1
+    fi
+    mkdir -p "$target_home/.local/state/dotfiles"
+    backup_dir="$(mktemp -d "$target_home/.local/state/dotfiles/restore-backup-$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")"
+  fi
+
+  local created=0 overwritten=0 skipped=0 status=0 path f target
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    # Defence in depth (the manifest was already validated above).
+    if ! backup_path_is_safe "$path"; then
+      warn "skip unsafe path: $path"; skipped=$((skipped + 1)); status=1; continue
+    fi
+    case "$path" in
+      *[[:cntrl:]]*) warn "skip control-char path"; skipped=$((skipped + 1)); status=1; continue ;;
+    esac
+    f="$extract/files/$path"
+    target="$target_home/$path"
+    # Refuse to write through a symlinked parent (escape prevention).
+    if path_has_symlinked_parent "$target_home" "$path"; then
+      warn "skip (symlinked parent in target path): $path"; skipped=$((skipped + 1)); status=1; continue
+    fi
+
+    if [[ -e "$target" || -L "$target" ]]; then
+      if [[ "$skip_existing" -eq 1 ]]; then
+        item "skip (exists): $path"
+        skipped=$((skipped + 1))
+        continue
+      fi
+      if [[ "$apply" -eq 1 ]]; then
+        mkdir -p "$(dirname "$backup_dir/$path")"
+        # mv moves a symlink target as the link itself (does not follow).
+        mv "$target" "$backup_dir/$path"
+        mkdir -p "$(dirname "$target")"
+        cp -p "$f" "$target"
+      else
+        item "would overwrite (existing backed up first): $path"
+      fi
+      overwritten=$((overwritten + 1))
+    else
+      if [[ "$apply" -eq 1 ]]; then
+        mkdir -p "$(dirname "$target")"
+        cp -p "$f" "$target"
+      else
+        item "would create: $path"
+      fi
+      created=$((created + 1))
+    fi
+  done < <(yq -p=json -o=tsv '.files[].path' "$manifest")
+
+  if [[ "$apply" -eq 1 ]]; then
+    ok "restored: $created created, $overwritten overwritten, $skipped skipped"
+    [[ "$overwritten" -gt 0 ]] && item "displaced files saved under: $backup_dir"
+  else
+    ok "dry-run: $created would be created, $overwritten would be overwritten, $skipped skipped"
+  fi
+  return "$status"
+}
+
 main() {
   local command="${1:-}"
   shift || true
   case "$command" in
     backup) cmd_backup "$@" ;;
     verify) cmd_verify "$@" ;;
+    restore) cmd_restore "$@" ;;
     -h | --help | help | "") usage; [[ -z "$command" ]] && return 2 || return 0 ;;
     *) fail "unknown command: $command"; usage; return 2 ;;
   esac

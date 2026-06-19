@@ -260,6 +260,95 @@ else
   miss "missing recipient should exit 2, got $rc"
 fi
 
+# 12. restore dry-run writes nothing.
+rdst="$fixture_home/restore-dst"
+mkdir -p "$rdst"
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" 2>&1)" || true
+if grep -Fq "would create" <<< "$out" && [[ "$(find "$rdst" -type f | wc -l | tr -d ' ')" -eq 0 ]]; then
+  pass "restore dry-run writes nothing"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore dry-run wrote files or did not plan"
+fi
+
+# 13. restore --apply restores files with the original content.
+if run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply >/dev/null 2>&1 \
+  && [[ "$(cat "$rdst/.zshrc.local" 2>/dev/null)" == "export SECRET_TOKEN=abc123" ]] \
+  && [[ -f "$rdst/.ssh/config.local" ]]; then
+  pass "restore --apply restores files with original content"
+else
+  miss "restore --apply did not restore correctly"
+fi
+
+# 14. restore --apply over an existing file backs the old one up first.
+printf 'LOCAL EDIT\n' > "$rdst/.zshrc.local"
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply 2>&1)" || true
+backed_up="$(find "$rdst/.local/state/dotfiles" -name '.zshrc.local' 2>/dev/null | head -n1)"
+if [[ "$(cat "$rdst/.zshrc.local")" == "export SECRET_TOKEN=abc123" ]] \
+  && [[ -n "$backed_up" && "$(cat "$backed_up")" == "LOCAL EDIT" ]]; then
+  pass "restore overwrites and saves the displaced file"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore did not back up the displaced file"
+fi
+
+# 15. restore --skip-existing leaves existing files untouched.
+printf 'KEEP ME\n' > "$rdst/.zshrc.local"
+run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply --skip-existing >/dev/null 2>&1 || true
+if [[ "$(cat "$rdst/.zshrc.local")" == "KEEP ME" ]]; then
+  pass "restore --skip-existing leaves existing files untouched"
+else
+  miss "restore --skip-existing overwrote an existing file"
+fi
+
+# 16. restore refuses to write through a symlinked parent (escape defence).
+sdst="$fixture_home/restore-symlink-dst"
+escape="$fixture_home/escape-target"
+mkdir -p "$sdst" "$escape"
+ln -s "$escape" "$sdst/.ssh"
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$sdst" --apply 2>&1)" || true
+if grep -Fq "symlinked parent" <<< "$out" && [[ ! -e "$escape/config.local" ]]; then
+  pass "restore refuses a symlinked parent (no escape)"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore wrote through a symlinked parent"
+fi
+
+# 16b. restore refuses when the backup-state path is a symlink (the
+#      displaced-file move must not escape via ~/.local -> outside).
+bdst="$fixture_home/restore-bdir-dst"
+boutside="$fixture_home/bdir-outside"
+mkdir -p "$bdst" "$boutside"
+printf 'pre-existing\n' > "$bdst/.zshrc.local"   # force the overwrite/backup path
+ln -s "$boutside" "$bdst/.local"
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$bdst" --apply 2>&1)" || true
+if grep -Fq "backup state path contains a symlink" <<< "$out" \
+  && [[ -z "$(find "$boutside" -type f 2>/dev/null)" ]] \
+  && [[ "$(cat "$bdst/.zshrc.local")" == "pre-existing" ]]; then
+  pass "restore refuses a symlinked backup-state path (no escape, nothing overwritten)"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore did not refuse a symlinked backup-state path"
+fi
+
+# 17. restore refuses an archive that fails verification (corrupt manifest).
+out="$(run restore --in "$fixture_home/out/badsum.age" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply 2>&1)" || true
+if grep -Fq "refusing to restore" <<< "$out"; then
+  pass "restore refuses an archive that fails verification"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore did not refuse a failed-verification archive"
+fi
+
+# 18. Runtime gate: a denied profile refuses to restore.
+set_profile work-minimal
+if run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply >/dev/null 2>&1; then
+  miss "restore must refuse under a denied profile"
+else
+  pass "restore refuses under a denied profile (work-minimal)"
+fi
+set_profile personal
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi

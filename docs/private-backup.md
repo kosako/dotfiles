@@ -56,6 +56,9 @@ private-backup.sh backup --out PATH [--recipient AGE1... | --recipients-file PAT
                          [--local-supplement PATH] [--yes]
 # verify: アーカイブを 0700 temp に復号し manifest と突き合わせ検証(HOME には書かない)
 private-backup.sh verify --in PATH (--identity PATH | --identity-command CMD)
+# restore: verify した上で HOME(or --target-home)へ復元。既定 dry-run、--apply で実行
+private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
+                          [--apply] [--skip-existing] [--target-home DIR]
 ```
 
 - recipient は flag か非コミットの `~/.config/dotfiles/private-backup.recipient` から取得。
@@ -65,6 +68,10 @@ private-backup.sh verify --in PATH (--identity PATH | --identity-command CMD)
 - archive は `tar | age` を pipe して平文 tar をディスクに残さない。アーカイブ内のパスは
   home 相対(`-C` で絶対パスを含めない)。
 - backup は捕捉 0 件なら空アーカイブを書かず fail。symlink / 不在 / 非正規ファイルは skip(warn)。
+- restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
+  `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(`~/.local/state/dotfiles/
+  restore-backup-<ts>/`)へ move。`--skip-existing` で既存は触らない。**symlink 化した親ディレクトリ
+  経由の書き込みを拒否**して HOME 外への escape を防ぐ。verify と同じ展開前 member 検証を共有。
 
 ## 段階
 
@@ -73,8 +80,9 @@ private-backup.sh verify --in PATH (--identity PATH | --identity-command CMD)
   指定先書き出し + local 補足同梱)+ verify。doctor の report-only section
   (public baseline の解決 + marker からバックアップ有無/最終日時。local 補足は存在のみ・
   中身は読まない)。
-- **第2段(後続)**: restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 / 0700 temp /
-  symlink・path traversal 防御)。冒頭で `require_secrets_access` を通す。
+- **第2段(完了)**: restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 / 0700 temp /
+  home-relative 検証 / symlink 親ディレクトリ経由の書き込み拒否 / verify 済みアーカイブのみ復元)。
+  冒頭で `require_secrets_access` を通す。
 
 ## 安全境界(後続スクリプトが守る規約)
 
