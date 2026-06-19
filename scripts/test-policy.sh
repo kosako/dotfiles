@@ -390,9 +390,16 @@ if [ "$1" = "env" ] && [ "$2" = "GOPATH" ]; then echo "$FAKE_GOPATH"; exit 0; fi
 exit 0
 EOF
   chmod +x "$drift_fakebin/brew" "$drift_fakebin/npm" "$drift_fakebin/go"
-  # yq is the one real tool the function needs; symlink it so the minimal
-  # PATH can still satisfy require_yq without pulling in the host's bin dir.
-  ln -s "$(command -v yq)" "$drift_fakebin/yq"
+  # Make the fake bin fully self-contained so report_catalog_drift runs with
+  # PATH=$drift_fakebin only. A minimal PATH that still included /usr/bin
+  # would leak host tools: GitHub's ubuntu runner ships a real `go` in
+  # /usr/bin, which would defeat the go-absent test. Symlinking the few real
+  # tools the function needs keeps manager presence controlled by the fakes
+  # alone (and host-independent).
+  local tool
+  for tool in bash sh cat dirname mktemp sort grep find basename awk rm yq; do
+    ln -s "$(command -v "$tool")" "$drift_fakebin/$tool"
+  done
 
   # Default inventory == the reality-seed catalog (drift-free baseline).
   printf '%s\n' chezmoi gh mise tmux yq > "$drift_dir/brew_formulae"
@@ -410,7 +417,7 @@ run_drift() {
   local name="$1"
   local expected="$2"
   run_ok_contains "$name" "$expected" \
-    env "PATH=$drift_fakebin:/usr/bin:/bin" \
+    env "PATH=$drift_fakebin" \
         "DRIFT_DIR=$drift_dir" \
         "FAKE_GOPATH=$drift_dir/go" \
         "LIBPOLICY=$fixture/scripts/lib-policy.sh" \
