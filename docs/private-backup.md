@@ -84,6 +84,39 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   home-relative 検証 / symlink 親ディレクトリ経由の書き込み拒否 / verify 済みアーカイブのみ復元)。
   冒頭で `require_secrets_access` を通す。
 
+## 新マシン bootstrap 手順(復元チェーン)
+
+復号に必要な信頼の起点は age identity 鍵で、それは 1Password にある。そして 1Password へ
+アクセスする手段(`op` の設定・sign-in 材料)を **backup の中身に依存させない**。逆順だと
+「backup を復号するには identity が要る → identity は 1Password → 1Password access は backup
+の中」で循環する。よって新マシンでは下記を**手で用意してから** restore する。**順序を守る**:
+
+1. **公開 dotfiles を入れる**: chezmoi + yq を入れ `chezmoi init`([README](../README.md) の
+   Quickstart)。これは public 設定だけで、private 設定(本機能の対象)は含まれない。
+2. **age を入れる**: `brew install age`。catalog の宣言レイヤ(#53)に載るが install action は
+   手動起動なので、ここでは手で入れる。verify / restore が age に依存する。
+3. **1Password を用意する(信頼の起点・手動)**: 1Password app と `op` CLI を入れ、sign-in する。
+   **backup から復元しない** —— backup を復号する identity がまだ無いため。op の設定 / sign-in
+   材料を「backup にだけ置く」ことは禁止([docs/secrets.md](secrets.md):復元チェーンの循環回避)。
+4. **age identity を 1Password から取り出す**: identity は `op read` で**参照**する(値を
+   ディスクに落とさない)。dotfiles はこの fetch を実行せず、利用者の手元操作に閉じる(secrets.md)。
+5. **restore する**: まず dry-run で差分を確認し、問題なければ `--apply`。
+
+```sh
+# identity をディスクに置かず op 経由で age に渡す(op:// は placeholder。実 vault/item 名は repo に書かない)
+./scripts/private-backup.sh restore --in /path/to/archive.age \
+  --identity-command 'op read op://Personal/dotfiles-age-identity/identity'
+
+# 差分を確認したら --apply を付けて反映(既存ファイルは timestamp 退避 dir へ move)
+./scripts/private-backup.sh restore --in /path/to/archive.age \
+  --identity-command 'op read op://Personal/dotfiles-age-identity/identity' --apply
+```
+
+restore は `allowSecretsAccess=true` の profile でのみ実行できる(work / client / agent では拒否)。
+復元後に**新しい backup を作る**には公開鍵(recipient)が要る ——
+`~/.config/dotfiles/private-backup.recipient` を置くか `--recipient` で渡す(公開鍵なので
+secret ではないが repo にはコミットしない)。
+
 ## 安全境界(後続スクリプトが守る規約)
 
 - backup / restore は **手動起動のみ**・`chezmoi apply` 非結合。
