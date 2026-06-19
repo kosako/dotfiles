@@ -631,12 +631,20 @@ cmd_restore() {
     item "dry-run: no files will be written (pass --apply to perform)"
   fi
 
-  # On apply, displaced files move here (timestamped, repo-external) before
-  # being overwritten, so a restore is reversible and never silently
-  # destroys existing content.
+  # On apply, displaced files move here (repo-external) before being
+  # overwritten, so a restore is reversible and never silently destroys
+  # content. The backup root's own path must be symlink-free for the same
+  # reason payload targets are: a symlinked ~/.local (or state/dotfiles)
+  # would otherwise redirect the displaced file outside the target tree.
+  # mktemp -d gives a unique dir (no same-second collision) at mode 0700.
   local backup_dir=""
   if [[ "$apply" -eq 1 ]]; then
-    backup_dir="$target_home/.local/state/dotfiles/restore-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    if path_has_symlinked_parent "$target_home" ".local/state/dotfiles/x"; then
+      fail "refusing: backup state path contains a symlink ($target_home/.local/state/dotfiles)"
+      return 1
+    fi
+    mkdir -p "$target_home/.local/state/dotfiles"
+    backup_dir="$(mktemp -d "$target_home/.local/state/dotfiles/restore-backup-$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")"
   fi
 
   local created=0 overwritten=0 skipped=0 status=0 path f target

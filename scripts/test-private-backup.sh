@@ -314,6 +314,23 @@ else
   miss "restore wrote through a symlinked parent"
 fi
 
+# 16b. restore refuses when the backup-state path is a symlink (the
+#      displaced-file move must not escape via ~/.local -> outside).
+bdst="$fixture_home/restore-bdir-dst"
+boutside="$fixture_home/bdir-outside"
+mkdir -p "$bdst" "$boutside"
+printf 'pre-existing\n' > "$bdst/.zshrc.local"   # force the overwrite/backup path
+ln -s "$boutside" "$bdst/.local"
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$bdst" --apply 2>&1)" || true
+if grep -Fq "backup state path contains a symlink" <<< "$out" \
+  && [[ -z "$(find "$boutside" -type f 2>/dev/null)" ]] \
+  && [[ "$(cat "$bdst/.zshrc.local")" == "pre-existing" ]]; then
+  pass "restore refuses a symlinked backup-state path (no escape, nothing overwritten)"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore did not refuse a symlinked backup-state path"
+fi
+
 # 17. restore refuses an archive that fails verification (corrupt manifest).
 out="$(run restore --in "$fixture_home/out/badsum.age" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply 2>&1)" || true
 if grep -Fq "refusing to restore" <<< "$out"; then
