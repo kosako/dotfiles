@@ -324,10 +324,13 @@ section "agent-tools (report-only)"
 # so doctor's no-side-effects invariant is never delegated implicitly.
 # See docs/ai-environment-boundary.md and the agent-tools
 # status-manifest-contract (contract_version 2).
+# The expected path defaults to the dotfiles directory convention
+# (~/src/agent/agent-tools) but is overridable via the AGENT_TOOLS env so a
+# non-standard checkout can still be reported. presence only; never cloned.
 if [[ "$(capability_value "$profile" enableAiPolicy)" != "true" ]]; then
   ok "AI policy disabled; skipping agent-tools check"
 else
-  agent_tools_dir="$HOME/src/agent/agent-tools"
+  agent_tools_dir="${AGENT_TOOLS:-$HOME/src/agent/agent-tools}"
   agent_tools_status="$agent_tools_dir/scripts/status.sh"
   if [[ ! -d "$agent_tools_dir" ]]; then
     warn "agent-tools not present at $agent_tools_dir (not auto-cloned)"

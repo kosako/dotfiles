@@ -204,6 +204,37 @@ else
   status=1
 fi
 
+# H) AGENT_TOOLS overrides the expected path (issue #71). The default
+#    ~/src/agent/agent-tools is absent (removed in E), so a v2 summary plus
+#    the run marker proves doctor read the overridden checkout.
+override_dir="$fixture_home/custom/agent-tools"
+override_scripts="$override_dir/scripts"
+override_marker="$override_dir/ran-marker"
+mkdir -p "$override_scripts"
+cat > "$override_scripts/status.sh" <<'SH'
+#!/bin/sh
+[ "$1" = "--json" ] || exit 1
+: > "$(dirname "$0")/../ran-marker"
+cat <<'JSON'
+{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":0,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":0,"stale":0},"register":{"catalog_present":false,"registered":0,"human_review_required":0,"unsupported":0},"sync_targets":[]}
+JSON
+SH
+chmod +x "$override_scripts/status.sh"
+rm -f "$override_marker"
+if at_out="$(HOME="$fixture_home" AGENT_TOOLS="$override_dir" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "agent-tools present; status contract v2" <<< "$at_out" && [[ -e "$override_marker" ]]; then
+    ok "test passed: AGENT_TOOLS overrides the expected path"
+  else
+    printf '%s\n' "$at_out" >&2
+    fail "test failed: AGENT_TOOLS override not honored"
+    status=1
+  fi
+else
+  printf '%s\n' "$at_out" >&2
+  fail "test failed: doctor must stay exit 0 with AGENT_TOOLS override"
+  status=1
+fi
+
 # private-backup report-only section (issue #60). doctor must report
 # backup presence and the local supplement's EXISTENCE ONLY, never parse
 # or read the supplement, and always stay exit 0.
