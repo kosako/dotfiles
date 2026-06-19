@@ -464,8 +464,8 @@ EOF
   done
 
   # Default inventory == the reality-seed catalog (drift-free baseline).
-  printf '%s\n' age chezmoi gh mise tmux yq > "$drift_dir/brew_formulae"
-  printf '%s\n' age chezmoi gh mise tmux yq > "$drift_dir/brew_leaves"
+  printf '%s\n' age chezmoi gh mise shellcheck tmux yq > "$drift_dir/brew_formulae"
+  printf '%s\n' age chezmoi gh mise shellcheck tmux yq > "$drift_dir/brew_leaves"
   printf '%s\n' copilot-cli iterm2 swiftbar > "$drift_dir/brew_casks"
   # npm and corepack are node-bundled; including them proves they are
   # filtered out and never reported as undeclared.
@@ -495,16 +495,16 @@ run_drift "catalog drift: flags an undeclared brew leaf" \
   "undeclared: librsvg (brew_formula leaf not in catalog)"
 
 setup_drift
-printf '%s\n' gh mise tmux yq > "$drift_dir/brew_formulae"
-printf '%s\n' gh mise tmux yq > "$drift_dir/brew_leaves"
+printf '%s\n' age gh mise shellcheck tmux yq > "$drift_dir/brew_formulae"
+printf '%s\n' age gh mise shellcheck tmux yq > "$drift_dir/brew_leaves"
 run_drift "catalog drift: flags a declared package that is not installed" \
   "not installed: chezmoi (brew_formula)"
 
 setup_drift
 # Declared via brew but absent from brew, while the command resolves on
 # PATH -> source drift (info), not "not installed".
-printf '%s\n' chezmoi mise tmux yq > "$drift_dir/brew_formulae"
-printf '%s\n' chezmoi mise tmux yq > "$drift_dir/brew_leaves"
+printf '%s\n' age chezmoi mise shellcheck tmux yq > "$drift_dir/brew_formulae"
+printf '%s\n' age chezmoi mise shellcheck tmux yq > "$drift_dir/brew_leaves"
 printf '#!/bin/sh\nexit 0\n' > "$drift_fakebin/gh"
 chmod +x "$drift_fakebin/gh"
 run_drift "catalog drift: source mismatch is info when the command is on PATH" \

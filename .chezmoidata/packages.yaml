@@ -37,6 +37,7 @@ packages:
   - { name: chezmoi, source: brew_formula }
   - { name: gh, source: brew_formula }
   - { name: mise, source: brew_formula }
+  - { name: shellcheck, source: brew_formula }
   - { name: tmux, source: brew_formula }
   - { name: yq, source: brew_formula }
   - { name: copilot-cli, source: brew_cask }
