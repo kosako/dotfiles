@@ -207,6 +207,18 @@ else
   miss "verify missed a mode mismatch"
 fi
 
+# 8d. A payload that decrypts but is not a valid tar fails closed (the
+#     member listing must reject it before extraction, not swallow tar's
+#     error).
+printf 'this is not a tar archive\n' | age -r "$recipient" -o "$fixture_home/out/notar.age"
+out="$(run verify --in "$fixture_home/out/notar.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
+if grep -Fq "could not list archive members" <<< "$out"; then
+  pass "verify fails closed on a non-tar payload"
+else
+  printf '%s\n' "$out" >&2
+  miss "verify did not fail closed on a non-tar payload"
+fi
+
 # 9. Runtime gate: a denied profile refuses to back up.
 set_profile work-minimal
 if run backup --out "$fixture_home/out/denied.age" --recipient "$recipient" --yes >/dev/null 2>&1; then

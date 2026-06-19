@@ -87,10 +87,23 @@ member_name_is_allowed() {
 # fifo), or (b) any disallowed or unsafe member name. Returns 0 if every
 # member is safe to extract into an isolated temp.
 validate_tar_members() {
-  local archive="$1"
+  local archive="$1" listdir
+  listdir="$(dirname "$archive")"
+  local tlist="$listdir/.tlist" vlist="$listdir/.tvlist"
+  # Capture the listings to files (not via a process substitution) so a
+  # `tar` that fails to even list a corrupt archive fails closed here,
+  # rather than its non-zero status being swallowed by the pipe.
+  if ! tar -tf "$archive" > "$tlist" 2>/dev/null; then
+    fail "could not list archive members; rejected before extraction"
+    return 1
+  fi
+  if ! tar -tvf "$archive" > "$vlist" 2>/dev/null; then
+    fail "could not list archive members; rejected before extraction"
+    return 1
+  fi
   # Type pass: the ls-style first character of `tar -tvf` is portable
   # across BSD (macOS) and GNU tar. Anything but "-" (regular) or "d"
-  # (directory) is rejected.
+  # (directory) is rejected (symlink "l", hardlink "h", device/fifo).
   local tc
   while IFS= read -r tc; do
     [[ -z "$tc" ]] && continue
@@ -98,8 +111,14 @@ validate_tar_members() {
       fail "archive has a non-regular member (symlink/hardlink/special); rejected before extraction"
       return 1
     fi
-  done < <(tar -tvf "$archive" 2>/dev/null | awk '{print substr($1,1,1)}')
-  # Name pass: reject traversal / absolute / disallowed members.
+  done < <(awk '{print substr($1,1,1)}' "$vlist")
+  # Name pass: reject traversal / absolute / disallowed members. A member
+  # name containing a newline is split across lines here, but that cannot
+  # cause an escape: the type pass already excludes symlinks, every line
+  # fragment is still checked (a "../" fragment is rejected), and any
+  # surviving odd name is caught downstream as a file not in the manifest.
+  # Backup itself never emits such names (control chars are rejected at
+  # capture time).
   local name
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
@@ -107,7 +126,7 @@ validate_tar_members() {
       fail "archive has a disallowed member name; rejected before extraction"
       return 1
     fi
-  done < <(tar -tf "$archive" 2>/dev/null)
+  done < "$tlist"
   return 0
 }
 
