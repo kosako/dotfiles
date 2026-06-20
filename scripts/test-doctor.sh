@@ -204,9 +204,9 @@ else
   status=1
 fi
 
-# H) AGENT_TOOLS overrides the expected path (issue #71). The default
-#    ~/src/agent/agent-tools is absent (removed in E), so a v2 summary plus
-#    the run marker proves doctor read the overridden checkout.
+# AT-override) AGENT_TOOLS overrides the expected path (issue #71). The
+#    default ~/src/agent/agent-tools is absent (removed in E), so a v2 summary
+#    plus the run marker proves doctor read the overridden checkout.
 override_dir="$fixture_home/custom/agent-tools"
 override_scripts="$override_dir/scripts"
 override_marker="$override_dir/ran-marker"
