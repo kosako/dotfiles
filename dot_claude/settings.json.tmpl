@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__pencil"
+    ]
+  },
+  "model": "opus[1m]",
+  "statusLine": {
+    "type": "command",
+    "command": "{{ .chezmoi.homeDir }}/go/bin/tacho statusline",
+    "padding": 0
+  },
+  "enabledPlugins": {
+    "skill-creator@claude-plugins-official": true,
+    "codex@openai-codex": true,
+    "notion@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
+      }
+    }
+  },
+  "effortLevel": "xhigh",
+  "agentPushNotifEnabled": true,
+  "remoteControlAtStartup": true
+}

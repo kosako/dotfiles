@@ -51,3 +51,8 @@ modules:
     description: AI agent 権限方針。
   ai-tools:
     description: 後続 module。AI tool install / 設定。
+  claude-settings:
+    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。
+    paths:
+      - .claude
+      - .claude/settings.json
