@@ -13,6 +13,12 @@ scripts
 templates
 worklog
 
+{{/* User-local Claude files are never tracked. settings.local.json holds
+     dynamic, machine/session-specific permissions that Claude Code writes
+     itself; chezmoi must not manage it. settings.json (the shared, public-safe
+     subset) is gated via the claude-settings module below. */}}
+.claude/settings.local.json
+
 {{/* Module-declared paths (.chezmoidata/modules.yaml) are managed only
      when the profile lists the module and every capability in its
      requires: matches. Everything else is ignored, so a path is only

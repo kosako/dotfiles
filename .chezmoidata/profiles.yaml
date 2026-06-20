@@ -18,6 +18,7 @@ profiles:
       - gui-apps
       - update-policy
       - ai-policy
+      - claude-settings
     capabilities:
       installPackages: true
       installGuiApps: true
