@@ -236,6 +236,32 @@ catalog_source_preference() {
   c="$category" yq '.source_preference[strenv(c)][]?' "$PACKAGES_FILE"
 }
 
+# Map a catalog source to the capability that gates installing it (#53 stage
+# 2). brew_formula / npm_global / go_install are package installs
+# (installPackages); brew_cask / mas are GUI apps (installGuiApps). manual and
+# any unknown source map to nothing — never installed by tooling. Returns 1
+# (and prints nothing) for the uninstallable sources.
+source_install_capability() {
+  case "$1" in
+    brew_formula | npm_global | go_install) printf 'installPackages\n' ;;
+    brew_cask | mas) printf 'installGuiApps\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether PROFILE may install SOURCE: the gating capability must be literally
+# true. Fail-closed — an unknown profile, an uninstallable source (manual /
+# unknown), or a non-true / absent capability all return 1. No side effects;
+# prints nothing. environmentKind constraints already force installPackages /
+# installGuiApps false on work / client / agent (sandbox forbids only secret
+# access), so this gate keeps the catalog installer from acting on those kinds.
+profile_installs_source() {
+  local profile="$1" source="$2" cap
+  cap="$(source_install_capability "$source")" || return 1
+  profile_exists "$profile" || return 1
+  [[ "$(capability_value "$profile" "$cap")" == "true" ]]
+}
+
 # Report drift between the declared catalog (packages.yaml) and what is
 # actually installed, per source. Report-only: every path returns 0 so a
 # caller under `set -e` (doctor.sh) keeps its exit code, and all probes are

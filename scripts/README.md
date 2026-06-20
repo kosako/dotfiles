@@ -143,6 +143,27 @@ fixture HOME で doctor の managed-path orphan 検出を検証する。実 home
   archive / 件数を表示すること。local 補足は **存在のみ**で中身(secret らしき行)を漏らさないこと。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
+## install-packages.sh
+
+software catalog(`.chezmoidata/packages.yaml`)の **未 install entry を install** する(#53 第2段)。
+手動起動のみ・`chezmoi apply` 非結合。**dry-run 既定**で、`--apply` を付けたときだけ実 install する。
+実 profile を chezmoi config から fail-closed に解決し、source を `installPackages`(brew_formula /
+npm_global / go_install)/ `installGuiApps`(brew_cask / mas)で gate する(work / client / agent は
+これらが false なので何も install しない)。既 install は skip して**更新しない**(install と update の
+分離、[docs/update-policy.md](../docs/update-policy.md))。track-only / manual は対象外。npm / go の
+manager が PATH に無ければ skip + warn(runtime は mise の領分)。
+
+```sh
+./scripts/install-packages.sh           # dry-run: 何が install されるか表示
+./scripts/install-packages.sh --apply   # 未 install entry を実際に install
+```
+
+## test-install-packages.sh
+
+`install-packages.sh` の gate と fail-closed 契約を検証する。source→capability の対応、
+`profile_installs_source` が personal のみ install を許し work 系は許さないこと、profile 未解決時の
+拒否、解決済み work profile の dry-run が 0 件を計画すること(副作用なし)を確認する。
+
 ## private-backup.sh
 
 private な設定(`.local` 上書き + curated アプリ設定)を **age identity 鍵**で単一アーカイブに
