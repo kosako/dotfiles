@@ -317,6 +317,25 @@ else
   ok "AI tool install/sync not managed (enableAiTools=false)"
 fi
 
+# enforceAiSandbox drives the Claude Code native sandbox block in the managed
+# ~/.claude/settings.json (Bash tool fs+network only; see
+# docs/ai-environment-boundary.md). Reported here because AGENTS.md requires a
+# capability to drive a doctor section, never a placeholder. It is a
+# safety-hardening capability (opposite polarity to the install / secret /
+# network / AI-tool capabilities), so it is intentionally absent from
+# environment_kind_forbidden_capabilities. The sandbox block only reaches a
+# real settings.json where the claude-settings module is active (personal
+# today), so a true value without that module is reported as dangling.
+if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    ok "enforceAiSandbox=true; Claude Code native sandbox managed in ~/.claude/settings.json (Bash tool fs+network only)"
+  else
+    warn "enforceAiSandbox=true but the claude-settings module is inactive for this profile; no managed settings carry the sandbox block (dangling capability)"
+  fi
+else
+  ok "Claude Code native sandbox not enforced via managed settings (enforceAiSandbox=false)"
+fi
+
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
 # agent-tools. Presence is always reported, but running its status.sh

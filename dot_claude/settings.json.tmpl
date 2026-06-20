@@ -1,4 +1,15 @@
+{{- $caps := index (index .profiles .profile) "capabilities" -}}
 {
+{{- if index $caps "enforceAiSandbox" }}
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": []
+    }
+  },
+{{- end }}
   "permissions": {
     "allow": [
       "mcp__pencil"

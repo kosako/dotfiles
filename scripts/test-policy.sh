@@ -362,6 +362,20 @@ run_fail_contains \
   "environmentKind agent forbids" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# enforceAiSandbox is a safety-hardening capability (opposite polarity to the
+# install / secret / network / AI-tool capabilities), so it must NOT be in the
+# environmentKind forbidden table: a restrictive kind (work) may set it true.
+# Flip every profile's value to true and assert --all (personal + both work
+# profiles) still validates; a regression that forbade it would hard-fail the
+# work profiles here.
+make_fixture
+awk '$0 == "      enforceAiSandbox: false" { print "      enforceAiSandbox: true"; next } { print }' \
+  "$fixture/.chezmoidata/profiles.yaml" > "$fixture/.chezmoidata/profiles.yaml.tmp"
+mv "$fixture/.chezmoidata/profiles.yaml.tmp" "$fixture/.chezmoidata/profiles.yaml"
+run_ok \
+  "enforceAiSandbox=true is allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiPolicy: true" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"

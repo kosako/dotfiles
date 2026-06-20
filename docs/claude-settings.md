@@ -51,6 +51,18 @@ module loop が、module を持たない profile(work-minimal / work-dev)では 
 **ディレクトリごと** ignore する。`scripts/test-render.sh` が profile 別の managed set で
 この gate を回帰固定している。
 
+## sandbox(`enforceAiSandbox`)
+
+`settings.json` 内の Claude Code native sandbox ブロックは `enforceAiSandbox` capability で
+gate する。true のときだけ `sandbox`(`enabled` / `failIfUnavailable: true` /
+`allowUnsandboxedCommands: false` / `network.allowedDomains: []`)を出し、false(全 profile の
+既定)では出さない。**effective なのは
+`claude-settings` module が active な personal だけ**(他 profile で true にしても dangling。
+`doctor` が報告)。射程(Bash tool の fs+network のみ・非TLS)・極性・既定の根拠は
+[policy-model](policy-model.md)・[ai-environment-boundary](ai-environment-boundary.md)、
+Issue #50。content の回帰は `scripts/test-claude-settings.sh`(cap=true で block が出る /
+false で出ない)が固定する。
+
 ## 後日 / 対象外
 
 - work / client の settings を新マシンで復元したいか次第で、**#60 暗号化バックアップ**に

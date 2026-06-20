@@ -135,6 +135,33 @@ enableAiTools: false
 `enableAiPolicy=true` は policy document と report-only check を有効にする。
 `enableAiTools=false` は AI tool install / AI asset sync / agent setup を行わないことを意味する。
 
+## Claude Code sandbox の射程と限界(`enforceAiSandbox`)
+
+`enforceAiSandbox` capability は、managed な `~/.claude/settings.json` に Claude Code の native
+sandbox ブロック(`sandbox.enabled` / `failIfUnavailable` / `allowUnsandboxedCommands` /
+`network.allowedDomains`)を出す。enforcement は Claude Code 自身が settings から内部適用する
+(外側で包む別物 `@anthropic-ai/sandbox-runtime` ではない)。
+
+射程を正確に把握する(過大評価しない):
+
+- **対象は Bash tool の subprocess の fs + network のみ**。`Read` / `Edit` / `Write` /
+  `WebFetch`、MCP server、hooks は **sandbox の外**(これらは `permissions` で律する)。
+- network は **per-domain の hostname allowlist** で、**TLS 終端しない**(暗号化内容は検査せず、
+  hostname だけで allow/deny する。domain fronting 等は素通りしうる)。既定 allowlist は
+  public-safe な**空**。
+- strict 化は **2 軸**で fallback を塞ぐ(`enforce` の名に合わせ、使えない環境で黙って
+  素通りさせない):
+  - `allowUnsandboxedCommands: false` — sandbox 内で個々のコマンドを unsandboxed へ
+    fallback させない(既定 `true`)。
+  - `failIfUnavailable: true` — sandbox 自体が初期化できない(依存不足・未対応 platform)
+    ときに、既定の「warning して全コマンドを unsandboxed 実行」を止め、hard fail にする
+    (既定 `false`)。これが無いと enforce を名乗っても unavailable 時に静かに無効化される。
+
+OS 全体の強制(`@anthropic-ai/sandbox-runtime` / 自作 Seatbelt profile / devcontainer の
+network firewall)は **別 tier** で、今の `dotfiles` には入れない(将来の opt-in)。gate・極性・
+既定値の正本は [policy-model](policy-model.md) の「Claude Code sandbox」。出典:
+code.claude.com/docs/en/sandboxing。Issue #50。
+
 ## 禁止事項
 
 - `dotfiles` から AI skills / agents project を暗黙に clone / pull する。

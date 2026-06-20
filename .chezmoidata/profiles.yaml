@@ -34,6 +34,7 @@ profiles:
       allowNetworkTunnels: true
       allowSecretsAccess: true
       enableAiTools: false
+      enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
 
@@ -64,6 +65,7 @@ profiles:
       allowNetworkTunnels: false
       allowSecretsAccess: false
       enableAiTools: false
+      enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
 
@@ -99,5 +101,6 @@ profiles:
       allowNetworkTunnels: false
       allowSecretsAccess: false
       enableAiTools: false
+      enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
