@@ -110,3 +110,6 @@ jobs:
 
       - name: chezmoi render and managed-set tests
         run: ./scripts/test-render.sh
+
+      - name: claude settings sandbox content tests
+        run: ./scripts/test-claude-settings.sh

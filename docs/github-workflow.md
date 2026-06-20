@@ -108,11 +108,12 @@ main 直 commit は例外扱いにする。
 ./scripts/test-npmrc.sh
 ./scripts/test-doctor.sh
 ./scripts/test-render.sh
+./scripts/test-claude-settings.sh
 bash -n scripts/*.sh
 git diff --check
 ```
 
-`test-render.sh` は chezmoi を必要とする(CI では version pin して導入する)。
+`test-render.sh` / `test-claude-settings.sh` は chezmoi を必要とする(CI では version pin して導入する)。
 
 `preflight` / `doctor` を変更した場合:
 

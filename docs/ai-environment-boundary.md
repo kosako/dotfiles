@@ -135,6 +135,28 @@ enableAiTools: false
 `enableAiPolicy=true` は policy document と report-only check を有効にする。
 `enableAiTools=false` は AI tool install / AI asset sync / agent setup を行わないことを意味する。
 
+## Claude Code sandbox の射程と限界(`enforceAiSandbox`)
+
+`enforceAiSandbox` capability は、managed な `~/.claude/settings.json` に Claude Code の native
+sandbox ブロック(`sandbox.enabled` / `allowUnsandboxedCommands` / `network.allowedDomains`)を
+出す。enforcement は Claude Code 自身が settings から内部適用する(外側で包む別物
+`@anthropic-ai/sandbox-runtime` ではない)。
+
+射程を正確に把握する(過大評価しない):
+
+- **対象は Bash tool の subprocess の fs + network のみ**。`Read` / `Edit` / `Write` /
+  `WebFetch`、MCP server、hooks は **sandbox の外**(これらは `permissions` で律する)。
+- network は **per-domain の hostname allowlist** で、**TLS 終端しない**(暗号化内容は検査せず、
+  hostname だけで allow/deny する。domain fronting 等は素通りしうる)。既定 allowlist は
+  public-safe な**空**。
+- `allowUnsandboxedCommands: false` で sandbox 外への fallback を塞ぐ(脱出させない)。
+  既定は `true` なので、明示的に false にして初めて strict になる。
+
+OS 全体の強制(`@anthropic-ai/sandbox-runtime` / 自作 Seatbelt profile / devcontainer の
+network firewall)は **別 tier** で、今の `dotfiles` には入れない(将来の opt-in)。gate・極性・
+既定値の正本は [policy-model](policy-model.md) の「Claude Code sandbox」。出典:
+code.claude.com/docs/en/sandboxing。Issue #50。
+
 ## 禁止事項
 
 - `dotfiles` から AI skills / agents project を暗黙に clone / pull する。
