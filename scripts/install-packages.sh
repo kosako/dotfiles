@@ -51,31 +51,36 @@ is_installed() {
       command -v "$bincmd" >/dev/null 2>&1 ;;
     go_install)
       command -v "$bincmd" >/dev/null 2>&1 ;;
+    mas)
+      mas list 2>/dev/null | awk '{print $1}' | grep -Fxq -- "$canonical" ;;
     *) return 0 ;;
   esac
 }
 
 # Whether the manager SOURCE needs is on PATH. npm_global / go_install depend
-# on a runtime (node / go) that mise provides; absence means "skip", not
-# "install failed".
+# on a runtime (node / go) that mise provides, and mas needs the `mas` CLI;
+# absence means "skip", not "install failed".
 manager_present() {
   case "$1" in
     brew_formula | brew_cask) command -v brew >/dev/null 2>&1 ;;
     npm_global) command -v npm >/dev/null 2>&1 ;;
     go_install) command -v go >/dev/null 2>&1 ;;
+    mas) command -v mas >/dev/null 2>&1 ;;
     *) return 1 ;;
   esac
 }
 
-# Build the install command for SOURCE into the INSTALL_CMD array (global).
-# Returns 1 for an unsupported source.
+# Build the install command for SOURCE into the INSTALL_CMD array (global),
+# using CANONICAL (= pkg, defaulting to name) as the install id. Returns 1
+# for an unsupported source.
 build_install_cmd() {
-  local source="$1" canonical="$2" pkg="$3"
+  local source="$1" canonical="$2"
   case "$source" in
     brew_formula) INSTALL_CMD=(brew install "$canonical") ;;
     brew_cask) INSTALL_CMD=(brew install --cask "$canonical") ;;
-    npm_global) INSTALL_CMD=(npm install -g "$pkg") ;;
-    go_install) INSTALL_CMD=(go install "${pkg}@latest") ;;
+    npm_global) INSTALL_CMD=(npm install -g "$canonical") ;;
+    go_install) INSTALL_CMD=(go install "${canonical}@latest") ;;
+    mas) INSTALL_CMD=(mas install "$canonical") ;;
     *) return 1 ;;
   esac
 }
@@ -149,7 +154,7 @@ main() {
       skipped=$((skipped + 1)); continue
     fi
 
-    if ! build_install_cmd "$source" "$canonical" "$pkg"; then
+    if ! build_install_cmd "$source" "$canonical"; then
       warn "skip $name: unsupported source '$source'"
       skipped=$((skipped + 1)); continue
     fi

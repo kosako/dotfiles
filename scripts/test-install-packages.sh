@@ -83,17 +83,29 @@ fi
 fixture_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-install-test.XXXXXX")"
 trap 'rm -rf "$fixture_bin"' EXIT
 fake_chezmoi() {
+  # $1 = chezmoi data payload, $2 = exit code
   cat > "$fixture_bin/chezmoi" <<SH
 #!/bin/sh
 printf '%s\n' '$1'
-exit 0
+exit ${2:-0}
 SH
   chmod +x "$fixture_bin/chezmoi"
 }
 
-# 5. A resolved work profile plans zero installs (everything gates out before
-#    any probing, so this is deterministic and has no side effects).
-fake_chezmoi '{"profile":"work-minimal"}'
+# 5a. chezmoi resolves a valid profile but exits non-zero -> refuse. With yq
+#     and bash present (only chezmoi fails), this reaches and pins
+#     resolve_runtime_profile's fail-closed path; the gate must not trust a
+#     masked payload.
+fake_chezmoi '{"profile":"personal"}' 3
+if ( PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" >/dev/null 2>&1 ); then
+  miss "installer must refuse when chezmoi exits non-zero (even with a valid profile)"
+else
+  pass "installer refuses on chezmoi non-zero exit (fail-closed resolve)"
+fi
+
+# 5b. A resolved work profile plans zero installs (everything gates out before
+#     any probing, so this is deterministic and has no side effects).
+fake_chezmoi '{"profile":"work-minimal"}' 0
 if out="$(PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)"; then
   if grep -Fq "dry-run: 0 would be installed" <<< "$out"; then
     pass "work-minimal plans zero installs (gated out)"
@@ -107,7 +119,7 @@ else
 fi
 
 # 6. An undefined resolved profile is refused (fail-closed).
-fake_chezmoi '{"profile":"no-such-profile"}'
+fake_chezmoi '{"profile":"no-such-profile"}' 0
 if ( PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" >/dev/null 2>&1 ); then
   miss "installer must refuse an undefined resolved profile"
 else

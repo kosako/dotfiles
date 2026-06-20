@@ -73,6 +73,9 @@ jobs:
       - name: private-backup backup/verify tests
         run: ./scripts/test-private-backup.sh
 
+      - name: catalog install gate tests
+        run: ./scripts/test-install-packages.sh
+
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 
