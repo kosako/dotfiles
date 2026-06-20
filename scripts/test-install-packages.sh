@@ -126,6 +126,32 @@ else
   pass "installer refuses an undefined resolved profile"
 fi
 
+# 7. build_install_cmd builds the right command per source from the canonical
+#    id (pkg, defaulting to name) — pins the npm pkg-less and mas/go fixes
+#    without performing installs. Sourcing is safe: the main run is guarded.
+# shellcheck source=scripts/install-packages.sh
+source "$SCRIPT_DIR/install-packages.sh"
+check_cmd() {
+  local src="$1" canonical="$2" want="$3" INSTALL_CMD=()
+  if build_install_cmd "$src" "$canonical" && [[ "${INSTALL_CMD[*]}" == "$want" ]]; then
+    pass "build_install_cmd $src -> $want"
+  else
+    miss "build_install_cmd $src should be '$want' (got '${INSTALL_CMD[*]:-<none>}')"
+  fi
+}
+check_cmd brew_formula age "brew install age"
+check_cmd brew_cask iterm2 "brew install --cask iterm2"
+# pkg-less npm entry: canonical falls back to name, never an empty id.
+check_cmd npm_global some-tool "npm install -g some-tool"
+check_cmd npm_global @scope/pkg "npm install -g @scope/pkg"
+check_cmd go_install github.com/x/y/v2 "go install github.com/x/y/v2@latest"
+check_cmd mas 497799835 "mas install 497799835"
+if build_install_cmd manual whatever 2>/dev/null; then
+  miss "build_install_cmd must reject an uninstallable source"
+else
+  pass "build_install_cmd rejects manual/unknown source"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "install-packages tests passed"
 fi

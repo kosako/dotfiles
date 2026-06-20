@@ -182,4 +182,8 @@ main() {
   fi
 }
 
-main "$@"
+# Run only when executed, not when sourced (test-install-packages.sh sources
+# this to unit-test build_install_cmd without performing installs).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

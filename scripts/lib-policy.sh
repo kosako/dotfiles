@@ -253,8 +253,8 @@ source_install_capability() {
 # true. Fail-closed — an unknown profile, an uninstallable source (manual /
 # unknown), or a non-true / absent capability all return 1. No side effects;
 # prints nothing. environmentKind constraints already force installPackages /
-# installGuiApps false on work / client / sandbox / agent, so this gate keeps
-# the catalog installer from ever acting there.
+# installGuiApps false on work / client / agent (sandbox forbids only secret
+# access), so this gate keeps the catalog installer from acting on those kinds.
 profile_installs_source() {
   local profile="$1" source="$2" cap
   cap="$(source_install_capability "$source")" || return 1
