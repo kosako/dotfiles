@@ -138,9 +138,9 @@ enableAiTools: false
 ## Claude Code sandbox の射程と限界(`enforceAiSandbox`)
 
 `enforceAiSandbox` capability は、managed な `~/.claude/settings.json` に Claude Code の native
-sandbox ブロック(`sandbox.enabled` / `allowUnsandboxedCommands` / `network.allowedDomains`)を
-出す。enforcement は Claude Code 自身が settings から内部適用する(外側で包む別物
-`@anthropic-ai/sandbox-runtime` ではない)。
+sandbox ブロック(`sandbox.enabled` / `failIfUnavailable` / `allowUnsandboxedCommands` /
+`network.allowedDomains`)を出す。enforcement は Claude Code 自身が settings から内部適用する
+(外側で包む別物 `@anthropic-ai/sandbox-runtime` ではない)。
 
 射程を正確に把握する(過大評価しない):
 
@@ -149,8 +149,13 @@ sandbox ブロック(`sandbox.enabled` / `allowUnsandboxedCommands` / `network.a
 - network は **per-domain の hostname allowlist** で、**TLS 終端しない**(暗号化内容は検査せず、
   hostname だけで allow/deny する。domain fronting 等は素通りしうる)。既定 allowlist は
   public-safe な**空**。
-- `allowUnsandboxedCommands: false` で sandbox 外への fallback を塞ぐ(脱出させない)。
-  既定は `true` なので、明示的に false にして初めて strict になる。
+- strict 化は **2 軸**で fallback を塞ぐ(`enforce` の名に合わせ、使えない環境で黙って
+  素通りさせない):
+  - `allowUnsandboxedCommands: false` — sandbox 内で個々のコマンドを unsandboxed へ
+    fallback させない(既定 `true`)。
+  - `failIfUnavailable: true` — sandbox 自体が初期化できない(依存不足・未対応 platform)
+    ときに、既定の「warning して全コマンドを unsandboxed 実行」を止め、hard fail にする
+    (既定 `false`)。これが無いと enforce を名乗っても unavailable 時に静かに無効化される。
 
 OS 全体の強制(`@anthropic-ai/sandbox-runtime` / 自作 Seatbelt profile / devcontainer の
 network firewall)は **別 tier** で、今の `dotfiles` には入れない(将来の opt-in)。gate・極性・

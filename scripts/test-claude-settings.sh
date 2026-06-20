@@ -6,8 +6,9 @@ set -euo pipefail
 # the *content* the enforceAiSandbox capability drives:
 #   - default (enforceAiSandbox=false): no "sandbox" key; settings unchanged.
 #   - enforceAiSandbox=true: a sandbox block with enabled=true,
-#     allowUnsandboxedCommands=false (no escape hatch), and a public-safe
-#     empty network allowlist.
+#     failIfUnavailable=true (hard-fail rather than silently run unsandboxed),
+#     allowUnsandboxedCommands=false (no per-command escape hatch), and a
+#     public-safe empty network allowlist.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,12 +86,13 @@ if ! yq -p json '.' "$on_file" >/dev/null 2>&1; then
   status=1
 else
   enabled="$(yq -p json '.sandbox.enabled' "$on_file")"
+  fail_if="$(yq -p json '.sandbox.failIfUnavailable' "$on_file")"
   unsandboxed="$(yq -p json '.sandbox.allowUnsandboxedCommands' "$on_file")"
   domains_len="$(yq -p json '.sandbox.network.allowedDomains | length' "$on_file")"
-  if [[ "$enabled" == "true" && "$unsandboxed" == "false" && "$domains_len" == "0" ]]; then
-    ok "test passed: enforceAiSandbox=true emits enabled, no-escape, empty-allowlist sandbox"
+  if [[ "$enabled" == "true" && "$fail_if" == "true" && "$unsandboxed" == "false" && "$domains_len" == "0" ]]; then
+    ok "test passed: enforceAiSandbox=true emits enabled, hard-fail, no-escape, empty-allowlist sandbox"
   else
-    fail "test failed: sandbox block wrong (enabled=$enabled allowUnsandboxedCommands=$unsandboxed allowedDomains.len=$domains_len)"
+    fail "test failed: sandbox block wrong (enabled=$enabled failIfUnavailable=$fail_if allowUnsandboxedCommands=$unsandboxed allowedDomains.len=$domains_len)"
     status=1
   fi
 fi

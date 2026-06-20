@@ -54,8 +54,9 @@ module loop が、module を持たない profile(work-minimal / work-dev)では 
 ## sandbox(`enforceAiSandbox`)
 
 `settings.json` 内の Claude Code native sandbox ブロックは `enforceAiSandbox` capability で
-gate する。true のときだけ `sandbox`(`enabled` / `allowUnsandboxedCommands: false` /
-`network.allowedDomains: []`)を出し、false(全 profile の既定)では出さない。**effective なのは
+gate する。true のときだけ `sandbox`(`enabled` / `failIfUnavailable: true` /
+`allowUnsandboxedCommands: false` / `network.allowedDomains: []`)を出し、false(全 profile の
+既定)では出さない。**effective なのは
 `claude-settings` module が active な personal だけ**(他 profile で true にしても dangling。
 `doctor` が報告)。射程(Bash tool の fs+network のみ・非TLS)・極性・既定の根拠は
 [policy-model](policy-model.md)・[ai-environment-boundary](ai-environment-boundary.md)、

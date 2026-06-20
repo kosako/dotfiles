@@ -3,6 +3,7 @@
 {{- if index $caps "enforceAiSandbox" }}
   "sandbox": {
     "enabled": true,
+    "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
     "network": {
       "allowedDomains": []
