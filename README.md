@@ -31,6 +31,7 @@ personal project として段階的に作っている。現時点の実装状況
 | doctor / preflight(report-only の健康診断) | 実装済み |
 | agent-tools との report-only 連携 | 実装済み(opt-in) |
 | zsh(shell-extra)の管理 | 実装済み(未適用) |
+| Claude Code settings(personal の public-safe な settings.json) | 実装済み(personal のみ) |
 | VS Code / SSH の管理 | 未着手 |
 
 「実機適用済み」は、現時点でこの author の Mac 上で `~/.gitconfig` が稼働しているという意味。zsh は chezmoi 管理に載せたが未適用。editor・SSH はまだ未着手。
