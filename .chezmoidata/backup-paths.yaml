@@ -20,3 +20,8 @@
 backup_paths:
   - { path: .zshrc.local, type: file, category: shell }
   - { path: .ssh/config.local, type: file, category: ssh }
+  # Codex harness config. Contains a mix of public-safe settings and
+  # machine/secret-bearing values (project paths incl. ~/work, status_line,
+  # mcp env), so it is never committed; the encrypted archive carries it.
+  # auth.json is intentionally excluded (1Password is the secret SoR). #78
+  - { path: .codex/config.toml, type: file, category: ai-tools }
