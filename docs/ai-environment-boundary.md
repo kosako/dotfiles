@@ -84,6 +84,13 @@ AI skills / agents project は、`dotfiles` の policy を前提に動く。poli
 - AI skills / agents project は `dotfiles` の capability を前提条件として参照してよい。
 - AI skills / agents project が install、network tunnel、secret access を必要とする場合は、`dotfiles` 側の capability と approval policy に従う。
 
+連携は 2 層に分かれる。混同しない:
+
+- **配布層**(AI skills / agents project → AI tool home): skill / instruction を `~/.claude` / `~/.codex` などへ配置するのは AI skills / agents project 側の責務(build / sync)。`dotfiles` はこの配布物を管理せず、tool home の asset を作らない。配布の正本は当該 project 側の docs。
+- **監視層**(`dotfiles` → AI skills / agents project): `dotfiles` の `doctor` が presence と、opt-in 時に status の health を read-only で覗くだけ(上の箇条書き)。書き込み・clone・sync はしない。
+
+監視層の status 読み取りは既定で off(`enableAgentToolsStatus: false`)。実運用で有効化する手順(presence path の整合・opt-in・status の実態確認)は Issue #73 で検討する。
+
 推奨する置き場所:
 
 ```text
