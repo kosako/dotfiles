@@ -312,6 +312,52 @@ else
   status=1
 fi
 
+# Git signing report (enableGitSigning, issue #85). doctor stays report-only /
+# exit 0 and must reflect both the active and the dangling (capability true but
+# git-signing module inactive) cases. Throwaway repo copy so the edits do not
+# touch the real data files.
+sign_root="$fixture_home/.dotfiles-signing"
+mkdir -p "$sign_root/.chezmoidata"
+cp -R "$DOTFILES_ROOT/scripts" "$sign_root/scripts"
+cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$sign_root/.chezmoidata/"
+
+# L) enableGitSigning=true with the git-signing module active -> managed mechanism.
+awk '$0 == "      enableGitSigning: false" { print "      enableGitSigning: true"; next } { print }' \
+  "$sign_root/.chezmoidata/profiles.yaml" > "$sign_root/.chezmoidata/profiles.yaml.tmp"
+mv "$sign_root/.chezmoidata/profiles.yaml.tmp" "$sign_root/.chezmoidata/profiles.yaml"
+if sg_out="$(HOME="$fixture_home" "$sign_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "SSH signing mechanism managed" <<< "$sg_out"; then
+    ok "test passed: enableGitSigning=true reports the managed signing mechanism"
+  else
+    printf '%s\n' "$sg_out" >&2
+    fail "test failed: managed signing mechanism not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$sg_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableGitSigning=true, module active)"
+  status=1
+fi
+
+# M) enableGitSigning=true but the git-signing module removed -> dangling warning,
+#    still exit 0.
+awk '$0 == "      - git-signing" { next } { print }' \
+  "$sign_root/.chezmoidata/profiles.yaml" > "$sign_root/.chezmoidata/profiles.yaml.tmp"
+mv "$sign_root/.chezmoidata/profiles.yaml.tmp" "$sign_root/.chezmoidata/profiles.yaml"
+if sg_out="$(HOME="$fixture_home" "$sign_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "git-signing module is inactive" <<< "$sg_out"; then
+    ok "test passed: enableGitSigning=true with module inactive is reported as dangling"
+  else
+    printf '%s\n' "$sg_out" >&2
+    fail "test failed: dangling enableGitSigning not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$sg_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableGitSigning dangling)"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi

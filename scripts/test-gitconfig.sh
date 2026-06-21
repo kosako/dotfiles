@@ -56,6 +56,11 @@ for pattern in \
   check_contains "hasconfig personal pattern: $pattern" "[includeIf \"$pattern\"]"
 done
 
+# The git-signing module's mechanism is pulled in via an unconditional include
+# (a no-op when the file is absent / signing off).
+check_contains "git-signing include directive" "[include]"
+check_contains "git-signing include path" "path = ~/.config/git/signing.gitconfig"
+
 # Public-safety: the ONLY hasconfig rules allowed are the three public personal
 # patterns asserted above. Match against the exact allowlist (not a loose
 # "contains kosako", which would also accept e.g. github.com/work-kosako): any

@@ -82,8 +82,27 @@ fatal: no email was given and auto-detection is disabled
   global identity の設定有無を検知する。値そのものは表示しない。
 - `scripts/test-gitconfig.sh` は `dot_gitconfig` の安全設定と includeIf の挙動を local fixture で検証する。
 
+## SSH 署名(git-signing module、Issue #85)
+
+commit / tag を **SSH 署名**(1Password の op-ssh-sign)して GitHub で Verified にできる。
+`enableGitSigning` capability で gate、既定 off=opt-in。
+
+- **仕組みは managed**: `~/.config/git/signing.gitconfig`(`gpg.format=ssh` + signer プログラム
+  `/Applications/1Password.app/Contents/MacOS/op-ssh-sign`)を、`git-signing` module かつ
+  `enableGitSigning=true` のときだけ配備する。`dot_gitconfig` は常時 `[include]` し、ファイル
+  不在時は git が無視(no-op)。signer パスは public-safe(`/Applications` 配下・ユーザー名なし)。
+- **鍵と opt-in は context 別 local**: `user.signingkey`(どの鍵)と `commit.gpgsign`(署名する)は
+  `~/.config/git/<context>.gitconfig` に置く。**managed 側には鍵も gpgsign も置かない**。理由:
+  global に `commit.gpgsign=true` を置くと署名鍵の無い context(work/client repos)で commit が
+  失敗する。context ごとに鍵を入れて opt-in する方が安全(multi-account の署名鍵分離とも一致)。
+- 署名鍵の**実体は 1Password**(SSH key)で、`user.signingkey` はその公開鍵参照。
+- GitHub では鍵を **Signing Key として登録**する(Authentication Key とは別枠)。committer email が
+  そのアカウントの verified email であること。
+- 復元との関係: identity + 署名紐付けを持つ `personal.gitconfig` は backup catalog に含めるので
+  (#85)、新マシンでは復元される([private-backup](private-backup.md))。
+
 ## 対象外
 
-- Git signing(後続 `git-signing` module)。
-- secret store(1Password など)からの identity / signing material の取得。
+- secret store(1Password など)からの identity 値の自動取得(署名鍵は 1Password agent 経由で
+  使うが、dotfiles は identity / 鍵素材を fetch しない)。
 - Git remote mutation。

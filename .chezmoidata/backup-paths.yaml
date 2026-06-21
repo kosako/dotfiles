@@ -25,3 +25,9 @@ backup_paths:
   # mcp env), so it is never committed; the encrypted archive carries it.
   # auth.json is intentionally excluded (1Password is the secret SoR). #78
   - { path: .codex/config.toml, type: file, category: ai-tools }
+  # Git personal identity (name/email, plus user.signingkey + commit.gpgsign
+  # once SSH signing is set up). Not chezmoi-managed — identity values must not
+  # enter the public repo (docs/git-identity.md) — so the encrypted archive
+  # carries it, letting a new machine restore the identity instead of
+  # recreating it by hand. The path itself is public-safe. (#85)
+  - { path: .config/git/personal.gitconfig, type: file, category: git }
