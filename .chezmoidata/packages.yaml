@@ -40,6 +40,7 @@ packages:
   - { name: shellcheck, source: brew_formula }
   - { name: tmux, source: brew_formula }
   - { name: yq, source: brew_formula }
+  - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: copilot-cli, source: brew_cask }
   - { name: iterm2, source: brew_cask }
   - { name: swiftbar, source: brew_cask }
