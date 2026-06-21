@@ -70,4 +70,3 @@ when = '''
 command = "echo '⚠ no-identity'"
 format = "[$output]($style) "
 style = "bold red"
-
