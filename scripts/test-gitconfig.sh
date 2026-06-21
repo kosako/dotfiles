@@ -66,7 +66,21 @@ check_contains "git-signing include path" "path = ~/.config/git/signing.gitconfi
 # default and must NEVER force signing on globally: a global `gpgsign = true`
 # would break key-less contexts (work/client), the exact failure the design
 # avoids.
-check_contains "commit signing defaults off" "gpgsign = false"
+# commit and tag both default off — assert section-aware so dropping either
+# block fails (a plain `gpgsign = false` grep would still pass on just one).
+for sect in commit tag; do
+  if awk -v s="[$sect]" '
+      $0 == s { ins = 1; next }
+      /^\[/   { ins = 0 }
+      ins && /^[[:space:]]*gpgsign[[:space:]]*=[[:space:]]*false/ { found = 1 }
+      END { exit !found }
+    ' "$GITCONFIG_SOURCE"; then
+    ok "test passed: $sect.gpgsign = false (section-aware)"
+  else
+    fail "test failed: [$sect] section missing gpgsign = false"
+    status=1
+  fi
+done
 if grep -Eq '^[[:space:]]*gpgsign[[:space:]]*=[[:space:]]*true' "$GITCONFIG_SOURCE"; then
   fail "test failed: managed source must not force gpgsign = true (breaks key-less contexts)"
   status=1
