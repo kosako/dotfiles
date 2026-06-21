@@ -23,6 +23,52 @@
 
 読み込み順序は widget の wrap 関係に従う: compinit → fzf-tab → fzf / zoxide / starship / direnv / mise → alias → local override → zsh-autosuggestions → zsh-syntax-highlighting(最後)。
 
+## 使い方(対話シェル操作、#96)
+
+新しいシェル(新しいタブ / ウィンドウ)で有効。マシン固有の設定・キーバインドは `~/.zshrc.local` に置く(managed file は触らない)。
+
+### プロンプト(starship)
+
+2 行構成(1 行目=情報、2 行目=入力 `❯`)。表示されるもの:
+
+- ディレクトリ(repo root 基準で短縮)、git ブランチ + 状態(dirty / ahead-behind / stash 等)。
+- **git identity context**(誤コミット防止):🟢 `personal` / 🟡 `<email>`(personal 以外の解決済み identity。実 email を表示)/ 🔴 `⚠ no-identity`(repo 内なのに identity 未解決 = このままでは commit 失敗)。判定は runtime に local の `~/.config/git/personal.gitconfig` と照合([git-identity](git-identity.md))。
+- runtime version(関係する project でのみ・mise 連動)、コマンド実行時間(2 秒超のみ)、`❯`(直前成功=緑 / 失敗=赤。非ゼロ終了コードは数値も表示)。
+
+### 移動
+
+- `z <キーワード>` … frecency で過去によく行った dir にジャンプ(zoxide)。`z foo bar` で複数キーワード絞り込み。`zi` で fzf 選択。
+- `Ctrl-T` … ファイル / dir を fzf 選択してカーソル位置に挿入。`Alt-C` … サブ dir へ fzf で cd。
+  - iTerm2 で `Alt-C` が無反応なら Profiles → Keys で Option キーを「Esc+」に設定する。
+
+### 履歴
+
+- `Ctrl-R` … fzf で履歴を曖昧検索。
+- autosuggestions(履歴からゴースト表示):`→` / `End` / `Ctrl-E` で全受け入れ、`Alt-F`(または `Ctrl-→`)で 1 単語だけ受け入れ。
+- **行頭にスペース**を付けて実行したコマンドは履歴に残さない(`HIST_IGNORE_SPACE`。秘密の一回限り用。基本は op/direnv 注入で secret をインライン入力しない = [secrets](secrets.md))。履歴はマシン外に同期しない。
+
+### 補完
+
+- `TAB` … 候補が複数あると fzf ピッカーで選択(fzf-tab)。例:`git checkout <TAB>` / `cd <TAB>` / `kill <TAB>`。矢印 / `Ctrl-J`・`Ctrl-K` で移動、Enter で確定。
+- `**<TAB>` … 任意コマンド引数を fzf 補完(例:`ssh **<TAB>`、`vim ~/src/**<TAB>`)。
+- 補完候補の**中身プレビュー**(dir 中身・ファイル内容)は既定では出ない。要れば fzf-tab の `fzf-preview` zstyle を `~/.zshrc.local` に追加する(例:`zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza --tree --level=1 --color=always $realpath'`)。
+
+### 検索・一覧・閲覧
+
+- `rg <pattern>`(ripgrep)/ `fd <name>`(fd):高速検索(`.gitignore` 尊重)。fzf の裏側でも使われる。
+- `ls` / `ll` / `la` / `lt`(eza:アイコン・git 状態・ツリー)、`cat`(bat:シンタックスハイライト、pager なしで cat 風)。
+- これらは**対話シェルの alias のみ**でスクリプトには影響しない。素の挙動が要るときは `command ls` / `command cat`。
+
+### project ごとの環境
+
+- mise:project に入ると `mise.toml` / `.tool-versions` に従って言語 version を自動切替([runtime](runtime.md))。
+- direnv:`.envrc` のある project で env を読み込む。初回だけ `direnv allow` が必要(自動許可しない)。op で secret を実行時注入する用途([secrets](secrets.md))。
+
+### カスタマイズ
+
+- 挙動・キーバインド・alias の上書き:`~/.zshrc.local`(local が勝つ)。
+- プロンプトの見た目:`~/.config/starship.toml`(managed。変更は source 経由で apply)。
+
 ## `~/.zshenv`(非対話 shell の PATH)
 
 `~/.zshenv` は **すべての zsh 起動**(対話/非対話・login/非login)で読まれる。ここに mise の shims(`$HOME/.local/share/mise/shims`)を PATH 前置し、子プロセスが spawn する非対話 shell でも mise 管理 runtime(`node` 等)が解決するようにする。`~/.zshrc` の `mise activate` は対話 shell でしか走らないため、非対話側は shims が拾う(両者は併用、削除不要)。詳細は [docs/runtime.md](runtime.md)。
