@@ -27,6 +27,24 @@ identity file の中身は最小限にする。
 	email = example@example.invalid
 ```
 
+## Remote URL による二次判定(hasconfig、Issue #52)
+
+identity の判定は「置き場所(gitdir)」が一次。加えて、**personal だけ** remote URL でも判定する
+二次ルール(`includeIf "hasconfig:remote.*.url:..."`、Git 2.36+)を持つ。`~/src/personal/` の
+外に clone した personal リポでも、remote が `github.com/kosako/**` なら personal identity が
+当たる保険(fail-closed と相性が良い「置き場所」と「remote」の二重判定)。
+
+- **gitdir が authoritative**: hasconfig ルールは gitdir ルールより **前**に置く。includeIf は
+  後勝ちなので、置き場所(gitdir)が当たればそちらが優先される(例: `~/src/work/` に置いた
+  `github.com/kosako` remote のリポは work identity)。hasconfig は gitdir が当たらないときだけ効く。
+- **personal に限る(public 制約)**: `dot_gitconfig` は public repo に入るため、会社・クライアントの
+  org 名 / URL は書けない。公開可能な personal(`github.com/kosako`)だけを二次判定し、work / client は
+  gitdir のみ + org 名は local identity file 側に留める。
+- **URL 表記を網羅**: HTTPS(`https://github.com/kosako/**`)、scp 形 SSH(`git@github.com:kosako/**`)、
+  `ssh://` 形(`ssh://git@github.com/kosako/**`)はそれぞれ別文字列として literal にマッチするため、
+  3 つとも宣言する(1 つでも欠けるとその clone 形では取りこぼす)。
+- work / client を `~/src/` の外に clone した場合は二次判定が無いので commit は fail-closed(安全側)。
+
 ## 管理方式の決定(2026-06-11、Issue #19)
 
 identity file は当面、完全手動・local only とする。

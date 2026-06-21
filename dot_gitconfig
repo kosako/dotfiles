@@ -11,6 +11,24 @@
 	# Refuse remote URLs that embed credentials.
 	credentialsInUrl = die
 
+# Secondary, remote-URL-based identity selection (Git 2.36+): a fail-closed
+# safety net for personal repos cloned OUTSIDE ~/src/personal/. The gitdir
+# rules below stay authoritative because includeIf is last-match-wins and they
+# are listed last, so a repo's on-disk placement always overrides its remote
+# when both match. Only personal is matched here: its GitHub URL is public,
+# while work/client org names/URLs are confidential and must never appear in
+# this public file (those contexts stay gitdir-only). All three URL spellings
+# are listed because Git matches the remote URL literally: the HTTPS,
+# scp-style SSH (host:owner), and ssh:// SSH forms are distinct strings.
+[includeIf "hasconfig:remote.*.url:https://github.com/kosako/**"]
+	path = ~/.config/git/personal.gitconfig
+
+[includeIf "hasconfig:remote.*.url:git@github.com:kosako/**"]
+	path = ~/.config/git/personal.gitconfig
+
+[includeIf "hasconfig:remote.*.url:ssh://git@github.com/kosako/**"]
+	path = ~/.config/git/personal.gitconfig
+
 [includeIf "gitdir:~/src/personal/"]
 	path = ~/.config/git/personal.gitconfig
 
