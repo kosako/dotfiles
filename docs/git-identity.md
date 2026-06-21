@@ -27,6 +27,14 @@ identity file の中身は最小限にする。
 	email = example@example.invalid
 ```
 
+## プロンプト表示(starship、Issue #96)
+
+どの identity で commit するかを取り違えないよう、starship プロンプトが現在の context を常時表示する
+([docs/shell.md](shell.md))。**personal=緑 / その他の解決済み identity=黄(email 表示)/ repo 内で
+identity 未解決(`useConfigOnly` の fail-closed)=赤**。分類は runtime に「解決された committer email」と
+**local の `~/.config/git/personal.gitconfig`** を照合して行い、managed な `starship.toml` には identity 値を
+一切持たない(public-safe。`scripts/test-starship.sh` が回帰固定)。
+
 ## Remote URL による二次判定(hasconfig、Issue #52)
 
 identity の判定は「置き場所(gitdir)」が一次。加えて、**personal だけ** remote URL でも判定する
