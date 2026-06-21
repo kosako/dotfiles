@@ -31,3 +31,10 @@ backup_paths:
   # carries it, letting a new machine restore the identity instead of
   # recreating it by hand. The path itself is public-safe. (#85)
   - { path: .config/git/personal.gitconfig, type: file, category: git }
+  # 1Password SSH agent config. op-ssh-sign (commit signing) and SSH auth reach
+  # the key through this agent, which only serves the vaults/items listed here;
+  # without it signing fails (it was the #87 gotcha). Not chezmoi-managed (it is
+  # machine/1Password-state specific); the encrypted archive carries it so a new
+  # machine restores the served-vault config. Path and vault names are
+  # public-safe; no key material is in it. (#89)
+  - { path: .config/1Password/ssh/agent.toml, type: file, category: ssh }
