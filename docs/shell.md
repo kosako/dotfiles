@@ -40,6 +40,7 @@
 - `z <キーワード>` … frecency で過去によく行った dir にジャンプ(zoxide)。`z foo bar` で複数キーワード絞り込み。`zi` で fzf 選択。
 - `Ctrl-T` … ファイル / dir を fzf 選択してカーソル位置に挿入。`Alt-C` … サブ dir へ fzf で cd。
   - iTerm2 で `Alt-C` が無反応なら Profiles → Keys で Option キーを「Esc+」に設定する。
+- **cd で移動するたびに、そのディレクトリの内容を自動一覧**(eza、chpwd フック)。`z` / `Ctrl-T` / `Alt-C` 経由の移動でも出る。`add-zsh-hook` 使用なので `~/.zshrc.local` で別の chpwd フックを足しても共存する。
 
 ### 履歴
 
@@ -51,7 +52,7 @@
 
 - `TAB` … 候補が複数あると fzf ピッカーで選択(fzf-tab)。例:`git checkout <TAB>` / `cd <TAB>` / `kill <TAB>`。矢印 / `Ctrl-J`・`Ctrl-K` で移動、Enter で確定。
 - `**<TAB>` … 任意コマンド引数を fzf 補完(例:`ssh **<TAB>`、`vim ~/src/**<TAB>`)。
-- 補完候補の**中身プレビュー**(dir 中身・ファイル内容)は既定では出ない。要れば fzf-tab の `fzf-preview` zstyle を `~/.zshrc.local` に追加する(例:`zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza --tree --level=1 --color=always $realpath'`)。
+- 補完候補の**中身プレビュー**:ピッカーで候補を選んでいる間、ディレクトリなら中身(eza --tree)、ファイルなら内容(bat)を表示(fzf-tab の `fzf-preview` zstyle で設定済み)。path を持たない補完(git ブランチ等)ではプレビューは空。
 
 ### 検索・一覧・閲覧
 
