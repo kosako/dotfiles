@@ -40,7 +40,7 @@
 - `z <キーワード>` … frecency で過去によく行った dir にジャンプ(zoxide)。`z foo bar` で複数キーワード絞り込み。`zi` で fzf 選択。
 - `Ctrl-T` … ファイル / dir を fzf 選択してカーソル位置に挿入。`Alt-C` … サブ dir へ fzf で cd。
   - iTerm2 で `Alt-C` が無反応なら Profiles → Keys で Option キーを「Esc+」に設定する。
-- **cd で移動するたびに、そのディレクトリの内容を自動一覧**(eza、chpwd フック)。`z` / `Ctrl-T` / `Alt-C` 経由の移動でも出る。`add-zsh-hook` 使用なので `~/.zshrc.local` で別の chpwd フックを足しても共存する。
+- **cd で移動するたびに、そのディレクトリの内容を自動一覧**(eza、chpwd フック)。`z` / `Alt-C` / 通常の `cd` など実際にディレクトリを移動する操作で出る(`Ctrl-T` は path をカーソルに挿入するだけで移動しないため出ない)。`add-zsh-hook` 使用なので `~/.zshrc.local` で別の chpwd フックを足しても共存する。
 
 ### 履歴
 
