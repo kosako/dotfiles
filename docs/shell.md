@@ -13,7 +13,7 @@
 
 すべて catalog 宣言 + brew install 済みで、`~/.zshrc` が guard 付きで読み込む:
 
-- **プロンプト**: starship(`~/.config/starship.toml`)。2行・git 状態・実行時間・exit code・関連 project でのみ runtime version を表示(mise が選ぶ version を反映)。
+- **プロンプト**: starship(`~/.config/starship.toml`)。2行・git 状態・実行時間・exit code・関連 project でのみ runtime version を表示(mise 連動)・**git identity context**(personal=緑 / その他=黄+email / repo 内で identity 未解決=赤)で誤コミットを視覚的に防ぐ。identity の分類は runtime に local の `~/.config/git/personal.gitconfig` と照合し、managed file に identity 値を入れない([docs/git-identity.md](git-identity.md))。
 - **移動**: zoxide(`z` / `zi`)+ fzf(`Ctrl-R` 履歴 / `Ctrl-T` ファイル / `Alt-C` サブディレクトリ cd)。
 - **補完**: zsh-completions を fpath に足し、compinit はキャッシュ(dump が無い/24h 超で再生成、通常は `-C` の高速パス)。fzf-tab で TAB 補完を fzf 化。
 - **入力補助**: zsh-autosuggestions(履歴ベース)+ zsh-syntax-highlighting。**syntax-highlighting は必ず最後に source**(直前までに定義した全 widget を wrap するため)。
@@ -69,6 +69,5 @@ managed 化自体を戻す場合は `chezmoi forget ~/.zshenv ~/.zshrc ~/.zprofi
 ## 対象外
 
 - プラグインマネージャ / oh-my-zsh(explicit-first 方針で不使用)。ツールの install は catalog + `install-packages.sh` の領分。
-- starship の git-identity context segment(#96 PR3 で別途。identity 値を managed file に入れない public-safe 実装)。
 - machine 固有値・secret の repo への持ち込み。
 - この module 単体での実 home への apply。

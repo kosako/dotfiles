@@ -11,6 +11,7 @@ add_newline = true
 format = """
 $directory\
 $git_branch$git_status$git_state\
+${custom.git_ctx_personal}${custom.git_ctx_other}${custom.git_ctx_none}\
 $nodejs$python$golang$rust\
 $cmd_duration$status
 $character"""
@@ -30,3 +31,42 @@ disabled = false
 [character]
 success_symbol = "[❯](green)"
 error_symbol = "[❯](red)"
+
+# Git identity context (#96): surface which identity will author commits, so a
+# wrong-context commit is caught before it happens. Public-safe: NO identity
+# values live here. Each `when` reads the resolved committer email and the LOCAL
+# ~/.config/git/personal.gitconfig (not managed) at runtime to classify the
+# context — personal -> green; any other resolved identity -> yellow (shows the
+# email); inside a repo with no identity (the useConfigOnly fail-closed case)
+# -> red. See docs/git-identity.md.
+[custom.git_ctx_personal]
+description = "git identity resolves to personal"
+when = '''
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
+  e=$(git config user.email 2>/dev/null)
+  [ -n "$e" ] && [ "$e" = "$(git config --file "$HOME/.config/git/personal.gitconfig" user.email 2>/dev/null)" ]
+'''
+command = "echo personal"
+format = "[$output]($style) "
+style = "bold green"
+
+[custom.git_ctx_other]
+description = "git identity is set but not personal"
+when = '''
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
+  e=$(git config user.email 2>/dev/null)
+  [ -n "$e" ] && [ "$e" != "$(git config --file "$HOME/.config/git/personal.gitconfig" user.email 2>/dev/null)" ]
+'''
+command = "git config user.email 2>/dev/null"
+format = "[$output]($style) "
+style = "bold yellow"
+
+[custom.git_ctx_none]
+description = "inside a repo but no git identity resolved (fail-closed)"
+when = '''
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
+  [ -z "$(git config user.email 2>/dev/null)" ]
+'''
+command = "echo '⚠ no-identity'"
+format = "[$output]($style) "
+style = "bold red"

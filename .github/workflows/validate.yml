@@ -116,3 +116,6 @@ jobs:
 
       - name: git-signing gating tests
         run: ./scripts/test-git-signing.sh
+
+      - name: starship prompt config tests
+        run: ./scripts/test-starship.sh
