@@ -3,8 +3,10 @@ set -euo pipefail
 
 # Gating test for the git-signing module (issue #85). signing.gitconfig (the
 # SSH-signing mechanism: gpg.format=ssh + 1Password signer) is a managed file
-# applied ONLY when enableGitSigning is true; the committed default is false, so
-# ~/.gitconfig's unconditional [include] is a no-op until opted in. The signing
+# applied ONLY when enableGitSigning is true. Both gated states are forced in
+# throwaway source copies so the test is independent of the committed default
+# (the unconditional [include] in ~/.gitconfig is a no-op when the file is
+# absent). The signing
 # key and the per-context commit.gpgsign live in the local identity files
 # (docs/git-identity.md) and are intentionally out of the managed mechanism.
 # Renders into throwaway destinations; never touches the real home directory.
@@ -48,16 +50,23 @@ apply_personal() {
 
 section "git-signing gating"
 
-# 1) Committed default (enableGitSigning=false): signing.gitconfig is not applied.
-if ! off_home="$(apply_personal "$DOTFILES_ROOT")"; then
-  fail "test failed: personal apply (default) did not render"
+# 1) enableGitSigning=false: signing.gitconfig is not applied. Force the value in
+#    a copy so the test is independent of the committed default.
+off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing-off.XXXXXX")"
+tmp_roots+=("$off_src")
+cp -R "$DOTFILES_ROOT" "$off_src/src"
+rm -rf "$off_src/src/.git"
+yq -i '.profiles.personal.capabilities.enableGitSigning = false' \
+  "$off_src/src/.chezmoidata/profiles.yaml"
+if ! off_home="$(apply_personal "$off_src/src")"; then
+  fail "test failed: personal apply (enableGitSigning=false) did not render"
   exit 1
 fi
 if [[ -e "$off_home/.config/git/signing.gitconfig" ]]; then
   fail "test failed: signing.gitconfig applied while enableGitSigning=false"
   status=1
 else
-  ok "test passed: default (enableGitSigning=false) does not apply signing.gitconfig"
+  ok "test passed: enableGitSigning=false does not apply signing.gitconfig"
 fi
 
 # 2) enableGitSigning=true: signing.gitconfig is applied with the SSH mechanism.

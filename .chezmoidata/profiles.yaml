@@ -25,7 +25,7 @@ profiles:
       installGuiApps: true
       enableMacOSDefaults: false
       enable1PasswordSSH: true
-      enableGitSigning: false
+      enableGitSigning: true
       enableDirenv: true
       enableRuntimeManagement: true
       enableVsCodeSettings: true
