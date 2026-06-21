@@ -145,12 +145,21 @@ audit=true
 EOF
     # npm consumes min-release-age and flattens it into `before` (now - <days>),
     # deleting the original key, so `npm config get min-release-age` is always
-    # null even when honored. Verify the operative `before` key is set instead.
+    # null even when honored. Verify the operative `before` cutoff is ~7 days
+    # ago instead: a non-empty `before` alone is not enough (a shorter age, or a
+    # hand-set far-future date, would also be non-empty but not enforce the
+    # 7-day cooldown). node ships with npm, so it is available to parse npm's
+    # Date string portably; an unparseable/empty value yields no epoch and fails
+    # the window check below.
     npm_before="$(npm config get before 2>/dev/null || true)"
+    npm_before_epoch=""
     if [[ -n "$npm_before" && "$npm_before" != "null" ]]; then
-      ok "npm min-release-age honored (before=$npm_before)"
+      npm_before_epoch="$(node -e 'const t=Date.parse(process.argv[1]||"");process.stdout.write(Number.isNaN(t)?"":String(Math.floor(t/1000)))' "$npm_before" 2>/dev/null || true)"
+    fi
+    if npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
+      ok "npm min-release-age=7 honored (before=$npm_before)"
     else
-      warn "enforce expects npm min-release-age, but before is unset (apply pending?)"
+      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=${npm_before:-unset} (apply pending?)"
     fi
   fi
 fi

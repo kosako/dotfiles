@@ -98,11 +98,13 @@ while IFS= read -r line; do
   if [[ "$key" == "min-release-age" ]]; then
     # npm flattens min-release-age into `before` (now - <days>) and deletes the
     # original key, so doctor cannot assert `min-release-age=<n>` via
-    # `npm config get`. It verifies the operative `before` key instead.
-    if grep -Fq "min-release-age honored" "$SCRIPT_DIR/doctor.sh"; then
-      ok "test passed: doctor verifies min-release-age via before"
+    # `npm config get`. It verifies the operative `before` cutoff is ~7 days ago
+    # through npm_before_within_age_window (exercised below); a mere presence
+    # grep would not catch a loosened window.
+    if grep -Fq "npm_before_within_age_window" "$SCRIPT_DIR/doctor.sh"; then
+      ok "test passed: doctor verifies min-release-age via before cutoff window"
     else
-      fail "test failed: doctor.sh does not verify min-release-age via before"
+      fail "test failed: doctor.sh does not verify min-release-age via before cutoff window"
       status=1
     fi
     continue
@@ -114,6 +116,36 @@ while IFS= read -r line; do
     status=1
   fi
 done < <(grep -E '^[a-z-]+=' "$NPMRC_TEMPLATE")
+
+section "unit: npm before cutoff window (min-release-age=7)"
+
+check_window() {
+  local name="$1" expected_rc="$2"; shift 2
+  if npm_before_within_age_window "$@"; then
+    [[ "$expected_rc" == "0" ]] && ok "test passed: $name" \
+      || { fail "test failed: $name (accepted, want reject)"; status=1; }
+  else
+    [[ "$expected_rc" == "1" ]] && ok "test passed: $name" \
+      || { fail "test failed: $name (rejected, want accept)"; status=1; }
+  fi
+}
+
+# Fixed reference instant so the assertions are deterministic.
+now=1781000000
+day=86400
+tol=43200
+# Honored: cutoff exactly 7 days ago, and a few seconds inside the window.
+check_window "exactly 7 days ago is honored"        0 $(( now - 7*day ))       "$now" 7 "$tol"
+check_window "7 days minus 30s still honored"       0 $(( now - 7*day + 30 ))  "$now" 7 "$tol"
+# Rejected: a shorter age (Codex's min-release-age=1 case) is not the 7d policy.
+check_window "1 day ago is rejected (too short)"    1 $(( now - 1*day ))       "$now" 7 "$tol"
+check_window "6 days ago is rejected (off by 1d)"   1 $(( now - 6*day ))       "$now" 7 "$tol"
+check_window "8 days ago is rejected (off by 1d)"   1 $(( now - 8*day ))       "$now" 7 "$tol"
+# Rejected: a hand-set far-future before disables the cooldown.
+check_window "far-future before is rejected"        1 $(( now + 1000*day ))    "$now" 7 "$tol"
+# Rejected: unset / non-numeric before (npm older than 11.10, parse failure).
+check_window "empty before is rejected"             1 ""                       "$now" 7 "$tol"
+check_window "non-numeric before is rejected"       1 "abc"                    "$now" 7 "$tol"
 
 if [[ "$status" -eq 0 ]]; then
   ok "npmrc tests passed"
