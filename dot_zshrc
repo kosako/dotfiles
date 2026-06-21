@@ -29,10 +29,13 @@ setopt EXTENDED_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_ALL_DUPS \
   fpath=("$HOMEBREW_PREFIX/share/zsh-completions" $fpath)
 autoload -Uz compinit
 # Rebuild the dump on first run or once a day; otherwise take the fast path.
-# -u uses Homebrew's admin-group-writable completion dirs (its default; owned by
-# us on a single-user mac) without the interactive "insecure directories"
-# prompt. -C trusts a recent dump and skips the freshness scan.
-if [[ -z $HOME/.zcompdump(N.mh-24) ]]; then
+# Capture the glob in an array: [[ ]] does not perform filename generation, so
+# a glob inside it never expands. -u uses Homebrew's admin-group-writable
+# completion dirs (its default; ours on a single-user mac) without the
+# interactive "insecure directories" prompt; -C trusts a recent dump and skips
+# the freshness scan.
+zcompdump_recent=("$HOME"/.zcompdump(N.mh-24))
+if (( ${#zcompdump_recent} == 0 )); then
   compinit -u
 else
   compinit -C

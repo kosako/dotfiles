@@ -44,7 +44,7 @@ if module_active_for_profile "$profile" "shell-extra"; then
 else
   shell_managed=0
 fi
-for file in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.zprofile"; do
+for file in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.config/starship.toml"; do
   base="$(basename "$file")"
   if [[ ! -e "$file" ]]; then
     ok "absent: $file"
@@ -53,6 +53,9 @@ for file in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.zprofile"; do
       # .zshenv has no ~/.zshenv.local override (it must stay minimal), so do
       # not tell users to move lines there — they would be lost. See docs/shell.md.
       warn "exists: $file — apply (shell-extra) replaces it; back up and diff first. .zshenv has no ~/.zshenv.local: move interactive lines to ~/.zshrc.local; non-interactive needs must go into managed .zshenv (see docs/shell.md)"
+    elif [[ "$base" == "starship.toml" ]]; then
+      # starship has no local-override file; the managed config is the whole file.
+      warn "exists: $file — apply (shell-extra) replaces it; back up and diff first. starship has no local override: fold custom prompt config into the managed ~/.config/starship.toml (see docs/shell.md)"
     else
       warn "exists: $file — apply (shell-extra) replaces it; move machine-specific lines to ~/$base.local first (see docs/shell.md)"
     fi
