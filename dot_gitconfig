@@ -11,6 +11,19 @@
 	# Refuse remote URLs that embed credentials.
 	credentialsInUrl = die
 
+# Commit/tag signing defaults OFF for every context, so unattended commits
+# (human or AI alike) never block on the 1Password signer prompt. Signing is
+# opt-in, not required. This MUST stay before the includeIf blocks below:
+# includeIf is last-match-wins, so a context file or a repo-local
+# `git config commit.gpgsign true` can opt back in. A `false` default is safe
+# everywhere; a global `true` would instead fail in key-less contexts. The
+# signing mechanism (signing.gitconfig) and key stay available, so opt-in is
+# one flag. See docs/git-identity.md.
+[commit]
+	gpgsign = false
+[tag]
+	gpgsign = false
+
 # Secondary, remote-URL-based identity selection (Git 2.36+): a fail-closed
 # safety net for personal repos cloned OUTSIDE ~/src/personal/. The gitdir
 # rules below stay authoritative because includeIf is last-match-wins and they

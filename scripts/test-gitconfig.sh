@@ -61,6 +61,33 @@ done
 check_contains "git-signing include directive" "[include]"
 check_contains "git-signing include path" "path = ~/.config/git/signing.gitconfig"
 
+# Commit/tag signing defaults off (unattended commits never block on the signer
+# prompt); opt-in is per-repo/context. The managed file must carry the false
+# default and must NEVER force signing on globally: a global `gpgsign = true`
+# would break key-less contexts (work/client), the exact failure the design
+# avoids.
+# commit and tag both default off — assert section-aware so dropping either
+# block fails (a plain `gpgsign = false` grep would still pass on just one).
+for sect in commit tag; do
+  if awk -v s="[$sect]" '
+      $0 == s { ins = 1; next }
+      /^\[/   { ins = 0 }
+      ins && /^[[:space:]]*gpgsign[[:space:]]*=[[:space:]]*false/ { found = 1 }
+      END { exit !found }
+    ' "$GITCONFIG_SOURCE"; then
+    ok "test passed: $sect.gpgsign = false (section-aware)"
+  else
+    fail "test failed: [$sect] section missing gpgsign = false"
+    status=1
+  fi
+done
+if grep -Eq '^[[:space:]]*gpgsign[[:space:]]*=[[:space:]]*true' "$GITCONFIG_SOURCE"; then
+  fail "test failed: managed source must not force gpgsign = true (breaks key-less contexts)"
+  status=1
+else
+  ok "test passed: managed source never forces signing on"
+fi
+
 # Public-safety: the ONLY hasconfig rules allowed are the three public personal
 # patterns asserted above. Match against the exact allowlist (not a loose
 # "contains kosako", which would also accept e.g. github.com/work-kosako): any
