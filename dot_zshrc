@@ -1,20 +1,82 @@
 # Managed by chezmoi from kosako/dotfiles.
-# Machine-specific PATH, tool env, and secrets belong in ~/.zshrc.local
-# (sourced last, not managed, never committed). See docs/shell.md.
+# Interactive shell setup (explicit-first; no plugin manager). Machine-specific
+# PATH, tool env, and secrets belong in ~/.zshrc.local (sourced near the end,
+# not managed, never committed). See docs/shell.md. Every tool here is declared
+# in the catalog (.chezmoidata/packages.yaml, #96) and installed via brew; each
+# source/init is guarded so the shell still starts when a tool is absent.
 
-# oh-my-zsh. Not auto-installed; if it is absent the source below is a
-# no-op and the shell still starts.
-export ZSH="$HOME/.oh-my-zsh"
-ZSH_THEME="robbyrussell"
-plugins=(git)
-[ -r "$ZSH/oh-my-zsh.sh" ] && source "$ZSH/oh-my-zsh.sh"
+# Homebrew prefix. `brew shellenv` in ~/.zprofile sets it for login shells; this
+# fallback covers non-login interactive shells. Apple Silicon default.
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/opt/homebrew}"
 
 # iTerm2 shell integration (no-op when the integration file is absent).
 [ -e "$HOME/.iterm2_shell_integration.zsh" ] && source "$HOME/.iterm2_shell_integration.zsh"
 
-# mise runtime activation (no-op when mise is not installed). Provides the
-# baseline runtimes from ~/.config/mise/config.toml. See docs/runtime.md.
+# History: large, de-duplicated, shared across sessions, with timestamps.
+# HIST_IGNORE_SPACE drops space-prefixed commands (a manual opt-out for not
+# recording a sensitive one-off). Secrets otherwise come via op/direnv and are
+# not typed inline (docs/secrets.md). History stays local (no off-machine sync).
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=100000
+SAVEHIST=100000
+setopt EXTENDED_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_ALL_DUPS \
+       HIST_IGNORE_SPACE HIST_REDUCE_BLANKS HIST_VERIFY SHARE_HISTORY
+
+# Completion: put zsh-completions on fpath, then compinit with a daily cache.
+# Regenerate the dump only when it is missing or older than 24h; otherwise -C
+# takes the fast path and skips the security scan.
+[ -d "$HOMEBREW_PREFIX/share/zsh-completions" ] && \
+  fpath=("$HOMEBREW_PREFIX/share/zsh-completions" $fpath)
+autoload -Uz compinit
+# Rebuild the dump on first run or once a day; otherwise take the fast path.
+# -u uses Homebrew's admin-group-writable completion dirs (its default; owned by
+# us on a single-user mac) without the interactive "insecure directories"
+# prompt. -C trusts a recent dump and skips the freshness scan.
+if [[ -z $HOME/.zcompdump(N.mh-24) ]]; then
+  compinit -u
+else
+  compinit -C
+fi
+
+# fzf-tab: replace the completion menu with an fzf picker. Load after compinit
+# and before the widget-wrapping plugins (autosuggestions / syntax-highlighting).
+[ -r "$HOMEBREW_PREFIX/share/fzf-tab/fzf-tab.zsh" ] && \
+  source "$HOMEBREW_PREFIX/share/fzf-tab/fzf-tab.zsh"
+
+# fzf: Ctrl-R (history), Ctrl-T (files), Alt-C (cd into a subdir) + completion.
+command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"
+
+# zoxide: `z <frecent dir>` jumps; `zi` picks interactively. A smarter cd.
+command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+
+# starship prompt (config: ~/.config/starship.toml).
+command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
+
+# direnv: per-project env, incl. op-based secret injection (docs/secrets.md).
+# `direnv allow` stays manual (docs/runtime.md); a no-op until a .envrc is allowed.
+command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
+
+# mise runtime activation (interactive); shims in ~/.zshenv cover non-interactive.
 command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
 
-# Local overrides win: machine-specific PATH, tool env, secrets.
+# Modern CLI: interactive aliases only (scripts are unaffected; `command ls` /
+# `command cat` still reach the originals). bat runs without a pager to stay
+# cat-like. See docs/shell.md.
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza --group-directories-first --icons=auto'
+  alias ll='eza -l --group-directories-first --icons=auto --git'
+  alias la='eza -la --group-directories-first --icons=auto --git'
+  alias lt='eza --tree --level=2 --icons=auto'
+fi
+command -v bat >/dev/null 2>&1 && alias cat='bat --paging=never'
+
+# Local overrides win: machine-specific PATH, tool env, secrets, keybindings.
+# Sourced before the widget-wrapping plugins so any local keybindings are wrapped.
 [ -r "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"
+
+# zsh-autosuggestions (history-based), then zsh-syntax-highlighting. The latter
+# must be sourced LAST so it wraps every widget defined above.
+[ -r "$HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh" ] && \
+  source "$HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
+[ -r "$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ] && \
+  source "$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"

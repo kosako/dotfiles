@@ -1,0 +1,32 @@
+# Managed by chezmoi from kosako/dotfiles (#96). starship prompt config.
+# Two-line: information on the first line, the input prompt on the second, so a
+# rich first line never crowds what you type. Language/runtime modules appear
+# only in relevant projects (starship's contextual default) and reflect the
+# mise-selected version on PATH. Symbols use starship defaults to avoid
+# requiring a Nerd Font. The git-identity context segment is added separately
+# (#96 PR3) so its identity-value-free, public-safe mapping gets isolated review.
+
+add_newline = true
+
+format = """
+$directory\
+$git_branch$git_status$git_state\
+$nodejs$python$golang$rust\
+$cmd_duration$status
+$character"""
+
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+
+[cmd_duration]
+# Only show how long a command took when it was slow enough to matter.
+min_time = 2000
+
+[status]
+# Surface a non-zero exit code by default (off in stock starship).
+disabled = false
+
+[character]
+success_symbol = "[❯](green)"
+error_symbol = "[❯](red)"

@@ -28,11 +28,12 @@ modules:
     requires:
       enableRuntimeManagement: true
   shell-extra:
-    description: zsh shell 設定(oh-my-zsh ベース、local override 対応)。
+    description: zsh shell 設定(explicit-first、starship + 個別プラグイン、local override 対応)。
     paths:
       - .zshenv
       - .zshrc
       - .zprofile
+      - .config/starship.toml
   vscode:
     description: VS Code settings のみ管理。extensions は自動 install しない。
   ssh-1password:
