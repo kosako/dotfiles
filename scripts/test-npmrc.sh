@@ -101,10 +101,13 @@ while IFS= read -r line; do
     # `npm config get`. It verifies the operative `before` cutoff is ~7 days ago
     # through npm_before_within_age_window (exercised below); a mere presence
     # grep would not catch a loosened window.
-    if grep -Fq "npm_before_within_age_window" "$SCRIPT_DIR/doctor.sh"; then
-      ok "test passed: doctor verifies min-release-age via before cutoff window"
+    # Require the exact call args (days=7, tolerance=43200), not just the
+    # function name: a loosened window (e.g. `7 90000`) or wrong age
+    # (e.g. `1 43200`) must break this test, locking the 7-day +/-12h contract.
+    if grep -Eq 'npm_before_within_age_window.* 7 43200' "$SCRIPT_DIR/doctor.sh"; then
+      ok "test passed: doctor verifies min-release-age via before cutoff (7d +/-12h)"
     else
-      fail "test failed: doctor.sh does not verify min-release-age via before cutoff window"
+      fail "test failed: doctor.sh must call npm_before_within_age_window with '7 43200'"
       status=1
     fi
     continue
@@ -121,12 +124,13 @@ section "unit: npm before cutoff window (min-release-age=7)"
 
 check_window() {
   local name="$1" expected_rc="$2"; shift 2
-  if npm_before_within_age_window "$@"; then
-    [[ "$expected_rc" == "0" ]] && ok "test passed: $name" \
-      || { fail "test failed: $name (accepted, want reject)"; status=1; }
+  local actual_rc=0
+  npm_before_within_age_window "$@" || actual_rc=1
+  if [[ "$actual_rc" == "$expected_rc" ]]; then
+    ok "test passed: $name"
   else
-    [[ "$expected_rc" == "1" ]] && ok "test passed: $name" \
-      || { fail "test failed: $name (rejected, want accept)"; status=1; }
+    fail "test failed: $name (rc=$actual_rc, want $expected_rc)"
+    status=1
   fi
 }
 
@@ -146,6 +150,10 @@ check_window "far-future before is rejected"        1 $(( now + 1000*day ))    "
 # Rejected: unset / non-numeric before (npm older than 11.10, parse failure).
 check_window "empty before is rejected"             1 ""                       "$now" 7 "$tol"
 check_window "non-numeric before is rejected"       1 "abc"                    "$now" 7 "$tol"
+# Rejected: non-numeric now / days / tolerance fail closed (no coercion to 0).
+check_window "non-numeric now is rejected"          1 $(( now - 7*day ))      "abc" 7 "$tol"
+check_window "non-numeric days is rejected"         1 $(( now - 7*day ))      "$now" abc "$tol"
+check_window "non-numeric tolerance is rejected"    1 $(( now - 7*day ))      "$now" 7 abc
 
 if [[ "$status" -eq 0 ]]; then
   ok "npmrc tests passed"

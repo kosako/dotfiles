@@ -645,8 +645,13 @@ command_status() {
 # before_epoch (unset / unparseable) returns 1.
 npm_before_within_age_window() {
   local before_epoch="$1" now_epoch="$2" days="$3" tolerance="$4"
-  [[ "$before_epoch" =~ ^[0-9]+$ ]] || return 1
-  [[ "$now_epoch" =~ ^[0-9]+$ ]] || return 1
+  # Every argument must be a non-negative integer; a non-numeric value (unset
+  # before, bad caller args) fails closed rather than being coerced to 0 in the
+  # arithmetic below, which would silently move the window.
+  local arg
+  for arg in "$before_epoch" "$now_epoch" "$days" "$tolerance"; do
+    [[ "$arg" =~ ^[0-9]+$ ]] || return 1
+  done
   local expected=$(( now_epoch - days * 86400 ))
   (( before_epoch >= expected - tolerance && before_epoch <= expected + tolerance ))
 }
