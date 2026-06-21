@@ -23,6 +23,7 @@ Phase 2 以降の作業は、原則として Issue 作成、branch 作成、Pull
 - `main` への直接 commit は例外扱いにする。
 - script、policy、capability、profile、install、secret、network、AI agent 境界に関わる変更は PR 必須。
 - main 直 commit の例外を使った場合は、Notion worklog または follow-up Issue に理由を残す。
+- **AI(エージェント)が作る commit は署名しない(`--no-gpg-sign` を付ける)。** personal context は `commit.gpgsign=true` で人間の commit は SSH 署名され GitHub Verified になるが(`docs/git-identity.md`)、AI commit を署名すると op-ssh-sign の Touch ID が必要になり、PR 確認後の自動 merge 等の自動化が止まる。署名は**人間の attest** に限り、AI commit は署名対象外とする。署名 on/off は per-context(personal=署名 / work・client=なし)で per-repo ではなく、AI 非署名は commit 単位の opt-out(repo/context とは別軸)。
 
 ## 作業ログ
 
