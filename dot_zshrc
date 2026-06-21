@@ -45,6 +45,16 @@ fi
 # and before the widget-wrapping plugins (autosuggestions / syntax-highlighting).
 [ -r "$HOMEBREW_PREFIX/share/fzf-tab/fzf-tab.zsh" ] && \
   source "$HOMEBREW_PREFIX/share/fzf-tab/fzf-tab.zsh"
+# fzf-tab previews: while choosing in the picker, show directory contents (eza)
+# for a dir candidate and file contents (bat) for a file. Non-path completions
+# set no $realpath, so the preview is simply empty. eza/bat are guarded by the
+# 2>/dev/null fallthrough, so this is a no-op when they are absent.
+zstyle ':fzf-tab:complete:*:*' fzf-preview '
+  if [ -d "$realpath" ]; then
+    eza --tree --level=1 --color=always --icons=auto -- "$realpath" 2>/dev/null
+  elif [ -f "$realpath" ]; then
+    bat --color=always --style=plain --line-range=:100 -- "$realpath" 2>/dev/null
+  fi'
 
 # fzf: Ctrl-R (history), Ctrl-T (files), Alt-C (cd into a subdir) + completion.
 command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"
@@ -72,6 +82,14 @@ if command -v eza >/dev/null 2>&1; then
   alias lt='eza --tree --level=2 --icons=auto'
 fi
 command -v bat >/dev/null 2>&1 && alias cat='bat --paging=never'
+
+# Auto-list the directory after every cd (eza). add-zsh-hook preserves any other
+# chpwd hooks (e.g. one defined in ~/.zshrc.local).
+if command -v eza >/dev/null 2>&1; then
+  autoload -Uz add-zsh-hook
+  _eza_chpwd() { eza --group-directories-first --icons=auto }
+  add-zsh-hook chpwd _eza_chpwd
+fi
 
 # Local overrides win: machine-specific PATH, tool env, secrets, keybindings.
 # Sourced before the widget-wrapping plugins so any local keybindings are wrapped.
