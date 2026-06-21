@@ -57,7 +57,7 @@ if command -v git >/dev/null 2>&1; then
   # local identity files (docs/git-identity.md), never in the managed mechanism.
   if [[ "$(capability_value "$profile" enableGitSigning)" == "true" ]]; then
     if module_active_for_profile "$profile" git-signing; then
-      ok "enableGitSigning=true; SSH signing mechanism managed (signing.gitconfig); set user.signingkey + commit.gpgsign per context (local)"
+      ok "enableGitSigning=true; SSH signing mechanism managed (signing.gitconfig); commit.gpgsign defaults off (managed), opt in per repo/context (local key + commit.gpgsign=true)"
     else
       warn "enableGitSigning=true but the git-signing module is inactive for this profile (signing mechanism not managed)"
     fi

@@ -82,21 +82,26 @@ fatal: no email was given and auto-detection is disabled
   global identity の設定有無を検知する。値そのものは表示しない。
 - `scripts/test-gitconfig.sh` は `dot_gitconfig` の安全設定と includeIf の挙動を local fixture で検証する。
 
-## SSH 署名(git-signing module、Issue #85)
+## SSH 署名(git-signing module、Issue #85 / 既定 off は Issue #97)
 
-commit / tag を **SSH 署名**(1Password の op-ssh-sign)して GitHub で Verified にできる。
-`enableGitSigning` capability で gate。**personal は有効(true)** = `signing.gitconfig` が
-managed で配備される。**work / client は false**(gitdir のみ・署名なし)。鍵(`user.signingkey`)と
-`commit.gpgsign` は引き続き context 別 local の opt-in(下記)。
+commit / tag は 1Password の op-ssh-sign で **SSH 署名**できるが、**署名は既定 OFF(人も AI も
+区別なし)**。一人プロジェクトの無人 commit が署名プロンプトで止まらないためで、署名は「必須」では
+なく「必要な repo だけ opt-in」する。署名インフラ(鍵・mechanism)は残すので opt-in は一発。
 
-- **仕組みは managed**: `~/.config/git/signing.gitconfig`(`gpg.format=ssh` + signer プログラム
-  `/Applications/1Password.app/Contents/MacOS/op-ssh-sign`)を、`git-signing` module かつ
-  `enableGitSigning=true` のときだけ配備する。`dot_gitconfig` は常時 `[include]` し、ファイル
-  不在時は git が無視(no-op)。signer パスは public-safe(`/Applications` 配下・ユーザー名なし)。
-- **鍵と opt-in は context 別 local**: `user.signingkey`(どの鍵)と `commit.gpgsign`(署名する)は
-  `~/.config/git/<context>.gitconfig` に置く。**managed 側には鍵も gpgsign も置かない**。理由:
-  global に `commit.gpgsign=true` を置くと署名鍵の無い context(work/client repos)で commit が
-  失敗する。context ごとに鍵を入れて opt-in する方が安全(multi-account の署名鍵分離とも一致)。
+- **既定 off は managed**: `dot_gitconfig`(global)が `[commit] gpgsign=false` / `[tag] gpgsign=false`
+  を **includeIf 群より前** に持つ。includeIf は last-match-wins なので、後続の context include や
+  repo-local の `git config commit.gpgsign true` が上書きして opt-in できる。`false` の既定は無鍵
+  context でも安全(global に `true` を置くと署名鍵の無い context で commit が失敗するので置かない)。
+- **仕組み(mechanism)は managed**: `~/.config/git/signing.gitconfig`(`gpg.format=ssh` + signer
+  プログラム `/Applications/1Password.app/Contents/MacOS/op-ssh-sign`)を、`git-signing` module かつ
+  `enableGitSigning=true` のときだけ配備する。`dot_gitconfig` は常時 `[include]` し、ファイル不在時
+  は git が無視(no-op)。signer パスは public-safe(`/Applications` 配下・ユーザー名なし)。
+- **鍵は context 別 local、gpgsign の opt-in も local か per-repo**: `user.signingkey`(どの鍵)は
+  `~/.config/git/<context>.gitconfig` に置く。**managed 側には鍵を置かず、gpgsign は false の既定
+  だけ置く**(`true` の opt-in は repo-local の `git config commit.gpgsign true`、または常時署名したい
+  context の local file)。
+- **トレードオフ**: 既定 off なので直接 commit に GitHub "Verified" は付かない。PR を web / squash
+  merge した履歴は GitHub の web-flow 鍵で Verified のまま。
 - 署名鍵の**実体は 1Password**(SSH key)で、`user.signingkey` はその公開鍵参照。
 - GitHub では鍵を **Signing Key として登録**する(Authentication Key とは別枠)。committer email が
   そのアカウントの verified email であること。
