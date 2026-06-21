@@ -104,7 +104,7 @@ while IFS= read -r line; do
     # Require the exact call args (days=7, tolerance=43200), not just the
     # function name: a loosened window (e.g. `7 90000`) or wrong age
     # (e.g. `1 43200`) must break this test, locking the 7-day +/-12h contract.
-    if grep -Eq 'npm_before_within_age_window.* 7 43200' "$SCRIPT_DIR/doctor.sh"; then
+    if grep -Eq 'npm_before_within_age_window .* 7 43200([[:space:]]|;|$)' "$SCRIPT_DIR/doctor.sh"; then
       ok "test passed: doctor verifies min-release-age via before cutoff (7d +/-12h)"
     else
       fail "test failed: doctor.sh must call npm_before_within_age_window with '7 43200'"
@@ -154,6 +154,9 @@ check_window "non-numeric before is rejected"       1 "abc"                    "
 check_window "non-numeric now is rejected"          1 $(( now - 7*day ))      "abc" 7 "$tol"
 check_window "non-numeric days is rejected"         1 $(( now - 7*day ))      "$now" abc "$tol"
 check_window "non-numeric tolerance is rejected"    1 $(( now - 7*day ))      "$now" 7 abc
+# Honored: leading zeros are read base-10, not octal (no arithmetic error).
+check_window "leading-zero before is honored"       0 "0$(( now - 7*day ))"   "$now" 7 "$tol"
+check_window "leading-zero days=07 is honored"      0 $(( now - 7*day ))      "$now" 07 "$tol"
 
 if [[ "$status" -eq 0 ]]; then
   ok "npmrc tests passed"

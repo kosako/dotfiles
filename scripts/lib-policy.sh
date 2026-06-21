@@ -652,6 +652,10 @@ npm_before_within_age_window() {
   for arg in "$before_epoch" "$now_epoch" "$days" "$tolerance"; do
     [[ "$arg" =~ ^[0-9]+$ ]] || return 1
   done
+  # Force base-10 so a value with leading zeros (e.g. "08") is not parsed as
+  # octal, which would raise an arithmetic error instead of comparing cleanly.
+  before_epoch=$(( 10#$before_epoch )); now_epoch=$(( 10#$now_epoch ))
+  days=$(( 10#$days )); tolerance=$(( 10#$tolerance ))
   local expected=$(( now_epoch - days * 86400 ))
   (( before_epoch >= expected - tolerance && before_epoch <= expected + tolerance ))
 }

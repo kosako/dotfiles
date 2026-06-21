@@ -40,7 +40,8 @@ npm は `.npmrc` 内で環境変数を参照できる。token 参照を持つ `.
 
 ```bash
 # token は 1Password から実行時に注入(値はディスクに落とさない)
-NPM_TOKEN="$(op read 'op://Personal/npm-token/credential')" npm publish
+# op:// は placeholder。実際の vault / item 名は repo に書かない。
+NPM_TOKEN="$(op read 'op://<vault>/<item>/credential')" npm publish
 ```
 
 失効・未使用の token をグローバル `~/.npmrc` に放置しない。必要になったら `npm login` で再発行し、上記の供給方式に乗せる。
