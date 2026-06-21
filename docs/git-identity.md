@@ -85,7 +85,9 @@ fatal: no email was given and auto-detection is disabled
 ## SSH 署名(git-signing module、Issue #85)
 
 commit / tag を **SSH 署名**(1Password の op-ssh-sign)して GitHub で Verified にできる。
-`enableGitSigning` capability で gate、既定 off=opt-in。
+`enableGitSigning` capability で gate。**personal は有効(true)** = `signing.gitconfig` が
+managed で配備される。**work / client は false**(gitdir のみ・署名なし)。鍵(`user.signingkey`)と
+`commit.gpgsign` は引き続き context 別 local の opt-in(下記)。
 
 - **仕組みは managed**: `~/.config/git/signing.gitconfig`(`gpg.format=ssh` + signer プログラム
   `/Applications/1Password.app/Contents/MacOS/op-ssh-sign`)を、`git-signing` module かつ
