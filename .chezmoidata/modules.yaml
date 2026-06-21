@@ -46,7 +46,12 @@ modules:
   macos-defaults:
     description: opt-in の macOS defaults。
   git-signing:
-    description: 後続 module。commit / tag signing。
+    description: commit / tag の SSH 署名(1Password op-ssh-sign)。仕組みのみ managed、鍵と opt-in は context 別 local。
+    paths:
+      - .config/git
+      - .config/git/signing.gitconfig
+    requires:
+      enableGitSigning: true
   ai-policy:
     description: AI agent 権限方針。
   ai-tools:

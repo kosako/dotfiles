@@ -50,6 +50,20 @@ if command -v git >/dev/null 2>&1; then
   else
     warn "transfer.credentialsInUrl is not die"
   fi
+  # enableGitSigning gates the managed SSH-signing mechanism
+  # (~/.config/git/signing.gitconfig: gpg.format=ssh + 1Password signer).
+  # AGENTS.md requires a capability to drive a doctor section. The signing KEY
+  # (user.signingkey) and the per-context commit.gpgsign opt-in live in the
+  # local identity files (docs/git-identity.md), never in the managed mechanism.
+  if [[ "$(capability_value "$profile" enableGitSigning)" == "true" ]]; then
+    if module_active_for_profile "$profile" git-signing; then
+      ok "enableGitSigning=true; SSH signing mechanism managed (signing.gitconfig); set user.signingkey + commit.gpgsign per context (local)"
+    else
+      warn "enableGitSigning=true but the git-signing module is inactive for this profile (signing mechanism not managed)"
+    fi
+  else
+    ok "Git signing mechanism not managed (enableGitSigning=false)"
+  fi
 else
   warn "git not found"
 fi

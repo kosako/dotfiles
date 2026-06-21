@@ -19,6 +19,7 @@ profiles:
       - update-policy
       - ai-policy
       - claude-settings
+      - git-signing
     capabilities:
       installPackages: true
       installGuiApps: true

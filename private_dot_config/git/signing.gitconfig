@@ -1,0 +1,10 @@
+# Managed by chezmoi from kosako/dotfiles.
+# SSH-based commit/tag signing mechanism, gated by enableGitSigning via the
+# git-signing module. Non-secret: only the signer program path. The signing KEY
+# (user.signingkey) and the per-context opt-in (commit.gpgsign) live in the
+# local identity files under ~/.config/git/ (see docs/git-identity.md), never
+# here. This file tells Git HOW to sign, not WHICH key or WHETHER to sign.
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign

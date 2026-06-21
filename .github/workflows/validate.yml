@@ -113,3 +113,6 @@ jobs:
 
       - name: claude settings sandbox content tests
         run: ./scripts/test-claude-settings.sh
+
+      - name: git-signing gating tests
+        run: ./scripts/test-git-signing.sh

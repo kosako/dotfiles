@@ -43,3 +43,11 @@
 
 [includeIf "gitdir:~/src/agent/"]
 	path = ~/.config/git/agent.gitconfig
+
+# SSH-based commit/tag signing mechanism, managed only when enableGitSigning is
+# on (git-signing module). The include is unconditional: Git silently ignores a
+# missing path, so this is a no-op until signing is opted in. The signing key
+# and the per-context commit.gpgsign live in the local identity files above
+# (see docs/git-identity.md).
+[include]
+	path = ~/.config/git/signing.gitconfig
