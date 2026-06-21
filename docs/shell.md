@@ -55,7 +55,7 @@
 
 ### 検索・一覧・閲覧
 
-- `rg <pattern>`(ripgrep)/ `fd <name>`(fd):高速検索(`.gitignore` 尊重)。fzf の裏側でも使われる。
+- `rg <pattern>`(ripgrep)/ `fd <name>`(fd):高速検索(`.gitignore` 尊重)。※ 既定では `Ctrl-T` / `Alt-C` は fzf 内蔵の walker を使う。fd を fzf の backend にしたい場合は `FZF_CTRL_T_COMMAND` / `FZF_ALT_C_COMMAND` を `~/.zshrc.local` で設定する。
 - `ls` / `ll` / `la` / `lt`(eza:アイコン・git 状態・ツリー)、`cat`(bat:シンタックスハイライト、pager なしで cat 風)。
 - これらは**対話シェルの alias のみ**でスクリプトには影響しない。素の挙動が要るときは `command ls` / `command cat`。
 
