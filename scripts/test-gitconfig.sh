@@ -47,6 +47,31 @@ for context in personal work client sandbox agent; do
   check_contains "include path for $context" "path = ~/.config/git/$context.gitconfig"
 done
 
+# Personal also has remote-URL (hasconfig) rules covering all three URL
+# spellings; work/client must never (their org URLs are confidential).
+for pattern in \
+  'hasconfig:remote.*.url:https://github.com/kosako/**' \
+  'hasconfig:remote.*.url:git@github.com:kosako/**' \
+  'hasconfig:remote.*.url:ssh://git@github.com/kosako/**'; do
+  check_contains "hasconfig personal pattern: $pattern" "[includeIf \"$pattern\"]"
+done
+
+# Public-safety: the ONLY hasconfig rules allowed are the three public personal
+# patterns asserted above. Match against the exact allowlist (not a loose
+# "contains kosako", which would also accept e.g. github.com/work-kosako): any
+# other hasconfig line is a confidential org leaking into this public file.
+unexpected_hasconfig="$(grep -F 'hasconfig:remote' "$GITCONFIG_SOURCE" \
+  | grep -vF 'hasconfig:remote.*.url:https://github.com/kosako/**' \
+  | grep -vF 'hasconfig:remote.*.url:git@github.com:kosako/**' \
+  | grep -vF 'hasconfig:remote.*.url:ssh://git@github.com/kosako/**' || true)"
+if [[ -n "$unexpected_hasconfig" ]]; then
+  fail "test failed: unexpected hasconfig rule(s) in source (only the 3 public personal patterns allowed):"
+  printf '%s\n' "$unexpected_hasconfig" >&2
+  status=1
+else
+  ok "test passed: hasconfig rules are exactly the 3 public personal patterns"
+fi
+
 if grep -Eq '^[[:space:]]*(name|email)[[:space:]]*=' "$GITCONFIG_SOURCE"; then
   fail "test failed: source contains an identity assignment"
   status=1
@@ -54,8 +79,11 @@ else
   ok "test passed: no identity assignment in source"
 fi
 
-if grep -q '@' "$GITCONFIG_SOURCE"; then
-  fail "test failed: source contains an @ (possible email value)"
+# An '@' is allowed only inside the SSH remote-URL patterns of the hasconfig
+# includeIf headers (git@... / ssh://git@...); anywhere else it likely
+# indicates a leaked email value.
+if grep -F '@' "$GITCONFIG_SOURCE" | grep -vqF 'hasconfig:remote.*.url'; then
+  fail "test failed: source contains an @ outside hasconfig URL patterns (possible email value)"
   status=1
 else
   ok "test passed: no email-like value in source"
@@ -141,6 +169,82 @@ elif grep -qi "credential" <<< "$output"; then
 else
   printf '%s\n' "$output" >&2
   fail "test failed: credential URL failed for another reason"
+  status=1
+fi
+
+section "fixture checks: remote-URL identity (hasconfig)"
+
+# A work identity file + ~/src/work/ so the ordering test below (placement
+# stays authoritative) can resolve a work identity.
+cat > "$fixture/.config/git/work.gitconfig" <<'EOF'
+[user]
+	name = Dotfiles Work Test
+	email = dotfiles-work@example.invalid
+EOF
+mkdir -p "$fixture/src/work/demo"
+
+# A personal repo cloned OUTSIDE ~/src/ still resolves the personal identity
+# from its remote URL, for each of the three URL spellings.
+has_i=0
+for url in \
+  "https://github.com/kosako/x.git" \
+  "git@github.com:kosako/x.git" \
+  "ssh://git@github.com/kosako/x.git"; do
+  has_i=$((has_i + 1))
+  repo="$fixture/outside/has-$has_i"
+  mkdir -p "$repo"
+  run_git "$repo" init --quiet --initial-branch=main
+  run_git "$repo" config remote.origin.url "$url"
+  if output="$(run_git "$repo" commit --allow-empty -m test 2>&1)"; then
+    author="$(run_git "$repo" log -1 --format='%ae')"
+    if [[ "$author" == "dotfiles-test@example.invalid" ]]; then
+      ok "test passed: outside-root repo with personal remote resolves personal identity ($url)"
+    else
+      fail "test failed: outside-root repo resolved unexpected author: $author ($url)"
+      status=1
+    fi
+  else
+    printf '%s\n' "$output" >&2
+    fail "test failed: commit failed for outside-root personal remote ($url)"
+    status=1
+  fi
+done
+
+# A non-personal remote outside ~/src/ must NOT match: the hasconfig patterns
+# are exact to github.com/kosako, never a catch-all (fail-closed).
+repo="$fixture/outside/has-other"
+mkdir -p "$repo"
+run_git "$repo" init --quiet --initial-branch=main
+run_git "$repo" config remote.origin.url "https://github.com/someorg/x.git"
+if output="$(run_git "$repo" commit --allow-empty -m test 2>&1)"; then
+  printf '%s\n' "$output" >&2
+  fail "test failed: non-personal remote outside roots resolved an identity"
+  status=1
+elif grep -Eqi 'no (email|name) was given|user\.useConfigOnly' <<< "$output"; then
+  ok "test passed: non-personal remote outside roots stays fail-closed"
+else
+  printf '%s\n' "$output" >&2
+  fail "test failed: non-personal remote failed for another reason"
+  status=1
+fi
+
+# Placement stays authoritative: a repo IN ~/src/work/ keeps the work identity
+# even when its remote is a personal (github.com/kosako) URL, because the
+# gitdir rule is listed after the hasconfig rules and wins when both match.
+repo="$fixture/src/work/demo"
+run_git "$repo" init --quiet --initial-branch=main
+run_git "$repo" config remote.origin.url "https://github.com/kosako/x.git"
+if output="$(run_git "$repo" commit --allow-empty -m test 2>&1)"; then
+  author="$(run_git "$repo" log -1 --format='%ae')"
+  if [[ "$author" == "dotfiles-work@example.invalid" ]]; then
+    ok "test passed: gitdir placement overrides remote (work dir + personal remote -> work)"
+  else
+    fail "test failed: placement did not override remote; author: $author"
+    status=1
+  fi
+else
+  printf '%s\n' "$output" >&2
+  fail "test failed: commit failed in work context with personal remote"
   status=1
 fi
 
