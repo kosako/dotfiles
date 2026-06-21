@@ -40,6 +40,22 @@ packages:
   - { name: shellcheck, source: brew_formula }
   - { name: tmux, source: brew_formula }
   - { name: yq, source: brew_formula }
+  # Interactive shell environment (#96): prompt, navigation, completion, modern
+  # CLI. Installed via brew, sourced/initialised from dot_zshrc (no plugin
+  # manager). The zsh-* plugins have no executable; brew_formula presence is
+  # detected via `brew list`, so they need no bin.
+  - { name: starship, source: brew_formula }
+  - { name: zoxide, source: brew_formula }
+  - { name: fzf, source: brew_formula }
+  - { name: fzf-tab, source: brew_formula }
+  - { name: zsh-autosuggestions, source: brew_formula }
+  - { name: zsh-syntax-highlighting, source: brew_formula }
+  - { name: zsh-completions, source: brew_formula }
+  - { name: ripgrep, source: brew_formula, bin: rg }
+  - { name: fd, source: brew_formula }
+  - { name: eza, source: brew_formula }
+  - { name: bat, source: brew_formula }
+  - { name: direnv, source: brew_formula }
   - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: copilot-cli, source: brew_cask }
   - { name: iterm2, source: brew_cask }

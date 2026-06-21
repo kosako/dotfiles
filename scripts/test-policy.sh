@@ -435,6 +435,12 @@ run_fail_contains \
 # Globals set by setup_drift: drift_dir (fake inventory + go bin),
 # drift_fakebin (fake managers + yq symlink). Reuses `fixture` from
 # make_fixture for the sourced lib-policy.sh and packages.yaml.
+#
+# shell_env_formulae mirrors the #96 interactive-shell brew formulae now in the
+# catalog so the reality-seed stays drift-free; reused by the override cases
+# below so each still introduces exactly one drift.
+shell_env_formulae=(starship zoxide fzf fzf-tab zsh-autosuggestions \
+  zsh-syntax-highlighting zsh-completions ripgrep fd eza bat direnv)
 setup_drift() {
   make_fixture
   drift_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-drift.XXXXXX")"
@@ -478,8 +484,10 @@ EOF
   done
 
   # Default inventory == the reality-seed catalog (drift-free baseline).
-  printf '%s\n' age chezmoi gh mise shellcheck tmux yq > "$drift_dir/brew_formulae"
-  printf '%s\n' age chezmoi gh mise shellcheck tmux yq > "$drift_dir/brew_leaves"
+  printf '%s\n' age chezmoi gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+    > "$drift_dir/brew_formulae"
+  printf '%s\n' age chezmoi gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+    > "$drift_dir/brew_leaves"
   printf '%s\n' 1password-cli copilot-cli iterm2 swiftbar > "$drift_dir/brew_casks"
   # npm and corepack are node-bundled; including them proves they are
   # filtered out and never reported as undeclared.
@@ -509,16 +517,20 @@ run_drift "catalog drift: flags an undeclared brew leaf" \
   "undeclared: librsvg (brew_formula leaf not in catalog)"
 
 setup_drift
-printf '%s\n' age gh mise shellcheck tmux yq > "$drift_dir/brew_formulae"
-printf '%s\n' age gh mise shellcheck tmux yq > "$drift_dir/brew_leaves"
+printf '%s\n' age gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+  > "$drift_dir/brew_formulae"
+printf '%s\n' age gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+  > "$drift_dir/brew_leaves"
 run_drift "catalog drift: flags a declared package that is not installed" \
   "not installed: chezmoi (brew_formula)"
 
 setup_drift
 # Declared via brew but absent from brew, while the command resolves on
 # PATH -> source drift (info), not "not installed".
-printf '%s\n' age chezmoi mise shellcheck tmux yq > "$drift_dir/brew_formulae"
-printf '%s\n' age chezmoi mise shellcheck tmux yq > "$drift_dir/brew_leaves"
+printf '%s\n' age chezmoi mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+  > "$drift_dir/brew_formulae"
+printf '%s\n' age chezmoi mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+  > "$drift_dir/brew_leaves"
 printf '#!/bin/sh\nexit 0\n' > "$drift_fakebin/gh"
 chmod +x "$drift_fakebin/gh"
 run_drift "catalog drift: source mismatch is info when the command is on PATH" \
