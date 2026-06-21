@@ -94,6 +94,19 @@ check_module_gate "mise config managed only with enableRuntimeManagement" \
 section "consistency: doctor enforce expectations"
 
 while IFS= read -r line; do
+  key="${line%%=*}"
+  if [[ "$key" == "min-release-age" ]]; then
+    # npm flattens min-release-age into `before` (now - <days>) and deletes the
+    # original key, so doctor cannot assert `min-release-age=<n>` via
+    # `npm config get`. It verifies the operative `before` key instead.
+    if grep -Fq "min-release-age honored" "$SCRIPT_DIR/doctor.sh"; then
+      ok "test passed: doctor verifies min-release-age via before"
+    else
+      fail "test failed: doctor.sh does not verify min-release-age via before"
+      status=1
+    fi
+    continue
+  fi
   if grep -Fq "$line" "$SCRIPT_DIR/doctor.sh"; then
     ok "test passed: doctor expects $line"
   else

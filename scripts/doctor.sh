@@ -117,7 +117,7 @@ elif ! command -v npm >/dev/null 2>&1; then
 else
   npm_version="$(npm --version)"
   ok "npm: $npm_version"
-  for key in min-release-age ignore-scripts save-exact fund audit userconfig globalconfig; do
+  for key in before ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
     item "npm $key=$value"
   done
@@ -142,8 +142,16 @@ ignore-scripts=true
 save-exact=true
 fund=false
 audit=true
-min-release-age=7
 EOF
+    # npm consumes min-release-age and flattens it into `before` (now - <days>),
+    # deleting the original key, so `npm config get min-release-age` is always
+    # null even when honored. Verify the operative `before` key is set instead.
+    npm_before="$(npm config get before 2>/dev/null || true)"
+    if [[ -n "$npm_before" && "$npm_before" != "null" ]]; then
+      ok "npm min-release-age honored (before=$npm_before)"
+    else
+      warn "enforce expects npm min-release-age, but before is unset (apply pending?)"
+    fi
   fi
 fi
 
