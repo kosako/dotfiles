@@ -508,6 +508,18 @@ run_drift() {
         bash -c 'set -euo pipefail; source "$LIBPOLICY"; report_catalog_drift'
 }
 
+# Drop one entry from the seeded brew inventory to simulate a declared-but-
+# absent package. Mutating the seed (rather than re-listing it) keeps each
+# override case inheriting the full reality-seed, so it introduces exactly one
+# drift and can never silently diverge from shell_env_formulae.
+drift_seed_remove() {
+  local entry="$1" f
+  for f in brew_formulae brew_leaves; do
+    grep -vx "$entry" "$drift_dir/$f" > "$drift_dir/$f.tmp"
+    mv "$drift_dir/$f.tmp" "$drift_dir/$f"
+  done
+}
+
 setup_drift
 run_drift "catalog drift: clean when reality matches the catalog" "no catalog drift"
 
@@ -517,20 +529,14 @@ run_drift "catalog drift: flags an undeclared brew leaf" \
   "undeclared: librsvg (brew_formula leaf not in catalog)"
 
 setup_drift
-printf '%s\n' age gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
-  > "$drift_dir/brew_formulae"
-printf '%s\n' age gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
-  > "$drift_dir/brew_leaves"
+drift_seed_remove chezmoi
 run_drift "catalog drift: flags a declared package that is not installed" \
   "not installed: chezmoi (brew_formula)"
 
 setup_drift
 # Declared via brew but absent from brew, while the command resolves on
 # PATH -> source drift (info), not "not installed".
-printf '%s\n' age chezmoi mise shellcheck tmux yq "${shell_env_formulae[@]}" \
-  > "$drift_dir/brew_formulae"
-printf '%s\n' age chezmoi mise shellcheck tmux yq "${shell_env_formulae[@]}" \
-  > "$drift_dir/brew_leaves"
+drift_seed_remove gh
 printf '#!/bin/sh\nexit 0\n' > "$drift_fakebin/gh"
 chmod +x "$drift_fakebin/gh"
 run_drift "catalog drift: source mismatch is info when the command is on PATH" \
