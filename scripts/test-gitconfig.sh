@@ -56,13 +56,20 @@ for pattern in \
   check_contains "hasconfig personal pattern: $pattern" "[includeIf \"$pattern\"]"
 done
 
-# Public-safety: every hasconfig rule must reference only the public personal
-# owner. A work/client org name appearing here would leak into a public repo.
-if grep -F 'hasconfig:remote' "$GITCONFIG_SOURCE" | grep -vq 'kosako'; then
-  fail "test failed: a hasconfig rule references a non-public owner (github.com/kosako only)"
+# Public-safety: the ONLY hasconfig rules allowed are the three public personal
+# patterns asserted above. Match against the exact allowlist (not a loose
+# "contains kosako", which would also accept e.g. github.com/work-kosako): any
+# other hasconfig line is a confidential org leaking into this public file.
+unexpected_hasconfig="$(grep -F 'hasconfig:remote' "$GITCONFIG_SOURCE" \
+  | grep -vF 'hasconfig:remote.*.url:https://github.com/kosako/**' \
+  | grep -vF 'hasconfig:remote.*.url:git@github.com:kosako/**' \
+  | grep -vF 'hasconfig:remote.*.url:ssh://git@github.com/kosako/**' || true)"
+if [[ -n "$unexpected_hasconfig" ]]; then
+  fail "test failed: unexpected hasconfig rule(s) in source (only the 3 public personal patterns allowed):"
+  printf '%s\n' "$unexpected_hasconfig" >&2
   status=1
 else
-  ok "test passed: hasconfig rules are personal/public-safe only"
+  ok "test passed: hasconfig rules are exactly the 3 public personal patterns"
 fi
 
 if grep -Eq '^[[:space:]]*(name|email)[[:space:]]*=' "$GITCONFIG_SOURCE"; then
