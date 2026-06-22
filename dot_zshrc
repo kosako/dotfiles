@@ -123,15 +123,21 @@ _ai_clip_copy() {
   fi
 }
 
-# Run the original command line ($1), showing its merged output live via tee
-# while capturing it, then copy command + plain output + exit status. pipestatus
-# gives the command's own status (a process substitution would not wait for the
-# temp file to finish writing). The temp file is mktemp 0600 and removed after.
+# Run the original command line ($1) with output captured to a temp file, show
+# it, then copy command + plain output + exit status. A plain redirect (not a
+# pipe or process substitution) keeps eval in the *current* shell, so cd,
+# export, and source persist exactly as pressing Enter would; it also writes the
+# file synchronously, so there is no concurrent tee to race against the read, nor
+# one that would block when the command backgrounds a job holding the pipe.
+# Output therefore appears after the command finishes rather than streaming.
+# Temp file is mktemp 0600, removed after. Copy failure is reported on stderr but
+# does not change the exit status: callers and the prompt expect the command's.
 _ai_clip_run() {
   local cmd="$1" raw rc
   raw="$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" || return 1
-  eval "$cmd" 2>&1 | tee "$raw"
-  rc=${pipestatus[1]}
+  eval "$cmd" > "$raw" 2>&1
+  rc=$?
+  cat -- "$raw"
   {
     print -r -- "\$ $cmd"
     _ai_clip_strip_ansi < "$raw"
