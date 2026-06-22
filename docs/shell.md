@@ -48,6 +48,15 @@
 - autosuggestions(履歴からゴースト表示):`→` / `End` / `Ctrl-E` で全受け入れ、`Alt-F`(または `Ctrl-→`)で 1 単語だけ受け入れ。
 - **行頭にスペース**を付けて実行したコマンドは履歴に残さない(`HIST_IGNORE_SPACE`。秘密の一回限り用。基本は op/direnv 注入で secret をインライン入力しない = [secrets](secrets.md))。履歴はマシン外に同期しない。
 
+### 出力のコピー(AI 連携)
+
+- `Ctrl-O` … **Enter の代わりに**押すと、そのコマンドを実行しつつ「`$ コマンド` + 出力 + `[exit status]`」をクリップボードへコピーする(AI チャットに貼って相談する用途)。普段は今までどおり Enter、コピーしたいコマンドだけ Ctrl-O。`&&` 連結 / pipe / 複数行コマンドも行全体を捕捉する。
+  - 出力は ANSI(色・制御列)を除去したプレーンテキストでコピーする。実行内容は通常の Enter と同じ(alias・オプションそのまま)。
+  - うっかり Enter で実行した後は取れない → `↑` で呼び出して Ctrl-O で実行し直す(副作用のあるコマンドの再実行に注意)。手で範囲選択するのは従来どおり可能。
+  - **行頭スペース**を付けたコマンドは Ctrl-O でも履歴に残さない(`HIST_IGNORE_SPACE` の opt-out を尊重。コピー自体は行う)。一時ファイルは `mktemp` の 0600 で作りコピー後に削除する。
+  - vim / less / top / fzf などの全画面 TUI は制御列だらけになるため対象にしない運用。
+  - 実行行には内部的に `_ai_clip_run '…'` が表示される(キャプチャ用ラッパ)。履歴にはクリーンなコマンドだけが残る。
+
 ### 補完
 
 - `TAB` … 候補が複数あると fzf ピッカーで選択(fzf-tab)。例:`git checkout <TAB>` / `cd <TAB>` / `kill <TAB>`。矢印 / `Ctrl-J`・`Ctrl-K` で移動、Enter で確定。
@@ -69,6 +78,7 @@
 
 - 挙動・キーバインド・alias の上書き:`~/.zshrc.local`(local が勝つ)。
 - プロンプトの見た目:`~/.config/starship.toml`(managed。変更は source 経由で apply)。
+- `Ctrl-O`(出力コピー)で `pbcopy` が host に届かない remote / container セッションでは、`~/.zshrc.local` に `export AI_CLIPBOARD_OSC52=1` を置くと OSC 52 経由で端末にコピーさせる(端末対応・サイズ制限に注意。既定は off)。
 
 ## `~/.zshenv`(非対話 shell の PATH)
 
