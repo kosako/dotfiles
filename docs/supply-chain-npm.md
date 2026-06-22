@@ -63,6 +63,33 @@ npm install --ignore-scripts=false
 
 project の `.npmrc` に `ignore-scripts=false` を置く方法もあるが、その project の依存全体に効くため、理由を project 側に書き残すこと。
 
+### Claude Code(ネイティブバイナリを postinstall で配置する例)
+
+Anthropic 公式 CLI `@anthropic-ai/claude-code` 2.x は、~226MB のネイティブバイナリを optional dependency(`@anthropic-ai/claude-code-<platform>`)として配布し、`postinstall`(`install.cjs`)でそれを package の bin にハードリンク配置する。`ignore-scripts=true` だと postinstall が走らずバイナリが配置されず(optional dep 自体は取得されている)、`claude` 実行時に次で落ちる:
+
+```text
+Error: claude native binary not installed.
+```
+
+`ignore-scripts` は all-or-nothing で npm に package 単位の許可機能が無いため、信頼できる first-party の `claude-code` についてのみ、**グローバルの `ignore-scripts=true` は維持したまま、監査済みの installer 1 本だけを path 指定で明示実行**する(hardening を全体で緩めない、という enforce の方針と最も整合する逃げ道)。
+
+```sh
+# 通常 install(optional dep を取得)→ 既知の installer だけを明示実行
+npm i -g @anthropic-ai/claude-code --include=optional
+node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
+```
+
+この 2 手は `dot_zshrc` の `claude-update` 関数にまとめてある(更新時はこれを実行する)。
+
+検証:
+
+```sh
+claude --version                                       # → 2.x (Claude Code)
+ls -la "$(npm root -g)/@anthropic-ai/claude-code/bin/" # 本体が ~226MB(スタブでない)
+```
+
+`min-release-age=7` により最新ではなく公開 7 日以上経った版が入るのは仕様(下記「`min-release-age` の注意」)。
+
 ## `min-release-age` の注意
 
 - 単位は日数。pnpm の `minimumReleaseAge`(分単位)と混同しないこと。

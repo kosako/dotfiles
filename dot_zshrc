@@ -164,6 +164,29 @@ _ai_clip_accept_line() {
 zle -N ai-clip-accept-line _ai_clip_accept_line
 bindkey '^O' ai-clip-accept-line
 
+# Update Claude Code despite the hardened ~/.npmrc (ignore-scripts=true). Claude
+# Code ships its ~226MB native binary as an optional dependency and places it via
+# a postinstall (install.cjs) that hardlinks it into the package bin; with
+# install scripts disabled the binary is never placed and `claude` fails with
+# "native binary not installed". ignore-scripts is all-or-nothing, so instead of
+# relaxing it globally we keep it on and, after a normal install, run ONLY this
+# one audited first-party installer by path. --include=optional guarantees the
+# platform package is present for install.cjs to link. See docs/supply-chain-npm.md.
+claude-update() {
+  command -v npm  >/dev/null 2>&1 || { print -u2 -- "claude-update: npm not found";  return 1; }
+  command -v node >/dev/null 2>&1 || { print -u2 -- "claude-update: node not found"; return 1; }
+  npm i -g @anthropic-ai/claude-code --include=optional || return
+  local root installer
+  root="$(npm root -g)" || return
+  installer="$root/@anthropic-ai/claude-code/install.cjs"
+  if [[ ! -f "$installer" ]]; then
+    print -u2 -- "claude-update: installer not found at $installer (package layout changed?)"
+    return 1
+  fi
+  node "$installer" || return
+  command -v claude >/dev/null 2>&1 && claude --version
+}
+
 # Local overrides win: machine-specific PATH, tool env, secrets, keybindings.
 # Sourced before the widget-wrapping plugins so any local keybindings are wrapped.
 [ -r "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"
