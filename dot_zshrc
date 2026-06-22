@@ -91,6 +91,79 @@ if command -v eza >/dev/null 2>&1; then
   add-zsh-hook chpwd _eza_chpwd
 fi
 
+# AI clip (Ctrl-O): run the current command line and copy "command + output +
+# exit status" to the clipboard, for pasting into an AI chat. Press Ctrl-O
+# instead of Enter — type normally, opt in per command. The whole BUFFER is
+# requoted with ${(qq)} and re-run via eval, so &&-chains, pipes, and multi-line
+# commands are captured intact. Defined before the local override (so a local
+# rebinding wins) and before the widget-wrapping plugins. See docs/shell.md.
+
+# Strip ANSI/OSC escapes so the pasted text is plain (easier for an AI to read).
+# perl ships with macOS; if it is ever absent, copy the raw output rather than
+# failing the whole capture.
+_ai_clip_strip_ansi() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -CS -pe 's/\e\[[0-9;:?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(\a|\e\\)//g; s/\r//g'
+  else
+    cat
+  fi
+}
+
+# Clipboard sink: pbcopy locally. OSC 52 is opt-in (AI_CLIPBOARD_OSC52=1) for
+# remote/containerised sessions where pbcopy cannot reach the host clipboard;
+# it is not a silent fallback because terminal support and size limits vary.
+# Fail (return 1) when neither target is available so the caller can report it.
+_ai_clip_copy() {
+  if command -v pbcopy >/dev/null 2>&1; then
+    pbcopy
+  elif [[ "${AI_CLIPBOARD_OSC52:-}" == 1 ]] && command -v base64 >/dev/null 2>&1; then
+    printf '\e]52;c;%s\a' "$(base64 | tr -d '\n')" > /dev/tty
+  else
+    return 1
+  fi
+}
+
+# Run the original command line ($1) with output captured to a temp file, show
+# it, then copy command + plain output + exit status. A plain redirect (not a
+# pipe or process substitution) keeps eval in the *current* shell, so cd,
+# export, and source persist exactly as pressing Enter would; it also writes the
+# file synchronously, so there is no concurrent tee to race against the read, nor
+# one that would block when the command backgrounds a job holding the pipe.
+# Output therefore appears after the command finishes rather than streaming.
+# Temp file is mktemp 0600, removed after. Copy failure is reported on stderr but
+# does not change the exit status: callers and the prompt expect the command's.
+_ai_clip_run() {
+  local cmd="$1" raw rc
+  raw="$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" || return 1
+  eval "$cmd" > "$raw" 2>&1
+  rc=$?
+  cat -- "$raw"
+  {
+    print -r -- "\$ $cmd"
+    _ai_clip_strip_ansi < "$raw"
+    print -r -- "[exit status: $rc]"
+  } | _ai_clip_copy || print -u2 -- \
+    "ai-clip: no clipboard target (set AI_CLIPBOARD_OSC52=1 for remote sessions)"
+  rm -f -- "$raw"
+  return "$rc"
+}
+
+# Ctrl-O widget: save the clean command to history (unless it is space-prefixed,
+# which opts out of history like any command), then run it through the capture
+# wrapper. The wrapper line is space-prefixed so HIST_IGNORE_SPACE keeps the
+# _ai_clip_run call itself out of history.
+_ai_clip_accept_line() {
+  if [[ -z "$BUFFER" ]]; then
+    zle accept-line
+    return
+  fi
+  [[ "$BUFFER" != [[:space:]]* ]] && print -s -- "$BUFFER"
+  BUFFER=" _ai_clip_run ${(qq)BUFFER}"
+  zle accept-line
+}
+zle -N ai-clip-accept-line _ai_clip_accept_line
+bindkey '^O' ai-clip-accept-line
+
 # Local overrides win: machine-specific PATH, tool env, secrets, keybindings.
 # Sourced before the widget-wrapping plugins so any local keybindings are wrapped.
 [ -r "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"
