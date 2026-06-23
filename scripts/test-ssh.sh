@@ -59,8 +59,9 @@ if [[ ! -f "$on_cfg" ]]; then
   status=1
 elif grep -q '^Host github.com$' "$on_cfg" \
   && grep -Fqx '    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"' "$on_cfg" \
+  && grep -q '^Match all$' "$on_cfg" \
   && grep -q '^Include config.local$' "$on_cfg"; then
-  ok "test passed: enable1PasswordSSH=true emits scoped github.com agent + Include config.local"
+  ok "test passed: enable1PasswordSSH=true emits scoped github.com agent + Match all + Include config.local"
 else
   fail "test failed: enable1PasswordSSH=true config missing github.com agent or Include"
   status=1
@@ -114,6 +115,45 @@ if [[ -f "$on_cfg" ]]; then
     status=1
   else
     ok "test passed: managed config carries no Host *, no keys, only the public github.com host"
+  fi
+fi
+
+section "ssh -G resolution (Include is global, managed-wins)"
+
+# 4) Behavioral check with the real ssh parser. A text match alone missed the
+#    bug where `Include config.local` sat inside the Host github.com block and
+#    was only read when connecting to github.com (#121). Point the Include at a
+#    throwaway config.local that defines a host the managed config does NOT, and
+#    assert ssh resolves it (proves the Include is global) and that github.com
+#    still gets the managed agent (proves managed-wins). Relative Include paths
+#    resolve under ~/.ssh, so rewrite to an absolute path for an isolated test.
+if ! command -v ssh >/dev/null 2>&1; then
+  item "ssh not found; skipping ssh -G resolution check"
+elif [[ -f "$on_cfg" ]]; then
+  probe_local="$base/config.local"
+  cat > "$probe_local" <<EOF
+Host probe-vm
+  HostName 10.9.8.7
+  User probeuser
+Host *
+  IdentityAgent /tmp/probe-local.sock
+EOF
+  probe_cfg="$base/probe-config"
+  sed "s#^Include config.local\$#Include $probe_local#" "$on_cfg" > "$probe_cfg"
+
+  # IdentityAgent paths contain a space ("Group Containers"), so capture the
+  # whole value after the keyword rather than a single field.
+  probe_host="$(ssh -G -F "$probe_cfg" probe-vm 2>/dev/null | sed -n 's/^hostname //p')"
+  gh_agent="$(ssh -G -F "$probe_cfg" github.com 2>/dev/null | sed -n 's/^identityagent //p')"
+
+  if [[ "$probe_host" != "10.9.8.7" ]]; then
+    fail "test failed: config.local host not resolved (Include is not global): hostname=$probe_host"
+    status=1
+  elif [[ "$gh_agent" != *"1password/t/agent.sock" ]]; then
+    fail "test failed: github.com did not keep the managed agent (managed-wins broken): identityagent=$gh_agent"
+    status=1
+  else
+    ok "test passed: ssh resolves a config.local-only host (global Include) and github.com keeps the managed agent (managed-wins)"
   fi
 fi
 
