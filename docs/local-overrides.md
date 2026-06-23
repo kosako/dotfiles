@@ -27,15 +27,22 @@ managed 側の既定値を上書きできる必要があるため、これを意
 
 ## SSH: managed-wins(末尾 Include)
 
-managed な `~/.ssh/config` は末尾に local file を Include する。
+managed な `~/.ssh/config` は末尾に local file を Include する。ただし `Host`/`Match`
+ブロックの直後に置くとその section に閉じ込められるため、`Match all` で global に戻してから
+Include する。
 
 ```text
+Host github.com
+    IdentityAgent "...op-agent.sock"
+Match all
 Include config.local
 ```
 
 ssh_config は **first-match-wins** のため、末尾 Include は managed 設定が優先される
 **managed-wins** になる。SSH は安全境界(どの host にどの鍵・agent を使うか)であり、
 local file が managed の安全設定を上書きできてはならないため、zsh とは逆の勝ち方を意図とする。
+`Match all` が無いと Include が直前の Host ブロックに閉じ込められ、local の host が
+github.com 接続時しか読まれない(#121)。
 
 local 側は managed が定義していない Host を追加する用途に限る。実装・移行手順は
 [ssh](ssh.md)(`ssh-1password` module、`enable1PasswordSSH` gate)。

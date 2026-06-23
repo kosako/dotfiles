@@ -12,6 +12,12 @@
 # offered to hosts we choose. Gated by enable1PasswordSSH.
 Host github.com
     IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-{{ end -}}
 
+# Reset to a global section before the Include. Without this, the Include would
+# stay inside the Host github.com block above and config.local would only be
+# read when connecting to github.com (ssh_config sections run until the next
+# Host/Match). Match all keeps the Include global while the managed blocks above
+# still win (first-match-wins = managed-wins).
+Match all
+{{ end -}}
 Include config.local

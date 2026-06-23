@@ -28,10 +28,25 @@ work-*=false)。`true` のとき managed config に `Host github.com` の `Ident
 
 ## managed-wins(末尾 Include)
 
-managed config は末尾で `Include config.local` する。ssh_config は **first-match-wins** なので、
+managed config は末尾で config.local を Include する。ssh_config は **first-match-wins** なので、
 managed の上のブロックが勝つ = **managed-wins**([local-overrides](local-overrides.md))。
 `config.local` は managed が定義していない host を **追加する**用途に限る(managed の安全設定を
 上書きさせない)。`config.local` が無くても SSH は壊れない(欠落 Include は無視される)。
+
+```text
+Host github.com
+    IdentityAgent "...op-agent.sock"
+
+Match all
+Include config.local
+```
+
+**`Match all` が必須**。ssh_config の section は次の `Host`/`Match` まで続くので、`Include` を
+`Host github.com` ブロックの**直後にそのまま**置くと Include がそのブロックに閉じ込められ、
+config.local は **github.com に接続したときしか読まれない**(他 host が解決されない)。`Match all`
+で global section に戻してから Include すると、config.local は全 host に効きつつ、上の managed
+ブロックが先に評価されて勝つ(#121 で `ssh -G` 検証)。capability OFF で managed ブロックが
+無いときは `Include config.local` 単体で既に global。
 
 ## 既存 `~/.ssh/config` からの移行
 
