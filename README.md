@@ -32,9 +32,10 @@ personal project として段階的に作っている。現時点の実装状況
 | agent-tools との report-only 連携 | 実装済み(opt-in) |
 | zsh(shell-extra)の管理 | 実装済み(未適用) |
 | Claude Code settings(personal の public-safe な settings.json) | 実装済み(personal のみ) |
-| VS Code / SSH の管理 | 未着手 |
+| VS Code settings の管理 | 管理しない(VS Code 未使用のため見送り、#16) |
+| SSH の管理 | 未着手(#17) |
 
-「実機適用済み」は、現時点でこの author の Mac 上で `~/.gitconfig` が稼働しているという意味。zsh は chezmoi 管理に載せたが未適用。editor・SSH はまだ未着手。
+「実機適用済み」は、現時点でこの author の Mac 上で `~/.gitconfig` が稼働しているという意味。zsh は chezmoi 管理に載せたが未適用。VS Code は未使用のため管理しない(capability OFF・配線は dormant、#16)。SSH はまだ未着手。
 
 ## 考え方
 
