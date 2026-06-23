@@ -60,7 +60,12 @@ packages:
   - { name: copilot-cli, source: brew_cask }
   - { name: iterm2, source: brew_cask }
   - { name: swiftbar, source: brew_cask }
-  - { name: claude-code, source: npm_global, pkg: "@anthropic-ai/claude-code", bin: claude }
+  # claude-code is installed via the native installer (claude.ai/install.sh) to
+  # ~/.local/bin, NOT npm: its built-in auto-updater shells out to `npm i -g` and
+  # inherits the hardened ~/.npmrc (ignore-scripts=true), which skips the
+  # postinstall that places its native binary and breaks self-update
+  # (anthropics/claude-code#62684). Native install self-updates outside npm, so
+  # npm hardening and working auto-update coexist. See docs/supply-chain-npm.md.
   - { name: codex, source: npm_global, pkg: "@openai/codex" }
   - { name: goreleaser, source: go_install, pkg: "github.com/goreleaser/goreleaser/v2" }
   - { name: tacho, source: go_install, pkg: "github.com/kosako/tachograph/cmd/tacho" }

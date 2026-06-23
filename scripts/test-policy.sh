@@ -491,7 +491,7 @@ EOF
   printf '%s\n' 1password-cli copilot-cli iterm2 swiftbar > "$drift_dir/brew_casks"
   # npm and corepack are node-bundled; including them proves they are
   # filtered out and never reported as undeclared.
-  printf '%s' '{"dependencies":{"@anthropic-ai/claude-code":{},"@openai/codex":{},"npm":{},"corepack":{}}}' \
+  printf '%s' '{"dependencies":{"@openai/codex":{},"npm":{},"corepack":{}}}' \
     > "$drift_dir/npm.json"
   touch "$drift_dir/go/bin/goreleaser" "$drift_dir/go/bin/tacho"
   chmod +x "$drift_dir/go/bin/goreleaser" "$drift_dir/go/bin/tacho"

@@ -10,3 +10,9 @@
 # CI, tool subshells). No-op when mise is absent (the dir just won't exist).
 # Default data dir; adjust if MISE_DATA_DIR is set. See docs/runtime.md.
 export PATH="$HOME/.local/share/mise/shims:$PATH"
+
+# User-local bin for native-installed CLIs that self-update outside any package
+# manager — notably the native `claude` from claude.ai/install.sh (NOT the npm
+# package; see docs/supply-chain-npm.md). Put it ahead of package-manager bins so
+# the native binary wins over any stray npm/Homebrew copy. No-op when empty.
+export PATH="$HOME/.local/bin:$PATH"

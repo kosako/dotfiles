@@ -164,14 +164,16 @@ _ai_clip_accept_line() {
 zle -N ai-clip-accept-line _ai_clip_accept_line
 bindkey '^O' ai-clip-accept-line
 
-# Update Claude Code despite the hardened ~/.npmrc (ignore-scripts=true). Claude
-# Code ships its ~226MB native binary as an optional dependency and places it via
-# a postinstall (install.cjs) that hardlinks it into the package bin; with
-# install scripts disabled the binary is never placed and `claude` fails with
-# "native binary not installed". ignore-scripts is all-or-nothing, so instead of
-# relaxing it globally we keep it on and, after a normal install, run ONLY this
-# one audited first-party installer by path. --include=optional guarantees the
-# platform package is present for install.cjs to link. See docs/supply-chain-npm.md.
+# Recovery helper for a npm-global Claude Code whose native binary did not get
+# placed. Claude Code is normally installed via the native installer
+# (claude.ai/install.sh) and is NOT an npm package here (see
+# docs/supply-chain-npm.md) — but if it was ever `npm i -g`'d, the hardened
+# ~/.npmrc (ignore-scripts=true) skips its postinstall (install.cjs), so the
+# ~226MB native binary is never hardlinked into the package bin and `claude`
+# fails with "native binary not installed". ignore-scripts is all-or-nothing, so
+# rather than relax it globally, install normally then run ONLY this one audited
+# first-party installer by path. --include=optional ensures the platform package
+# is present for install.cjs to link. Prefer the native installer for day-to-day.
 claude-update() {
   command -v npm  >/dev/null 2>&1 || { print -u2 -- "claude-update: npm not found";  return 1; }
   command -v node >/dev/null 2>&1 || { print -u2 -- "claude-update: node not found"; return 1; }

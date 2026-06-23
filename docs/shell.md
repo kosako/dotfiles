@@ -86,6 +86,8 @@
 
 `~/.zshenv` は **すべての zsh 起動**(対話/非対話・login/非login)で読まれる。ここに mise の shims(`$HOME/.local/share/mise/shims`)を PATH 前置し、子プロセスが spawn する非対話 shell でも mise 管理 runtime(`node` 等)が解決するようにする。`~/.zshrc` の `mise activate` は対話 shell でしか走らないため、非対話側は shims が拾う(両者は併用、削除不要)。詳細は [docs/runtime.md](runtime.md)。
 
+あわせて `$HOME/.local/bin` も PATH 前置する(shims より前)。native installer で入れた自己更新型 CLI がここに入るため。代表例が native `claude`(Claude Code。npm-global ではなく `claude.ai/install.sh` で導入)で、stray な npm/Homebrew copy より優先される。経緯は [docs/supply-chain-npm.md](supply-chain-npm.md)。
+
 - **最小限に保つ**: 全 zsh 起動で走るので、`.zshenv` には PATH 以外の重い処理・副作用を入れない。
 - **local override は無し**: `.zshenv` は `~/.zshenv.local` を source しない(副作用を避けるため)。machine 固有 PATH は `~/.zshrc.local`(対話)に置く。
 - `MISE_DATA_DIR` を変更している場合は、shims パスをその値に合わせる(既定 `$HOME/.local/share/mise/shims`)。
