@@ -376,8 +376,24 @@ run_ok \
   "enforceAiSandbox=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
+# gateGitHubMcp / enableGitHubIsolatedReader (#119 Phase 1) are also
+# safety-hardening capabilities, so they must NOT be in the forbidden table
+# either: a restrictive kind (work) may set them true. Flip both across every
+# profile and assert --all still validates.
 make_fixture
-insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiPolicy: true" "    extraSection:"
+awk '$0 == "      gateGitHubMcp: false" { print "      gateGitHubMcp: true"; next }
+     $0 == "      enableGitHubIsolatedReader: false" { print "      enableGitHubIsolatedReader: true"; next }
+     { print }' \
+  "$fixture/.chezmoidata/profiles.yaml" > "$fixture/.chezmoidata/profiles.yaml.tmp"
+mv "$fixture/.chezmoidata/profiles.yaml.tmp" "$fixture/.chezmoidata/profiles.yaml"
+run_ok \
+  "GitHub guard capabilities are allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
+# Anchor on the LAST capability line so the bogus section lands after the whole
+# capabilities block (update this if a later capability is added below).
+make_fixture
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableGitHubIsolatedReader: false" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
 run_ok \
   "ignores sections after capabilities" \

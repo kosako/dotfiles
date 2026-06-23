@@ -402,6 +402,50 @@ else
   status=1
 fi
 
+# GitHub injection guard report (gateGitHubMcp / enableGitHubIsolatedReader, #119
+# Phase 1). The capabilities land before their enforcement; doctor must report
+# them honestly (declared, not enforced) and stay exit 0 = no dead capability.
+# Throwaway repo copy so the flip does not touch the real data files.
+gh_root="$fixture_home/.dotfiles-ghguard"
+mkdir -p "$gh_root/.chezmoidata"
+cp -R "$DOTFILES_ROOT/scripts" "$gh_root/scripts"
+cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
+
+# P) default (false) -> BOTH capabilities reported as not active, exit 0. Check
+#    both so the section can't silently drop one (the dead-capability guard).
+if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "gateGitHubMcp not active" <<< "$gh_out" \
+    && grep -Fq "enableGitHubIsolatedReader not active" <<< "$gh_out"; then
+    ok "test passed: both GitHub guard capabilities reported as not active"
+  else
+    printf '%s\n' "$gh_out" >&2
+    fail "test failed: GitHub guard capability not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$gh_out" >&2
+  fail "test failed: doctor must stay exit 0 (GitHub guard, default)"
+  status=1
+fi
+
+# Q) flipped true -> reported as declared-but-not-enforced (placeholder), exit 0.
+awk '$0 == "      gateGitHubMcp: false" { print "      gateGitHubMcp: true"; next } { print }' \
+  "$gh_root/.chezmoidata/profiles.yaml" > "$gh_root/.chezmoidata/profiles.yaml.tmp"
+mv "$gh_root/.chezmoidata/profiles.yaml.tmp" "$gh_root/.chezmoidata/profiles.yaml"
+if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "not wired yet" <<< "$gh_out"; then
+    ok "test passed: gateGitHubMcp=true reported as declared-not-enforced"
+  else
+    printf '%s\n' "$gh_out" >&2
+    fail "test failed: gateGitHubMcp=true placeholder not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$gh_out" >&2
+  fail "test failed: doctor must stay exit 0 (GitHub guard, flipped true)"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi
