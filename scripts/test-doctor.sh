@@ -358,6 +358,50 @@ else
   status=1
 fi
 
+# SSH 1Password agent report (enable1PasswordSSH, issue #17). doctor stays
+# report-only / exit 0 and must reflect both the active and the dangling
+# (capability true but ssh-1password module inactive) cases. Throwaway repo
+# copy so the edits do not touch the real data files.
+ssh_root="$fixture_home/.dotfiles-ssh"
+mkdir -p "$ssh_root/.chezmoidata"
+cp -R "$DOTFILES_ROOT/scripts" "$ssh_root/scripts"
+cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$ssh_root/.chezmoidata/"
+
+# N) enable1PasswordSSH=true with the ssh-1password module active -> managed agent.
+#    personal's committed default is true + module present, so no mutation needed.
+if ss_out="$(HOME="$fixture_home" "$ssh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.ssh/config carries the 1Password agent" <<< "$ss_out"; then
+    ok "test passed: enable1PasswordSSH=true reports the managed SSH agent"
+  else
+    printf '%s\n' "$ss_out" >&2
+    fail "test failed: managed SSH agent not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ss_out" >&2
+  fail "test failed: doctor must stay exit 0 (enable1PasswordSSH=true, module active)"
+  status=1
+fi
+
+# O) enable1PasswordSSH=true but the ssh-1password module removed -> dangling
+#    warning, still exit 0.
+awk '$0 == "      - ssh-1password" { next } { print }' \
+  "$ssh_root/.chezmoidata/profiles.yaml" > "$ssh_root/.chezmoidata/profiles.yaml.tmp"
+mv "$ssh_root/.chezmoidata/profiles.yaml.tmp" "$ssh_root/.chezmoidata/profiles.yaml"
+if ss_out="$(HOME="$fixture_home" "$ssh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "ssh-1password module is inactive" <<< "$ss_out"; then
+    ok "test passed: enable1PasswordSSH=true with module inactive is reported as dangling"
+  else
+    printf '%s\n' "$ss_out" >&2
+    fail "test failed: dangling enable1PasswordSSH not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ss_out" >&2
+  fail "test failed: doctor must stay exit 0 (enable1PasswordSSH dangling)"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi

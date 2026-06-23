@@ -58,8 +58,7 @@ if [[ ! -f "$on_cfg" ]]; then
   fail "test failed: ~/.ssh/config not applied for personal (module membership)"
   status=1
 elif grep -q '^Host github.com$' "$on_cfg" \
-  && grep -q 'IdentityAgent' "$on_cfg" \
-  && grep -q '1password/t/agent.sock' "$on_cfg" \
+  && grep -Fqx '    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"' "$on_cfg" \
   && grep -q '^Include config.local$' "$on_cfg"; then
   ok "test passed: enable1PasswordSSH=true emits scoped github.com agent + Include config.local"
 else
