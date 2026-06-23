@@ -97,6 +97,22 @@ else
   fi
 fi
 
+section "claude settings managed global prefs"
+
+# 3) issue #93, option (a): stable, public-safe global preferences that Claude
+#    Code persists to settings.json (NOT settings.local.json) are absorbed into
+#    the managed template, so `chezmoi apply` is a no-op for them and the live
+#    file does not drift. off_file is the committed-default personal render from
+#    section 1; lock the two currently-absorbed keys there.
+skip_warn="$(yq -p json '.skipWorkflowUsageWarning // "absent"' "$off_file")"
+tui_mode="$(yq -p json '.tui // "absent"' "$off_file")"
+if [[ "$skip_warn" == "true" && "$tui_mode" == "fullscreen" ]]; then
+  ok "test passed: managed template carries skipWorkflowUsageWarning=true and tui=fullscreen"
+else
+  fail "test failed: managed global prefs missing (skipWorkflowUsageWarning=$skip_warn tui=$tui_mode)"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "claude settings tests passed"
 fi
