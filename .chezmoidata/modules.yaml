@@ -38,6 +38,9 @@ modules:
     description: VS Code settings のみ管理。extensions は自動 install しない。
   ssh-1password:
     description: 1Password SSH Agent 用の SSH 設定。秘密鍵は管理しない。
+    paths:
+      - .ssh
+      - .ssh/config
   direnv-policy:
     description: direnv 利用方針。direnv allow は自動化しない。
   update-policy:

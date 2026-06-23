@@ -233,6 +233,22 @@ else
   ok "secret access disabled for profile"
 fi
 
+section "SSH (1Password agent)"
+# enable1PasswordSSH gates the agent setting in the managed ~/.ssh/config
+# (scoped to github.com, never Host *; the op socket path is public-safe).
+# AGENTS.md requires a capability to drive a doctor section. Report-only and
+# contents-blind: doctor never reads ~/.ssh/config or probes the agent socket.
+# Machine-specific hosts/keys live in ~/.ssh/config.local (docs/ssh.md).
+if [[ "$(capability_value "$profile" enable1PasswordSSH)" == "true" ]]; then
+  if module_active_for_profile "$profile" ssh-1password; then
+    ok "enable1PasswordSSH=true; managed ~/.ssh/config carries the 1Password agent for github.com (scoped, not Host *); machine-specific hosts go in ~/.ssh/config.local"
+  else
+    warn "enable1PasswordSSH=true but the ssh-1password module is inactive for this profile (no managed SSH config carries the agent setting; dangling capability)"
+  fi
+else
+  ok "1Password SSH agent not managed (enable1PasswordSSH=false)"
+fi
+
 section "private-backup (report-only)"
 # Report-only and contents-blind (issue #60). Resolve the PUBLIC baseline
 # (backup-paths.yaml) and show whether each target exists; the local

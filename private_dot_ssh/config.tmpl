@@ -1,0 +1,17 @@
+# Managed by chezmoi from kosako/dotfiles.
+# Public-safe SSH config: no host names, no private keys. Machine-specific
+# hosts and overrides live in ~/.ssh/config.local, Include'd at the END so the
+# managed blocks win (ssh_config is first-match-wins = managed-wins). The local
+# file may only ADD hosts this file does not define. See docs/ssh.md and
+# docs/local-overrides.md.
+{{ $caps := index .profiles .profile "capabilities" -}}
+{{ if $caps.enable1PasswordSSH -}}
+
+# GitHub over SSH uses the 1Password SSH agent. The op agent socket path is
+# fixed and public-safe. Scoped to this host (never Host *) so keys are only
+# offered to hosts we choose. Gated by enable1PasswordSSH.
+Host github.com
+    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+{{ end -}}
+
+Include config.local

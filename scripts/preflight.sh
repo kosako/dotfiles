@@ -27,7 +27,7 @@ else
 fi
 
 section "existing home files"
-for file in "$HOME/.gitconfig" "$HOME/.ssh/config" "$HOME/.npmrc"; do
+for file in "$HOME/.gitconfig" "$HOME/.npmrc"; do
   if [[ -e "$file" ]]; then
     warn "exists: $file"
   else
@@ -63,6 +63,26 @@ for file in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.config/star
     item "exists: $file — not managed for profile $profile (left as-is)"
   fi
 done
+
+section "ssh config (apply impact)"
+# When ssh-1password is active, apply replaces ~/.ssh/config with the managed
+# version. Machine-specific hosts (and the 1Password agent for them) must move
+# to ~/.ssh/config.local first, or they are lost. The local file is reported by
+# existence only — never read (docs/local-overrides.md). See docs/ssh.md.
+if module_active_for_profile "$profile" "ssh-1password"; then
+  if [[ -e "$HOME/.ssh/config" ]]; then
+    warn "exists: $HOME/.ssh/config — apply (ssh-1password) replaces it; move machine-specific hosts to ~/.ssh/config.local first, then diff (see docs/ssh.md)"
+  else
+    ok "absent: $HOME/.ssh/config"
+  fi
+  if [[ -e "$HOME/.ssh/config.local" ]]; then
+    item "local override present: $HOME/.ssh/config.local (contents not read)"
+  fi
+elif [[ -e "$HOME/.ssh/config" ]]; then
+  item "exists: $HOME/.ssh/config — not managed for profile $profile (left as-is)"
+else
+  ok "absent: $HOME/.ssh/config"
+fi
 
 section "config directory permission"
 # private_dot_config makes chezmoi manage ~/.config itself at 0700.
