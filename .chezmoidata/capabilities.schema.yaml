@@ -41,3 +41,7 @@ capabilities:
     type: boolean
   enableAiPolicy:
     type: boolean
+  gateGitHubMcp:
+    type: boolean
+  enableGitHubIsolatedReader:
+    type: boolean

@@ -38,6 +38,8 @@ profiles:
       enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
+      gateGitHubMcp: false
+      enableGitHubIsolatedReader: false
 
   work-minimal:
     environmentKind: work
@@ -69,6 +71,8 @@ profiles:
       enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
+      gateGitHubMcp: false
+      enableGitHubIsolatedReader: false
 
   work-dev:
     environmentKind: work
@@ -105,3 +109,5 @@ profiles:
       enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
+      gateGitHubMcp: false
+      enableGitHubIsolatedReader: false
