@@ -63,32 +63,19 @@ npm install --ignore-scripts=false
 
 project の `.npmrc` に `ignore-scripts=false` を置く方法もあるが、その project の依存全体に効くため、理由を project 側に書き残すこと。
 
-### Claude Code(ネイティブバイナリを postinstall で配置する例)
+### Claude Code(native installer で入れる。npm-global にしない)
 
-Anthropic 公式 CLI `@anthropic-ai/claude-code` 2.x は、~226MB のネイティブバイナリを optional dependency(`@anthropic-ai/claude-code-<platform>`)として配布し、`postinstall`(`install.cjs`)でそれを package の bin にハードリンク配置する。`ignore-scripts=true` だと postinstall が走らずバイナリが配置されず(optional dep 自体は取得されている)、`claude` 実行時に次で落ちる:
+Claude Code は **native installer(`curl -fsSL https://claude.ai/install.sh | bash`)で入れる**。`~/.local/bin/claude` にスタンドアロン配置され、npm を一切経由せずバックグラウンドで自己更新するので、`ignore-scripts=true` などの npm hardening と**独立して両立**する(catalog からも外してある = `packages.yaml` / `docs/runtime.md`。PATH 前置は `dot_zshenv`)。
 
-```text
-Error: claude native binary not installed.
-```
+**なぜ npm-global にしないか**: claude-code 2.x は ~226MB のネイティブバイナリを optional dependency(`@anthropic-ai/claude-code-<platform>`)として配り、`postinstall`(`install.cjs`)で package の bin にハードリンク配置する。`ignore-scripts=true` だと postinstall が走らずバイナリが配置されない(optional dep 自体は取得されている)。さらに **Claude Code の組み込みオートアップデータは内部で `npm install -g` を実行して同じ hardening を継承する**ため自己更新に失敗し、`claude` が `native binary not installed` で落ちる/バイナリがエラースタブに置換され得る([anthropics/claude-code#62684](https://github.com/anthropics/claude-code/issues/62684))。npm-global のままこれを直す公式手段は無く、native installer がこの層の公式解。
 
-`ignore-scripts` は all-or-nothing で npm に package 単位の許可機能が無いため、信頼できる first-party の `claude-code` についてのみ、**グローバルの `ignore-scripts=true` は維持したまま、監査済みの installer 1 本だけを path 指定で明示実行**する(hardening を全体で緩めない、という enforce の方針と最も整合する逃げ道)。
+**復旧専用ヘルパ**: 万一 npm-global で入っていてバイナリ未配置になったときのために、`dot_zshrc` に `claude-update` 関数がある。グローバルの `ignore-scripts=true` は緩めず、監査済みの installer 1 本だけを path 指定で明示実行して un-stub する(通常運用は native installer):
 
 ```sh
-# 通常 install(optional dep を取得)→ 既知の installer だけを明示実行
+# 復旧用。通常運用は native installer。
 npm i -g @anthropic-ai/claude-code --include=optional
 node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
-
-この 2 手は `dot_zshrc` の `claude-update` 関数にまとめてある(更新時はこれを実行する)。
-
-検証:
-
-```sh
-claude --version                                       # → 2.x (Claude Code)
-ls -la "$(npm root -g)/@anthropic-ai/claude-code/bin/" # 本体が ~226MB(スタブでない)
-```
-
-`min-release-age=7` により最新ではなく公開 7 日以上経った版が入るのは仕様(下記「`min-release-age` の注意」)。
 
 ## `min-release-age` の注意
 
