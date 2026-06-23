@@ -13,6 +13,7 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 # User-local bin for native-installed CLIs that self-update outside any package
 # manager — notably the native `claude` from claude.ai/install.sh (NOT the npm
-# package; see docs/supply-chain-npm.md). Put it ahead of package-manager bins so
-# the native binary wins over any stray npm/Homebrew copy. No-op when empty.
+# package; see docs/supply-chain-npm.md). Prepended here so it wins in
+# non-interactive shells; interactive shells re-assert it in ~/.zshrc after
+# `mise activate` / `brew shellenv` (which prepend later). No-op when empty.
 export PATH="$HOME/.local/bin:$PATH"
