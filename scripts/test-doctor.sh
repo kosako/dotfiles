@@ -411,10 +411,12 @@ mkdir -p "$gh_root/.chezmoidata"
 cp -R "$DOTFILES_ROOT/scripts" "$gh_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
 
-# P) default (false) -> reported as not active, exit 0.
+# P) default (false) -> BOTH capabilities reported as not active, exit 0. Check
+#    both so the section can't silently drop one (the dead-capability guard).
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "gateGitHubMcp not active" <<< "$gh_out"; then
-    ok "test passed: gateGitHubMcp=false reported as not active"
+  if grep -Fq "gateGitHubMcp not active" <<< "$gh_out" \
+    && grep -Fq "enableGitHubIsolatedReader not active" <<< "$gh_out"; then
+    ok "test passed: both GitHub guard capabilities reported as not active"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: GitHub guard capability not reported"
