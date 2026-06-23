@@ -72,6 +72,15 @@ command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 # mise runtime activation (interactive); shims in ~/.zshenv cover non-interactive.
 command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
 
+# Re-assert ~/.local/bin at the front of PATH. ~/.zshenv prepends it too, but both
+# `brew shellenv` (~/.zprofile) and `mise activate` above prepend AFTER that and
+# bury it, so in interactive shells a stray npm/Homebrew `claude` would otherwise
+# win over the native one in ~/.local/bin. Re-prepending here (before the
+# ~/.zshrc.local override below, so a local PATH still wins) fixes that. mise
+# runtimes are unaffected: nothing in ~/.local/bin shadows node/go/uv.
+# See docs/shell.md and docs/supply-chain-npm.md.
+export PATH="$HOME/.local/bin:$PATH"
+
 # Modern CLI: interactive aliases only (scripts are unaffected; `command ls` /
 # `command cat` still reach the originals). bat runs without a pager to stay
 # cat-like. See docs/shell.md.
