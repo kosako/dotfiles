@@ -119,3 +119,6 @@ jobs:
 
       - name: starship prompt config tests
         run: ./scripts/test-starship.sh
+
+      - name: ssh-1password gating and safety tests
+        run: ./scripts/test-ssh.sh
