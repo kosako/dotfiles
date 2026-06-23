@@ -28,7 +28,7 @@ profiles:
       enableGitSigning: true
       enableDirenv: true
       enableRuntimeManagement: true
-      enableVsCodeSettings: true
+      enableVsCodeSettings: false
       enableVsCodeExtensions: false
       npmHardeningMode: enforce
       corepackMode: report
@@ -95,7 +95,7 @@ profiles:
       enableGitSigning: false
       enableDirenv: true
       enableRuntimeManagement: true
-      enableVsCodeSettings: true
+      enableVsCodeSettings: false
       enableVsCodeExtensions: false
       npmHardeningMode: report
       corepackMode: report
