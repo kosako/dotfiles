@@ -548,6 +548,17 @@ chmod +x "$drift_dir/go/bin/stray-tool"
 run_drift "catalog drift: flags an undeclared go binary" \
   "undeclared: stray-tool (go binary not in catalog)"
 
+# The Go toolchain's own binaries (go, gofmt) sit in the scanned bin dir when
+# the toolchain manager points GOBIN at $GOROOT/bin (mise does). They are not
+# catalog-managed go_install packages, so they must not surface as undeclared
+# sprawl -- the seed already declares goreleaser/tacho, so adding only go/gofmt
+# must leave the catalog drift-free.
+setup_drift
+touch "$drift_dir/go/bin/go" "$drift_dir/go/bin/gofmt"
+chmod +x "$drift_dir/go/bin/go" "$drift_dir/go/bin/gofmt"
+run_drift "catalog drift: go toolchain binaries are not undeclared sprawl" \
+  "no catalog drift"
+
 setup_drift
 rm -f "$drift_fakebin/brew"
 run_drift "catalog drift: skips a missing package manager (report-only)" \

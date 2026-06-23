@@ -31,7 +31,7 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 実機との drift は `doctor.sh` の `software catalog` section(`report_catalog_drift`)が **report-only**(常に exit 0、欠けている package manager は skip)で報告する。検出は 3 種:
 
 - **未 install**(宣言済みだが入っていない)→ `warn`。
-- **台帳外**(undeclared / sprawl: 入っているが catalog に無い)→ `warn`。brew は `brew leaves`(top-level のみ。依存は拾わない)、npm は node 同梱の `npm` / `corepack` を除外(runtime の領分、node/go/uv と同じ扱い)、mas は App Store の無関係アプリが大量に誤検知されるため undeclared は出さない(宣言済み mas entry の presence のみ確認)。
+- **台帳外**(undeclared / sprawl: 入っているが catalog に無い)→ `warn`。brew は `brew leaves`(top-level のみ。依存は拾わない)、npm は node 同梱の `npm` / `corepack` を除外(runtime の領分、node/go/uv と同じ扱い)、go は toolchain 同梱の `go` / `gofmt` を除外(GOBIN を `$GOROOT/bin` に向ける mise 等では toolchain 本体が scan dir に同居するため。catalog で宣言・削除できる go_install package ではない)、mas は App Store の無関係アプリが大量に誤検知されるため undeclared は出さない(宣言済み mas entry の presence のみ確認)。
 - **source ズレ**(宣言 source の inventory には無いが `command` が PATH 上に在る = 別 source で入っている疑い)→ `info`。manager 横断の名前照合(脆い)はやらず、PATH 上の存在という堅い信号だけを使う。
 
 照合は source ごとの canonical id(`pkg`、無ければ `name`)で行う。
