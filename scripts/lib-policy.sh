@@ -492,6 +492,15 @@ report_catalog_drift() {
   if [[ "$have_go" -eq 1 ]]; then
     while IFS= read -r b; do
       [[ -z "$b" ]] && continue
+      # `go` and `gofmt` are the Go distribution's own binaries, shipped in
+      # $GOROOT/bin. A toolchain manager (mise) sets GOBIN to that same dir,
+      # so they land in the scanned bin dir next to `go install` packages.
+      # They are not catalog-managed go_install sprawl -- they cannot be
+      # declared or removed via the catalog -- so exclude them from undeclared
+      # detection, the same way npm's node-bundled npm/corepack are excluded.
+      case "$b" in
+        go|gofmt) continue ;;
+      esac
       grep -Fxq -- "$b" "$decl_go_bins" || {
         warn "undeclared: $b (go binary not in catalog)"
         drift_count=$((drift_count + 1))
