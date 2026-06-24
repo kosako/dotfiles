@@ -125,31 +125,33 @@ section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
 #    (8 entries: ssh-key / env-dump / gh-secret reads) and gateGitHubMcp is ON
-#    (Phase 2), so the deny is exactly those 9 — with no human-legit gate
-#    (enforceAiSandbox off) and no ask block. Pinning the exact length (9) keeps
-#    the render from silently growing; asserting the floor entries proves they
-#    are present even with enforceAiSandbox off (the core of Phase 2 task B).
-deny_len="$(yq -p json '.permissions.deny | length' "$off_file")"
+#    (Phase 2), so the deny is exactly those 9 (the floor present even with
+#    enforceAiSandbox off is the core of Phase 2 task B) with no ask block. We pin
+#    the EXACT ordered array, not length + a few representatives: this is a
+#    security-boundary regression test, so it must catch a floor matcher being
+#    swapped for another (which would keep the length at 9).
+expected_deny=$'Read(~/.ssh/**)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nmcp__github'
+actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
 ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
-if [[ "$deny_len" == "9" && "$ask_default" == "absent" ]] \
-  && grep -Fq '"Read(~/.ssh/**)"' "$off_file" \
-  && grep -Fq '"Bash(printenv)"' "$off_file" \
-  && grep -Fq '"Bash(gh secret *)"' "$off_file" \
-  && grep -Fq '"mcp__github"' "$off_file"; then
-  ok "test passed: committed personal denies the unconditional secret floor + github MCP (9 total), no ask (enforceAiSandbox off)"
+if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "absent" ]]; then
+  ok "test passed: committed personal deny is exactly the secret floor + github MCP (9, ordered), no ask (enforceAiSandbox off)"
 else
-  fail "test failed: committed personal deny/ask unexpected (deny_len=$deny_len ask=$ask_default)"
+  fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
+  printf '%s\n' "$actual_deny" >&2
   status=1
 fi
 
-# 4b) The human-legit gate matchers must NOT be in the committed render
-#     (enforceAiSandbox off): main-push and .env read ride on enforceAiSandbox,
-#     so they are absent until it is flipped (the tier split of Phase 2 task B).
-if grep -Fq '"Bash(git push * main)"' "$off_file" || grep -Fq '"Read(//**/.env*)"' "$off_file"; then
-  fail "test failed: human-legit gate (main-push/.env read) leaked into committed render with enforceAiSandbox off"
+# 4b) ALL four human-legit gate matchers must be absent from the committed render
+#     (enforceAiSandbox off): main/master push and both .env read paths ride on
+#     enforceAiSandbox, so none appear until it is flipped (the tier split).
+if grep -Fq '"Bash(git push * main)"' "$off_file" \
+  || grep -Fq '"Bash(git push * master)"' "$off_file" \
+  || grep -Fq '"Bash(cat *.env*)"' "$off_file" \
+  || grep -Fq '"Read(//**/.env*)"' "$off_file"; then
+  fail "test failed: a human-legit gate matcher leaked into committed render with enforceAiSandbox off"
   status=1
 else
-  ok "test passed: human-legit gate (main-push/.env read) absent until enforceAiSandbox (committed render)"
+  ok "test passed: all human-legit gate matchers (main/master push, .env reads) absent until enforceAiSandbox (committed render)"
 fi
 
 # 5) enforceAiSandbox=true: the human-legit write gate is ADDED on top of the
@@ -158,13 +160,14 @@ fi
 #    (ssh / env reads) are present regardless. Context-gated writes (merge/PR/
 #    comment/label/push ai/*) are intentionally NOT here (Phase 2 hook).
 if grep -Fq '"Bash(git push * main)"' "$on_file" \
+  && grep -Fq '"Bash(git push * master)"' "$on_file" \
   && grep -Fq '"Read(//**/.env*)"' "$on_file" \
   && grep -Fq '"Bash(cat *.env*)"' "$on_file" \
   && grep -Fq '"Bash(printenv)"' "$on_file" \
   && grep -Fq '"Read(~/.ssh/**)"' "$on_file" \
   && grep -Fq '"Bash(gh release create *)"' "$on_file" \
   && grep -Fq '"Bash(gh api *protection*)"' "$on_file"; then
-  ok "test passed: enforceAiSandbox=true adds human-legit gate (main-push, .env read) + ask (release/protection) atop the secret floor"
+  ok "test passed: enforceAiSandbox=true adds human-legit gate (main/master push, .env read) + ask (release/protection) atop the secret floor"
 else
   fail "test failed: enforceAiSandbox=true missing expected write deny/ask matchers"
   status=1

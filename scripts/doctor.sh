@@ -375,7 +375,7 @@ fi
 # today), so a true value without that module is reported as dangling.
 if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
-    ok "enforceAiSandbox=true; managed ~/.claude/settings.json carries the native sandbox (Bash fs+network) and the GitHub write deny/ask (secret + main-push deny, release/protection ask; best-effort)"
+    ok "enforceAiSandbox=true; managed ~/.claude/settings.json carries the native sandbox (Bash fs+network) and the human-legit GitHub write gate (main-push + .env-read deny, release/protection ask; best-effort — the never-legit secret floor is unconditional, see the injection guard section)"
   else
     warn "enforceAiSandbox=true but the claude-settings module is inactive for this profile; no managed settings carry the sandbox block (dangling capability)"
   fi

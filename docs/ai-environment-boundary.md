@@ -177,10 +177,16 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
 - `gateGitHubMcp`: managed `~/.claude/settings.json` の `permissions.deny` に `mcp__github`
   を足し、GitHub MCP server を丸ごと deny する(`claude-settings` module が active な
   profile のみ実効。dangling は doctor が report)。
-- GitHub 由来の write / secret 操作の deny / ask は **`enforceAiSandbox` に相乗り**する
-  (#119 の決定。専用 capability を作らない)。secret 露出(`printenv` / `gh secret` /
-  `cat *.env*` / `Read(//**/.env*)` / `~/.ssh`)と main / master への直 push を deny、
-  release 操作と branch protection / rulesets 変更を ask にする。
+- GitHub 由来の deny は **3 tier**(#119 Phase 2 task B。専用 capability は作らない):
+  - **(1) never-legit secret floor は無条件**(常時 render)。SSH 秘密鍵読取(`~/.ssh`)・
+    全 env dump(`printenv` / `env`)・GitHub Actions secret(`gh secret` / `gh api *secrets*`)は
+    誰も Claude に正規に頼まず、deny は Claude の Bash tool にしか効かない(人間のターミナル
+    非影響)ので、`enforceAiSandbox` を待たず常時 deny する(personal で今日 live)。
+  - **(2)** `gateGitHubMcp`(上記の MCP deny)。
+  - **(3) human-legit な write は `enforceAiSandbox` に相乗り**。main / master への直 push と
+    `.env` 読取(`cat *.env*` / `Read(//**/.env*)`)を deny、release 操作と branch protection /
+    rulesets 変更を ask にする。人間が正規に Claude に頼みうるので常時 ON にはせず、制限
+    context(= `enforceAiSandbox` / Phase 3)に寄せる。
 
 **boundary でない理由(過大評価しない)**:
 
