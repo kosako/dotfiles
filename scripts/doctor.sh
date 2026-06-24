@@ -410,6 +410,12 @@ if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; 
 else
   ok "enableGitHubIsolatedReader not active (false)"
 fi
+# Trust list (#119 PR3): the self trust basis (GitHub login + numeric id) plus
+# any opt-in trusted collaborators live in a non-committed local file consumed by
+# the isolated reader / safe-gh (Phase 3). Pointer only — never read here. Its
+# existence is reported contents-blind by the private-backup section (it is in
+# backup-paths.yaml). Absent ⇒ fail closed (only self is trusted).
+item "trust list: ~/.config/dotfiles/github-trust.local (#119; contents never read; absent ⇒ only self trusted)"
 
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs

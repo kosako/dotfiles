@@ -74,17 +74,20 @@ sandbox ブロックの射程は [ai-environment-boundary](ai-environment-bounda
 
 ## GitHub trust list(#119)
 
-GitHub injection 防御(epic #119)の trust 基点と egress allowlist の local 値は、managed
-file に焼かず **`~/.config/dotfiles/*.local`**(chezmoi 管理外・非コミット)に置く。trust の
-基点は `is_self`(自分の login + id)で、collaborator / bot は既定 untrusted(方針は
-[ai-policy](ai-policy.md))。
+GitHub injection 防御(epic #119)の trust 基点の local 値は、managed file に焼かず
+**`~/.config/dotfiles/github-trust.local`**(chezmoi 管理外・非コミット)に置く。trust の
+基点は `is_self`(自分の login + numeric id)で、collaborator / bot は既定 untrusted(方針は
+[ai-policy](ai-policy.md))。egress allowlist の local 値も同じ `~/.config/dotfiles/*.local`
+規約に従う(具体ファイル名は egress を per-host 化する Phase 2 / 3 で pin する)。
 
 - 共通原則どおり managed 側は trust list が無くても壊れないように書く(fail closed で
   「自分以外は untrusted」に倒す)。
-- doctor は **存在のみ** report-only で表示し、中身(login / id / host)は読まない。この
-  doctor presence-check は Phase 1 PR3 で配線する(現時点は未配線)。
-- 再セットアップに備えた **暗号化バックアップ**の対象にできる(`docs/private-backup.md`、
-  issue #60)。
+- **`backup-paths.yaml`(category `ai-tools`)に載せ**、再セットアップに備えた **暗号化
+  バックアップ**の対象にする(`docs/private-backup.md`、issue #60)。識別子(login / id)は
+  public repo に入れないため、暗号化アーカイブが運ぶ。
+- doctor は **存在のみ** contents-blind に report する(private-backup section が
+  `baseline present/absent: .config/dotfiles/github-trust.local` として表示し、中身=login /
+  id は読まない。injection-guard section にも置き場ポインタを出す)。
 
 ## 決定記録
 
