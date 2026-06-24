@@ -138,9 +138,11 @@ fi
 #    comment/label/push ai/*) are intentionally NOT here (Phase 2 hook).
 if grep -Fq '"Bash(git push * main)"' "$on_file" \
   && grep -Fq '"Bash(printenv)"' "$on_file" \
+  && grep -Fq '"Read(**/.env*)"' "$on_file" \
+  && grep -Fq '"Read(~/.ssh/**)"' "$on_file" \
   && grep -Fq '"Bash(gh release create *)"' "$on_file" \
   && grep -Fq '"Bash(gh api *protection*)"' "$on_file"; then
-  ok "test passed: enforceAiSandbox=true adds write deny (secret/main-push) + approval ask (release/protection)"
+  ok "test passed: enforceAiSandbox=true adds write deny (secret via Bash+Read, main-push) + approval ask (release/protection)"
 else
   fail "test failed: enforceAiSandbox=true missing expected write deny/ask matchers"
   status=1
@@ -165,10 +167,34 @@ if ! mcp_file="$(render_personal_settings "$mcp_src/src")"; then
   fail "test failed: personal apply (gateGitHubMcp=true) did not render"
   exit 1
 fi
-if grep -Fq '"mcp__github"' "$mcp_file" && grep -Fq '"mcp__github__*"' "$mcp_file"; then
-  ok "test passed: gateGitHubMcp=true denies the github MCP server"
+# Valid JSON (comma regression guard for the conditional deny block) + the bare
+# server-name deny (mcp__github covers all tools; mcp__github__* is redundant).
+if yq -p json '.' "$mcp_file" >/dev/null 2>&1 \
+  && grep -Fq '"mcp__github"' "$mcp_file"; then
+  ok "test passed: gateGitHubMcp=true denies the github MCP server (valid JSON)"
 else
-  fail "test failed: gateGitHubMcp=true did not deny the github MCP server"
+  fail "test failed: gateGitHubMcp=true did not deny the github MCP server (or invalid JSON)"
+  status=1
+fi
+
+# 6b) Both gates on: the deny/ask blocks plus sandbox must still be valid JSON
+#     (catches a comma regression when several conditional keys are present).
+both_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-both.XXXXXX")"
+tmp_roots+=("$both_src")
+cp -R "$DOTFILES_ROOT" "$both_src/src"
+rm -rf "$both_src/src/.git"
+yq -i '.profiles.personal.capabilities.gateGitHubMcp = true | .profiles.personal.capabilities.enforceAiSandbox = true' \
+  "$both_src/src/.chezmoidata/profiles.yaml"
+if ! both_file="$(render_personal_settings "$both_src/src")"; then
+  fail "test failed: personal apply (both gates true) did not render"
+  exit 1
+fi
+if yq -p json '.' "$both_file" >/dev/null 2>&1 \
+  && grep -Fq '"mcp__github"' "$both_file" \
+  && grep -Fq '"Bash(git push * main)"' "$both_file"; then
+  ok "test passed: both gates on -> valid JSON with combined MCP + write deny"
+else
+  fail "test failed: both gates on produced invalid JSON or missing matchers"
   status=1
 fi
 

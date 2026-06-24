@@ -9,9 +9,9 @@
        on enforceAiSandbox (no separate capability, per #119). Every gating
        capability defaults false, so this renders byte-identical until flipped. */ -}}
 {{- $deny := list -}}
-{{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github" "mcp__github__*") -}}{{- end -}}
+{{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list -}}
-{{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(printenv)" "Bash(printenv *)" "Bash(env)" "Bash(env *)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(cat *.env*)" "Bash(cat ~/.ssh/*)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
+{{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(printenv)" "Bash(printenv *)" "Bash(env)" "Bash(env *)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(cat *.env*)" "Bash(cat ~/.ssh/*)" "Read(**/.env*)" "Read(~/.ssh/**)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
 {
 {{- if index $caps "enforceAiSandbox" }}
   "sandbox": {
