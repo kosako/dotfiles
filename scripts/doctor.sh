@@ -403,6 +403,23 @@ if [[ "$(capability_value "$profile" gateGitHubMcp)" == "true" ]]; then
 else
   ok "gateGitHubMcp not active (false)"
 fi
+# The #119 write/secret hard-floor (secret read, ~/.ssh, main-push hard deny;
+# release/protection ask) is emitted into the managed settings.json by the
+# enforceAiSandbox capability, not by a #119-specific one (the epic's "no
+# separate capability" decision). So it is only live when enforceAiSandbox is
+# true; on personal that capability stays false (its egress block is unusable on
+# a daily driver), so the floor is INERT even though gateGitHubMcp is on. Disclose
+# the live state here so the green MCP-deny line above is not read as a complete
+# injection guard. Splitting the context-independent floor (secret/ssh/main-push)
+# from the egress block is #119 Phase 2. Only meaningful where claude-settings
+# manages the file at all.
+if module_active_for_profile "$profile" claude-settings; then
+  if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
+    item "write/secret hard-floor active (rides on enforceAiSandbox; secret + main-push deny, release/protection ask — see sandbox section)"
+  else
+    item "write/secret hard-floor INERT (enforceAiSandbox=false): secret read, ~/.ssh, main-push deny and release/protection ask are not rendered — #119 Phase 2 splits it from the egress block"
+  fi
+fi
 # enableGitHubIsolatedReader is the isolated reader (Phase 3): the capability is
 # declared but its enforcement is not wired yet.
 if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; then
