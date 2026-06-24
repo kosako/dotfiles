@@ -38,7 +38,11 @@ profiles:
       enforceAiSandbox: false
       enableAgentToolsStatus: false
       enableAiPolicy: true
-      gateGitHubMcp: false
+      # Phase 2 (#119): deny the github MCP server in the managed settings.json.
+      # Best-effort / steering (not an enforcement boundary; see
+      # docs/ai-environment-boundary.md). No github MCP is configured today, so
+      # this is harmless defense-in-depth: an MCP added later is pre-denied.
+      gateGitHubMcp: true
       enableGitHubIsolatedReader: false
 
   work-minimal:

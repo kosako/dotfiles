@@ -121,14 +121,16 @@ fi
 
 section "claude settings GitHub injection guard (#119)"
 
-# 4) Default (both gates false): no deny/ask keys at all. This is the
-#    byte-identical guarantee — the capabilities land off and change nothing.
+# 4) Committed personal render: gateGitHubMcp is ON (Phase 2, #119), so the
+#    permissions carry exactly the github MCP deny; enforceAiSandbox is still
+#    off, so there is no ask block. (Before Phase 2 this asserted no deny/ask at
+#    all; personal now opts into the MCP gate — see profiles.yaml.)
 deny_default="$(yq -p json '.permissions.deny // "absent"' "$off_file")"
 ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
-if [[ "$deny_default" == "absent" && "$ask_default" == "absent" ]]; then
-  ok "test passed: default emits no deny/ask (permissions unchanged)"
+if [[ "$deny_default" == *"mcp__github"* && "$ask_default" == "absent" ]]; then
+  ok "test passed: committed personal denies github MCP (gateGitHubMcp on), no ask (enforceAiSandbox off)"
 else
-  fail "test failed: default unexpectedly has deny/ask (deny=$deny_default ask=$ask_default)"
+  fail "test failed: committed personal deny/ask unexpected (deny=$deny_default ask=$ask_default)"
   status=1
 fi
 
