@@ -420,8 +420,9 @@ cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
     && grep -Fq "enableGitHubIsolatedReader not active" <<< "$gh_out" \
-    && grep -Fq "write/secret hard-floor INERT" <<< "$gh_out"; then
-    ok "test passed: gateGitHubMcp enforced (MCP deny), isolated reader not active, write/secret floor disclosed inert"
+    && grep -Fq "secret floor active" <<< "$gh_out" \
+    && grep -Fq "human-legit write gate INERT" <<< "$gh_out"; then
+    ok "test passed: MCP deny + always-on secret floor active + human-legit gate inert (enforceAiSandbox off), isolated reader not active"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: GitHub guard capability not reported"
@@ -493,26 +494,27 @@ else
   status=1
 fi
 
-# R) enforceAiSandbox=true: the injection-guard section discloses the write/secret
-#    hard-floor as ACTIVE (it rides on enforceAiSandbox). Covers the other branch
-#    of the floor disclosure; case P covered the inert (enforceAiSandbox=false)
-#    branch. Builds on case Q's mutated copy (claude-settings active for personal).
-#    exit 0.
+# R) enforceAiSandbox=true: the injection-guard section discloses the human-legit
+#    write gate as ACTIVE (it rides on enforceAiSandbox), with the always-on secret
+#    floor active too. Covers the other branch; case P covered the inert
+#    (enforceAiSandbox=false) branch. Builds on case Q's mutated copy
+#    (claude-settings active for personal). exit 0.
 awk '$0 == "      enforceAiSandbox: false" { print "      enforceAiSandbox: true"; next }
      { print }' \
   "$gh_root/.chezmoidata/profiles.yaml" > "$gh_root/.chezmoidata/profiles.yaml.tmp"
 mv "$gh_root/.chezmoidata/profiles.yaml.tmp" "$gh_root/.chezmoidata/profiles.yaml"
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "write/secret hard-floor active" <<< "$gh_out"; then
-    ok "test passed: enforceAiSandbox=true -> write/secret floor disclosed active"
+  if grep -Fq "human-legit write gate active" <<< "$gh_out" \
+    && grep -Fq "secret floor active" <<< "$gh_out"; then
+    ok "test passed: enforceAiSandbox=true -> human-legit write gate active (secret floor active too)"
   else
     printf '%s\n' "$gh_out" >&2
-    fail "test failed: write/secret floor active-state not reported when enforceAiSandbox=true"
+    fail "test failed: human-legit write gate active-state not reported when enforceAiSandbox=true"
     status=1
   fi
 else
   printf '%s\n' "$gh_out" >&2
-  fail "test failed: doctor must stay exit 0 (write/secret floor active)"
+  fail "test failed: doctor must stay exit 0 (human-legit write gate active)"
   status=1
 fi
 

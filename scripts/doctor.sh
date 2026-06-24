@@ -403,21 +403,23 @@ if [[ "$(capability_value "$profile" gateGitHubMcp)" == "true" ]]; then
 else
   ok "gateGitHubMcp not active (false)"
 fi
-# The #119 write/secret hard-floor (secret read, ~/.ssh, main-push hard deny;
-# release/protection ask) is emitted into the managed settings.json by the
-# enforceAiSandbox capability, not by a #119-specific one (the epic's "no
-# separate capability" decision). So it is only live when enforceAiSandbox is
-# true; on personal that capability stays false (its egress block is unusable on
-# a daily driver), so the floor is INERT even though gateGitHubMcp is on. Disclose
-# the live state here so the green MCP-deny line above is not read as a complete
-# injection guard. Splitting the context-independent floor (secret/ssh/main-push)
-# from the egress block is #119 Phase 2. Only meaningful where claude-settings
-# manages the file at all.
+# The #119 write/secret deny is split into two tiers (Phase 2 task B). Only
+# meaningful where claude-settings manages the file at all.
 if module_active_for_profile "$profile" claude-settings; then
+  # Tier 1 — never-legit secret floor: unconditional in the managed
+  # settings.json (SSH-key / env-dump / gh-secret reads). The human never
+  # legitimately asks Claude to do these and the deny binds only Claude's Bash
+  # tool, so it is always on. Live on personal today, no enforceAiSandbox needed.
+  ok "secret floor active: SSH-key / env-dump / gh-secret reads denied unconditionally (best-effort, not a boundary)"
+  # Tier 2 — human-legit write gate: main-push deny, .env read deny, and the
+  # release/branch-protection ask still ride on enforceAiSandbox, which personal
+  # keeps false (its egress block is unusable on a daily driver). A restricted
+  # context for these is #119 Phase 3 — disclose the live state so the green line
+  # above is not read as a complete injection guard.
   if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
-    item "write/secret hard-floor active (rides on enforceAiSandbox; secret + main-push deny, release/protection ask — see sandbox section)"
+    item "human-legit write gate active (enforceAiSandbox): main-push + .env-read deny, release/protection ask"
   else
-    item "write/secret hard-floor INERT (enforceAiSandbox=false): secret read, ~/.ssh, main-push deny and release/protection ask are not rendered — #119 Phase 2 splits it from the egress block"
+    item "human-legit write gate INERT (enforceAiSandbox=false): main-push / .env-read deny and release/protection ask are not rendered — needs a restricted context (#119 Phase 3), not the daily-driver egress block"
   fi
 fi
 # enableGitHubIsolatedReader is the isolated reader (Phase 3): the capability is

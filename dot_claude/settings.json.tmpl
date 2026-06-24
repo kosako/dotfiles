@@ -1,18 +1,30 @@
 {{- $caps := index (index .profiles .profile) "capabilities" -}}
 {{- /* GitHub injection guard (epic #119). Best-effort / steering only:
-       command-string matchers are bypassable ($(), equivalent read paths, MCP by
-       other means, subagent gaps) and are NOT an enforcement boundary — see
-       docs/ai-environment-boundary.md. deny = never-OK (hard); ask = always needs
-       approval. The context-gated writes (merge/PR/comment/label/push ai/*) are
-       intentionally absent: gating them on a clean context needs the Phase 2
-       PreToolUse hook. gateGitHubMcp gates the MCP deny; the write deny/ask rides
-       on enforceAiSandbox (no separate capability, per #119). gateGitHubMcp is on
-       for personal (Phase 2), so the personal render carries the mcp__github deny;
-       enforceAiSandbox / enableGitHubIsolatedReader stay default false. */ -}}
-{{- $deny := list -}}
+       command-string matchers are bypassable ($(), equivalent read paths like
+       xxd / python open(), MCP by other means, subagent gaps) and are NOT an
+       enforcement boundary — see docs/ai-environment-boundary.md and the bypass
+       negative test in scripts/test-claude-settings.sh. deny = never-OK (hard);
+       ask = always needs approval.
+
+       Three deny tiers (#119 Phase 2 task B):
+       1. never-legit secret floor (UNCONDITIONAL): reading SSH private keys,
+          dumping the whole env, or touching GitHub Actions secrets is never
+          something the human legitimately asks Claude (the AI tool) to do, and a
+          deny binds only Claude's own Bash tool calls — never the human's own
+          terminal, and not env calls nested inside a script Claude runs. So this
+          floor is always on at ~zero human friction, making the decision-6 secret
+          floor live on personal WITHOUT enforceAiSandbox's egress block.
+       2. gateGitHubMcp: deny the github MCP server.
+       3. enforceAiSandbox (human-legit, stays gated): git push to main/master and
+          reading .env are things the human does legitimately direct Claude to do,
+          so they ride on enforceAiSandbox — which personal keeps false because its
+          egress block is unusable on a daily driver (a restricted context is the
+          Phase 3 home for these). The context-gated writes (merge/PR/comment/
+          label/push ai/*) need the Phase 2 hook and are intentionally absent. */ -}}
+{{- $deny := list "Read(~/.ssh/**)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list -}}
-{{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(printenv)" "Bash(printenv *)" "Bash(env)" "Bash(env *)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(cat *.env*)" "Bash(cat ~/.ssh/*)" "Read(//**/.env*)" "Read(~/.ssh/**)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
+{{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(cat *.env*)" "Read(//**/.env*)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
 {
 {{- if index $caps "enforceAiSandbox" }}
   "sandbox": {
