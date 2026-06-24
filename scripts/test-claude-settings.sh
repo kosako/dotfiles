@@ -9,13 +9,14 @@ set -euo pipefail
 #     failIfUnavailable=true (hard-fail rather than silently run unsandboxed),
 #     allowUnsandboxedCommands=false (no per-command escape hatch), and a
 #     public-safe empty network allowlist.
-# It also fixes the GitHub injection guard content (issue #119):
-# gateGitHubMcp -> deny the github MCP server; enforceAiSandbox -> write deny
-# (secret/main-push) + approval ask (release/protection). gateGitHubMcp is ON
-# for personal (Phase 2), so the committed render carries the MCP deny;
-# enforceAiSandbox stays default false (no sandbox/ask until flipped).
-# The matchers are best-effort/steering; a bypass negative test keeps that
-# visible. See docs/ai-environment-boundary.md.
+# It also fixes the GitHub injection guard content (issue #119) in three deny
+# tiers (Phase 2 task B): (1) an UNCONDITIONAL never-legit secret floor
+# (ssh-key / env-dump / gh-secret reads) that is always rendered; (2) gateGitHubMcp
+# -> deny the github MCP server (ON for personal); (3) enforceAiSandbox -> the
+# human-legit write gate (main-push + .env-read deny, release/protection ask),
+# which stays default false (absent until flipped). The matchers are
+# best-effort/steering; a bypass negative test keeps that visible. See
+# docs/ai-environment-boundary.md.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,32 +123,51 @@ fi
 
 section "claude settings GitHub injection guard (#119)"
 
-# 4) Committed personal render: gateGitHubMcp is ON (Phase 2, #119), so the
-#    permissions carry EXACTLY the github MCP deny (length 1) and nothing more;
-#    enforceAiSandbox is still off, so there is no ask block. Pinning the exact
-#    deny (not just "contains mcp__github") keeps the flip from silently growing
-#    extra denies. (Before Phase 2 this asserted no deny/ask at all.)
-deny_len="$(yq -p json '.permissions.deny | length' "$off_file")"
-deny_first="$(yq -p json '.permissions.deny[0] // ""' "$off_file")"
+# 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
+#    (8 entries: ssh-key / env-dump / gh-secret reads) and gateGitHubMcp is ON
+#    (Phase 2), so the deny is exactly those 9 (the floor present even with
+#    enforceAiSandbox off is the core of Phase 2 task B) with no ask block. We pin
+#    the EXACT ordered array, not length + a few representatives: this is a
+#    security-boundary regression test, so it must catch a floor matcher being
+#    swapped for another (which would keep the length at 9).
+expected_deny=$'Read(~/.ssh/**)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nmcp__github'
+actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
 ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
-if [[ "$deny_len" == "1" && "$deny_first" == "mcp__github" && "$ask_default" == "absent" ]]; then
-  ok "test passed: committed personal denies exactly the github MCP (gateGitHubMcp on), no ask (enforceAiSandbox off)"
+if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "absent" ]]; then
+  ok "test passed: committed personal deny is exactly the secret floor + github MCP (9, ordered), no ask (enforceAiSandbox off)"
 else
-  fail "test failed: committed personal deny/ask unexpected (deny_len=$deny_len first=$deny_first ask=$ask_default)"
+  fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
+  printf '%s\n' "$actual_deny" >&2
   status=1
 fi
 
-# 5) enforceAiSandbox=true: the write deny/ask rides on the same gate (on_file
-#    from section 2). secret + direct main push are hard deny; release and
-#    branch-protection need approval (ask). Context-gated writes (merge/PR/
+# 4b) ALL four human-legit gate matchers must be absent from the committed render
+#     (enforceAiSandbox off): main/master push and both .env read paths ride on
+#     enforceAiSandbox, so none appear until it is flipped (the tier split).
+if grep -Fq '"Bash(git push * main)"' "$off_file" \
+  || grep -Fq '"Bash(git push * master)"' "$off_file" \
+  || grep -Fq '"Bash(cat *.env*)"' "$off_file" \
+  || grep -Fq '"Read(//**/.env*)"' "$off_file"; then
+  fail "test failed: a human-legit gate matcher leaked into committed render with enforceAiSandbox off"
+  status=1
+else
+  ok "test passed: all human-legit gate matchers (main/master push, .env reads) absent until enforceAiSandbox (committed render)"
+fi
+
+# 5) enforceAiSandbox=true: the human-legit write gate is ADDED on top of the
+#    unconditional floor (on_file from section 2). main push + .env read become
+#    deny; release and branch-protection need approval (ask). The floor entries
+#    (ssh / env reads) are present regardless. Context-gated writes (merge/PR/
 #    comment/label/push ai/*) are intentionally NOT here (Phase 2 hook).
 if grep -Fq '"Bash(git push * main)"' "$on_file" \
-  && grep -Fq '"Bash(printenv)"' "$on_file" \
+  && grep -Fq '"Bash(git push * master)"' "$on_file" \
   && grep -Fq '"Read(//**/.env*)"' "$on_file" \
+  && grep -Fq '"Bash(cat *.env*)"' "$on_file" \
+  && grep -Fq '"Bash(printenv)"' "$on_file" \
   && grep -Fq '"Read(~/.ssh/**)"' "$on_file" \
   && grep -Fq '"Bash(gh release create *)"' "$on_file" \
   && grep -Fq '"Bash(gh api *protection*)"' "$on_file"; then
-  ok "test passed: enforceAiSandbox=true adds write deny (secret via Bash+Read, main-push) + approval ask (release/protection)"
+  ok "test passed: enforceAiSandbox=true adds human-legit gate (main/master push, .env read) + ask (release/protection) atop the secret floor"
 else
   fail "test failed: enforceAiSandbox=true missing expected write deny/ask matchers"
   status=1
