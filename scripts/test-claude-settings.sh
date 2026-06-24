@@ -9,10 +9,11 @@ set -euo pipefail
 #     failIfUnavailable=true (hard-fail rather than silently run unsandboxed),
 #     allowUnsandboxedCommands=false (no per-command escape hatch), and a
 #     public-safe empty network allowlist.
-# It also fixes the GitHub injection guard content (issue #119, Phase 1):
+# It also fixes the GitHub injection guard content (issue #119):
 # gateGitHubMcp -> deny the github MCP server; enforceAiSandbox -> write deny
-# (secret/main-push) + approval ask (release/protection). Both gates default
-# false, so the rendered settings.json is byte-identical until one is flipped.
+# (secret/main-push) + approval ask (release/protection). gateGitHubMcp is ON
+# for personal (Phase 2), so the committed render carries the MCP deny;
+# enforceAiSandbox stays default false (no sandbox/ask until flipped).
 # The matchers are best-effort/steering; a bypass negative test keeps that
 # visible. See docs/ai-environment-boundary.md.
 # Renders into throwaway destinations; never touches the real home directory.
@@ -122,15 +123,17 @@ fi
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: gateGitHubMcp is ON (Phase 2, #119), so the
-#    permissions carry exactly the github MCP deny; enforceAiSandbox is still
-#    off, so there is no ask block. (Before Phase 2 this asserted no deny/ask at
-#    all; personal now opts into the MCP gate — see profiles.yaml.)
-deny_default="$(yq -p json '.permissions.deny // "absent"' "$off_file")"
+#    permissions carry EXACTLY the github MCP deny (length 1) and nothing more;
+#    enforceAiSandbox is still off, so there is no ask block. Pinning the exact
+#    deny (not just "contains mcp__github") keeps the flip from silently growing
+#    extra denies. (Before Phase 2 this asserted no deny/ask at all.)
+deny_len="$(yq -p json '.permissions.deny | length' "$off_file")"
+deny_first="$(yq -p json '.permissions.deny[0] // ""' "$off_file")"
 ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
-if [[ "$deny_default" == *"mcp__github"* && "$ask_default" == "absent" ]]; then
-  ok "test passed: committed personal denies github MCP (gateGitHubMcp on), no ask (enforceAiSandbox off)"
+if [[ "$deny_len" == "1" && "$deny_first" == "mcp__github" && "$ask_default" == "absent" ]]; then
+  ok "test passed: committed personal denies exactly the github MCP (gateGitHubMcp on), no ask (enforceAiSandbox off)"
 else
-  fail "test failed: committed personal deny/ask unexpected (deny=$deny_default ask=$ask_default)"
+  fail "test failed: committed personal deny/ask unexpected (deny_len=$deny_len first=$deny_first ask=$ask_default)"
   status=1
 fi
 
