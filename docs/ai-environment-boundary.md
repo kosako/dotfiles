@@ -162,6 +162,43 @@ network firewall)は **別 tier** で、今の `dotfiles` には入れない(将
 既定値の正本は [policy-model](policy-model.md) の「Claude Code sandbox」。出典:
 code.claude.com/docs/en/sandboxing。Issue #50。
 
+## GitHub injection 防御の射程と限界(`gateGitHubMcp` / `enableGitHubIsolatedReader`)
+
+AI agent に GitHub の Issue / PR を読ませるときの **runtime / consumption-side prompt
+injection** 防御(epic #119)。capability 正本は [policy-model](policy-model.md)。
+**設計の正本は private 設計メモ**で、この repo は public-safe な実装面だけを扱う。
+
+Phase 1 で `dotfiles` に landed したのは **配管だけ**で、いずれも既定 false(render は
+byte-identical)。有効化しても下記のとおり **enforcement boundary ではない**:
+
+- `gateGitHubMcp`: managed `~/.claude/settings.json` の `permissions.deny` に `mcp__github`
+  を足し、GitHub MCP server を丸ごと deny する(`claude-settings` module が active な
+  profile のみ実効。dangling は doctor が report)。
+- GitHub 由来の write / secret 操作の deny / ask は **`enforceAiSandbox` に相乗り**する
+  (#119 の決定。専用 capability を作らない)。secret 露出(`printenv` / `gh secret` /
+  `cat *.env*` / `Read(//**/.env*)` / `~/.ssh`)と main / master への直 push を deny、
+  release 操作と branch protection / rulesets 変更を ask にする。
+
+**boundary でない理由(過大評価しない)**:
+
+- command-string matcher は **steering であって enforcement ではない**。`$()`・等価な
+  read path・別経路の MCP・subagent のギャップ(PreToolUse 不発 [anthropics/claude-code#21460])
+  で迂回しうる。
+- context-gated な write(他人由来の untrusted が無い clean なときだけ comment / label /
+  PR create / push を自律許可)は **Phase 2 の PreToolUse hook** が要るため Phase 1 には
+  **無い**(意図的)。
+- egress は `enforceAiSandbox` の network allowlist = **hostname best-effort**(TLS 終端せず、
+  DNS exfil は素通り。上の sandbox 節)。
+- **Phase 1 には trifecta(untrusted 読取 × secret × egress)を構造的に断つ hard 層が無い**。
+  hard 層 ── 隔離 reader / network egress sandbox / token の物理分離 ── は Phase 2 / 3。
+  `enableGitHubIsolatedReader` は Phase 3 の隔離 reader 用に **宣言だけ**してある
+  (declared, not enforced。doctor が warn)。
+
+**trust 基点**は `is_self`(login + id)のみ。collaborator / bot は既定 untrusted で、
+評価順は is_self → is_bot → association(bot は association=NONE に化けうるため)。read /
+write の既定方針は [ai-policy](ai-policy.md)、trust list の置き場は
+[local-overrides](local-overrides.md)。出典: epic #119。
+
 ## 禁止事項
 
 - `dotfiles` から AI skills / agents project を暗黙に clone / pull する。

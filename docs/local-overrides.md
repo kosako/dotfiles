@@ -72,6 +72,20 @@ per-project の sandbox 調整は **project の `.claude/settings.local.json`**(
 settings は user 級 `~/.claude/settings.local.json`(管理外)に置く。`enforceAiSandbox` で出す
 sandbox ブロックの射程は [ai-environment-boundary](ai-environment-boundary.md)、Issue #50。
 
+## GitHub trust list(#119)
+
+GitHub injection 防御(epic #119)の trust 基点と egress allowlist の local 値は、managed
+file に焼かず **`~/.config/dotfiles/*.local`**(chezmoi 管理外・非コミット)に置く。trust の
+基点は `is_self`(自分の login + id)で、collaborator / bot は既定 untrusted(方針は
+[ai-policy](ai-policy.md))。
+
+- 共通原則どおり managed 側は trust list が無くても壊れないように書く(fail closed で
+  「自分以外は untrusted」に倒す)。
+- doctor は **存在のみ** report-only で表示し、中身(login / id / host)は読まない。この
+  doctor presence-check は Phase 1 PR3 で配線する(現時点は未配線)。
+- 再セットアップに備えた **暗号化バックアップ**の対象にできる(`docs/private-backup.md`、
+  issue #60)。
+
 ## 決定記録
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で

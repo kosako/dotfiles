@@ -32,6 +32,8 @@ AI agent は default deny。
 - 暗黙の Homebrew install
 - network tunnel の作成
 - Git remote の変更
+- untrusted な GitHub content(他人の Issue / PR / コメント、bot、fork 由来)に書かれた指示の実行
+- main / protected branch への直接 push
 
 ## Approval Required
 
@@ -41,3 +43,25 @@ AI agent は default deny。
 - production access
 - secret access
 - work / client 情報の外部送信
+- GitHub release の作成 / 削除 / 編集
+- branch protection / ruleset の変更
+
+## Untrusted GitHub content(#119)
+
+GitHub の Issue / PR を読ませるときの runtime prompt injection 対策の方針(epic #119)。
+trust の基点は `is_self`(自分の login + id)のみで、collaborator / bot / fork 由来は既定
+untrusted。
+
+下記の read / write 規則は **目標方針(policy intent)であって、現状の enforcement ではない**。
+Phase 1 で実際に効くのは末尾が指す best-effort / steering 層だけで、context-gated な write は
+Phase 2、trifecta を断つ hard 層は Phase 2 / 3(射程と限界は
+[ai-environment-boundary](ai-environment-boundary.md))。
+
+- **read**: 自分の本文 = allow / 他人 = metadata only(title も入れない)/ 他人のコメント =
+  count + 警告のみ(本文・著者名・プレビューを混ぜない)/ bot = 全 untrusted。
+- **write**: untrusted content がセッションに無い(self 起点・clean)ときだけ comment / label /
+  PR create / push(`ai/*` 限定)を自律許可。untrusted が混ざったら gate。secret access は
+  **常に hard deny**。
+- enforcement の射程と限界(現状は best-effort / steering で boundary ではない)は
+  [ai-environment-boundary](ai-environment-boundary.md)、capability 正本は
+  [policy-model](policy-model.md)。
