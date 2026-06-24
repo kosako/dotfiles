@@ -203,6 +203,18 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
   `enableGitHubIsolatedReader` は Phase 3 の隔離 reader 用に **宣言だけ**してある
   (declared, not enforced。doctor が warn)。
 
+**subagent への適用(deny は継承・親 hook は subagent 不発)**: `permissions.deny` は main session
+だけでなく **subagent にも継承される**(Claude Code が subagent に親会話の permission context を
+引き継がせる)。よって `mcp__github` deny と secret 床は **subagent からも効く** ── injection で
+subagent を spawn して回避する経路は塞がっている。これは **settings.json(親 session)側の
+`PreToolUse` hook が subagent の個別 tool call に継承発火しない**([anthropics/claude-code#21460])
+のとは別レイヤ:**`permissions.deny`(enforcement)は subagent をカバーするが、親 session 側の
+hook(steering)は subagent の tool call には継承発火しない**(subagent 固有の hook は agent
+frontmatter で別途定義できるが、それは agent-tools 領分)。一方 `permissions.deny` は session 一律
+なので、「main は許可・subagent だけ非付与」(例: untrusted な GitHub を読む subagent からだけ
+`WebFetch` を外す)は settings.json では表現できない ── それは agent 定義(agent-tools 領分)/
+Phase 3 の隔離 reader の役割になる。
+
 **token 分離の実態(P0-B・best-effort)**: 「untrusted を読む間 `GH_TOKEN` を env から外せば
 private-token を hard に切れる」は **この環境では成り立たない**。実機の `gh` は `GH_TOKEN`
 未設定でも **keyring 認証**(macOS keychain)で動くため、env を外しても認証は残る = 偽の安心。
