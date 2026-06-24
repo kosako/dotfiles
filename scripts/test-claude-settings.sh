@@ -138,7 +138,7 @@ fi
 #    comment/label/push ai/*) are intentionally NOT here (Phase 2 hook).
 if grep -Fq '"Bash(git push * main)"' "$on_file" \
   && grep -Fq '"Bash(printenv)"' "$on_file" \
-  && grep -Fq '"Read(**/.env*)"' "$on_file" \
+  && grep -Fq '"Read(//**/.env*)"' "$on_file" \
   && grep -Fq '"Read(~/.ssh/**)"' "$on_file" \
   && grep -Fq '"Bash(gh release create *)"' "$on_file" \
   && grep -Fq '"Bash(gh api *protection*)"' "$on_file"; then
