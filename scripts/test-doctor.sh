@@ -429,6 +429,20 @@ else
   status=1
 fi
 
+# P2) trust list (#119 PR3): the injection-guard section points to the
+#     non-committed trust list, and the private-backup section reports its
+#     presence contents-blind (it is in backup-paths.yaml). The fixture HOME has
+#     no trust list, so it must show as a baseline-absent target. Reuses the
+#     default (case P) gh_out before case Q overwrites it.
+if grep -Fq "trust list: ~/.config/dotfiles/github-trust.local" <<< "$gh_out" \
+  && grep -Fq "baseline absent: .config/dotfiles/github-trust.local" <<< "$gh_out"; then
+  ok "test passed: trust list wired (injection-guard pointer + backup catalog presence, contents-blind)"
+else
+  printf '%s\n' "$gh_out" >&2
+  fail "test failed: trust list pointer or backup-catalog presence not reported"
+  status=1
+fi
+
 # Q) gateGitHubMcp=true (claude-settings active for personal) -> reported as
 #    enforced (MCP deny in managed settings), NOT as not-wired. enableGitHubIsolatedReader
 #    flipped too -> still reported as Phase 3 / not enforced. exit 0.

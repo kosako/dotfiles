@@ -40,3 +40,10 @@ backup_paths:
   # machine restores the served-vault config. Path and vault names are
   # public-safe; no key material is in it. (#89)
   - { path: .config/1Password/ssh/agent.toml, type: file, category: ssh }
+  # GitHub injection-guard trust list (#119). Holds the self trust basis
+  # (GitHub login + numeric id) plus any opt-in trusted collaborators; it is
+  # consumed by the isolated reader / safe-gh (Phase 3). Absent ⇒ fail closed
+  # (only self is trusted, computed at runtime; no opt-in accounts). Identity
+  # values must not enter the public repo, so it is non-committed; the
+  # encrypted archive carries it. The path itself is public-safe. (#119 PR3)
+  - { path: .config/dotfiles/github-trust.local, type: file, category: ai-tools }
