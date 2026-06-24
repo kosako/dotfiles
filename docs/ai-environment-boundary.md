@@ -168,8 +168,11 @@ AI agent に GitHub の Issue / PR を読ませるときの **runtime / consumpt
 injection** 防御(epic #119)。capability 正本は [policy-model](policy-model.md)。
 **設計の正本は private 設計メモ**で、この repo は public-safe な実装面だけを扱う。
 
-Phase 1 で `dotfiles` に landed したのは **配管だけ**で、いずれも既定 false(render は
-byte-identical)。有効化しても下記のとおり **enforcement boundary ではない**:
+Phase 1 は **配管だけ**を land した(既定 false・render は byte-identical)。**Phase 2 で
+personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 化した(render→diff→
+実機 dry-run の検証ゲート済み。github MCP は現状未構成なので実質 no-op = defense-in-depth)。
+`enforceAiSandbox` / `enableGitHubIsolatedReader` は全 profile false 継続。有効化しても
+下記のとおり **enforcement boundary ではない**:
 
 - `gateGitHubMcp`: managed `~/.claude/settings.json` の `permissions.deny` に `mcp__github`
   を足し、GitHub MCP server を丸ごと deny する(`claude-settings` module が active な

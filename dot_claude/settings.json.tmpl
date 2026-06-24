@@ -1,13 +1,14 @@
 {{- $caps := index (index .profiles .profile) "capabilities" -}}
-{{- /* GitHub injection guard (epic #119, Phase 1). Best-effort / steering only:
+{{- /* GitHub injection guard (epic #119). Best-effort / steering only:
        command-string matchers are bypassable ($(), equivalent read paths, MCP by
        other means, subagent gaps) and are NOT an enforcement boundary — see
        docs/ai-environment-boundary.md. deny = never-OK (hard); ask = always needs
        approval. The context-gated writes (merge/PR/comment/label/push ai/*) are
        intentionally absent: gating them on a clean context needs the Phase 2
        PreToolUse hook. gateGitHubMcp gates the MCP deny; the write deny/ask rides
-       on enforceAiSandbox (no separate capability, per #119). Every gating
-       capability defaults false, so this renders byte-identical until flipped. */ -}}
+       on enforceAiSandbox (no separate capability, per #119). gateGitHubMcp is on
+       for personal (Phase 2), so the personal render carries the mcp__github deny;
+       enforceAiSandbox / enableGitHubIsolatedReader stay default false. */ -}}
 {{- $deny := list -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list -}}

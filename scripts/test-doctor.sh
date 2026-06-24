@@ -412,12 +412,15 @@ mkdir -p "$gh_root/.chezmoidata"
 cp -R "$DOTFILES_ROOT/scripts" "$gh_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
 
-# P) default (false) -> BOTH capabilities reported as not active, exit 0. Check
-#    both so the section can't silently drop one (the dead-capability guard).
+# P) committed personal: gateGitHubMcp is ON (Phase 2, #119) and claude-settings
+#    is active, so doctor reports the github MCP server denied (enforced,
+#    best-effort); enableGitHubIsolatedReader is still Phase 3 -> not active.
+#    exit 0. Check both so the section can't silently drop one (dead-capability
+#    guard).
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "gateGitHubMcp not active" <<< "$gh_out" \
+  if grep -Fq "denies the github MCP server" <<< "$gh_out" \
     && grep -Fq "enableGitHubIsolatedReader not active" <<< "$gh_out"; then
-    ok "test passed: both GitHub guard capabilities reported as not active"
+    ok "test passed: gateGitHubMcp enforced (MCP deny), isolated reader not active"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: GitHub guard capability not reported"
