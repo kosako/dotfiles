@@ -443,6 +443,29 @@ else
   status=1
 fi
 
+# P3) trust list PRESENT: doctor must report it present via the backup catalog
+#     but NEVER echo its contents (contents-blind even when the file exists). A
+#     canary line catches a regression that read/leaked the file. Clean up after
+#     so later cases (Q) see the absent state again.
+mkdir -p "$fixture_home/.config/dotfiles"
+printf 'trusted-login = CANARY_TRUST_LEAK_7f3a\n' \
+  > "$fixture_home/.config/dotfiles/github-trust.local"
+if tl_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "baseline present: .config/dotfiles/github-trust.local" <<< "$tl_out" \
+    && ! grep -Fq "CANARY_TRUST_LEAK_7f3a" <<< "$tl_out"; then
+    ok "test passed: trust list present reported, contents never echoed (contents-blind)"
+  else
+    printf '%s\n' "$tl_out" >&2
+    fail "test failed: trust list present-state or contents-blind invariant not held"
+    status=1
+  fi
+else
+  printf '%s\n' "$tl_out" >&2
+  fail "test failed: doctor must stay exit 0 (trust list present)"
+  status=1
+fi
+rm -f "$fixture_home/.config/dotfiles/github-trust.local"
+
 # Q) gateGitHubMcp=true (claude-settings active for personal) -> reported as
 #    enforced (MCP deny in managed settings), NOT as not-wired. enableGitHubIsolatedReader
 #    flipped too -> still reported as Phase 3 / not enforced. exit 0.
