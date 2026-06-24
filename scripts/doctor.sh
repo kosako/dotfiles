@@ -375,7 +375,7 @@ fi
 # today), so a true value without that module is reported as dangling.
 if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
-    ok "enforceAiSandbox=true; Claude Code native sandbox managed in ~/.claude/settings.json (Bash tool fs+network only)"
+    ok "enforceAiSandbox=true; managed ~/.claude/settings.json carries the native sandbox (Bash fs+network) and the GitHub write deny/ask (secret + main-push deny, release/protection ask; best-effort)"
   else
     warn "enforceAiSandbox=true but the claude-settings module is inactive for this profile; no managed settings carry the sandbox block (dangling capability)"
   fi
@@ -388,18 +388,28 @@ section "GitHub injection guard (report-only)"
 # the GitHub runtime prompt-injection defense (epic #119). Like enforceAiSandbox
 # they are opposite polarity to the install / secret / network capabilities, so
 # they are intentionally absent from environment_kind_forbidden_capabilities (a
-# restrictive kind may set them true). Phase 1 lands the capabilities first; the
-# managed ~/.claude/settings.json gate and the isolated reader are wired in later
-# PRs. AGENTS.md requires a capability to drive a doctor section, so report the
-# declared state honestly as not-yet-enforced rather than as a dead capability.
-# Report-only and contents-blind. See docs/ai-environment-boundary.md.
-for github_guard_cap in gateGitHubMcp enableGitHubIsolatedReader; do
-  if [[ "$(capability_value "$profile" "$github_guard_cap")" == "true" ]]; then
-    warn "$github_guard_cap=true but its enforcement is not wired yet (#119 Phase 1 is incremental); declared, not enforced"
+# restrictive kind may set them true). All matchers are best-effort / steering,
+# NOT an enforcement boundary (see docs/ai-environment-boundary.md). Report-only
+# and contents-blind. AGENTS.md requires each capability to drive a section.
+#
+# gateGitHubMcp is wired (PR2): it denies the github MCP server in the managed
+# ~/.claude/settings.json (when claude-settings is active for the profile).
+if [[ "$(capability_value "$profile" gateGitHubMcp)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    ok "gateGitHubMcp=true; managed ~/.claude/settings.json denies the github MCP server (best-effort, not a boundary)"
   else
-    ok "$github_guard_cap not active (false)"
+    warn "gateGitHubMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)"
   fi
-done
+else
+  ok "gateGitHubMcp not active (false)"
+fi
+# enableGitHubIsolatedReader is the isolated reader (Phase 3): the capability is
+# declared but its enforcement is not wired yet.
+if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; then
+  warn "enableGitHubIsolatedReader=true but the isolated reader is not wired yet (#119 Phase 3); declared, not enforced"
+else
+  ok "enableGitHubIsolatedReader not active (false)"
+fi
 
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs

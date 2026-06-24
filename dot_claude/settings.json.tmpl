@@ -1,4 +1,17 @@
 {{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- /* GitHub injection guard (epic #119, Phase 1). Best-effort / steering only:
+       command-string matchers are bypassable ($(), equivalent read paths, MCP by
+       other means, subagent gaps) and are NOT an enforcement boundary — see
+       docs/ai-environment-boundary.md. deny = never-OK (hard); ask = always needs
+       approval. The context-gated writes (merge/PR/comment/label/push ai/*) are
+       intentionally absent: gating them on a clean context needs the Phase 2
+       PreToolUse hook. gateGitHubMcp gates the MCP deny; the write deny/ask rides
+       on enforceAiSandbox (no separate capability, per #119). Every gating
+       capability defaults false, so this renders byte-identical until flipped. */ -}}
+{{- $deny := list -}}
+{{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
+{{- $ask := list -}}
+{{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(printenv)" "Bash(printenv *)" "Bash(env)" "Bash(env *)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(cat *.env*)" "Bash(cat ~/.ssh/*)" "Read(//**/.env*)" "Read(~/.ssh/**)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
 {
 {{- if index $caps "enforceAiSandbox" }}
   "sandbox": {
@@ -11,6 +24,12 @@
   },
 {{- end }}
   "permissions": {
+{{- if $deny }}
+    "deny": {{ $deny | toJson }},
+{{- end }}
+{{- if $ask }}
+    "ask": {{ $ask | toJson }},
+{{- end }}
     "allow": [
       "mcp__pencil"
     ]

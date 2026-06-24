@@ -9,6 +9,12 @@ set -euo pipefail
 #     failIfUnavailable=true (hard-fail rather than silently run unsandboxed),
 #     allowUnsandboxedCommands=false (no per-command escape hatch), and a
 #     public-safe empty network allowlist.
+# It also fixes the GitHub injection guard content (issue #119, Phase 1):
+# gateGitHubMcp -> deny the github MCP server; enforceAiSandbox -> write deny
+# (secret/main-push) + approval ask (release/protection). Both gates default
+# false, so the rendered settings.json is byte-identical until one is flipped.
+# The matchers are best-effort/steering; a bypass negative test keeps that
+# visible. See docs/ai-environment-boundary.md.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -111,6 +117,102 @@ if [[ "$skip_warn" == "true" && "$tui_mode" == "fullscreen" ]]; then
 else
   fail "test failed: managed global prefs missing (skipWorkflowUsageWarning=$skip_warn tui=$tui_mode)"
   status=1
+fi
+
+section "claude settings GitHub injection guard (#119)"
+
+# 4) Default (both gates false): no deny/ask keys at all. This is the
+#    byte-identical guarantee — the capabilities land off and change nothing.
+deny_default="$(yq -p json '.permissions.deny // "absent"' "$off_file")"
+ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
+if [[ "$deny_default" == "absent" && "$ask_default" == "absent" ]]; then
+  ok "test passed: default emits no deny/ask (permissions unchanged)"
+else
+  fail "test failed: default unexpectedly has deny/ask (deny=$deny_default ask=$ask_default)"
+  status=1
+fi
+
+# 5) enforceAiSandbox=true: the write deny/ask rides on the same gate (on_file
+#    from section 2). secret + direct main push are hard deny; release and
+#    branch-protection need approval (ask). Context-gated writes (merge/PR/
+#    comment/label/push ai/*) are intentionally NOT here (Phase 2 hook).
+if grep -Fq '"Bash(git push * main)"' "$on_file" \
+  && grep -Fq '"Bash(printenv)"' "$on_file" \
+  && grep -Fq '"Read(//**/.env*)"' "$on_file" \
+  && grep -Fq '"Read(~/.ssh/**)"' "$on_file" \
+  && grep -Fq '"Bash(gh release create *)"' "$on_file" \
+  && grep -Fq '"Bash(gh api *protection*)"' "$on_file"; then
+  ok "test passed: enforceAiSandbox=true adds write deny (secret via Bash+Read, main-push) + approval ask (release/protection)"
+else
+  fail "test failed: enforceAiSandbox=true missing expected write deny/ask matchers"
+  status=1
+fi
+# merge/PR/comment/label must NOT be statically gated in Phase 1 (left to the hook).
+if grep -Fq 'gh pr merge' "$on_file" || grep -Fq 'gh pr create' "$on_file" || grep -Fq 'gh label create' "$on_file"; then
+  fail "test failed: context-gated writes are statically gated (should be deferred to the Phase 2 hook)"
+  status=1
+else
+  ok "test passed: context-gated writes (merge/PR/comment/label) are not statically gated"
+fi
+
+# 6) gateGitHubMcp=true: the GitHub MCP server is denied entirely. Flip in a
+#    throwaway copy so the committed default stays false.
+mcp_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-mcp.XXXXXX")"
+tmp_roots+=("$mcp_src")
+cp -R "$DOTFILES_ROOT" "$mcp_src/src"
+rm -rf "$mcp_src/src/.git"
+yq -i '.profiles.personal.capabilities.gateGitHubMcp = true' \
+  "$mcp_src/src/.chezmoidata/profiles.yaml"
+if ! mcp_file="$(render_personal_settings "$mcp_src/src")"; then
+  fail "test failed: personal apply (gateGitHubMcp=true) did not render"
+  exit 1
+fi
+# Valid JSON (comma regression guard for the conditional deny block) + the bare
+# server-name deny (mcp__github covers all tools; mcp__github__* is redundant).
+if yq -p json '.' "$mcp_file" >/dev/null 2>&1 \
+  && grep -Fq '"mcp__github"' "$mcp_file"; then
+  ok "test passed: gateGitHubMcp=true denies the github MCP server (valid JSON)"
+else
+  fail "test failed: gateGitHubMcp=true did not deny the github MCP server (or invalid JSON)"
+  status=1
+fi
+
+# 6b) Both gates on: the deny/ask blocks plus sandbox must still be valid JSON
+#     (catches a comma regression when several conditional keys are present).
+both_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-both.XXXXXX")"
+tmp_roots+=("$both_src")
+cp -R "$DOTFILES_ROOT" "$both_src/src"
+rm -rf "$both_src/src/.git"
+yq -i '.profiles.personal.capabilities.gateGitHubMcp = true | .profiles.personal.capabilities.enforceAiSandbox = true' \
+  "$both_src/src/.chezmoidata/profiles.yaml"
+if ! both_file="$(render_personal_settings "$both_src/src")"; then
+  fail "test failed: personal apply (both gates true) did not render"
+  exit 1
+fi
+if yq -p json '.' "$both_file" >/dev/null 2>&1 \
+  && grep -Fq '"mcp__github"' "$both_file" \
+  && grep -Fq '"Bash(git push * main)"' "$both_file"; then
+  ok "test passed: both gates on -> valid JSON with combined MCP + write deny"
+else
+  fail "test failed: both gates on produced invalid JSON or missing matchers"
+  status=1
+fi
+
+# 7) Bypass negative test. The static command-string matchers are steering, NOT
+#    an enforcement boundary: equivalent read/exfil paths are deliberately not
+#    covered. Assert their absence (in the max-deny enforceAiSandbox render) so
+#    the limitation stays visible and nobody mistakes this for a boundary. If a
+#    future change "covers" one of these, re-check the honest labeling first.
+bypass_hit=0
+for bypass in 'git fetch' 'gh api *contents' 'gh issue view' 'WebFetch'; do
+  if grep -Fq "$bypass" "$on_file"; then
+    fail "test failed: matcher unexpectedly covers '$bypass' — re-check honest labeling / update the bypass test"
+    bypass_hit=1
+    status=1
+  fi
+done
+if [[ "$bypass_hit" -eq 0 ]]; then
+  ok "test passed: known equivalent read/exfil paths are NOT covered (matchers are steering, not a boundary)"
 fi
 
 if [[ "$status" -eq 0 ]]; then

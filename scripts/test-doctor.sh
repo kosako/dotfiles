@@ -402,9 +402,10 @@ else
   status=1
 fi
 
-# GitHub injection guard report (gateGitHubMcp / enableGitHubIsolatedReader, #119
-# Phase 1). The capabilities land before their enforcement; doctor must report
-# them honestly (declared, not enforced) and stay exit 0 = no dead capability.
+# GitHub injection guard report (gateGitHubMcp / enableGitHubIsolatedReader, #119).
+# gateGitHubMcp is wired (PR2: MCP deny in managed settings.json); doctor must
+# report it as enforced when active. enableGitHubIsolatedReader is Phase 3, so it
+# stays "declared, not enforced". doctor stays exit 0 (no dead capability).
 # Throwaway repo copy so the flip does not touch the real data files.
 gh_root="$fixture_home/.dotfiles-ghguard"
 mkdir -p "$gh_root/.chezmoidata"
@@ -428,16 +429,21 @@ else
   status=1
 fi
 
-# Q) flipped true -> reported as declared-but-not-enforced (placeholder), exit 0.
-awk '$0 == "      gateGitHubMcp: false" { print "      gateGitHubMcp: true"; next } { print }' \
+# Q) gateGitHubMcp=true (claude-settings active for personal) -> reported as
+#    enforced (MCP deny in managed settings), NOT as not-wired. enableGitHubIsolatedReader
+#    flipped too -> still reported as Phase 3 / not enforced. exit 0.
+awk '$0 == "      gateGitHubMcp: false" { print "      gateGitHubMcp: true"; next }
+     $0 == "      enableGitHubIsolatedReader: false" { print "      enableGitHubIsolatedReader: true"; next }
+     { print }' \
   "$gh_root/.chezmoidata/profiles.yaml" > "$gh_root/.chezmoidata/profiles.yaml.tmp"
 mv "$gh_root/.chezmoidata/profiles.yaml.tmp" "$gh_root/.chezmoidata/profiles.yaml"
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "not wired yet" <<< "$gh_out"; then
-    ok "test passed: gateGitHubMcp=true reported as declared-not-enforced"
+  if grep -Fq "denies the github MCP server" <<< "$gh_out" \
+    && grep -Fq "isolated reader is not wired yet" <<< "$gh_out"; then
+    ok "test passed: gateGitHubMcp=true reported as enforced; isolated reader still Phase 3"
   else
     printf '%s\n' "$gh_out" >&2
-    fail "test failed: gateGitHubMcp=true placeholder not reported"
+    fail "test failed: gateGitHubMcp wired-state or isolated-reader Phase 3 state not reported"
     status=1
   fi
 else
