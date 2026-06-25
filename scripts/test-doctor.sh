@@ -65,7 +65,23 @@ agent_marker="$agent_dir/ran-marker"
 mkdir -p "$agent_scripts"
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
-[ "$1" = "--json" ] || exit 1
+# Model the status contract: accept `--root DIR` and `--json` in any order, and
+# assert doctor pins the inspection root to this checkout, not its own cwd (#73).
+# status.sh defaults its root to cwd, so a doctor that omits --root would inspect
+# the wrong dir; exit non-zero on a wrong/missing root to regress that loudly.
+root=""; json=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) root="$2"; shift 2 ;;
+    --json) json=1; shift ;;
+    *) shift ;;
+  esac
+done
+[ "$json" = 1 ] || exit 1
+[ -n "$root" ] || exit 3
+root="$(CDPATH= cd -- "$root" 2>/dev/null && pwd)" || exit 3
+expected="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+[ "$root" = "$expected" ] || exit 3
 : > "$(dirname "$0")/../ran-marker"
 cat <<'JSON'
 {"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"}]}
@@ -73,12 +89,20 @@ JSON
 SH
 chmod +x "$agent_scripts/status.sh"
 
-# A) Default profile (enableAgentToolsStatus=false): present but status.sh
-#    must not run.
+# A) Opt-in disabled: present but status.sh must not run. Force the capability
+#    off in a throwaway copy so the test is independent of the real default
+#    (personal opts in by default since #73), mirroring the opt-in copy below.
+optout_root="$fixture_home/.dotfiles-optout"
+mkdir -p "$optout_root/.chezmoidata"
+cp -R "$DOTFILES_ROOT/scripts" "$optout_root/scripts"
+cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$optout_root/.chezmoidata/"
+awk '$0 == "      enableAgentToolsStatus: true" { print "      enableAgentToolsStatus: false"; next } { print }' \
+  "$optout_root/.chezmoidata/profiles.yaml" > "$optout_root/.chezmoidata/profiles.yaml.tmp"
+mv "$optout_root/.chezmoidata/profiles.yaml.tmp" "$optout_root/.chezmoidata/profiles.yaml"
 rm -f "$agent_marker"
-if at_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if at_out="$(HOME="$fixture_home" "$optout_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "status read disabled" <<< "$at_out" && [[ ! -e "$agent_marker" ]]; then
-    ok "test passed: agent-tools status execution is opt-in (not run by default)"
+    ok "test passed: agent-tools status execution is opt-in (not run when disabled)"
   else
     printf '%s\n' "$at_out" >&2
     fail "test failed: agent-tools status.sh ran or was not reported as disabled"
@@ -120,7 +144,9 @@ fi
 # C) Opt-in + unknown contract version: not interpreted, still exit 0.
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
-[ "$1" = "--json" ] || exit 1
+json=0
+for a in "$@"; do [ "$a" = "--json" ] && json=1; done
+[ "$json" = 1 ] || exit 1
 echo '{"contract_version":99}'
 SH
 chmod +x "$agent_scripts/status.sh"
@@ -177,7 +203,9 @@ fi
 # G) Opt-in + malformed status JSON: doctor must not break, exit 0.
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
-[ "$1" = "--json" ] || exit 1
+json=0
+for a in "$@"; do [ "$a" = "--json" ] && json=1; done
+[ "$json" = 1 ] || exit 1
 echo 'this is not json {{{'
 SH
 chmod +x "$agent_scripts/status.sh"
@@ -213,7 +241,21 @@ override_marker="$override_dir/ran-marker"
 mkdir -p "$override_scripts"
 cat > "$override_scripts/status.sh" <<'SH'
 #!/bin/sh
-[ "$1" = "--json" ] || exit 1
+# Same root-pinning contract as the default-path fake: doctor must pass
+# --root equal to the AGENT_TOOLS-overridden checkout (#71 + #73).
+root=""; json=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) root="$2"; shift 2 ;;
+    --json) json=1; shift ;;
+    *) shift ;;
+  esac
+done
+[ "$json" = 1 ] || exit 1
+[ -n "$root" ] || exit 3
+root="$(CDPATH= cd -- "$root" 2>/dev/null && pwd)" || exit 3
+expected="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+[ "$root" = "$expected" ] || exit 3
 : > "$(dirname "$0")/../ran-marker"
 cat <<'JSON'
 {"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":0,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":0,"stale":0},"register":{"catalog_present":false,"registered":0,"human_review_required":0,"unsupported":0},"sync_targets":[]}

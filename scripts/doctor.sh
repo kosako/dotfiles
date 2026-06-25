@@ -453,6 +453,9 @@ section "agent-tools (report-only)"
 # The expected path defaults to the dotfiles directory convention
 # (~/src/agent/agent-tools) but is overridable via the AGENT_TOOLS env so a
 # non-standard checkout can still be reported. presence only; never cloned.
+# status.sh defaults its inspection root to its own cwd, so doctor pins
+# --root to the resolved checkout; otherwise it would inspect doctor's cwd
+# and falsely report an empty repo (#73).
 if [[ "$(capability_value "$profile" enableAiPolicy)" != "true" ]]; then
   ok "AI policy disabled; skipping agent-tools check"
 else
@@ -464,7 +467,7 @@ else
     ok "agent-tools present; status read disabled (set enableAgentToolsStatus=true to let doctor run its status.sh)"
   elif [[ ! -x "$agent_tools_status" ]]; then
     warn "agent-tools present but scripts/status.sh is missing or not executable"
-  elif ! status_json="$("$agent_tools_status" --json 2>/dev/null)" || [[ -z "$status_json" ]]; then
+  elif ! status_json="$("$agent_tools_status" --root "$agent_tools_dir" --json 2>/dev/null)" || [[ -z "$status_json" ]]; then
     warn "agent-tools status.sh produced no usable output (skipping summary)"
   else
     # Null-safe queries plus `|| true` keep doctor report-only even if

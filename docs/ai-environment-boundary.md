@@ -90,7 +90,7 @@ AI skills / agents project は、`dotfiles` の policy を前提に動く。poli
 - **配布層**(AI skills / agents project → AI tool home): skill / instruction を `~/.claude` / `~/.codex` などへ配置するのは AI skills / agents project 側の責務(build / sync)。`dotfiles` はこの**配布物(skill / instruction)**を作らない。配布の正本は当該 project 側の docs。(例外: ハーネス設定 `~/.claude/settings.json` は配布物ではなく**環境設定**なので、personal の public-safe な範囲だけ `dotfiles` が control plane として管理する。上の「dotfiles が持つもの」参照。)
 - **監視層**(`dotfiles` → AI skills / agents project): `dotfiles` の `doctor` が presence と、opt-in 時に status の health を read-only で覗くだけ(上の箇条書き)。書き込み・clone・sync はしない。
 
-監視層の status 読み取りは既定で off(`enableAgentToolsStatus: false`)。実運用で有効化する手順(presence path の整合・opt-in・status の実態確認)は Issue #73 で検討する。
+監視層の status 読み取りは personal で on(`enableAgentToolsStatus: true`、#73)。work profile は既定 off のまま。doctor は status を `status.sh --root <checkout>` で pin して読む(status.sh は既定で cwd を検査するため、未 pin だと doctor の cwd を誤検査して空 repo を偽報告する)。非標準 checkout(実体は `~/dev/agent-tools`)の path は `AGENT_TOOLS`(override 機構は #71)を非追跡の `~/.zshrc.local` に置く([local-overrides](local-overrides.md))。
 
 推奨する置き場所:
 
