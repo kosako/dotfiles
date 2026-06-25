@@ -36,7 +36,14 @@ profiles:
       allowSecretsAccess: true
       enableAiTools: false
       enforceAiSandbox: false
-      enableAgentToolsStatus: false
+      # #73: opt in to the report-only monitoring layer. doctor runs
+      # agent-tools' status.sh (--json, read-only, contract v2) and summarizes
+      # its health (clean / checks / stale / sync conflicts) as warnings. Still
+      # report-only / exit 0; never clones / pulls / syncs. A non-standard
+      # checkout path is resolved via AGENT_TOOLS in the local, non-tracked
+      # ~/.zshrc.local (the concrete path is never baked into tracked files; see
+      # docs/local-overrides.md).
+      enableAgentToolsStatus: true
       enableAiPolicy: true
       # Phase 2 (#119): deny the github MCP server in the managed settings.json.
       # Best-effort / steering (not an enforcement boundary; see

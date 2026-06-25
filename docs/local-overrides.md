@@ -89,6 +89,27 @@ GitHub injection 防御(epic #119)の trust 基点の local 値は、managed fil
   `baseline present/absent: .config/dotfiles/github-trust.local` として表示し、中身=login /
   id は読まない。injection-guard section にも置き場ポインタを出す)。
 
+## agent-tools の checkout path(#73)
+
+`dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`
+(directory convention)で探す。実体が directory convention 以外の場所に checkout されて
+いるときは `AGENT_TOOLS` env で override する(override 機構は #71)。具体 path は managed
+file に焼かず、非追跡の `~/.zshrc.local` に置く(zsh は末尾 source = local-wins。local path を
+tracked file に入れない public-safety 規約に従う):
+
+```sh
+export AGENT_TOOLS="$HOME/path/to/agent-tools"
+```
+
+- doctor は status 読み取り時に `status.sh --root "$AGENT_TOOLS"` と root を pin する。
+  status.sh は既定で **cwd** を検査するため、pin しないと doctor を起動した cwd を誤検査して
+  空の repo を偽報告する(#73)。
+- 監視層自体を動かすかどうかの opt-in は `enableAgentToolsStatus`(profile capability、tracked)
+  で、AGENT_TOOLS(checkout path の解決)とは別レイヤ。capability が off なら presence までで
+  status は読まない。
+- 共通原則どおり managed 側は AGENT_TOOLS 未設定でも壊れない(既定 path に fallback し、
+  不在なら report-only の warn)。
+
 ## 決定記録
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で
