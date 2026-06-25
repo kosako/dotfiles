@@ -92,13 +92,13 @@ GitHub injection 防御(epic #119)の trust 基点の local 値は、managed fil
 ## agent-tools の checkout path(#73)
 
 `dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`
-(directory convention)で探す。実体が非標準な checkout(例: `~/dev/agent-tools`)にある
-ときは `AGENT_TOOLS` env で override する(override 機構は #71)。local path は managed file に
-焼かず、非追跡の `~/.zshrc.local` に置く(zsh は末尾 source = local-wins。local path を
+(directory convention)で探す。実体が directory convention 以外の場所に checkout されて
+いるときは `AGENT_TOOLS` env で override する(override 機構は #71)。具体 path は managed
+file に焼かず、非追跡の `~/.zshrc.local` に置く(zsh は末尾 source = local-wins。local path を
 tracked file に入れない public-safety 規約に従う):
 
 ```sh
-export AGENT_TOOLS="$HOME/dev/agent-tools"
+export AGENT_TOOLS="$HOME/path/to/agent-tools"
 ```
 
 - doctor は status 読み取り時に `status.sh --root "$AGENT_TOOLS"` と root を pin する。
