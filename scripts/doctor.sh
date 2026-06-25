@@ -414,18 +414,25 @@ if module_active_for_profile "$profile" claude-settings; then
   # Tier 2 — human-legit write gate: main-push deny, .env read deny, and the
   # release/branch-protection ask still ride on enforceAiSandbox, which personal
   # keeps false (its egress block is unusable on a daily driver). A restricted
-  # context for these is #119 Phase 3 — disclose the live state so the green line
-  # above is not read as a complete injection guard.
+  # context for these is #119 Phase 3 (#131) — disclose the live state so the
+  # green line above is not read as a complete injection guard.
   if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
     item "human-legit write gate active (enforceAiSandbox): main-push + .env-read deny, release/protection ask"
   else
-    item "human-legit write gate INERT (enforceAiSandbox=false): main-push / .env-read deny and release/protection ask are not rendered — needs a restricted context (#119 Phase 3), not the daily-driver egress block"
+    item "human-legit write gate INERT (enforceAiSandbox=false): main-push / .env-read deny and release/protection ask are not rendered — needs a restricted context (#119 Phase 3, #131), not the daily-driver egress block"
   fi
+  # The main-push deny is leaky steering even where it renders: the matcher
+  # `git push * main|master` only catches the explicit trailing-`main` form and
+  # misses bare `git push`, `git push origin HEAD`, and refspecs (`HEAD:main`).
+  # Verified against Claude Code matcher semantics (#119). Disclosed so the deny
+  # is not mistaken for a real main-push boundary — the real enforcement is
+  # server-side branch protection or the Phase 3 isolated reader (#131).
+  item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; real block is branch protection or the Phase 3 isolated reader (#131)"
 fi
 # enableGitHubIsolatedReader is the isolated reader (Phase 3): the capability is
 # declared but its enforcement is not wired yet.
 if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; then
-  warn "enableGitHubIsolatedReader=true but the isolated reader is not wired yet (#119 Phase 3); declared, not enforced"
+  warn "enableGitHubIsolatedReader=true but the isolated reader is not wired yet (#119 Phase 3, #131); declared, not enforced"
 else
   ok "enableGitHubIsolatedReader not active (false)"
 fi

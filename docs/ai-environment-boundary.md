@@ -186,7 +186,13 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
   - **(3) human-legit な write は `enforceAiSandbox` に相乗り**。main / master への直 push と
     `.env` 読取(`cat *.env*` / `Read(//**/.env*)`)を deny、release 操作と branch protection /
     rulesets 変更を ask にする。人間が正規に Claude に頼みうるので常時 ON にはせず、制限
-    context(= `enforceAiSandbox` / Phase 3)に寄せる。
+    context(= 下記「制限 context の接続規約」/ Phase 3 [#131])に寄せる。なお main-push deny
+    の matcher(`git push * main|master`)は **leaky steering**: ` main` 末尾の explicit 形しか
+    拾わず bare `git push` / `git push origin HEAD` / refspec(`HEAD:main`)は抜ける(Claude Code
+    の matcher セマンティクスを #119 で裏取り。`*` は空白跨ぎ・末尾 ` main` は word boundary 固定・
+    複合コマンドは分割評価)。真の「main 直 push を止める」hard 層は server-side branch protection
+    か Phase 3 の隔離 reader であり、matcher を enumeration で広げて塞ぐのは command-string ≠
+    enforcement のアンチパターンゆえ **しない**。
 
 **boundary でない理由(過大評価しない)**:
 
@@ -199,8 +205,8 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
 - egress は `enforceAiSandbox` の network allowlist = **hostname best-effort**(TLS 終端せず、
   DNS exfil は素通り。上の sandbox 節)。
 - **Phase 1 には trifecta(untrusted 読取 × secret × egress)を構造的に断つ hard 層が無い**。
-  hard 層 ── 隔離 reader / network egress sandbox / token の物理分離 ── は Phase 2 / 3。
-  `enableGitHubIsolatedReader` は Phase 3 の隔離 reader 用に **宣言だけ**してある
+  hard 層 ── 隔離 reader / network egress sandbox / token の物理分離 ── は Phase 3 [#131]。
+  `enableGitHubIsolatedReader` は Phase 3 [#131] の隔離 reader 用に **宣言だけ**してある
   (declared, not enforced。doctor が warn)。
 
 **subagent への適用(deny は継承・親 hook は subagent 不発)**: `permissions.deny` は main session
@@ -219,7 +225,25 @@ Phase 3 の隔離 reader の役割になる。
 private-token を hard に切れる」は **この環境では成り立たない**。実機の `gh` は `GH_TOKEN`
 未設定でも **keyring 認証**(macOS keychain)で動くため、env を外しても認証は残る = 偽の安心。
 真に切るには untrusted-read 用 shell で `GH_CONFIG_DIR` を隔離し、全認証源(keychain / OAuth /
-git credential helper / MCP token / curl)を遮断する **session 隔離**が要る = hard 化は Phase 2 / 3。
+git credential helper / MCP token / curl)を遮断する **session 隔離**が要る = hard 化は Phase 3。
+これは runtime / invocation そのものなので dotfiles(control plane)には置かず、**Phase 3 [#131]
+への単一 hand-off** とする。acceptance criteria は「隔離 session で `gh` / git の認証済み
+private access が失敗することを実機検証する」。dotfiles 側で `GH_CONFIG_DIR` 隔離 shell や
+safe-gh wrapper は land しない(env-strip だけの半端な実体は inert = 偽の安心になる)。
+
+**制限 context の接続規約(#119 Phase 2 で確定・実体は agent-tools / Phase 3 [#131])**: tier3 の
+human-legit write gate を daily driver 全体に被せず「untrusted な GitHub を読む制限 context」に
+だけ効かせる方法は、`permissions.deny` が **session 一律**(「main は許可・制限 context だけ deny」を
+1 つの settings 内で表現できない)である以上、**別 session を立てる**ことに帰着する。その別 session の
+実体(launcher / 隔離起動)は invocation = agent-tools 領分(Phase 3)に置き、**dotfiles は launcher を
+持たない**。接続規約: 制限 context は agent-tools が **`claude --settings <path>` で dotfiles の managed
+template を基底に重ねて** 起動する。重ねる中身は **write-gate のみ**(secret floor + `mcp__github`
+deny + tier3 の human-legit write deny)で、**`enforceAiSandbox` の egress sandbox ブロックは含めない**
+── egress は別 tier(Phase 3 の OS egress firewall)。permission deny(Claude tool)・network egress
+(Bash subprocess)・token 隔離(OS / session credential)は同じ file に書けても **同じ enforcement
+layer ではない**ので束ねない。deny floor は managed template を single source とし、agent-tools 側で
+再発明・drift させない。dotfiles はこの規約を **doc として持つだけ**で、制限 settings file 自体は
+render しない(起動主体が dotfiles に無い render は dead-render になる)。
 
 **trust 基点**は `is_self`(login + numeric id)のみ。collaborator / bot は既定 untrusted で、
 評価順は is_self → is_bot → association(bot は association=NONE に化けうるため)。read /
