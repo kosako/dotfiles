@@ -158,11 +158,14 @@ else
 fi
 
 section "known project roots"
+# Standard roots (docs/directory-convention.md). Optional: repos may live
+# outside ~/src (a non-standard placement) with repo-local identity, so a
+# missing standard root is reported neutrally, not as a warning (#134).
 for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
   if [[ -d "$dir" ]]; then
     ok "exists: $dir"
   else
-    warn "missing: $dir"
+    item "not present (standard root, optional): $dir"
   fi
 done
 

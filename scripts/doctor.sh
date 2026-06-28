@@ -350,10 +350,13 @@ section "AI policy"
 if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
   ok "enableAiPolicy=true (policy docs + report-only checks; see docs/ai-policy.md)"
   item "boundary today: directory convention + Git identity separation + policy docs"
+  # The standard agent root is optional: agent repos may live outside ~/src (a
+  # non-standard placement) resolved via AGENT_TOOLS / repo-local identity, so a
+  # missing standard root is reported neutrally, not as a warning (#134).
   if [[ -d "$HOME/src/agent" ]]; then
     ok "agent project root exists: $HOME/src/agent"
   else
-    warn "agent project root missing: $HOME/src/agent"
+    item "agent project root not present (standard root, optional): $HOME/src/agent"
   fi
 else
   ok "AI policy checks disabled for profile"
@@ -543,11 +546,14 @@ if [[ "$tunnel_tools_found" -eq 0 ]]; then
 fi
 
 section "project roots"
+# Standard roots (docs/directory-convention.md). They are optional: repos may
+# live outside ~/src (a non-standard placement) with repo-local identity, so a
+# missing standard root is reported neutrally, not as a warning (#134).
 for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
   if [[ -d "$dir" ]]; then
     ok "exists: $dir"
   else
-    warn "missing: $dir"
+    item "not present (standard root, optional): $dir"
   fi
 done
 
