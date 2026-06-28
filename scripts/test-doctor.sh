@@ -354,6 +354,26 @@ else
   status=1
 fi
 
+# project roots / agent root (#134): a missing STANDARD root is reported
+# neutrally (an item), not as a warning, so a non-standard placement (repos kept
+# outside ~/src) is not nagged. The fixture HOME has no ~/src/personal, so it
+# must surface as a neutral "not present (standard root, optional)" item and
+# never as a "missing: .../src/personal" warning.
+if pr_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "not present (standard root, optional): $fixture_home/src/personal" <<< "$pr_out" \
+    && ! grep -Fq "missing: $fixture_home/src/personal" <<< "$pr_out"; then
+    ok "test passed: missing standard project root reported neutrally, not as a warning (#134)"
+  else
+    printf '%s\n' "$pr_out" >&2
+    fail "test failed: standard project root missing must be neutral (#134), not a warning"
+    status=1
+  fi
+else
+  printf '%s\n' "$pr_out" >&2
+  fail "test failed: doctor must stay exit 0 (project roots neutral)"
+  status=1
+fi
+
 # Git signing report (enableGitSigning, issue #85). doctor stays report-only /
 # exit 0 and must reflect both the active and the dangling (capability true but
 # git-signing module inactive) cases. Throwaway repo copy so the edits do not

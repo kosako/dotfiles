@@ -81,6 +81,11 @@ fatal: no email was given and auto-detection is disabled
 
 これは意図した挙動。誤った identity で commit するより、commit できない方を選ぶ。
 
+意図的に `~/src` の外で運用する project では、repo ごとに `git config user.name` /
+`user.email` を設定して fail-closed を解除する(承知の上で「置き場所」による自動分離を
+使わない選択。personal は remote URL による二次判定(Issue #52)が当たれば設定不要)。
+非標準配置の扱いは [directory-convention](directory-convention.md) を参照。
+
 ## 検査
 
 - `scripts/doctor.sh` は report-only で以下を確認する。
