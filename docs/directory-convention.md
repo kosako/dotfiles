@@ -59,9 +59,10 @@ Git config では `user.useConfigOnly = true` を使い、known directory 外で
 - **agent-tools の監視**: doctor が探す checkout path は `AGENT_TOOLS` env で実体を指す
   (override 機構は Issue #71、root pin は Issue #73)。具体 path は tracked file に焼かず、
   非追跡の `~/.zshrc.local` に置く。
-- **doctor / preflight の検査範囲**: remote URL の credential scan と standard root の
-  presence check は `~/src` を前提とする。非標準配置の repo はこれらの自動検査の対象外に
-  なる(どちらも report-only なので実害はないが、網羅性は下がる)。
+- **doctor / preflight の検査範囲**: standard root の presence check と remote URL の
+  credential scan は `~/src` を前提とする(ただし credential scan は dotfiles repo 自身を
+  常に対象に含む)。dotfiles 以外の非標準配置 repo はこれらの自動検査の対象外になる
+  (どちらも report-only なので実害はないが、網羅性は下がる)。
 
 doctor / preflight は標準 root の不在を中立に報告し(警告ではない)、非標準配置を妨げない。
 ただし標準の `~/src/<context>/` 構造の方が identity 判定・secret access・policy の自動適用を
