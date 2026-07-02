@@ -500,9 +500,9 @@ EOF
   done
 
   # Default inventory == the reality-seed catalog (drift-free baseline).
-  printf '%s\n' age chezmoi gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+  printf '%s\n' age chezmoi gh herdr mise shellcheck tmux yq "${shell_env_formulae[@]}" \
     > "$drift_dir/brew_formulae"
-  printf '%s\n' age chezmoi gh mise shellcheck tmux yq "${shell_env_formulae[@]}" \
+  printf '%s\n' age chezmoi gh herdr mise shellcheck tmux yq "${shell_env_formulae[@]}" \
     > "$drift_dir/brew_leaves"
   printf '%s\n' 1password-cli copilot-cli iterm2 swiftbar > "$drift_dir/brew_casks"
   # npm and corepack are node-bundled; including them proves they are
