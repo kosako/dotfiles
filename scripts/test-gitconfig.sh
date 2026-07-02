@@ -307,6 +307,32 @@ else
   status=1
 fi
 
+# A credential hiding in pushurl with a clean fetch url must be flagged too
+# (#144: the scan matched only remote.*.url and pushurl slipped through).
+mkdir -p "$fixture/src/personal/pushurl-demo"
+run_git "$fixture/src/personal/pushurl-demo" init --quiet --initial-branch=main
+run_git "$fixture/src/personal/pushurl-demo" config remote.origin.url "https://invalid.example/repo.git"
+run_git "$fixture/src/personal/pushurl-demo" config remote.origin.pushurl "https://user:secret-placeholder@invalid.example/repo.git"
+
+flagged="$(git_remotes_with_credentials "$fixture/src/personal/pushurl-demo")"
+if [[ "$flagged" == "origin" ]]; then
+  ok "test passed: credential-like pushurl detected (clean fetch url)"
+else
+  fail "test failed: expected flagged remote 'origin' via pushurl, got: ${flagged:-<none>}"
+  status=1
+fi
+
+# Both url and pushurl carrying credentials still report the remote once.
+run_git "$fixture/src/personal/pushurl-demo" config remote.origin.url "https://user:secret-placeholder@invalid.example/repo.git"
+
+flagged="$(git_remotes_with_credentials "$fixture/src/personal/pushurl-demo")"
+if [[ "$flagged" == "origin" ]]; then
+  ok "test passed: url+pushurl credentials report the remote once"
+else
+  fail "test failed: expected single 'origin', got: ${flagged:-<none>}"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "gitconfig tests passed"
 fi

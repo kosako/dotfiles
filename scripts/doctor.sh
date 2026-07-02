@@ -114,8 +114,12 @@ if [[ "$npm_mode" == "off" ]]; then
   ok "npm hardening intentionally unmanaged"
 elif ! command -v npm >/dev/null 2>&1; then
   warn "npm not found"
+elif ! npm_version="$(npm --version 2>/dev/null)" || [[ -z "$npm_version" ]]; then
+  # A mise shim resolves on PATH even when no node runtime is installed; the
+  # unguarded probe used to kill the whole doctor here via set -e, breaking
+  # the report-only contract (#144).
+  warn "npm on PATH but not runnable (shim without a runtime?); skipping npm checks"
 else
-  npm_version="$(npm --version)"
   ok "npm: $npm_version"
   for key in before ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
@@ -123,7 +127,12 @@ else
   done
   npm_major="${npm_version%%.*}"
   npm_minor="$(printf '%s' "$npm_version" | cut -d. -f2)"
-  if [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]] 2>/dev/null; then
+  # Guard before the arithmetic test: [[ -gt ]] evaluates its operands as
+  # arithmetic, so a non-numeric component resolves as a variable name and
+  # aborts the shell under set -u (the old 2>/dev/null hid even that) (#144).
+  if [[ ! "$npm_major" =~ ^[0-9]+$ || ! "$npm_minor" =~ ^[0-9]+$ ]]; then
+    warn "npm version '$npm_version' not recognized; cannot check min-release-age support"
+  elif [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]]; then
     ok "npm supports min-release-age (>= 11.10)"
   else
     warn "npm older than 11.10, min-release-age is not enforced"

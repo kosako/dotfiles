@@ -656,15 +656,18 @@ require_secrets_access() {
 }
 
 # Print names of remotes whose URL embeds password-like userinfo
-# (scheme://user:password@host). URL values are never printed.
+# (scheme://user:password@host). Covers pushurl too — a credential can hide
+# in remote.<name>.pushurl with a clean fetch url (#144). Each remote is
+# printed once even when both url and pushurl are flagged. URL values are
+# never printed.
 git_remotes_with_credentials() {
   local repo="$1"
-  git -C "$repo" config --local --get-regexp '^remote\..*\.url$' 2>/dev/null |
+  git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null |
     awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
       name = $1
       sub(/^remote\./, "", name)
-      sub(/\.url$/, "", name)
-      print name
+      sub(/\.(url|pushurl)$/, "", name)
+      if (!seen[name]++) print name
     }'
 }
 
