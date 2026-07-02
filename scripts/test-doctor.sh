@@ -618,6 +618,120 @@ else
   status=1
 fi
 
+# DRIFT-A) A token-shaped line in ~/.npmrc is warned by name only (the value
+# never appears in the output), doctor stays exit 0 (#148).
+dr_home="$fixture_home/drift"
+mkdir -p "$dr_home"
+printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n//registry.npmjs.org/:_authToken=secret-placeholder-value\n' \
+  > "$dr_home/.npmrc"
+if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "npmrc contains 1 _authToken line" <<< "$dr_out" \
+    && ! grep -Fq "secret-placeholder-value" <<< "$dr_out"; then
+    ok "test passed: npmrc token line warned by count, value never echoed"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: token line not warned, or the value leaked into output"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 with a token line present"
+  status=1
+fi
+
+# DRIFT-B) A managed .npmrc missing the managed-by header is warned; the
+# status check itself must skip — as not-initialized when chezmoi exists
+# (fixture homes carry no chezmoi state), as not-found where it does not
+# (the CI validate job has no chezmoi).
+if command -v chezmoi >/dev/null 2>&1; then
+  drift_skip="chezmoi not initialized for this home; skipping drift check"
+else
+  drift_skip="chezmoi not found; skipping drift check"
+fi
+printf 'ignore-scripts=true\n' > "$dr_home/.npmrc"
+if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
+    && grep -Fq "$drift_skip" <<< "$dr_out"; then
+    ok "test passed: missing managed-by header warned; uninitialized home skips the status check"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: header warn or the not-initialized skip line missing"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 with a headerless npmrc"
+  status=1
+fi
+
+# DRIFT-C) The chezmoi-status branches, deterministic via a fake chezmoi on
+# PATH (the CI validate job has no chezmoi and the render job does not run
+# this test, so without the fake these branches would never be exercised in
+# CI): drift lines -> per-line warn + exit 0; empty -> ok; failure -> the
+# not-initialized skip, all report-only.
+cz_fakebin="$fixture_home/czfake"
+mkdir -p "$cz_fakebin"
+cat > "$cz_fakebin/chezmoi" <<'SH'
+#!/bin/sh
+case "$1" in
+  --version) printf 'chezmoi version v0.0-fake\n' ;;
+  status)
+    [ -n "$FAKE_CHEZMOI_STATUS" ] && printf '%s\n' "$FAKE_CHEZMOI_STATUS"
+    exit "${FAKE_CHEZMOI_RC:-0}" ;;
+esac
+exit 0
+SH
+chmod +x "$cz_fakebin/chezmoi"
+
+if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
+  FAKE_CHEZMOI_STATUS='MM .npmrc' FAKE_CHEZMOI_RC=0 \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "drift: MM .npmrc" <<< "$dr_out" \
+    && grep -Fq "a drift can be intended" <<< "$dr_out"; then
+    ok "test passed: a chezmoi status line is warned as drift, doctor stays exit 0"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: drift line not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 when drift is reported"
+  status=1
+fi
+
+if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=0 \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "no drift: managed files match the source state" <<< "$dr_out"; then
+    ok "test passed: an empty chezmoi status reports no drift"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: empty status should report no drift"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 with a clean status"
+  status=1
+fi
+
+if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "chezmoi not initialized for this home; skipping drift check" <<< "$dr_out"; then
+    ok "test passed: a failing chezmoi status is skipped, doctor stays exit 0"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: failing status should skip with the not-initialized item"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 when chezmoi status fails"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi
