@@ -139,7 +139,7 @@ Git config source(`dot_gitconfig`)を変更した場合:
 
 ## 検証レイヤー
 
-(旧 docs/validation-plan.md から統合。#147)
+(旧検証計画 doc から統合。#147)
 
 ```text
 1. 静的検証 + テスト   CI が PR ごとに実行(.github/workflows/validate.yml が single source)
