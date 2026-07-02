@@ -124,7 +124,7 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 
 **決定済み不使用・doctor 開示なし・owner なしの dormant は削除する**。schema に残すと
 「宣言 = 何かが動く」という読みを裏切り、honest-labeling が信用できなくなる。削除しても
-git 履歴から復元できる(前例: vscode #16/#145、enableMacOSDefaults #145)。
+git 履歴から復元できる(削除済みの前例は #16 / #145 を参照)。
 
 ## capability → 実装の gating 方式(規範)
 
