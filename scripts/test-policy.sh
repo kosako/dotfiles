@@ -410,6 +410,27 @@ if set_capability_all "$fixture" enforceAiSandbox true 2>/dev/null; then
 fi
 ok "test passed: set_capability_all fails closed on an empty profiles map"
 
+# Capability registry (#151): a capability without implemented: true|false
+# fails closed, and implemented: false without a doctor disclosure (the
+# static proxy: doctor.sh mentions the name) fails. The mutations are
+# verified by the failure assertions themselves — a no-op mutation would
+# make validate pass and the test fail loudly.
+make_fixture
+yq -i 'del(.capabilities.enableGitSigning.implemented)' \
+  "$fixture/.chezmoidata/capabilities.schema.yaml"
+run_fail_contains \
+  "capability without an implemented flag fails closed" \
+  "enableGitSigning lacks implemented" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+yq -i '.capabilities.installGuiApps.implemented = false' \
+  "$fixture/.chezmoidata/capabilities.schema.yaml"
+run_fail_contains \
+  "implemented=false without a doctor mention fails (undisclosed dormant)" \
+  "installGuiApps is implemented=false but doctor.sh never mentions it" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 # Anchor on the LAST capability line so the bogus section lands after the whole
 # capabilities block (update this if a later capability is added below).
 make_fixture

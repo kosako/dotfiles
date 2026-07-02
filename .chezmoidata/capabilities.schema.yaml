@@ -1,41 +1,64 @@
+# Capability schema. Every capability MUST declare:
+#   type:        boolean | enum (enum also lists values)
+#   implemented: true | false — false marks a declared-not-implemented
+#                capability (a live contract or roadmap placeholder per the
+#                keep-criterion in docs/policy-model.md). validate-policy
+#                requires the flag and, for implemented: false, statically
+#                checks that doctor.sh discloses the capability (#151).
 capabilities:
   installPackages:
     type: boolean
+    implemented: true
   installGuiApps:
     type: boolean
+    implemented: true
   enable1PasswordSSH:
     type: boolean
+    implemented: true
   enableGitSigning:
     type: boolean
+    implemented: true
   enableDirenv:
     type: boolean
+    implemented: true
   enableRuntimeManagement:
     type: boolean
+    implemented: true
   npmHardeningMode:
     type: enum
+    implemented: true
     values:
       - off
       - report
       - enforce
   corepackMode:
     type: enum
+    implemented: true
     values:
       - off
       - report
       - enable
   allowNetworkTunnels:
     type: boolean
+    implemented: true
   allowSecretsAccess:
     type: boolean
+    implemented: true
   enableAiTools:
     type: boolean
+    implemented: false
   enforceAiSandbox:
     type: boolean
+    implemented: true
   enableAgentToolsStatus:
     type: boolean
+    implemented: true
   enableAiPolicy:
     type: boolean
+    implemented: true
   gateGitHubMcp:
     type: boolean
+    implemented: true
   enableGitHubIsolatedReader:
     type: boolean
+    implemented: false

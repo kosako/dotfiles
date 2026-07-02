@@ -105,6 +105,49 @@ validate_modules() {
   return "$status"
 }
 
+# Capability registry (#151): every capability must declare
+# implemented: true|false (fail closed — an unlabeled capability cannot claim
+# honest-labeling). implemented: false additionally requires a doctor
+# disclosure; the static proxy is that doctor.sh mentions the capability name
+# at all. This is a source-text check, not a behavior check (a mention inside
+# a comment would satisfy it), but it catches exactly the failure #145
+# removed: a capability living in schema + profiles with zero doctor
+# references. The keep-criterion for implemented: false entries is in
+# docs/policy-model.md.
+validate_capability_registry() {
+  local status=0 capability impl
+  local doctor_script="$DOTFILES_ROOT/scripts/doctor.sh"
+  while IFS= read -r capability; do
+    [[ -z "$capability" ]] && continue
+    impl="$(capability_implemented "$capability")"
+    case "$impl" in
+      true)
+        ok "capability registry: $capability implemented=true"
+        ;;
+      false)
+        if grep -Fq -- "$capability" "$doctor_script"; then
+          ok "capability registry: $capability implemented=false, doctor discloses it"
+        else
+          fail "capability registry: $capability is implemented=false but doctor.sh never mentions it (undisclosed dormant declaration)"
+          status=1
+        fi
+        ;;
+      *)
+        fail "capability registry: $capability lacks implemented: true|false"
+        status=1
+        ;;
+    esac
+  done < "$known_caps_file"
+
+  if [[ "$status" -eq 0 ]]; then
+    ok "capability registry validation passed"
+  else
+    fail "capability registry validation failed"
+  fi
+
+  return "$status"
+}
+
 # The software catalog (packages.yaml) is profile-independent data, like
 # modules: every entry must name a known source, go_install / mas need an
 # explicit canonical pkg id (a bare name cannot reconstruct a module path
@@ -433,6 +476,8 @@ case "$command" in
     status=0
     section "validating modules"
     validate_modules || status=1
+    section "validating capability registry"
+    validate_capability_registry || status=1
     section "validating packages"
     validate_packages || status=1
     section "validating backup paths"
@@ -458,6 +503,7 @@ case "$command" in
   *)
     status=0
     validate_modules || status=1
+    validate_capability_registry || status=1
     validate_packages || status=1
     validate_backup_paths || status=1
     validate_profile "$command" || status=1

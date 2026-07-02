@@ -126,6 +126,27 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 「宣言 = 何かが動く」という読みを裏切り、honest-labeling が信用できなくなる。削除しても
 git 履歴から復元できる(削除済みの前例は #16 / #145 を参照)。
 
+この基準は #151 で機械検査に接続した: schema の各 capability は `implemented: true|false`
+を必須で持ち(欠落は validate が fail)、`implemented: false` は doctor.sh がその
+capability 名に言及していることを validate が静的に検査する(source-text の proxy であって
+挙動検査ではないが、「schema と profile に居るのに doctor が一度も触れない」型の穴は塞がる)。
+
+### capability 追加チェックリスト
+
+capability を 1 つ追加するときに触る場所(fail-closed の意図的コスト。validate が大半の
+漏れを検出する):
+
+1. `capabilities.schema.yaml` — `type` と `implemented` を宣言。
+2. `profiles.yaml` — **全 profile** に値を記入(欠落は validate fail)。
+3. 危険な権限なら `lib-policy.sh` の `environment_kind_forbidden_capabilities` と
+   本 doc / README の表(3 箇所)+ `test-policy.sh` の cross-check に追加。
+   安全強化型(true ほど締まる)は**入れない**(極性は sandbox 節参照)。
+4. 実装の配線 — 原則 requires 方式(上の規範)。`implemented: false` で land する場合は
+   doctor に未実装/未配線の warn を出す section を追加(AGENTS.md 規約 + #151 検査)。
+5. テスト — render 影響があれば `test-render.sh` の期待 managed set、settings 影響が
+   あれば `test-claude-settings.sh`、極性は `test-policy.sh`。
+6. docs — 対応する docs の節(このファイル・関連 doc)。
+
 ## capability → 実装の gating 方式(規範)
 
 capability が実装を gate する方式は **原則 requires 方式**(module の `requires:` で
