@@ -12,7 +12,6 @@ profiles:
       - project-templates
       - runtime
       - shell-extra
-      - vscode
       - ssh-1password
       - direnv-policy
       - gui-apps
@@ -28,8 +27,6 @@ profiles:
       enableGitSigning: true
       enableDirenv: true
       enableRuntimeManagement: true
-      enableVsCodeSettings: false
-      enableVsCodeExtensions: false
       npmHardeningMode: enforce
       corepackMode: report
       allowNetworkTunnels: true
@@ -72,8 +69,6 @@ profiles:
       enableGitSigning: false
       enableDirenv: false
       enableRuntimeManagement: false
-      enableVsCodeSettings: false
-      enableVsCodeExtensions: false
       npmHardeningMode: report
       corepackMode: report
       allowNetworkTunnels: false
@@ -98,7 +93,6 @@ profiles:
       - doctor
       - preflight
       - project-templates
-      - vscode
       - direnv-policy
       - update-policy
       - ai-policy
@@ -110,8 +104,6 @@ profiles:
       enableGitSigning: false
       enableDirenv: true
       enableRuntimeManagement: true
-      enableVsCodeSettings: false
-      enableVsCodeExtensions: false
       npmHardeningMode: report
       corepackMode: report
       allowNetworkTunnels: false

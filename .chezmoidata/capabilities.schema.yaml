@@ -13,10 +13,6 @@ capabilities:
     type: boolean
   enableRuntimeManagement:
     type: boolean
-  enableVsCodeSettings:
-    type: boolean
-  enableVsCodeExtensions:
-    type: boolean
   npmHardeningMode:
     type: enum
     values:
