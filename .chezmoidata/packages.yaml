@@ -56,6 +56,10 @@ packages:
   - { name: eza, source: brew_formula }
   - { name: bat, source: brew_formula }
   - { name: direnv, source: brew_formula }
+  # Agent multiplexer (#154): runs multiple coding agents in one terminal.
+  # homebrew-core formula (bottled); background service is optional and not
+  # managed here (start manually with `herdr server` or `brew services`).
+  - { name: herdr, source: brew_formula }
   - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: copilot-cli, source: brew_cask }
   - { name: iterm2, source: brew_cask }
