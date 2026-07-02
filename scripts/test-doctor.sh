@@ -618,6 +618,52 @@ else
   status=1
 fi
 
+# DRIFT-A) A token-shaped line in ~/.npmrc is warned by name only (the value
+# never appears in the output), doctor stays exit 0 (#148).
+dr_home="$fixture_home/drift"
+mkdir -p "$dr_home"
+printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n//registry.npmjs.org/:_authToken=secret-placeholder-value\n' \
+  > "$dr_home/.npmrc"
+if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "npmrc contains 1 _authToken line" <<< "$dr_out" \
+    && ! grep -Fq "secret-placeholder-value" <<< "$dr_out"; then
+    ok "test passed: npmrc token line warned by count, value never echoed"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: token line not warned, or the value leaked into output"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 with a token line present"
+  status=1
+fi
+
+# DRIFT-B) A managed .npmrc missing the managed-by header is warned; the
+# status check itself must skip — as not-initialized when chezmoi exists
+# (fixture homes carry no chezmoi state), as not-found where it does not
+# (the CI validate job has no chezmoi).
+if command -v chezmoi >/dev/null 2>&1; then
+  drift_skip="chezmoi not initialized for this home; skipping drift check"
+else
+  drift_skip="chezmoi not found; skipping drift check"
+fi
+printf 'ignore-scripts=true\n' > "$dr_home/.npmrc"
+if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
+    && grep -Fq "$drift_skip" <<< "$dr_out"; then
+    ok "test passed: missing managed-by header warned; uninitialized home skips the status check"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: header warn or the not-initialized skip line missing"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 with a headerless npmrc"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi

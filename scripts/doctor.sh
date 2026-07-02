@@ -343,6 +343,49 @@ if [[ "$orphan_count" -eq 0 ]]; then
   ok "no managed-path orphans"
 fi
 
+# Managed-file drift (#148): the repo is fail-closed about what gets managed,
+# but nothing watched whether applied files silently diverged afterwards —
+# twice a token reappeared in ~/.npmrc / preference keys drifted (#91/#93
+# relapses) with no signal. Report-only: chezmoi status is read-only and a
+# pending-intake drift is expected operation (docs/claude-settings.md), so
+# drift is a warn, never an exit-code change.
+section "managed drift (report-only)"
+if ! command -v chezmoi >/dev/null 2>&1; then
+  warn "chezmoi not found; skipping drift check"
+elif ! drift_status="$(chezmoi status 2>/dev/null)"; then
+  # No initialized config in this HOME (e.g. test fixtures, pre-bootstrap).
+  item "chezmoi not initialized for this home; skipping drift check"
+else
+  drift_lines=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    drift_lines=$((drift_lines + 1))
+    warn "drift: $line (inspect with: chezmoi diff)"
+  done <<< "$drift_status"
+  if [[ "$drift_lines" -eq 0 ]]; then
+    ok "no drift: managed files match the source state"
+  else
+    item "a drift can be intended (new keys pending intake, #93); reconcile or take in, do not ignore"
+  fi
+fi
+# ~/.npmrc must never carry a token (docs/supply-chain-npm.md): scan for
+# credential-shaped keys by name only — values are never read or printed.
+# Gated on enforce: profiles that do not manage ~/.npmrc (report/off) would
+# get false header alarms; leftovers there are the orphan section's job.
+if [[ "$npm_mode" == "enforce" && -f "$HOME/.npmrc" ]]; then
+  token_lines="$(grep -c -- "_authToken" "$HOME/.npmrc" 2>/dev/null || true)"
+  if [[ "${token_lines:-0}" -gt 0 ]]; then
+    warn "npmrc contains $token_lines _authToken line(s) — tokens do not belong there (npm logout, then chezmoi apply; see docs/supply-chain-npm.md)"
+  else
+    ok "npmrc carries no _authToken line"
+  fi
+  if head -n 1 "$HOME/.npmrc" | grep -Fq "Managed by chezmoi"; then
+    ok "npmrc managed-by header present"
+  else
+    warn "npmrc lacks the managed-by header (overwritten by a tool? chezmoi apply restores it)"
+  fi
+fi
+
 section "AI policy"
 if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
   ok "enableAiPolicy=true (policy docs + report-only checks; see docs/ai-policy.md)"
