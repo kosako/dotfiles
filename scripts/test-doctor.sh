@@ -8,6 +8,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
+# The doctor resolves the agent-tools checkout from $AGENT_TOOLS (issue #71),
+# so a developer shell that exports it (the documented #71/#73 override)
+# would leak the real checkout into every fixture run below — the agent-tools
+# cases then execute the real status.sh and fail (issue #142). Unset it once
+# here; the AT-override case re-sets it explicitly for its own invocation.
+unset AGENT_TOOLS
+
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
