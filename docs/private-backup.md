@@ -67,7 +67,12 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   を想定)。後者は出力を /dev/fd 経由で age に渡し、秘密鍵をディスクに置かない。
 - archive は `tar | age` を pipe して平文 tar をディスクに残さない。アーカイブ内のパスは
   home 相対(`-C` で絶対パスを含めない)。
-- backup は捕捉 0 件なら空アーカイブを書かず fail。symlink / 不在 / 非正規ファイルは skip(warn)。
+- backup は捕捉 0 件なら空アーカイブを書かず fail。symlink / 不在 / 非正規 / 読取不可の
+  ファイルは skip(warn)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+- 書き込み前の確認は `--yes` で省略できる。`--yes` なしでは TTY での対話確認が必須:
+  TTY が無い(cron / CI など無人実行)場合は明示エラーで **exit 非 0**、対話で decline
+  した場合も **exit 非 0**(アーカイブを書かなかった実行は成功を返さない。無人実行での
+  バックアップ欠落が exit 0 で監視をすり抜けるのを防ぐ)。無人実行は `--yes` を明示する。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(`~/.local/state/dotfiles/
   restore-backup-<ts>/`)へ move。`--skip-existing` で既存は触らない。**symlink 化した親ディレクトリ

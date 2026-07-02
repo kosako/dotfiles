@@ -424,10 +424,13 @@ if HOME="$dup_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   age -d -i "$fixture_home/keys/id.txt" "$dup_home/d.age" | tar -xpf - -C "$dup_extract"
   dup_total="$(yq -p=json -o=tsv '.files | length' "$dup_extract/manifest.json")"
   dup_unique="$(yq -p=json -o=tsv '[.files[].path] | unique | length' "$dup_extract/manifest.json")"
-  if [[ "$dup_total" == "$dup_unique" ]]; then
-    pass "overlapping dir+file declarations do not duplicate manifest entries"
+  # Exactly once: dedup must not drop the file either (an ordering bug that
+  # skipped capture entirely would also show zero duplicates).
+  dup_inner="$(yq -p=json -o=tsv '[.files[].path | select(. == "nest/inner")] | length' "$dup_extract/manifest.json")"
+  if [[ "$dup_total" == "$dup_unique" && "$dup_inner" == "1" ]]; then
+    pass "overlapping dir+file declarations capture the file exactly once"
   else
-    miss "manifest lists duplicate paths ($dup_total entries, $dup_unique unique)"
+    miss "manifest should list nest/inner exactly once ($dup_total entries, $dup_unique unique, nest/inner x$dup_inner)"
   fi
 else
   miss "backup with overlapping declarations failed"
@@ -437,23 +440,27 @@ fi
 #     and captures the readable files (issue #141: set -e aborted the whole
 #     run mid-archive before).
 unr_home="$fixture_home/unr"
-mkdir -p "$unr_home/.ssh" "$unr_home/.config/dotfiles"
+mkdir -p "$unr_home/.ssh" "$unr_home/.config/dotfiles" "$unr_home/box"
 printf 'a\n' > "$unr_home/.zshrc.local"
 printf 'b\n' > "$unr_home/.ssh/config.local"
 printf 'locked\n' > "$unr_home/locked"
 chmod 000 "$unr_home/locked"
-printf 'backup_paths:\n  - { path: "locked", type: file }\n' \
+printf 'ok\n' > "$unr_home/box/readable"
+printf 'locked\n' > "$unr_home/box/locked-in-dir"
+chmod 000 "$unr_home/box/locked-in-dir"
+printf 'backup_paths:\n  - { path: "locked", type: file }\n  - { path: "box", type: dir }\n' \
   > "$unr_home/.config/dotfiles/backup-paths.local"
 unr_rc=0
 unr_out="$(HOME="$unr_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$unr_home/u.age" --recipient "$recipient" --yes 2>&1)" || unr_rc=$?
-chmod 600 "$unr_home/locked" # so the EXIT trap can clean up
+chmod 600 "$unr_home/locked" "$unr_home/box/locked-in-dir" # so the EXIT trap can clean up
 if [[ "$unr_rc" -eq 0 && -f "$unr_home/u.age" ]] \
-  && grep -Fq "unreadable (skipped): locked" <<< "$unr_out"; then
-  pass "unreadable file is skipped with a warning, backup still succeeds"
+  && grep -Fq "unreadable (skipped): locked" <<< "$unr_out" \
+  && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out"; then
+  pass "unreadable files (declared file and inside a dir) are skipped with a warning, backup still succeeds"
 else
   printf '%s\n' "$unr_out" >&2
-  miss "unreadable file should be skipped without aborting, got rc=$unr_rc"
+  miss "unreadable files should be skipped without aborting, got rc=$unr_rc"
 fi
 
 if [[ "$status" -eq 0 ]]; then
