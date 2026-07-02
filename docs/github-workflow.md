@@ -137,6 +137,27 @@ Git config source(`dot_gitconfig`)を変更した場合:
 ./scripts/test-gitconfig.sh
 ```
 
+## 検証レイヤー
+
+(旧検証計画 doc から統合。#147)
+
+```text
+1. 静的検証 + テスト   CI が PR ごとに実行(.github/workflows/validate.yml が single source)
+2. render 検証         test-render.sh: 全 profile を throwaway destination に apply し
+                       managed target 一覧を期待値と比較(CI の render job)
+3. 実 host への適用    target を絞った chezmoi apply(diff 全文確認後)
+```
+
+VM 検証は行わない(2026-06-12 決定: throwaway destination + CI render 検証 + target を
+絞った host 適用で代替)。決定の経緯・検証メモは Notion(検証戦略ページ)と git 履歴。
+
+## 新しい file 種別を managed にするときの標準手順
+
+1. module の `paths:` / `requires:` を `.chezmoidata/modules.yaml` に宣言する(`docs/policy-model.md`)。
+2. throwaway destination で apply し、`scripts/test-render.sh` の期待 managed 一覧を更新する。
+3. 実 host では `chezmoi diff` の全出力を確認してから、target を絞って apply する。
+4. 適用後に `./scripts/doctor.sh <profile>` を確認する。
+
 ## 禁止事項
 
 - Issue なしで大きな scope を始める。
