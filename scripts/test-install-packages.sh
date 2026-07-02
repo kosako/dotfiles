@@ -152,6 +152,54 @@ else
   pass "build_install_cmd rejects manual/unknown source"
 fi
 
+# 8. is_installed matches against the full inventory capture. Regression for
+#    the SIGPIPE false negative (#143): with the old `probe | grep -Fxq`
+#    shape, grep exits on the first hit, the still-writing producer takes
+#    SIGPIPE, and pipefail turns a found entry into "not installed" whenever
+#    the inventory is larger than the pipe buffer. The fakes put the target
+#    first and pad far past the buffer (64KiB) to make that deterministic.
+pad_lines="$(mktemp "$fixture_bin/pad.XXXXXX")"
+for _ in $(seq 1 4000); do
+  printf 'padding-entry-000000000000000000000000000000000000\n'
+done > "$pad_lines"
+# exec makes the fake process itself the pipe writer, so it dies of SIGPIPE
+# (141) exactly like the real manager would; a plain `cat` child would take
+# the signal while the sh wrapper still runs its final `exit 0`, masking the
+# failure the regression is about.
+cat > "$fixture_bin/brew" <<SH
+#!/bin/sh
+case "\$*" in
+  "list --cask -1") printf '%s\n' target-cask; exec cat "$pad_lines" ;;
+  "list --formula -1") printf '%s\n' target-formula; exec cat "$pad_lines" ;;
+esac
+exit 0
+SH
+cat > "$fixture_bin/mas" <<SH
+#!/bin/sh
+if [ "\$1" = "list" ]; then
+  printf '%s\n' '123456 Target App (1.0)'
+  exec awk '{print NR+1000000, \$0}' "$pad_lines"
+fi
+exit 0
+SH
+chmod +x "$fixture_bin/brew" "$fixture_bin/mas"
+check_installed() {
+  local src="$1" canonical="$2" label="$3"
+  if (PATH="$fixture_bin:$PATH" is_installed "$src" "$canonical" "no-such-bin"); then
+    pass "is_installed finds $label in a large inventory (no SIGPIPE false negative)"
+  else
+    miss "is_installed lost $label to the SIGPIPE false negative"
+  fi
+}
+check_installed brew_cask target-cask "a cask"
+check_installed brew_formula target-formula "a formula"
+check_installed mas 123456 "a mas app"
+if (PATH="$fixture_bin:$PATH" is_installed brew_cask absent-cask no-such-bin); then
+  miss "is_installed must not report an absent cask as installed"
+else
+  pass "is_installed still reports a genuinely absent cask as not installed"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "install-packages tests passed"
 fi
