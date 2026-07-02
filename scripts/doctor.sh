@@ -359,7 +359,7 @@ else
   ok "AI policy checks disabled for profile"
 fi
 if [[ "$(capability_value "$profile" enableAiTools)" == "true" ]]; then
-  warn "enableAiTools=true but the ai-tools module is not implemented yet (nothing is managed)"
+  warn "enableAiTools=true but no implementation exists yet (nothing is managed; roadmap placeholder)"
 else
   ok "AI tool install/sync not managed (enableAiTools=false)"
 fi
