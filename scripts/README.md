@@ -47,6 +47,8 @@ unknown profile / module / capability や capability enum の不正値は policy
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
 - backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
   重複なしであること。
+- capability registry(#151): 全 capability が `implemented: true|false` を持ち、
+  `implemented: false` は doctor.sh が言及していること(source-text の静的 proxy)。
 
 ## preflight.sh
 

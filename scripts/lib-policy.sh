@@ -159,6 +159,15 @@ capability_allowed_values() {
   c="$capability" yq '.capabilities[strenv(c)].values[]?' "$CAPABILITIES_FILE"
 }
 
+# The capability's implemented flag (#151): "true" / "false", or "null" when
+# the schema entry lacks the flag (validate-policy fails closed on it).
+# tostring, not `// ""`: yq's alternative operator treats boolean false as
+# falsy, so `implemented: false` would read as absent.
+capability_implemented() {
+  local capability="$1"
+  c="$capability" yq '.capabilities[strenv(c)].implemented | tostring' "$CAPABILITIES_FILE"
+}
+
 capability_value_is_allowed() {
   local capability="$1"
   local value="$2"
