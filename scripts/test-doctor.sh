@@ -7,6 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 # The doctor resolves the agent-tools checkout from $AGENT_TOOLS (issue #71),
 # so a developer shell that exports it (the documented #71/#73 override)
@@ -103,9 +105,7 @@ optout_root="$fixture_home/.dotfiles-optout"
 mkdir -p "$optout_root/.chezmoidata"
 cp -R "$DOTFILES_ROOT/scripts" "$optout_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$optout_root/.chezmoidata/"
-awk '$0 == "      enableAgentToolsStatus: true" { print "      enableAgentToolsStatus: false"; next } { print }' \
-  "$optout_root/.chezmoidata/profiles.yaml" > "$optout_root/.chezmoidata/profiles.yaml.tmp"
-mv "$optout_root/.chezmoidata/profiles.yaml.tmp" "$optout_root/.chezmoidata/profiles.yaml"
+set_capability_all "$optout_root" enableAgentToolsStatus false
 rm -f "$agent_marker"
 if at_out="$(HOME="$fixture_home" "$optout_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "status read disabled" <<< "$at_out" && [[ ! -e "$agent_marker" ]]; then
@@ -127,9 +127,7 @@ optin_root="$fixture_home/.dotfiles-optin"
 mkdir -p "$optin_root/.chezmoidata"
 cp -R "$DOTFILES_ROOT/scripts" "$optin_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$optin_root/.chezmoidata/"
-awk '$0 == "      enableAgentToolsStatus: false" { print "      enableAgentToolsStatus: true"; next } { print }' \
-  "$optin_root/.chezmoidata/profiles.yaml" > "$optin_root/.chezmoidata/profiles.yaml.tmp"
-mv "$optin_root/.chezmoidata/profiles.yaml.tmp" "$optin_root/.chezmoidata/profiles.yaml"
+set_capability_all "$optin_root" enableAgentToolsStatus true
 
 # B) Opt-in enabled: status.sh runs, summary shown, conflict flagged.
 rm -f "$agent_marker"
@@ -391,9 +389,7 @@ cp -R "$DOTFILES_ROOT/scripts" "$sign_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$sign_root/.chezmoidata/"
 
 # L) enableGitSigning=true with the git-signing module active -> managed mechanism.
-awk '$0 == "      enableGitSigning: false" { print "      enableGitSigning: true"; next } { print }' \
-  "$sign_root/.chezmoidata/profiles.yaml" > "$sign_root/.chezmoidata/profiles.yaml.tmp"
-mv "$sign_root/.chezmoidata/profiles.yaml.tmp" "$sign_root/.chezmoidata/profiles.yaml"
+set_capability_all "$sign_root" enableGitSigning true
 if sg_out="$(HOME="$fixture_home" "$sign_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "SSH signing mechanism managed" <<< "$sg_out"; then
     ok "test passed: enableGitSigning=true reports the managed signing mechanism"
@@ -410,9 +406,7 @@ fi
 
 # M) enableGitSigning=true but the git-signing module removed -> dangling warning,
 #    still exit 0.
-awk '$0 == "      - git-signing" { next } { print }' \
-  "$sign_root/.chezmoidata/profiles.yaml" > "$sign_root/.chezmoidata/profiles.yaml.tmp"
-mv "$sign_root/.chezmoidata/profiles.yaml.tmp" "$sign_root/.chezmoidata/profiles.yaml"
+remove_module_all "$sign_root" git-signing
 if sg_out="$(HOME="$fixture_home" "$sign_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "git-signing module is inactive" <<< "$sg_out"; then
     ok "test passed: enableGitSigning=true with module inactive is reported as dangling"
@@ -454,9 +448,7 @@ fi
 
 # O) enable1PasswordSSH=true but the ssh-1password module removed -> dangling
 #    warning, still exit 0.
-awk '$0 == "      - ssh-1password" { next } { print }' \
-  "$ssh_root/.chezmoidata/profiles.yaml" > "$ssh_root/.chezmoidata/profiles.yaml.tmp"
-mv "$ssh_root/.chezmoidata/profiles.yaml.tmp" "$ssh_root/.chezmoidata/profiles.yaml"
+remove_module_all "$ssh_root" ssh-1password
 if ss_out="$(HOME="$fixture_home" "$ssh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "ssh-1password module is inactive" <<< "$ss_out"; then
     ok "test passed: enable1PasswordSSH=true with module inactive is reported as dangling"
@@ -543,11 +535,8 @@ rm -f "$fixture_home/.config/dotfiles/github-trust.local"
 # Q) gateGitHubMcp=true (claude-settings active for personal) -> reported as
 #    enforced (MCP deny in managed settings), NOT as not-wired. enableGitHubIsolatedReader
 #    flipped too -> still reported as Phase 3 / not enforced. exit 0.
-awk '$0 == "      gateGitHubMcp: false" { print "      gateGitHubMcp: true"; next }
-     $0 == "      enableGitHubIsolatedReader: false" { print "      enableGitHubIsolatedReader: true"; next }
-     { print }' \
-  "$gh_root/.chezmoidata/profiles.yaml" > "$gh_root/.chezmoidata/profiles.yaml.tmp"
-mv "$gh_root/.chezmoidata/profiles.yaml.tmp" "$gh_root/.chezmoidata/profiles.yaml"
+set_capability_all "$gh_root" gateGitHubMcp true
+set_capability_all "$gh_root" enableGitHubIsolatedReader true
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
     && grep -Fq "isolated reader is not wired yet" <<< "$gh_out"; then
@@ -568,10 +557,7 @@ fi
 #    floor active too. Covers the other branch; case P covered the inert
 #    (enforceAiSandbox=false) branch. Builds on case Q's mutated copy
 #    (claude-settings active for personal). exit 0.
-awk '$0 == "      enforceAiSandbox: false" { print "      enforceAiSandbox: true"; next }
-     { print }' \
-  "$gh_root/.chezmoidata/profiles.yaml" > "$gh_root/.chezmoidata/profiles.yaml.tmp"
-mv "$gh_root/.chezmoidata/profiles.yaml.tmp" "$gh_root/.chezmoidata/profiles.yaml"
+set_capability_all "$gh_root" enforceAiSandbox true
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "human-legit write gate active" <<< "$gh_out" \
     && grep -Fq "secret floor active" <<< "$gh_out"; then

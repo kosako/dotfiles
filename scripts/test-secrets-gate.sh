@@ -125,21 +125,19 @@ fi
 rm -f "$fixture_bin/chezmoi"
 
 # 5. Consistency with the live host, only when chezmoi can resolve a
-#    profile (skipped in CI). The gate's verdict must match the pure check
-#    for whatever profile the machine actually runs — never more permissive.
+#    profile (skipped in CI). The gate's verdict must match the declared
+#    allowSecretsAccess literal read straight from profiles.yaml — an
+#    expectation independent of the lib's own check. (The previous version
+#    compared require_secrets_access against profile_allows_secrets_access,
+#    which the gate calls internally: f(x)==f(x), it could never fail. #149)
 if resolved="$(resolve_runtime_profile 2>/dev/null)"; then
-  if require_secrets_access >/dev/null 2>&1; then
-    if profile_allows_secrets_access "$resolved"; then
-      pass "gate agrees with profile '$resolved' (granted)"
-    else
-      miss "gate granted access but profile '$resolved' should be denied"
-    fi
+  declared="$(P="$resolved" yq '.profiles[strenv(P)].capabilities.allowSecretsAccess' "$PROFILES_FILE")"
+  if require_secrets_access >/dev/null 2>&1; then verdict="granted"; else verdict="denied"; fi
+  if { [[ "$declared" == "true" && "$verdict" == "granted" ]]; } \
+    || { [[ "$declared" != "true" && "$verdict" == "denied" ]]; }; then
+    pass "gate $verdict matches declared allowSecretsAccess=$declared for live profile '$resolved'"
   else
-    if profile_allows_secrets_access "$resolved"; then
-      miss "gate refused but profile '$resolved' should be granted"
-    else
-      pass "gate agrees with profile '$resolved' (denied)"
-    fi
+    miss "gate $verdict but profiles.yaml declares allowSecretsAccess=$declared for '$resolved'"
   fi
 else
   item "chezmoi did not resolve a profile; skipping live consistency check"

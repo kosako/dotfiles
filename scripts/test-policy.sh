@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 tmp_roots=()
 
@@ -369,9 +371,7 @@ run_fail_contains \
 # profiles) still validates; a regression that forbade it would hard-fail the
 # work profiles here.
 make_fixture
-awk '$0 == "      enforceAiSandbox: false" { print "      enforceAiSandbox: true"; next } { print }' \
-  "$fixture/.chezmoidata/profiles.yaml" > "$fixture/.chezmoidata/profiles.yaml.tmp"
-mv "$fixture/.chezmoidata/profiles.yaml.tmp" "$fixture/.chezmoidata/profiles.yaml"
+set_capability_all "$fixture" enforceAiSandbox true
 run_ok \
   "enforceAiSandbox=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
@@ -381,14 +381,35 @@ run_ok \
 # either: a restrictive kind (work) may set them true. Flip both across every
 # profile and assert --all still validates.
 make_fixture
-awk '$0 == "      gateGitHubMcp: false" { print "      gateGitHubMcp: true"; next }
-     $0 == "      enableGitHubIsolatedReader: false" { print "      enableGitHubIsolatedReader: true"; next }
-     { print }' \
-  "$fixture/.chezmoidata/profiles.yaml" > "$fixture/.chezmoidata/profiles.yaml.tmp"
-mv "$fixture/.chezmoidata/profiles.yaml.tmp" "$fixture/.chezmoidata/profiles.yaml"
+set_capability_all "$fixture" gateGitHubMcp true
+set_capability_all "$fixture" enableGitHubIsolatedReader true
 run_ok \
   "GitHub guard capabilities are allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
+
+# The fixture helpers themselves must fail closed: a typo'd capability or
+# module silently no-oped in the old awk shape, leaving the following
+# assertion to pass against an unflipped fixture (#149).
+make_fixture
+if set_capability_all "$fixture" noSuchCapability true 2>/dev/null; then
+  fail "test failed: set_capability_all must reject an undeclared capability"
+  exit 1
+fi
+ok "test passed: set_capability_all fails closed on an undeclared capability"
+if remove_module_all "$fixture" no-such-module 2>/dev/null; then
+  fail "test failed: remove_module_all must reject an unlisted module"
+  exit 1
+fi
+ok "test passed: remove_module_all fails closed on an unlisted module"
+# An empty profiles map must fail too: `[] | all` is vacuously true in yq,
+# so without the length guard the helper would "succeed" while setting
+# nothing (Codex review, #149).
+printf 'profiles: {}\n' > "$fixture/.chezmoidata/profiles.yaml"
+if set_capability_all "$fixture" enforceAiSandbox true 2>/dev/null; then
+  fail "test failed: set_capability_all must reject an empty profiles map"
+  exit 1
+fi
+ok "test passed: set_capability_all fails closed on an empty profiles map"
 
 # Anchor on the LAST capability line so the bogus section lands after the whole
 # capabilities block (update this if a later capability is added below).
