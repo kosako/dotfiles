@@ -323,14 +323,13 @@ run_fail_contains \
 
 # environmentKind cross-check. Every deny entry for work/client/agent
 # must actually fire: retag personal (already elevated) to work and force
-# the two caps it leaves false to true, then assert all six are flagged.
+# the one cap it leaves false to true, then assert all five are flagged.
 make_fixture
 replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: work"
-replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableMacOSDefaults: false" "      enableMacOSDefaults: true"
 replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
 ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1 || true)"
 ek_missing=""
-for cap in installPackages installGuiApps enableMacOSDefaults allowSecretsAccess allowNetworkTunnels enableAiTools; do
+for cap in installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools; do
   grep -Fq "environmentKind work forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
 done
 if [[ -z "$ek_missing" ]]; then

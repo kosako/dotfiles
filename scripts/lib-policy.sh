@@ -193,7 +193,6 @@ environment_kind_forbidden_capabilities() {
       printf '%s\n' \
         installPackages \
         installGuiApps \
-        enableMacOSDefaults \
         allowSecretsAccess \
         allowNetworkTunnels \
         enableAiTools

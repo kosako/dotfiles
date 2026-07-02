@@ -59,7 +59,7 @@ environmentKind は飾りラベルではない。`validate-policy.sh` が、環�
 
 | environmentKind | false 必須の capability |
 | --- | --- |
-| work / client / agent | installPackages, installGuiApps, enableMacOSDefaults, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| work / client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 

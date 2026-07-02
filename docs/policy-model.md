@@ -53,7 +53,7 @@ environmentKind は飾りラベルではなく、capability の不変条件を�
 
 | environmentKind | false 必須の capability |
 | --- | --- |
-| work / client / agent | installPackages, installGuiApps, enableMacOSDefaults, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| work / client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 
@@ -110,6 +110,33 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   render→diff→実機 dry-run の検証ゲート済み)、work 系=false(`claude-settings` 非 active)。
   `enableGitHubIsolatedReader` は全 profile false(Phase 3)。github MCP は現状未構成なので
   deny は実質 no-op = 将来 MCP を足したとき先回りで deny する defense-in-depth。
+
+## dormant capability の扱い(残す基準)
+
+宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ
+(2026-07-02 監査 + #145 で確定):
+
+1. **owner のある生きた契約**: 実装先が issue で追跡されている接続契約
+   (例: `enableGitHubIsolatedReader` → Phase 3 #131)か、roadmap 上の placeholder
+   (例: `enableAiTools`)であること。
+2. **doctor 開示**: doctor がその「未実装 / 未配線」を warn として開示していること
+   (AGENTS.md「宣言だけで何も駆動しない capability を作らない」の実体)。
+
+**決定済み不使用・doctor 開示なし・owner なしの dormant は削除する**。schema に残すと
+「宣言 = 何かが動く」という読みを裏切り、honest-labeling が信用できなくなる。削除しても
+git 履歴から復元できる(前例: vscode #16/#145、enableMacOSDefaults #145)。
+
+## capability → 実装の gating 方式(規範)
+
+capability が実装を gate する方式は **原則 requires 方式**(module の `requires:` で
+path ごと管理対象を gate。`runtime` / `git-signing` / `supply-chain/npm` が例)。
+ファイル自体は常に管理し**中身だけ**を capability で分岐させたい場合のみ、テンプレート内
+分岐を使ってよい(`claude-settings` / `ssh-1password` が例)。その場合は capability true
+かつ module inactive の組み合わせを doctor が dangling として警告する section を必ず併設する。
+
+`requires:` の意味論は **boolean / enum の等値のみ**に保つ(不変条件)。module 活性判定は
+`.chezmoiignore` の Go template と `lib-policy.sh` の `module_active_for_profile` に
+二重実装されており、意味論を拡張すると両方の同時修正が必要になるため。
 
 ## Capability Modes
 

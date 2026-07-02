@@ -3,8 +3,6 @@ capabilities:
     type: boolean
   installGuiApps:
     type: boolean
-  enableMacOSDefaults:
-    type: boolean
   enable1PasswordSSH:
     type: boolean
   enableGitSigning:

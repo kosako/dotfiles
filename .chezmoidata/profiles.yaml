@@ -22,7 +22,6 @@ profiles:
     capabilities:
       installPackages: true
       installGuiApps: true
-      enableMacOSDefaults: false
       enable1PasswordSSH: true
       enableGitSigning: true
       enableDirenv: true
@@ -64,7 +63,6 @@ profiles:
     capabilities:
       installPackages: false
       installGuiApps: false
-      enableMacOSDefaults: false
       enable1PasswordSSH: false
       enableGitSigning: false
       enableDirenv: false
@@ -99,7 +97,6 @@ profiles:
     capabilities:
       installPackages: false
       installGuiApps: false
-      enableMacOSDefaults: false
       enable1PasswordSSH: false
       enableGitSigning: false
       enableDirenv: true
