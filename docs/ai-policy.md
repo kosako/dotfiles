@@ -53,8 +53,10 @@ trust の基点は `is_self`(自分の login + id)のみで、collaborator / bot
 untrusted。
 
 下記の read / write 規則は **目標方針(policy intent)であって、現状の enforcement ではない**。
-Phase 1 で実際に効くのは末尾が指す best-effort / steering 層だけで、context-gated な write は
-Phase 2、trifecta を断つ hard 層は Phase 2 / 3(射程と限界は
+Phase 1 / 2 で実際に効いているのは steering 層と、Phase 2 で live 化した secret floor
+(never-legit な secret 読取の無条件 hard deny)+ `gateGitHubMcp` の `mcp__github` deny まで。
+context-gated な write(PreToolUse hook 本体)と trifecta を断つ hard 層(隔離 reader /
+token 隔離 / OS egress)は Phase 3(#131)へ hand-off 済み(射程と限界は
 [ai-environment-boundary](ai-environment-boundary.md))。
 
 - **read**: 自分の本文 = allow / 他人 = metadata only(title も入れない)/ 他人のコメント =

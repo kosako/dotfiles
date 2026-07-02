@@ -200,8 +200,8 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
   read path・別経路の MCP・subagent のギャップ(PreToolUse 不発 [anthropics/claude-code#21460])
   で迂回しうる。
 - context-gated な write(他人由来の untrusted が無い clean なときだけ comment / label /
-  PR create / push を自律許可)は **Phase 2 の PreToolUse hook** が要るため Phase 1 には
-  **無い**(意図的)。
+  PR create / push を自律許可)は **PreToolUse hook 本体**が要るため、まだ**無い**(意図的。
+  hook 本体は Phase 2 から Phase 3 [#131] へ hand-off 済み)。
 - egress は `enforceAiSandbox` の network allowlist = **hostname best-effort**(TLS 終端せず、
   DNS exfil は素通り。上の sandbox 節)。
 - **Phase 1 には trifecta(untrusted 読取 × secret × egress)を構造的に断つ hard 層が無い**。

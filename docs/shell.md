@@ -18,7 +18,7 @@
 - **補完**: zsh-completions を fpath に足し、compinit はキャッシュ(dump が無い/24h 超で再生成、通常は `-C` の高速パス)。fzf-tab で TAB 補完を fzf 化。
 - **入力補助**: zsh-autosuggestions(履歴ベース)+ zsh-syntax-highlighting。**syntax-highlighting は必ず最後に source**(直前までに定義した全 widget を wrap するため)。
 - **履歴**: 大容量・重複除去・セッション共有・タイムスタンプ。`HIST_IGNORE_SPACE` で行頭スペースのコマンドは記録しない(secret の手動オプトアウト。secret は op/direnv 供給でインライン入力しない = [docs/secrets.md](secrets.md))。off-machine 同期はしない。
-- **modern CLI**: eza(`ls` 系 alias)/ bat(`cat` alias、pager 無しで cat 風)。**alias は対話シェル限定**でスクリプトに影響せず、`command ls` / `command cat` で原本に届く。ripgrep / fd は fzf の裏方。
+- **modern CLI**: eza(`ls` 系 alias)/ bat(`cat` alias、pager 無しで cat 風)。**alias は対話シェル限定**でスクリプトに影響せず、`command ls` / `command cat` で原本に届く。ripgrep / fd は単体で使う検索ツール(fzf の既定 walker は内蔵のもの。詳細は後述の fzf 節)。
 - **runtime/env(別レイヤを compose)**: mise activate(対話)+ direnv hook。mise = runtime version、direnv = project env / op secret 注入([docs/runtime.md](runtime.md) / [docs/secrets.md](secrets.md))。新しい version スイッチャ(nvm/pyenv 等)は入れない(mise と競合)。
 
 読み込み順序は widget の wrap 関係に従う: compinit → fzf-tab → fzf / zoxide / starship / direnv / mise → alias → local override → zsh-autosuggestions → zsh-syntax-highlighting(最後)。
