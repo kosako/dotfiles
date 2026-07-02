@@ -53,7 +53,7 @@ local 側は managed が定義していない Host を追加する用途に限�
 VS Code は現在この環境で**未使用**(editor は別物)。よって #16 は「VS Code settings を
 管理しない」で決着した。当初は capability / `vscode` module / doctor section を dormant で
 残したが、**#145 で配線ごと削除**(「決定済み不使用の dormant 宣言は残さない」基準。
-[policy-model](policy-model.md) の残す基準を参照)。
+基準の明文化は #145 の後続 PR で [policy-model](policy-model.md) に置く)。
 
 将来 VS Code を採用するときは、git 履歴(#16 / #145)から配線を復元しつつ、
 (1) `capabilities.schema.yaml` に `enableVsCodeSettings` を再宣言(全 profile への記入が
