@@ -587,6 +587,51 @@ else
   status=1
 fi
 
+# NPM-A) A broken npm (shim without a runtime) must not kill the doctor:
+# report-only means warn + skip, exit 0 (#144).
+npm_fakebin="$fixture_home/npmfake"
+mkdir -p "$npm_fakebin"
+cat > "$npm_fakebin/npm" <<'SH'
+#!/bin/sh
+exit 1
+SH
+chmod +x "$npm_fakebin/npm"
+if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "npm on PATH but not runnable" <<< "$np_out"; then
+    ok "test passed: broken npm is warned and skipped, doctor stays exit 0"
+  else
+    printf '%s\n' "$np_out" >&2
+    fail "test failed: broken npm should be reported as not runnable"
+    status=1
+  fi
+else
+  printf '%s\n' "$np_out" >&2
+  fail "test failed: doctor must stay exit 0 with a broken npm on PATH"
+  status=1
+fi
+
+# NPM-B) A non-numeric npm version must not abort the min-release-age
+# arithmetic ([[ -gt ]] resolves non-numeric operands as variable names and
+# dies under set -u); expect a warn and exit 0 (#144).
+cat > "$npm_fakebin/npm" <<'SH'
+#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'not-a-version\n'; exit 0; fi
+exit 0
+SH
+if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "npm version 'not-a-version' not recognized" <<< "$np_out"; then
+    ok "test passed: unrecognized npm version is warned, doctor stays exit 0"
+  else
+    printf '%s\n' "$np_out" >&2
+    fail "test failed: unrecognized npm version should be warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$np_out" >&2
+  fail "test failed: doctor must stay exit 0 with an unrecognized npm version"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi
