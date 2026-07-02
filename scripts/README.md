@@ -63,6 +63,13 @@ remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検�
 
 policy validation が失敗した場合は exit 1。
 
+## test-lib.sh
+
+test-*.sh が共有する fixture 編集 helper(source 専用、lib-policy.sh の後に source する)。
+`set_capability_all` / `remove_module_all` が fixture の profiles.yaml を yq で構造的に
+編集し、対象が存在しなければ fail する(行形式一致の awk 直書きが無言で no-op 化して
+テストが vacuous pass する事故の再発防止。#149)。
+
 ## test-policy.sh
 
 外部 test framework を使わずに policy validation の fail-closed 挙動を検証する。
