@@ -311,6 +311,19 @@ cmd_backup() {
             continue
             ;;
         esac
+        # Deduplicate against paths already captured (a declared file inside
+        # this dir, or an overlapping dir declaration) so the manifest never
+        # lists the same file twice; restore would otherwise process it
+        # twice and misreport created/displaced counts.
+        if grep -Fxq -- "$rel" "$seen_paths"; then
+          continue
+        fi
+        printf '%s\n' "$rel" >> "$seen_paths"
+        if [[ ! -r "$f" ]]; then
+          warn "skip unreadable file under $path: $rel"
+          skipped=$((skipped + 1))
+          continue
+        fi
         mode="$(file_mode "$f")"
         size="$(wc -c < "$f" | tr -d ' ')"
         hash="$(sha256_of "$f")"
@@ -323,6 +336,11 @@ cmd_backup() {
     else
       if [[ ! -f "$target" ]]; then
         warn "declared file is not a regular file (skipped): $path"
+        skipped=$((skipped + 1))
+        continue
+      fi
+      if [[ ! -r "$target" ]]; then
+        warn "unreadable (skipped): $path"
         skipped=$((skipped + 1))
         continue
       fi
@@ -356,10 +374,17 @@ cmd_backup() {
   if [[ "$assume_yes" -ne 1 ]]; then
     printf '[info] - proceed and write the encrypted archive? [y/N] ' >&2
     local reply=""
-    read -r reply < /dev/tty || reply=""
+    # Both no-TTY and a declined prompt return non-zero: a run that wrote no
+    # archive must not exit 0, or unattended runs (cron/CI without --yes)
+    # would report success while backups silently never happen.
+    if ! read -r reply < /dev/tty 2>/dev/null; then
+      printf '\n' >&2
+      fail "no TTY for confirmation; pass --yes for unattended runs"
+      return 1
+    fi
     case "$reply" in
       y | Y | yes | YES) ;;
-      *) warn "aborted by user; nothing written"; return 0 ;;
+      *) warn "aborted by user; nothing written"; return 1 ;;
     esac
   fi
 
@@ -429,7 +454,10 @@ decrypt_and_extract() {
   ok "decrypted to 0700 temp"
 
   validate_tar_members "$cipher_tar" || return 1
-  if ! tar -xf "$cipher_tar" -C "$extract" 2>/dev/null; then
+  # -p: restore the modes recorded in the archive. Without it bsdtar applies
+  # the umask on extraction, so group/other-writable files (664/775) come out
+  # as 644/755 and the manifest mode comparison below rejects a good archive.
+  if ! tar -xpf "$cipher_tar" -C "$extract" 2>/dev/null; then
     fail "could not extract archive"
     return 1
   fi
