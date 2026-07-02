@@ -49,6 +49,11 @@ jobs:
       - name: bash syntax check
         run: bash -n scripts/*.sh
 
+      # The managed zsh layer had no syntax gate at all — the #96 compinit
+      # glob bug lived exactly here (#150). The runner image ships zsh.
+      - name: zsh syntax check (managed shell files)
+        run: zsh -n dot_zshenv dot_zshrc dot_zprofile
+
       - name: shellcheck (warning and above)
         run: shellcheck -S warning scripts/*.sh
 
@@ -75,6 +80,9 @@ jobs:
 
       - name: catalog install gate tests
         run: ./scripts/test-install-packages.sh
+
+      - name: preflight report-only tests
+        run: ./scripts/test-preflight.sh
 
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
