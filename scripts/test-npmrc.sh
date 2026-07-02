@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
@@ -157,6 +159,72 @@ check_window "non-numeric tolerance is rejected"    1 $(( now - 7*day ))      "$
 # Honored: leading zeros are read base-10, not octal (no arithmetic error).
 check_window "leading-zero before is honored"       0 "0$(( now - 7*day ))"   "$now" 7 "$tol"
 check_window "leading-zero days=07 is honored"      0 $(( now - 7*day ))      "$now" 07 "$tol"
+
+# Rendered content (#150): the static grep above pins the template SOURCE,
+# not what a profile actually renders — a flipped gate condition would keep
+# every static check green. Render for real when chezmoi is available (the
+# render job runs this; the validate job has no chezmoi and skips).
+section "rendered content (chezmoi)"
+if ! command -v chezmoi >/dev/null 2>&1; then
+  warn "chezmoi not found; skipping rendered-content checks (the CI render job runs them)"
+else
+  tmp_roots=()
+  cleanup() {
+    for dir in "${tmp_roots[@]:-}"; do
+      [[ -n "$dir" ]] && rm -rf "$dir"
+    done
+  }
+  trap cleanup EXIT
+
+  # Apply personal from SOURCE_DIR into a throwaway home; print the home path.
+  render_personal_home() {
+    local source_dir="$1" root
+    root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-render.XXXXXX")"
+    tmp_roots+=("$root")
+    mkdir -p "$root/home"
+    printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
+    if ! chezmoi --config "$root/chezmoi.toml" \
+        --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1; then
+      return 1
+    fi
+    printf '%s\n' "$root/home"
+  }
+
+  # enforce (personal default): every hardening line renders, tokens never do.
+  if home_dir="$(render_personal_home "$DOTFILES_ROOT")" \
+    && [[ -f "$home_dir/.npmrc" ]]; then
+    for line in "ignore-scripts=true" "save-exact=true" "fund=false" "audit=true" "min-release-age=7"; do
+      check_file_has_line "rendered enforce npmrc has: $line" "$home_dir/.npmrc" "$line"
+    done
+    if grep -Eq '_authToken|registry=|^//' "$home_dir/.npmrc"; then
+      fail "test failed: rendered npmrc contains token or registry configuration"
+      status=1
+    else
+      ok "test passed: rendered npmrc carries no token or registry configuration"
+    fi
+  else
+    fail "test failed: personal (enforce) did not render ~/.npmrc"
+    status=1
+  fi
+
+  # report: the supply-chain/npm module requires enforce, so ~/.npmrc must
+  # leave the managed set entirely (not render as an empty file).
+  flip_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-flip.XXXXXX")"
+  tmp_roots+=("$flip_root")
+  cp -R "$DOTFILES_ROOT/." "$flip_root/repo"
+  set_capability_all "$flip_root/repo" npmHardeningMode report
+  if home_dir="$(render_personal_home "$flip_root/repo")"; then
+    if [[ -e "$home_dir/.npmrc" ]]; then
+      fail "test failed: npmHardeningMode=report must not manage ~/.npmrc"
+      status=1
+    else
+      ok "test passed: npmHardeningMode=report leaves ~/.npmrc unmanaged"
+    fi
+  else
+    fail "test failed: apply failed with npmHardeningMode=report"
+    status=1
+  fi
+fi
 
 if [[ "$status" -eq 0 ]]; then
   ok "npmrc tests passed"
