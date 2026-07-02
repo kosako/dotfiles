@@ -373,7 +373,9 @@ fi
 # Gated on enforce: profiles that do not manage ~/.npmrc (report/off) would
 # get false header alarms; leftovers there are the orphan section's job.
 if [[ "$npm_mode" == "enforce" && -f "$HOME/.npmrc" ]]; then
-  token_lines="$(grep -c -- "_authToken" "$HOME/.npmrc" 2>/dev/null || true)"
+  # Key-shaped occurrences only ((^|:)_authToken=): a mention inside a value
+  # or comment is not a credential line and must not alarm.
+  token_lines="$(grep -cE '(^|:)_authToken[[:space:]]*=' "$HOME/.npmrc" 2>/dev/null || true)"
   if [[ "${token_lines:-0}" -gt 0 ]]; then
     warn "npmrc contains $token_lines _authToken line(s) — tokens do not belong there (npm logout, then chezmoi apply; see docs/supply-chain-npm.md)"
   else
