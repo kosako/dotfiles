@@ -116,6 +116,7 @@ main 直 commit は例外扱いにする。
 ./scripts/test-starship.sh
 ./scripts/test-ssh.sh
 bash -n scripts/*.sh
+shellcheck -S warning scripts/*.sh
 git diff --check
 ```
 
