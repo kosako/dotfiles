@@ -283,6 +283,45 @@ profile_installs_source() {
 # excludes node-bundled npm globals (npm, corepack: runtime domain, like
 # node/go/uv), and is skipped for mas (the App Store carries many apps
 # unrelated to the dev catalog; flagging them all would be noise).
+
+# The go bin directory: GOBIN, falling back to GOPATH/bin. mise points GOBIN
+# at GOROOT/bin, which is why the toolchain binaries live next to installed
+# packages (see the go|gofmt guard below).
+go_bin_dir() {
+  local gobin
+  gobin="$(go env GOBIN 2>/dev/null || true)"
+  [[ -z "$gobin" ]] && gobin="$(go env GOPATH 2>/dev/null || true)/bin"
+  printf '%s' "$gobin"
+}
+
+# Full installed inventory for SOURCE, one id per line; empty when the
+# manager is absent or the probe fails (read-only, never errors). The single
+# probe implementation shared by the drift report below and the installer's
+# is_installed (#143) — before this they were duplicated and could disagree.
+#
+# Contract for callers: capture the WHOLE list (file or variable) and match
+# against the capture. Matching the producer directly (`probe | grep -q`)
+# dies of SIGPIPE under pipefail once grep exits on the first hit, so an
+# installed entry randomly reads as absent (#143).
+installed_inventory() {
+  local source="$1"
+  case "$source" in
+    brew_formula) brew list --formula -1 2>/dev/null || true ;;
+    brew_leaves) brew leaves 2>/dev/null || true ;;
+    brew_cask) brew list --cask -1 2>/dev/null || true ;;
+    npm_global)
+      npm ls -g --depth=0 --json 2>/dev/null \
+        | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null || true ;;
+    go_install)
+      local dir
+      dir="$(go_bin_dir)"
+      if [[ -n "$dir" && -d "$dir" ]]; then
+        find "$dir" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null || true
+      fi ;;
+    mas) mas list 2>/dev/null | awk '{print $1}' || true ;;
+  esac
+}
+
 report_catalog_drift() {
   if ! require_yq; then
     warn "yq unavailable; skipping catalog drift"
@@ -311,20 +350,20 @@ report_catalog_drift() {
     "$decl_go_bins"
   )
 
-  # Inventories (read-only). A failing probe leaves the list empty via
-  # `|| true`; per-source availability flags gate whether absence means
-  # "not installed" or "manager not present, skip".
+  # Inventories (read-only), one shared probe per source (installed_inventory
+  # above); a failing probe yields an empty list. Per-source availability
+  # flags gate whether absence means "not installed" or "manager not
+  # present, skip".
   local have_brew=0 have_npm=0 have_go=0 have_mas=0 gobin=""
   if command -v brew >/dev/null 2>&1; then
     have_brew=1
-    brew list --formula -1 2>/dev/null | sort > "$brew_formulae" || true
-    brew leaves 2>/dev/null | sort > "$brew_leaves" || true
-    brew list --cask -1 2>/dev/null | sort > "$brew_casks" || true
+    installed_inventory brew_formula | sort > "$brew_formulae"
+    installed_inventory brew_leaves | sort > "$brew_leaves"
+    installed_inventory brew_cask | sort > "$brew_casks"
   fi
   if command -v npm >/dev/null 2>&1; then
     have_npm=1
-    npm ls -g --depth=0 --json 2>/dev/null \
-      | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null \
+    installed_inventory npm_global \
       | grep -vxE 'npm|corepack' | sort > "$npm_globals" || true
   fi
   # A go-built binary persists in GOPATH/bin even if `go` is later removed,
@@ -333,16 +372,12 @@ report_catalog_drift() {
   # go cannot tell us where it is.
   if command -v go >/dev/null 2>&1; then
     have_go=1
-    gobin="$(go env GOBIN 2>/dev/null || true)"
-    [[ -z "$gobin" ]] && gobin="$(go env GOPATH 2>/dev/null || true)/bin"
-    if [[ -n "$gobin" && -d "$gobin" ]]; then
-      find "$gobin" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null \
-        | sort > "$go_bins" || true
-    fi
+    gobin="$(go_bin_dir)"
+    installed_inventory go_install | sort > "$go_bins"
   fi
   if command -v mas >/dev/null 2>&1; then
     have_mas=1
-    mas list 2>/dev/null | awk '{print $1}' | sort > "$mas_ids" || true
+    installed_inventory mas | sort > "$mas_ids"
   fi
 
   # Report which inventories were inspected. npm's global root differs by

@@ -36,23 +36,30 @@ EOF
 
 # Whether NAME is already installed for SOURCE. canonical = pkg|name,
 # bincmd = bin|name. Read-only; a present entry is left untouched (no upgrade).
+# Probes via lib-policy's installed_inventory (the same one the doctor drift
+# report reads) and matches against the full capture: the previous
+# `probe | grep -Fxq` shape died of SIGPIPE under pipefail once grep exited
+# on the first hit, so installed casks/apps randomly read as absent and
+# --apply re-ran their installers (#143).
 is_installed() {
-  local source="$1" canonical="$2" bincmd="$3"
+  local source="$1" canonical="$2" bincmd="$3" inv=""
   case "$source" in
     brew_formula)
-      brew list --formula -1 2>/dev/null | grep -Fxq -- "$canonical" && return 0
+      inv="$(installed_inventory brew_formula)"
+      grep -Fxq -- "$canonical" <<< "$inv" && return 0
       command -v "$bincmd" >/dev/null 2>&1 ;;
     brew_cask)
-      brew list --cask -1 2>/dev/null | grep -Fxq -- "$canonical" ;;
+      inv="$(installed_inventory brew_cask)"
+      grep -Fxq -- "$canonical" <<< "$inv" ;;
     npm_global)
-      npm ls -g --depth=0 --json 2>/dev/null \
-        | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null \
-        | grep -Fxq -- "$canonical" && return 0
+      inv="$(installed_inventory npm_global)"
+      grep -Fxq -- "$canonical" <<< "$inv" && return 0
       command -v "$bincmd" >/dev/null 2>&1 ;;
     go_install)
       command -v "$bincmd" >/dev/null 2>&1 ;;
     mas)
-      mas list 2>/dev/null | awk '{print $1}' | grep -Fxq -- "$canonical" ;;
+      inv="$(installed_inventory mas)"
+      grep -Fxq -- "$canonical" <<< "$inv" ;;
     *) return 0 ;;
   esac
 }
