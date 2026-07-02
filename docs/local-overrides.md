@@ -51,15 +51,18 @@ local 側は managed が定義していない Host を追加する用途に限�
 ## VS Code
 
 VS Code は現在この環境で**未使用**(editor は別物)。よって #16 は「VS Code settings を
-管理しない」で決着し、`enableVsCodeSettings` を全 profile で `false` にした。capability /
-`vscode` module / doctor section / この節の配線は **dormant** に残す。
+管理しない」で決着した。当初は capability / `vscode` module / doctor section を dormant で
+残したが、**#145 で配線ごと削除**(「決定済み不使用の dormant 宣言は残さない」基準。
+基準の明文化は #145 の後続 PR で [policy-model](policy-model.md) に置く)。
 
-将来 VS Code を採用するときは、(1) settings template を足し、(2) `.chezmoidata/modules.yaml`
-の `vscode` module に `paths`(管理する settings file)と `requires: { enableVsCodeSettings: true }`
-を宣言し(`runtime` / `git-signing` module と同じ形)、(3) `enableVsCodeSettings` を反転する。
-`.chezmoiignore` の module loop は module の `paths` / `requires` で管理対象を gate するため、
-(2) を欠くと template を足しても ignore されたままになる。`enableVsCodeExtensions` は据え置き
-=自動 install しない。
+将来 VS Code を採用するときは、git 履歴(#16 / #145)から配線を復元しつつ、
+(1) `capabilities.schema.yaml` に `enableVsCodeSettings` を再宣言(全 profile への記入が
+validate で強制される)、(2) settings template を足し、(3) `.chezmoidata/modules.yaml` に
+`vscode` module を `paths` + `requires: { enableVsCodeSettings: true }` 付きで再宣言
+(`runtime` / `git-signing` module と同じ形)、(4) doctor section を追加する
+(AGENTS.md の「capability は doctor section を駆動する」規約)。`.chezmoiignore` の
+module loop は module の `paths` / `requires` で管理対象を gate するため、(3) を欠くと
+template を足しても ignore されたままになる。extensions の自動 install はしない。
 
 採用時の設計メモ: VS Code の settings は JSON 単一 file のため source / Include に相当する
 仕組みがなく、managed file に一本化するか機械 merge を導入するかをその時点で決める。

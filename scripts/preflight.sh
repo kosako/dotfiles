@@ -135,7 +135,7 @@ if command -v git >/dev/null 2>&1; then
 fi
 
 section "commands"
-for command_name in git chezmoi brew op node npm corepack mise direnv code yq shellcheck shfmt; do
+for command_name in git chezmoi brew op node npm corepack mise direnv yq shellcheck shfmt; do
   command_status "$command_name" || true
 done
 

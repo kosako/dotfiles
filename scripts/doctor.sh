@@ -215,18 +215,6 @@ for command_name in zsh starship; do
   command_status "$command_name" || true
 done
 
-section "VS Code"
-if [[ "$(capability_value "$profile" enableVsCodeSettings)" == "true" ]]; then
-  command_status code || true
-else
-  ok "VS Code settings disabled for profile"
-fi
-if [[ "$(capability_value "$profile" enableVsCodeExtensions)" == "true" ]]; then
-  warn "VS Code extension auto-install is enabled"
-else
-  ok "VS Code extension auto-install disabled"
-fi
-
 section "1Password"
 if [[ "$(capability_value "$profile" allowSecretsAccess)" == "true" ]]; then
   if command -v op >/dev/null 2>&1; then
