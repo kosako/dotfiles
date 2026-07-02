@@ -618,6 +618,111 @@ else
   status=1
 fi
 
+# NPM-C/D) The enforce expectation checks, deterministic via fake npm/node on
+# PATH (#150): a mismatched config value is warned; the min-release-age
+# before-cutoff is honored/warned based on the parsed epoch. The fakes are
+# env-driven so each case pins one branch; doctor stays exit 0 throughout.
+cat > "$npm_fakebin/npm" <<'SH'
+#!/bin/sh
+case "$1" in
+  --version) printf '11.10.0\n' ;;
+  config)
+    case "$3" in
+      ignore-scripts) printf '%s\n' "${FAKE_NPM_IGNORE_SCRIPTS:-true}" ;;
+      save-exact) printf 'true\n' ;;
+      fund) printf 'false\n' ;;
+      audit) printf 'true\n' ;;
+      before) printf '%s\n' "${FAKE_NPM_BEFORE:-null}" ;;
+      *) printf 'null\n' ;;
+    esac ;;
+esac
+exit 0
+SH
+cat > "$npm_fakebin/node" <<'SH'
+#!/bin/sh
+printf '%s' "${FAKE_NODE_EPOCH:-}"
+exit 0
+SH
+chmod +x "$npm_fakebin/npm" "$npm_fakebin/node"
+now_epoch="$(date +%s)"
+
+if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
+  FAKE_NPM_IGNORE_SCRIPTS=false FAKE_NPM_BEFORE="fake-date" \
+  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enforce expects npm ignore-scripts=true, current: false" <<< "$np_out" \
+    && grep -Fq "npm min-release-age=7 honored" <<< "$np_out"; then
+    ok "test passed: enforce mismatch warned while a good before-cutoff is honored"
+  else
+    printf '%s\n' "$np_out" >&2
+    fail "test failed: enforce mismatch warn or honored cutoff missing"
+    status=1
+  fi
+else
+  printf '%s\n' "$np_out" >&2
+  fail "test failed: doctor must stay exit 0 on an enforce mismatch"
+  status=1
+fi
+
+if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
+  FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 86400 ))" \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enforce expects npm min-release-age=7 (before ~= now-7d)" <<< "$np_out"; then
+    ok "test passed: a too-recent before cutoff is warned (cooldown not enforced)"
+  else
+    printf '%s\n' "$np_out" >&2
+    fail "test failed: too-recent before cutoff not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$np_out" >&2
+  fail "test failed: doctor must stay exit 0 on a too-recent cutoff"
+  status=1
+fi
+
+# COREPACK-A) corepackMode=off says intentionally unmanaged; B) report mode
+# with a corepack on PATH reports its version line (fake for determinism —
+# the CI validate job may or may not ship corepack) (#150).
+cp_root="$fixture_home/.dotfiles-corepack"
+mkdir -p "$cp_root/.chezmoidata"
+cp -R "$DOTFILES_ROOT/scripts" "$cp_root/scripts"
+cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$cp_root/.chezmoidata/"
+set_capability_all "$cp_root" corepackMode off
+if cp_out="$(HOME="$fixture_home" "$cp_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "corepack intentionally unmanaged" <<< "$cp_out"; then
+    ok "test passed: corepackMode=off reports intentionally unmanaged"
+  else
+    printf '%s\n' "$cp_out" >&2
+    fail "test failed: corepackMode=off not reported as unmanaged"
+    status=1
+  fi
+else
+  printf '%s\n' "$cp_out" >&2
+  fail "test failed: doctor must stay exit 0 with corepackMode=off"
+  status=1
+fi
+
+cat > "$npm_fakebin/corepack" <<'SH'
+#!/bin/sh
+[ "$1" = "--version" ] && printf '0.0-fake\n'
+exit 0
+SH
+chmod +x "$npm_fakebin/corepack"
+if cp_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "corepack: 0.0-fake" <<< "$cp_out"; then
+    ok "test passed: corepackMode=report shows the corepack version"
+  else
+    printf '%s\n' "$cp_out" >&2
+    fail "test failed: corepack version line missing under report mode"
+    status=1
+  fi
+else
+  printf '%s\n' "$cp_out" >&2
+  fail "test failed: doctor must stay exit 0 under corepackMode=report"
+  status=1
+fi
+
 # DRIFT-A) A token-shaped line in ~/.npmrc is warned by name only (the value
 # never appears in the output), doctor stays exit 0 (#148).
 dr_home="$fixture_home/drift"

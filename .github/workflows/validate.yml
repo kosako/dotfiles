@@ -122,3 +122,8 @@ jobs:
 
       - name: ssh-1password gating and safety tests
         run: ./scripts/test-ssh.sh
+
+      # Also runs in the validate job for its static checks; here chezmoi is
+      # available so the rendered-content section actually executes (#150).
+      - name: npmrc rendered-content tests
+        run: ./scripts/test-npmrc.sh

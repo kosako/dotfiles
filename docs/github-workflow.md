@@ -122,6 +122,8 @@ git diff --check
 
 `test-render.sh` / `test-claude-settings.sh` / `test-git-signing.sh` / `test-starship.sh` /
 `test-ssh.sh` は chezmoi を必要とする(CI では version pin して導入する。render job 所属)。
+`test-npmrc.sh` は両 job で走る(静的検査は validate job、chezmoi が要る rendered-content
+検査は render job で実行される。#150)。
 この一覧は `.github/workflows/validate.yml` が正なので、CI にテストを足したらここも更新する。
 
 `preflight` / `doctor` を変更した場合:
