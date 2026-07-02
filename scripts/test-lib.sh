@@ -27,9 +27,16 @@ set_capability_all() {
     fail "set_capability_all: missing $file"
     return 1
   fi
-  local declared
+  # Two separate probes on purpose: combining them with yq's `and` mis-parses
+  # (pipe binds loosest, the has-check leaks out of the conjunction). The
+  # count probe guards the vacuous-true case — `[] | all` is true, so an
+  # empty/missing profiles map would otherwise pass the has-check and the
+  # assignment below would silently no-op, the same failure mode this helper
+  # exists to prevent (Codex review, #149).
+  local count declared
+  count="$(yq '.profiles // {} | length' "$file")"
   declared="$(C="$cap" yq '[.profiles[].capabilities | has(strenv(C))] | all' "$file")"
-  if [[ "$declared" != "true" ]]; then
+  if [[ -z "$count" || "$count" == "0" || "$declared" != "true" ]]; then
     fail "set_capability_all: capability '$cap' is not declared by every profile in $file"
     return 1
   fi

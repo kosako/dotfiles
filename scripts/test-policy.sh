@@ -401,6 +401,15 @@ if remove_module_all "$fixture" no-such-module 2>/dev/null; then
   exit 1
 fi
 ok "test passed: remove_module_all fails closed on an unlisted module"
+# An empty profiles map must fail too: `[] | all` is vacuously true in yq,
+# so without the length guard the helper would "succeed" while setting
+# nothing (Codex review, #149).
+printf 'profiles: {}\n' > "$fixture/.chezmoidata/profiles.yaml"
+if set_capability_all "$fixture" enforceAiSandbox true 2>/dev/null; then
+  fail "test failed: set_capability_all must reject an empty profiles map"
+  exit 1
+fi
+ok "test passed: set_capability_all fails closed on an empty profiles map"
 
 # Anchor on the LAST capability line so the bogus section lands after the whole
 # capabilities block (update this if a later capability is added below).
