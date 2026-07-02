@@ -176,27 +176,28 @@ else
   }
   trap cleanup EXIT
 
-  # Apply personal from SOURCE_DIR into a throwaway home; print the home path.
-  render_personal_home() {
-    local source_dir="$1" root
-    root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-render.XXXXXX")"
-    tmp_roots+=("$root")
+  # Apply personal from SOURCE_DIR into ROOT/home. ROOT is created by the
+  # CALLER and registered in tmp_roots there: a helper that mktemps and
+  # returns via command substitution would append to tmp_roots only inside
+  # the substitution subshell, so the cleanup trap would never see it and
+  # the render roots would leak (Codex review, #150).
+  render_personal_into() {
+    local source_dir="$1" root="$2"
     mkdir -p "$root/home"
     printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
-    if ! chezmoi --config "$root/chezmoi.toml" \
-        --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1; then
-      return 1
-    fi
-    printf '%s\n' "$root/home"
+    chezmoi --config "$root/chezmoi.toml" \
+      --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1
   }
 
   # enforce (personal default): every hardening line renders, tokens never do.
-  if home_dir="$(render_personal_home "$DOTFILES_ROOT")" \
-    && [[ -f "$home_dir/.npmrc" ]]; then
+  enforce_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-render.XXXXXX")"
+  tmp_roots+=("$enforce_root")
+  if render_personal_into "$DOTFILES_ROOT" "$enforce_root" \
+    && [[ -f "$enforce_root/home/.npmrc" ]]; then
     for line in "ignore-scripts=true" "save-exact=true" "fund=false" "audit=true" "min-release-age=7"; do
-      check_file_has_line "rendered enforce npmrc has: $line" "$home_dir/.npmrc" "$line"
+      check_file_has_line "rendered enforce npmrc has: $line" "$enforce_root/home/.npmrc" "$line"
     done
-    if grep -Eq '_authToken|registry=|^//' "$home_dir/.npmrc"; then
+    if grep -Eq '_authToken|registry=|^//' "$enforce_root/home/.npmrc"; then
       fail "test failed: rendered npmrc contains token or registry configuration"
       status=1
     else
@@ -213,8 +214,10 @@ else
   tmp_roots+=("$flip_root")
   cp -R "$DOTFILES_ROOT/." "$flip_root/repo"
   set_capability_all "$flip_root/repo" npmHardeningMode report
-  if home_dir="$(render_personal_home "$flip_root/repo")"; then
-    if [[ -e "$home_dir/.npmrc" ]]; then
+  report_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-render.XXXXXX")"
+  tmp_roots+=("$report_root")
+  if render_personal_into "$flip_root/repo" "$report_root"; then
+    if [[ -e "$report_root/home/.npmrc" ]]; then
       fail "test failed: npmHardeningMode=report must not manage ~/.npmrc"
       status=1
     else
