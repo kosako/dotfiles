@@ -349,6 +349,120 @@ else
 fi
 set_profile personal
 
+# Octal mode of a path (same OS branch as file_mode in private-backup.sh,
+# which the test cannot source: running the script under test executes main).
+mode_of() {
+  if stat -f '%Lp' "$1" >/dev/null 2>&1; then
+    stat -f '%Lp' "$1"
+  else
+    stat -c '%a' "$1"
+  fi
+}
+
+# 19. A group-writable file (664) round-trips: capture, verify, and restore
+#     keep the recorded mode. Regression for the umask bug: extraction
+#     without -p turned 664 into 644 and the manifest mode check rejected
+#     every archive containing such a file (issue #141).
+gw_home="$fixture_home/gw"
+mkdir -p "$gw_home/.ssh"
+printf 'a\n' > "$gw_home/.zshrc.local"
+printf 'b\n' > "$gw_home/.ssh/config.local"
+chmod 664 "$gw_home/.zshrc.local"
+gw_rc=0
+HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$gw_home/gw.age" --recipient "$recipient" --yes >/dev/null 2>&1 || gw_rc=$?
+if [[ "$gw_rc" -eq 0 ]] && HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  verify --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  gw_dst="$fixture_home/gw-restore"
+  mkdir -p "$gw_dst"
+  if HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    restore --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" \
+    --target-home "$gw_dst" --apply >/dev/null 2>&1 \
+    && [[ "$(mode_of "$gw_dst/.zshrc.local")" == "664" ]]; then
+    pass "group-writable file (664) survives backup/verify/restore with its mode"
+  else
+    miss "restored group-writable file lost its mode (want 664, got $(mode_of "$gw_dst/.zshrc.local" 2>/dev/null))"
+  fi
+else
+  miss "verify rejected an archive containing a group-writable file (umask regression)"
+fi
+
+# 20. Without --yes and without a TTY, backup must fail (non-zero) instead of
+#     reporting success while writing nothing (issue #141: unattended runs
+#     would otherwise silently never back up).
+ntty_home="$fixture_home/ntty"
+mkdir -p "$ntty_home/.ssh"
+printf 'a\n' > "$ntty_home/.zshrc.local"
+printf 'b\n' > "$ntty_home/.ssh/config.local"
+ntty_rc=0
+# perl setsid detaches from the controlling terminal so `read < /dev/tty`
+# inside the script fails; macOS ships no setsid(1), perl is on both OSes.
+ntty_out="$(HOME="$ntty_home" PATH="$fixture_home/fakebin:$PATH" \
+  perl -e 'use POSIX (); POSIX::setsid() != -1 or die "setsid: $!"; exec @ARGV or die "exec: $!"' \
+  -- "$PB" backup --out "$ntty_home/n.age" --recipient "$recipient" 2>&1 < /dev/null)" || ntty_rc=$?
+if [[ "$ntty_rc" -ne 0 && ! -f "$ntty_home/n.age" ]] \
+  && grep -Fq "no TTY for confirmation" <<< "$ntty_out"; then
+  pass "backup without --yes and without a TTY fails (no silent success)"
+else
+  printf '%s\n' "$ntty_out" >&2
+  miss "non-TTY backup without --yes should fail, got rc=$ntty_rc"
+fi
+
+# 21. Overlapping declarations (a dir and a file inside it) capture the file
+#     once: the manifest lists no duplicate paths (issue #141).
+dup_home="$fixture_home/dup"
+mkdir -p "$dup_home/.ssh" "$dup_home/.config/dotfiles" "$dup_home/nest"
+printf 'a\n' > "$dup_home/.zshrc.local"
+printf 'b\n' > "$dup_home/.ssh/config.local"
+printf 'c\n' > "$dup_home/nest/inner"
+printf 'backup_paths:\n  - { path: "nest", type: dir }\n  - { path: "nest/inner", type: file }\n' \
+  > "$dup_home/.config/dotfiles/backup-paths.local"
+if HOME="$dup_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$dup_home/d.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  dup_extract="$fixture_home/dup-extract"
+  mkdir -p "$dup_extract"
+  age -d -i "$fixture_home/keys/id.txt" "$dup_home/d.age" | tar -xpf - -C "$dup_extract"
+  dup_total="$(yq -p=json -o=tsv '.files | length' "$dup_extract/manifest.json")"
+  dup_unique="$(yq -p=json -o=tsv '[.files[].path] | unique | length' "$dup_extract/manifest.json")"
+  # Exactly once: dedup must not drop the file either (an ordering bug that
+  # skipped capture entirely would also show zero duplicates).
+  dup_inner="$(yq -p=json -o=tsv '[.files[].path | select(. == "nest/inner")] | length' "$dup_extract/manifest.json")"
+  if [[ "$dup_total" == "$dup_unique" && "$dup_inner" == "1" ]]; then
+    pass "overlapping dir+file declarations capture the file exactly once"
+  else
+    miss "manifest should list nest/inner exactly once ($dup_total entries, $dup_unique unique, nest/inner x$dup_inner)"
+  fi
+else
+  miss "backup with overlapping declarations failed"
+fi
+
+# 22. An unreadable file is skipped with a warning; the backup still succeeds
+#     and captures the readable files (issue #141: set -e aborted the whole
+#     run mid-archive before).
+unr_home="$fixture_home/unr"
+mkdir -p "$unr_home/.ssh" "$unr_home/.config/dotfiles" "$unr_home/box"
+printf 'a\n' > "$unr_home/.zshrc.local"
+printf 'b\n' > "$unr_home/.ssh/config.local"
+printf 'locked\n' > "$unr_home/locked"
+chmod 000 "$unr_home/locked"
+printf 'ok\n' > "$unr_home/box/readable"
+printf 'locked\n' > "$unr_home/box/locked-in-dir"
+chmod 000 "$unr_home/box/locked-in-dir"
+printf 'backup_paths:\n  - { path: "locked", type: file }\n  - { path: "box", type: dir }\n' \
+  > "$unr_home/.config/dotfiles/backup-paths.local"
+unr_rc=0
+unr_out="$(HOME="$unr_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$unr_home/u.age" --recipient "$recipient" --yes 2>&1)" || unr_rc=$?
+chmod 600 "$unr_home/locked" "$unr_home/box/locked-in-dir" # so the EXIT trap can clean up
+if [[ "$unr_rc" -eq 0 && -f "$unr_home/u.age" ]] \
+  && grep -Fq "unreadable (skipped): locked" <<< "$unr_out" \
+  && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out"; then
+  pass "unreadable files (declared file and inside a dir) are skipped with a warning, backup still succeeds"
+else
+  printf '%s\n' "$unr_out" >&2
+  miss "unreadable files should be skipped without aborting, got rc=$unr_rc"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi
