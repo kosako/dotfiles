@@ -10,6 +10,14 @@
 - `doctor` は状態を報告するだけにする。
 - 更新は明示コマンドとして実行する。
 
+## 例外: claude-code(native installer の自己更新)
+
+claude-code は catalog 外の native installer(`claude.ai/install.sh` → `~/.local/bin`)で
+管理し、**バックグラウンドの自己更新を意図的に受け入れている**(#112)。npm 経由の
+auto-update が hardened `~/.npmrc`(ignore-scripts=true)と両立しないための採用で、
+「npm hardening を維持したまま自動更新も動く」ことを優先した唯一の例外。経緯と詳細は
+[supply-chain-npm](supply-chain-npm.md)。
+
 ## Rationale
 
 勝手に全体を最新版へ上げることは、再現性とサプライチェーン安全性の両方を弱める。

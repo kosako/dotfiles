@@ -26,16 +26,20 @@ personal project として段階的に作っている。現時点の実装状況
 | Git identity 分離(context 別、fail-closed) | 実装済み・実機適用済み |
 | policy / capabilities / profile 検証(fail-closed) | 実装済み |
 | environmentKind による capability 制約の強制 | 実装済み |
-| supply-chain(git credential scan / npm hardening / Corepack policy) | 実装済み(npm は未適用) |
-| project templates / mise runtime | 実装済み(未適用) |
+| supply-chain(git credential scan / npm hardening / Corepack policy) | 実装済み・実機適用済み(#91) |
+| project templates / mise runtime | 実装済み・実機適用済み(mise) |
 | doctor / preflight(report-only の健康診断) | 実装済み |
-| agent-tools との report-only 連携 | 実装済み(opt-in) |
-| zsh(shell-extra)の管理 | 実装済み(未適用) |
-| Claude Code settings(personal の public-safe な settings.json) | 実装済み(personal のみ) |
+| software catalog + install action(dry-run 既定) | 実装済み・運用中(#53) |
+| private backup(age 暗号化・verify/restore) | 実装済み・運用中(#60) |
+| agent-tools との report-only 連携 | 実装済み(personal で opt-in 済み、#73) |
+| zsh(shell-extra)+ starship の管理 | 実装済み・実機適用済み(#96) |
+| Claude Code settings(personal の public-safe な settings.json) | 実装済み・実機適用済み(personal のみ) |
+| Git signing(SSH 署名 + 1Password、opt-in) | 実装済み・実機適用済み(#85/#97) |
 | VS Code settings の管理 | 管理しない(VS Code 未使用のため見送り、#16) |
-| SSH(ssh-1password)の管理 | 実装済み(未適用、personal のみ) |
+| SSH(ssh-1password)の管理 | 実装済み・実機適用済み(personal のみ、#17/#121) |
+| GitHub injection 防御(secret floor / MCP deny、steering) | Phase 2 まで実機適用済み(hard 層は #131) |
 
-「実機適用済み」は、現時点でこの author の Mac 上で `~/.gitconfig` が稼働しているという意味。zsh は chezmoi 管理に載せたが未適用。VS Code は未使用のため管理しない(capability OFF・配線は dormant、#16)。SSH は public-safe な骨格を personal で管理する形で実装したが未適用(既存 `~/.ssh/config` からの移行手順は [docs/ssh.md](docs/ssh.md)、#17)。
+「実機適用済み」は、現時点でこの author の Mac 上で managed file が実際に稼働しているという意味(実機の状態は repo からは検証できないので、この列は運用記録。repo 側で機械検証されるのは managed template と render / test の整合まで)。VS Code は未使用のため管理しない(capability OFF・配線は dormant、#16)。SSH の移行手順は [docs/ssh.md](docs/ssh.md)。
 
 ## 考え方
 

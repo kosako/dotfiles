@@ -1,7 +1,13 @@
 # scripts
 
-この directory の script は、dotfiles を host に適用する前後の policy 検証を担当する。
-package install、GUI app install、macOS defaults、secret fetch、Git remote mutation は行わない。
+この directory の script は、dotfiles を host に適用する前後の policy 検証と、catalog に
+宣言された運用アクション(手動起動のみ)を担当する。検証系(validate / preflight / doctor /
+test-*)は read-only で、host を変更しない。host に書き込むのは明示的に起動した
+`install-packages.sh --apply`(catalog 宣言の package install。dry-run 既定)と
+`private-backup.sh`(`backup` は確認後に `--out` のアーカイブと state marker を書く。
+`restore` は dry-run 既定で `--apply` のときだけ復元する)だけで、いずれも
+`chezmoi apply` には結合しない。macOS defaults、secret fetch、
+Git remote mutation は行わない。
 
 ## 終了コード方針
 
@@ -38,6 +44,9 @@ unknown profile / module / capability や capability enum の不正値は policy
 - module の `paths:` が home 相対であること。同一 path を複数 module が宣言していないこと。
 - module の `requires:` の capability が定義済みで、値が schema の型に適合すること。
 - `requires:` があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
+- package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
+- backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
+  重複なしであること。
 
 ## preflight.sh
 
@@ -52,7 +61,7 @@ policy validation が失敗した場合は exit 1。
 
 ## doctor.sh
 
-導入後または現状環境の健康診断を行う。chezmoi、Git、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、Git remote URL(credential らしき userinfo の有無。URL の値は表示しない)、npm、Corepack、runtime、VS Code、1Password、managed-path orphan(managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出)、AI policy(`enableAiPolicy` / `enableAiTools` の現状)、network tunnels(`allowNetworkTunnels` と tunnel tool の存在)、agent-tools(report-only。`~/src/agent/agent-tools`(既定。`AGENT_TOOLS` env で override 可)の presence を表示し、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --root <checkout> --json`。root を pin しないと status.sh は cwd を検査して空 repo を偽報告する)を実行して安全な summary を出す。clone / pull / sync はしない)、private-backup(report-only。public baseline の各 target の存在と marker からのバックアップ有無/最終日時を表示。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない)、project root の状態を表示する。
+導入後または現状環境の健康診断を行う。chezmoi、Git、Git signing(`enableGitSigning` の SSH 署名 mechanism が managed か、capability true で module inactive の dangling か)、Git identity context(各 context の identity file が存在するか、意図的に未設定か)、Git remote URL(credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない)、npm、Corepack、software catalog drift(catalog 宣言 vs 実機の brew/npm/go/mas。declared-missing / undeclared-sprawl / source-mismatch を report-only で表示)、runtime、VS Code、1Password、SSH(`enable1PasswordSSH` の managed `~/.ssh/config` が active か dangling か)、managed-path orphan(managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出)、AI policy(`enableAiPolicy` / `enableAiTools` の現状)、enforceAiSandbox(sandbox ブロックと human-legit write gate の live state)、GitHub injection guard(secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` は Phase 3 まで未配線であることの開示)、network tunnels(`allowNetworkTunnels` と tunnel tool の存在)、agent-tools(report-only。`~/src/agent/agent-tools`(既定。`AGENT_TOOLS` env で override 可)の presence を表示し、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --root <checkout> --json`。root を pin しないと status.sh は cwd を検査して空 repo を偽報告する)を実行して安全な summary を出す。clone / pull / sync はしない)、private-backup(report-only。public baseline の各 target の存在と marker からのバックアップ有無/最終日時を表示。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない)、project root の状態を表示する。
 副作用は持たない。設定不足や未導入 command の warning は report-only として exit 0 のままにする。
 remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検査は `docs/supply-chain-npm.md`、Corepack の検査は `docs/supply-chain-corepack.md` に従う。
 `npmHardeningMode=enforce` の profile では、期待する npm config 値と現在値の不一致を `[warn]` で報告する(apply 前は不一致が正常)。
@@ -174,8 +183,8 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 ## private-backup.sh
 
 private な設定(`.local` 上書き + curated アプリ設定)を **age identity 鍵**で単一アーカイブに
-退避し(`backup`)、そのアーカイブを検証する(`verify`)。災害復旧用の単方向 backup→restore で、
-restore は後続段。手動起動のみ・`chezmoi apply` 非結合。冒頭で runtime secrets gate
+退避し(`backup`)、アーカイブを検証し(`verify`)、検証済みのものだけを復元する(`restore`。
+既定 dry-run、`--apply` で実行)。手動起動のみ・`chezmoi apply` 非結合。冒頭で runtime secrets gate
 (`require_secrets_access`)を通り、`allowSecretsAccess != true` の profile では実行拒否。
 
 ```sh
@@ -247,7 +256,8 @@ profile を解決できない・未知の profile・`true` 以外の値はすべ
   `false` の profile(work-minimal / work-dev)と未知 profile を拒否すること(vacuously true にしない)。
 - chezmoi が見つからないとき `resolve_runtime_profile` / `require_secrets_access` が fail-closed で
   拒否すること(default profile に倒さない)。
-- chezmoi が profile を解決できる環境では、gate の判定が実 profile の純検査と一致すること
+- chezmoi が profile を解決できる環境では、gate の判定が profiles.yaml の
+  `allowSecretsAccess` 宣言値(yq 直読みの独立期待値)と一致すること
   (より緩くならない。chezmoi 不在の CI では skip)。
 
 実 profile は `chezmoi data` から取得し、CLI 引数では渡さない(呼び出し側が gate を
@@ -271,6 +281,34 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 - profile 無回答の init が fail すること(default を持たない)。
 
 chezmoi が必要(CI では version pin して導入する)。
+
+## test-claude-settings.sh
+
+managed `~/.claude/settings.json` の rendered content を検証する。throwaway repo copy で
+capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の無条件 deny
+8 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
+足して計 9 件)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと、#93 で
+取り込んだ global preference キーの保持を確認する。chezmoi が必要(render job)。
+
+## test-git-signing.sh
+
+git-signing module の gating を検証する。`enableGitSigning` の on/off で
+`~/.config/git/signing.gitconfig` が管理される/されないこと、signing mechanism
+(gpg.format=ssh + op-ssh-sign)が public-safe な骨格のみであることを render で確認する。
+chezmoi が必要(render job)。
+
+## test-ssh.sh
+
+ssh-1password module の gating と安全契約を検証する。`enable1PasswordSSH` の on/off gating、
+managed `~/.ssh/config` に host 名・秘密鍵・`Host *` への agent 付与・forwarding が混入しない
+こと、`Match all` 後の `Include config.local` 構造、`ssh -G` での実挙動(managed-wins と
+config.local の解決)を確認する。chezmoi が必要(render job)。
+
+## test-starship.sh
+
+starship.toml の render を検証する。TOML として parse できること(tomllib)、
+git-identity context の色分けが runtime 照合で行われ、identity の実値(email 等)が
+managed file に混入しないことを確認する。chezmoi が必要(render job)。
 
 ## lib-policy.sh
 

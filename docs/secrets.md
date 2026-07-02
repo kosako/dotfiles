@@ -81,5 +81,6 @@ direnv には 2 つの用途がある。本 doc が扱うのは後者(secret 供
 
 - `op://` 参照の repo 保持、`op run` / `op read` の repo 内実行(実 fetch は利用者側)。
 - 平文 secret のディスク・repo 配置。
-- マシンローカルに置かざるを得ない秘密素材の暗号化(age 等)は別 Issue で扱う。
+- マシンローカルに置かざるを得ない秘密素材の暗号化(age)は [private-backup](private-backup.md)
+  が担う(#60 で実装済み)。
 - 会社・クライアント固有の vault 名・item 名・参照を repo / docs に入れない。例の `op://` 参照は placeholder。

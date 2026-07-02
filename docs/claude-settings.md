@@ -14,6 +14,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model / effort / public plugin / 通知 / statusLine / tui / workflow 警告抑止 等の global preference) | public repo(`dot_claude/settings.json.tmpl`) | ✅ chezmoi(**personal profile のみ**) |
+| permission ブロック(#119): secret floor の無条件 deny 8 件(`~/.ssh` 読取 / env dump / gh secret 系)、`gateGitHubMcp` の `mcp__github` deny(personal 既定 true で計 9 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | personal・機密(secret を含む設定など) | `~/.claude/settings.local.json` | ❌ 非コミット・管理外 |
 | work / client の settings | 暗号化バックアップ(#60)か各マシン手設定 | ❌ public repo に生値を置かない |
 | skill / instruction(`skills/`、`agent-tools/CLAUDE.md`) | agent-tools が配布 | ❌ 別 repo の責務 |
@@ -65,6 +66,18 @@ permission 承認は対象外。
 module loop が、module を持たない profile(work-minimal / work-dev)では `.claude` を
 **ディレクトリごと** ignore する。`scripts/test-render.sh` が profile 別の managed set で
 この gate を回帰固定している。
+
+## permissions(#119: secret floor / GitHub guard)
+
+`permissions.deny` には capability 非依存の **secret floor**(never-legit な secret 読取
+8 件: `Read(~/.ssh/**)` / `Bash(cat ~/.ssh/*)` / `gh secret` / `gh api *secrets*` /
+`env` / `printenv` 系)を常時出力する。`gateGitHubMcp=true`(personal 既定)で
+`mcp__github`(server 全体)の deny を足して計 9 件、`enforceAiSandbox=true` で human-legit gate
+(`.env` 読取 / main・master への push の deny、release / branch-protection の ask)を
+追加する。`permissions.allow` は `mcp__pencil` のみ。これらは **steering であって
+enforcement boundary ではない**(射程と限界は
+[ai-environment-boundary](ai-environment-boundary.md))。deny の内容と順序は
+`scripts/test-claude-settings.sh` が exact-set で回帰固定している。
 
 ## sandbox(`enforceAiSandbox`)
 

@@ -1,7 +1,8 @@
 # Local Overrides
 
 managed な設定 file と、host 固有の local 上書きの境界規約。
-Phase 7 以降の zsh(#15)、VS Code(#16)、SSH(#17)はこの規約に従って実装する。
+zsh(#96 で実装・適用済み)と SSH(#17 で実装・適用済み)はこの規約に従って実装した。
+VS Code は未使用のため管理しない(#16。将来採用する場合の手順は下記)。
 
 ## 共通原則
 
@@ -78,7 +79,7 @@ GitHub injection 防御(epic #119)の trust 基点の local 値は、managed fil
 **`~/.config/dotfiles/github-trust.local`**(chezmoi 管理外・非コミット)に置く。trust の
 基点は `is_self`(自分の login + numeric id)で、collaborator / bot は既定 untrusted(方針は
 [ai-policy](ai-policy.md))。egress allowlist の local 値も同じ `~/.config/dotfiles/*.local`
-規約に従う(具体ファイル名は egress を per-host 化する Phase 2 / 3 で pin する)。
+規約に従う(具体ファイル名は OS egress firewall を実装する Phase 3(#131)で pin する)。
 
 - 共通原則どおり managed 側は trust list が無くても壊れないように書く(fail closed で
   「自分以外は untrusted」に倒す)。

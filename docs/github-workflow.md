@@ -107,14 +107,22 @@ main 直 commit は例外扱いにする。
 ./scripts/test-gitconfig.sh
 ./scripts/test-npmrc.sh
 ./scripts/test-doctor.sh
+./scripts/test-secrets-gate.sh
+./scripts/test-private-backup.sh
+./scripts/test-install-packages.sh
 ./scripts/test-render.sh
 ./scripts/test-claude-settings.sh
 ./scripts/test-git-signing.sh
+./scripts/test-starship.sh
+./scripts/test-ssh.sh
 bash -n scripts/*.sh
+shellcheck -S warning scripts/*.sh
 git diff --check
 ```
 
-`test-render.sh` / `test-claude-settings.sh` / `test-git-signing.sh` は chezmoi を必要とする(CI では version pin して導入する)。
+`test-render.sh` / `test-claude-settings.sh` / `test-git-signing.sh` / `test-starship.sh` /
+`test-ssh.sh` は chezmoi を必要とする(CI では version pin して導入する。render job 所属)。
+この一覧は `.github/workflows/validate.yml` が正なので、CI にテストを足したらここも更新する。
 
 `preflight` / `doctor` を変更した場合:
 
