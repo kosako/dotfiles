@@ -50,7 +50,11 @@ jobs:
         run: bash -n scripts/*.sh
 
       # The managed zsh layer had no syntax gate at all — the #96 compinit
-      # glob bug lived exactly here (#150). The runner image ships zsh.
+      # glob bug lived exactly here (#150). ubuntu-latest (24.04) does not
+      # ship zsh, so install it explicitly rather than assume the image.
+      - name: install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: zsh syntax check (managed shell files)
         run: zsh -n dot_zshenv dot_zshrc dot_zprofile
 
