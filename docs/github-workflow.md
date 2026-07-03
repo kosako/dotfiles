@@ -115,7 +115,9 @@ main 直 commit は例外扱いにする。
 ./scripts/test-git-signing.sh
 ./scripts/test-starship.sh
 ./scripts/test-ssh.sh
+./scripts/test-preflight.sh
 bash -n scripts/*.sh
+zsh -n dot_zshenv dot_zshrc dot_zprofile
 shellcheck -S warning scripts/*.sh
 git diff --check
 ```

@@ -74,6 +74,13 @@ remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検�
 
 policy validation が失敗した場合は exit 1。
 
+## test-preflight.sh
+
+`preflight.sh` の report-only 契約と apply-impact 警告を fixture HOME で検証する(#150)。
+空 home の exit 0 / shell-extra・ssh-1password の replace 警告と override pointer /
+非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
+policy validation 失敗時のみ非 0、をカバーする。
+
 ## test-lib.sh
 
 test-*.sh が共有する fixture 編集 helper(source 専用、lib-policy.sh の後に source する)。
