@@ -3,3 +3,4 @@
 .chezmoiignore.local
 .local/
 worklog/
+.agent-context.local.md
