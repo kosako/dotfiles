@@ -227,6 +227,7 @@ gclone() {
       return 2
       ;;
   esac
+  host="${host%%:*}"  # strip :port (ssh://git@host:22/...) so context rules match on the bare host
   owner="${rest%%/*}"
   repo="${rest#*/}"
   repo="${repo%/}"
@@ -240,9 +241,12 @@ gclone() {
   if [[ "$host" == "github.com" && "$owner" == "kosako" ]]; then
     ctx="personal"
   elif [[ -r "$map" ]]; then
-    local m_owner m_ctx
-    while read -r m_owner m_ctx; do
+    local m_owner m_ctx m_extra
+    while read -r m_owner m_ctx m_extra; do
       [[ -z "$m_owner" || "$m_owner" == \#* ]] && continue
+      # Exactly two fields: a malformed line (missing or extra fields) never
+      # resolves a context — it falls through to the fail-closed abort below.
+      [[ -z "$m_ctx" || -n "$m_extra" ]] && continue
       if [[ "$m_owner" == "$owner" ]]; then
         ctx="$m_ctx"
         break
@@ -261,7 +265,7 @@ gclone() {
       return 1
     fi
   fi
-  if [[ "$ctx" == /* || "$ctx" == *..* ]]; then
+  if [[ "$ctx" == /* || "$ctx" == *..* || "$ctx" == *[[:space:]]* ]]; then
     print -u2 -- "gclone: invalid context path: $ctx"
     return 2
   fi

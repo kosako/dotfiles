@@ -30,11 +30,20 @@ fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gclone-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
 
 # Extract exactly one marker-delimited function body from the managed source.
+# The guards make extraction failures loud instead of vacuous: exactly one
+# begin and one end marker must exist, and the extraction must end at the end
+# marker (a missing end marker would sweep the rest of the file in).
+begin_count="$(grep -c '^# --- gclone begin ---$' "$DOTFILES_ROOT/dot_zshrc")" || true
+end_count="$(grep -c '^# --- gclone end ---$' "$DOTFILES_ROOT/dot_zshrc")" || true
+if [[ "$begin_count" != "1" || "$end_count" != "1" ]]; then
+  fail "expected exactly one gclone marker pair in dot_zshrc (begin=$begin_count end=$end_count)"
+  exit 1
+fi
 fn_file="$fixture_home/gclone.zsh"
 awk '/^# --- gclone begin ---$/,/^# --- gclone end ---$/' \
   "$DOTFILES_ROOT/dot_zshrc" > "$fn_file"
-if ! grep -q '^gclone()' "$fn_file"; then
-  fail "gclone markers not found in dot_zshrc (extraction broke)"
+if ! grep -q '^gclone()' "$fn_file" || [[ "$(tail -n 1 "$fn_file")" != "# --- gclone end ---" ]]; then
+  fail "gclone extraction broke (function or end marker missing)"
   exit 1
 fi
 
@@ -59,6 +68,8 @@ run_gclone "scp url (.git) -> personal" 0 "$fixture_home/src/personal/bar" \
   -n git@github.com:kosako/bar.git
 run_gclone "ssh:// url -> personal" 0 "$fixture_home/src/personal/baz" \
   -n ssh://git@github.com/kosako/baz
+run_gclone "ssh:// url with port -> personal" 0 "$fixture_home/src/personal/qux" \
+  -n ssh://git@github.com:22/kosako/qux
 
 # 2. Local mapping resolves other owners (the machine-local seam for
 #    company orgs; the org name never enters this repo).
@@ -75,10 +86,15 @@ run_gclone "managed rule wins over mapping" 0 "$fixture_home/src/personal/foo" \
 run_gclone "unmapped owner aborts (no TTY)" 1 "" \
   -n https://github.com/stranger/tool
 
-# 4. A mapping that escapes ~/src is rejected (no path traversal).
-printf 'evil ../../etc\n' >> "$fixture_home/.config/dotfiles/clone-contexts.local"
+# 4. A mapping that escapes ~/src is rejected (no path traversal), and a
+#    malformed mapping line (extra fields) never resolves — it falls through
+#    to the fail-closed abort instead of cloning into "work/bad extra".
+printf 'evil ../../etc\nbad work/bad extra\n' \
+  >> "$fixture_home/.config/dotfiles/clone-contexts.local"
 run_gclone "traversal context rejected" 2 "" \
   -n https://github.com/evil/tool
+run_gclone "malformed mapping line falls through to abort" 1 "" \
+  -n https://github.com/bad/tool
 
 # 5. Existing destination aborts (never clobbers).
 mkdir -p "$fixture_home/src/personal/exists"
