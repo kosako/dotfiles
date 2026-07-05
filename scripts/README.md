@@ -297,8 +297,8 @@ chezmoi が必要(CI では version pin して導入する)。
 
 managed `~/.claude/settings.json` の rendered content を検証する。throwaway repo copy で
 capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の無条件 deny
-8 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
-足して計 9 件)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと、#93 で
+12 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
+足して計 13 件。#136 で credential-store 読取 4 件を追加)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと、#93 で
 取り込んだ global preference キーの保持を確認する。chezmoi が必要(render job)。
 
 ## test-git-signing.sh

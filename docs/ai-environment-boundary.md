@@ -180,9 +180,13 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
   profile のみ実効。dangling は doctor が report)。
 - GitHub 由来の deny は **3 tier**(#119 Phase 2 task B。専用 capability は作らない):
   - **(1) never-legit secret floor は無条件**(常時 render)。SSH 秘密鍵読取(`~/.ssh`)・
-    全 env dump(`printenv` / `env`)・GitHub Actions secret(`gh secret` / `gh api *secrets*`)は
-    誰も Claude に正規に頼まず、deny は Claude の Bash tool にしか効かない(人間のターミナル
-    非影響)ので、`enforceAiSandbox` を待たず常時 deny する(personal で今日 live)。
+    credential-store 読取(`~/.aws` / `~/.config/gh` の OAuth token / `~/.netrc` /
+    `~/.codex/auth.json`。#136)・全 env dump(`printenv` / `env`)・GitHub Actions secret
+    (`gh secret` / `gh api *secrets*`)は誰も Claude に正規に頼まず、deny は Claude の
+    tool call にしか効かない(人間のターミナル非影響)ので、`enforceAiSandbox` を待たず
+    常時 deny する(personal で今日 live)。file 系は **Read 側 deny を主軸**とし、Bash
+    matcher の path 列挙はしない(等価経路で迂回できる leaky steering。tier 全体が
+    boundary でない点は下記)。
   - **(2)** `gateGitHubMcp`(上記の MCP deny)。
   - **(3) human-legit な write は `enforceAiSandbox` に相乗り**。main / master への直 push と
     `.env` 読取(`cat *.env*` / `Read(//**/.env*)`)を deny、release 操作と branch protection /

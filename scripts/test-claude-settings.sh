@@ -124,17 +124,19 @@ fi
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
-#    (8 entries: ssh-key / env-dump / gh-secret reads) and gateGitHubMcp is ON
-#    (Phase 2), so the deny is exactly those 9 (the floor present even with
-#    enforceAiSandbox off is the core of Phase 2 task B) with no ask block. We pin
-#    the EXACT ordered array, not length + a few representatives: this is a
-#    security-boundary regression test, so it must catch a floor matcher being
-#    swapped for another (which would keep the length at 9).
-expected_deny=$'Read(~/.ssh/**)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nmcp__github'
+#    (12 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
+#    credential-store files — gh OAuth token, AWS keys, ~/.netrc, Codex
+#    auth.json — joined in #136) and gateGitHubMcp is ON (Phase 2), so the deny
+#    is exactly those 13 (the floor present even with enforceAiSandbox off is
+#    the core of Phase 2 task B) with no ask block. We pin the EXACT ordered
+#    array, not length + a few representatives: this is a security-boundary
+#    regression test, so it must catch a floor matcher being swapped for
+#    another (which would keep the length at 13).
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nmcp__github'
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
 ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "absent" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + github MCP (9, ordered), no ask (enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + github MCP (13, ordered), no ask (enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
