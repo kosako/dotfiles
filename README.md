@@ -27,7 +27,7 @@ personal project として段階的に作っている。現時点の実装状況
 | policy / capabilities / profile 検証(fail-closed) | 実装済み |
 | environmentKind による capability 制約の強制 | 実装済み |
 | supply-chain(git credential scan / npm hardening / Corepack policy) | 実装済み・実機適用済み(#91) |
-| project templates / mise runtime | 実装済み・実機適用済み(mise) |
+| mise runtime | 実装済み・実機適用済み |
 | doctor / preflight(report-only の健康診断) | 実装済み |
 | software catalog + install action(dry-run 既定) | 実装済み・運用中(#53) |
 | private backup(age 暗号化・verify/restore) | 実装済み・運用中(#60) |

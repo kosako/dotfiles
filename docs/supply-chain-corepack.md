@@ -1,6 +1,6 @@
 # Supply Chain: Corepack
 
-`supply-chain/corepack` module の方針。Corepack の availability と `packageManager` field の扱いを `corepackMode` capability で段階制御する。
+`supply-chain-corepack` module の方針。Corepack の availability と `packageManager` field の扱いを `corepackMode` capability で段階制御する。
 
 ## Mode
 
@@ -28,7 +28,7 @@ corepack enable
 ```
 
 - pin は project 側の責務。dotfiles は global に package manager を強制しない。
-- exact pin の例は `templates/project/node/package.json` にある。
+- exact pin の例: `"packageManager": "pnpm@10.12.1"`(range 指定ではなく exact version にする)。
 - range 指定や hash なしの曖昧な pin は避け、exact version を使う。
 
 ## update policy との関係

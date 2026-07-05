@@ -142,7 +142,7 @@ fixture は一時 directory に作り、実際の home や global Git config に
 - 期待する hardening 設定(`ignore-scripts=true` など)が定義されていること。
 - token、registry 設定が含まれないこと。
 - `.chezmoiignore` が module の `paths:` からループ生成されていること。
-- `.chezmoiignore` が repo 管理用 file(README、docs、scripts、templates など)を home に apply しないこと。
+- `.chezmoiignore` が repo 管理用 file(README、docs、scripts など)を home に apply しないこと。
 - modules.yaml の宣言で `.npmrc` が `npmHardeningMode=enforce` のみ、mise config が `enableRuntimeManagement=true` のみで管理されること。
 - template の設定値と `doctor.sh` の enforce 期待値が一致していること。
 

@@ -1,6 +1,6 @@
 # Supply Chain: npm
 
-`supply-chain/npm` module の方針。npm 経由の supply-chain 攻撃(install script、typosquatting、公開直後の悪性 version)への防御を `npmHardeningMode` capability で段階制御する。
+`supply-chain-npm` module の方針。npm 経由の supply-chain 攻撃(install script、typosquatting、公開直後の悪性 version)への防御を `npmHardeningMode` capability で段階制御する。
 
 ## Mode
 
@@ -10,7 +10,7 @@ report  ~/.npmrc は管理しない。doctor が現在の npm config を表示�
 enforce chezmoi が ~/.npmrc を管理し、hardening 設定を出力する。
 ```
 
-- `report` / `off` では `~/.npmrc` は chezmoi の管理対象外になる(既存 `.npmrc` を上書きしない)。この gate は `supply-chain/npm` module の `paths:` / `requires:` 宣言(`.chezmoidata/modules.yaml`)から `.chezmoiignore` に生成される。
+- `report` / `off` では `~/.npmrc` は chezmoi の管理対象外になる(既存 `.npmrc` を上書きしない)。この gate は `supply-chain-npm` module の `paths:` / `requires:` 宣言(`.chezmoidata/modules.yaml`)から `.chezmoiignore` に生成される。
 - `enforce` は現在 `personal` profile のみ。work 系は `report` で、会社側の npm 設定を壊さない。
 
 ## enforce 時の `~/.npmrc`

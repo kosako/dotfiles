@@ -150,7 +150,7 @@ capability を 1 つ追加するときに触る場所(fail-closed の意図的�
 ## capability → 実装の gating 方式(規範)
 
 capability が実装を gate する方式は **原則 requires 方式**(module の `requires:` で
-path ごと管理対象を gate。`runtime` / `git-signing` / `supply-chain/npm` が例)。
+path ごと管理対象を gate。`runtime` / `git-signing` / `supply-chain-npm` が例)。
 ファイル自体は常に管理し**中身だけ**を capability で分岐させたい場合のみ、テンプレート内
 分岐を使ってよい(`claude-settings` / `ssh-1password` が例)。その場合は capability true
 かつ module inactive の組み合わせを doctor が dangling として警告する section を必ず併設する。

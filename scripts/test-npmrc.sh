@@ -68,7 +68,7 @@ fi
 
 check_file_contains "ignore generated from module paths" "$CHEZMOIIGNORE" 'range $module.paths'
 
-for entry in README.md AGENTS.md LICENSE docs scripts templates worklog; do
+for entry in README.md AGENTS.md LICENSE docs scripts worklog; do
   check_file_has_line "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
 done
 
@@ -89,7 +89,7 @@ check_module_gate() {
 }
 
 check_module_gate ".npmrc managed only with npmHardeningMode=enforce" \
-  "supply-chain/npm" ".npmrc" "npmHardeningMode enforce"
+  "supply-chain-npm" ".npmrc" "npmHardeningMode enforce"
 check_module_gate "mise config managed only with enableRuntimeManagement" \
   "runtime" ".config/mise" "enableRuntimeManagement true"
 
@@ -208,7 +208,7 @@ else
     status=1
   fi
 
-  # report: the supply-chain/npm module requires enforce, so ~/.npmrc must
+  # report: the supply-chain-npm module requires enforce, so ~/.npmrc must
   # leave the managed set entirely (not render as an empty file).
   flip_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-flip.XXXXXX")"
   tmp_roots+=("$flip_root")

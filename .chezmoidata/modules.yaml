@@ -5,22 +5,20 @@ modules:
     description: directory convention に基づく Git identity 分離。
     paths:
       - .gitconfig
-  supply-chain/git:
+  supply-chain-git:
     description: Git credential 漏洩防止と remote URL 検査。
-  supply-chain/npm:
+  supply-chain-npm:
     description: npm hardening の report / enforce。
     paths:
       - .npmrc
     requires:
       npmHardeningMode: enforce
-  supply-chain/corepack:
+  supply-chain-corepack:
     description: Corepack availability と packageManager policy。
   doctor:
     description: 導入後の健康診断。
   preflight:
     description: 導入前の危険検知。
-  project-templates:
-    description: 新規 repository 用テンプレート。
   runtime:
     description: mise による runtime 管理。
     paths:
