@@ -96,8 +96,10 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 - `enableGitHubIsolatedReader`(boolean): Phase 3(#131)の隔離 reader 用。**宣言のみで未配線**
   (declared, not enforced)。true でも enforcement は無く doctor が warn する。
 - GitHub 由来の deny は専用 capability を作らず **3 tier**(#119 Phase 2 task B): never-legit な
-  secret 読取(`~/.ssh` / `printenv` / `env` / `gh secret` / `gh api *secrets*`)は **無条件 deny**
-  (`enforceAiSandbox` を待たず常時)、main / master 直 push と `.env` 読取 deny + release /
+  secret 読取(`~/.ssh` と credential-store の `~/.aws` / `~/.config/gh` / `~/.netrc` /
+  `~/.codex/auth.json`(#136)/ `printenv` / `env` / `gh secret` / `gh api *secrets*`)は
+  **無条件 deny**(`enforceAiSandbox` を待たず常時)。file 系は **Read 側 deny を主軸**とし、
+  Bash matcher の path 列挙はしない(等価経路で迂回できる leaky steering。#136)。main / master 直 push と `.env` 読取 deny + release /
   branch-protection ask は **`enforceAiSandbox` に相乗り**(human-legit ゆえ常時 ON にしない)。
 - tier3 の main-push deny(`git push * main|master`)は **leaky steering**: ` main` 末尾の explicit
   形しか拾わず bare `git push` / `git push origin HEAD` / refspec(`HEAD:main`)は抜ける(Claude Code
