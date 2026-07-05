@@ -91,7 +91,7 @@ check_module_gate() {
 check_module_gate ".npmrc managed only with npmHardeningMode=enforce" \
   "supply-chain-npm" ".npmrc" "npmHardeningMode enforce"
 check_module_gate "mise config managed only with enableRuntimeManagement" \
-  "runtime" ".config/mise" "enableRuntimeManagement true"
+  "runtime" $'.config/mise\n.config/mise/config.toml' "enableRuntimeManagement true"
 
 section "consistency: doctor enforce expectations"
 

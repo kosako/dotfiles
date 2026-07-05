@@ -23,6 +23,7 @@ modules:
     description: mise による runtime 管理。
     paths:
       - .config/mise
+      - .config/mise/config.toml
     requires:
       enableRuntimeManagement: true
   shell-extra:
