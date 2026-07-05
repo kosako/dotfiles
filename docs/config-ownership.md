@@ -11,7 +11,7 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 
 | 資産 | 正本 | 配布 | 変更フロー |
 | --- | --- | --- | --- |
-| ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録**) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
+| ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録** / plugin / statusLine / tui 等の global preference) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
 | マシン固有・動的値(`~/.claude/settings.local.json`、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
@@ -30,7 +30,8 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 
 ## どこを直すか(判定)
 
-1. ハーネスの振る舞い(model / permission / hooks 登録 / sandbox)を変えたい →
+1. ハーネスの振る舞い(model / permission / hooks 登録 / sandbox / plugin /
+   statusLine 等の global preference)を変えたい →
    dotfiles の template を変更して PR。live の `~/.claude/settings.json` を直接編集
    しない(managed-wins。`chezmoi apply` で戻る)。
 2. skill / 指示文 / hook スクリプトの中身を変えたい → agent-tools。
@@ -56,9 +57,10 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
   public-safety 規約([secrets](secrets.md)、AGENTS.md)による。
 
 暗号化バックアップ(#60、[private-backup](private-backup.md))は別レイヤ: 上記の
-うち「新マシンで再現したい非 secret 設定」は `.chezmoidata/backup-paths.yaml` で
-運べる(例: `.codex/config.toml`)。ただし credential は backup にも入れない
-(`auth.json` を意図的に除外している経緯は #78)。
+うち「新マシンで再現したい、public repo に置けない private / local 設定」は
+`.chezmoidata/backup-paths.yaml` で運べる(例: `.codex/config.toml`。アーカイブは
+secret を含みうる前提で age 暗号化する)。ただし credential そのものは backup にも
+入れない(SoR は 1Password。`auth.json` を意図的に除外している経緯は #78)。
 
 ## `.chezmoiignore` への先置きはしない(検討結果)
 
