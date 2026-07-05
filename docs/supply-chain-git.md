@@ -1,6 +1,6 @@
 # Supply Chain: Git
 
-`supply-chain/git` module の方針。Git 経由の credential 漏洩を防ぐ。
+`supply-chain-git` module の方針。Git 経由の credential 漏洩を防ぐ。
 
 ## 二段構え
 

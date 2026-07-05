@@ -1,6 +1,6 @@
 # Supply Chain: Corepack
 
-`supply-chain/corepack` module の方針。Corepack の availability と `packageManager` field の扱いを `corepackMode` capability で段階制御する。
+`supply-chain-corepack` module の方針。Corepack の availability と `packageManager` field の扱いを `corepackMode` capability で段階制御する。
 
 ## Mode
 

@@ -197,7 +197,7 @@ make_fixture
 replace_once "$fixture/.chezmoidata/modules.yaml" "      npmHardeningMode: enforce" "      npmHardeningMode: strict"
 run_fail_contains \
   "rejects invalid enum in module requires" \
-  "module requires enum invalid: supply-chain/npm: npmHardeningMode=strict" \
+  "module requires enum invalid: supply-chain-npm: npmHardeningMode=strict" \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture
