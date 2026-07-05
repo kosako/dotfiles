@@ -19,6 +19,7 @@ secret store / local private config
 ```
 
 AI agent の安全境界は `dotfiles` に置く。AI agent の振る舞いを作る素材は別 project に置く。
+運用時に「どこを直すのが正本か」を 1 枚で引く早見表は [config-ownership](config-ownership.md)。
 
 ## dotfiles が持つもの
 
