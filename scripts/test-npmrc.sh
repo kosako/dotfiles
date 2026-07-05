@@ -68,7 +68,7 @@ fi
 
 check_file_contains "ignore generated from module paths" "$CHEZMOIIGNORE" 'range $module.paths'
 
-for entry in README.md AGENTS.md LICENSE docs scripts templates worklog; do
+for entry in README.md AGENTS.md LICENSE docs scripts worklog; do
   check_file_has_line "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
 done
 

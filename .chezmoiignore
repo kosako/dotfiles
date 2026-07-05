@@ -10,7 +10,6 @@ AGENTS.md
 LICENSE
 docs
 scripts
-templates
 worklog
 
 {{/* User-local Claude files are never tracked. settings.local.json holds

@@ -8,7 +8,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 - **global(baseline)**: project の外でも動く必要があるグローバル CLI のための *最小 baseline runtime* だけを宣言する。具体例: npm global tool(例 `@openai/codex`)は node を、`go install` 由来の tool(例 `goreleaser`)は go を、どの project にいなくても要求する。これらが動く下地を出すのが global の役割。なお `claude`(Claude Code)は npm-global ではなく native installer で `~/.local/bin` に入れるため、この node baseline には依存しない(`docs/supply-chain-npm.md`)。
   - baseline は `lts` / major 線で宣言する(例: `node = "lts"`、`go = "1.26"`)。**再現性のための exact pin ではない**。
-- **project(override)**: 各 project の `.mise.toml` が **exact version** で pin し、global baseline を override する(例: `templates/project/python/.mise.toml`)。再現性の責務は project 側にある。
+- **project(override)**: 各 project の `.mise.toml` が **exact version** で pin し、global baseline を override する(例: `[tools]` に `python = "3.13.5"` のような exact pin)。再現性の責務は project 側にある。
 
 この分界は意図的な決定(2026-06-18、#54)。以前は「global に tool version を置かない」方針だったが、global CLI(npm global / go install 由来)が project 外でも runtime を要するため、global に最小 baseline を置く形へ改めた。global は「再現性 pin の置き場」ではなく「グローバルツールの稼働基盤」と位置づける。
 

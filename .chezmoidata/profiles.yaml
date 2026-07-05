@@ -9,7 +9,6 @@ profiles:
       - supply-chain/corepack
       - doctor
       - preflight
-      - project-templates
       - runtime
       - shell-extra
       - ssh-1password
@@ -90,7 +89,6 @@ profiles:
       - supply-chain/corepack
       - doctor
       - preflight
-      - project-templates
       - direnv-policy
       - update-policy
       - ai-policy

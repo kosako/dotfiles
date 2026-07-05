@@ -28,7 +28,7 @@ corepack enable
 ```
 
 - pin は project 側の責務。dotfiles は global に package manager を強制しない。
-- exact pin の例は `templates/project/node/package.json` にある。
+- exact pin の例: `"packageManager": "pnpm@10.12.1"`(range や hash なし指定にしない)。
 - range 指定や hash なしの曖昧な pin は避け、exact version を使う。
 
 ## update policy との関係
