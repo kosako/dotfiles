@@ -132,7 +132,7 @@ run_fail_contains() {
 fixture=""
 make_fixture
 run_ok "validates all profiles" "$fixture/scripts/validate-policy.sh" --all
-run_ok_contains "lists profiles" "work-dev" "$fixture/scripts/validate-policy.sh" --list-profiles
+run_ok_contains "lists profiles" "work" "$fixture/scripts/validate-policy.sh" --list-profiles
 
 make_fixture
 replace_once "$fixture/.chezmoidata/profiles.yaml" "      corepackMode: report" "      corepackMode: off"

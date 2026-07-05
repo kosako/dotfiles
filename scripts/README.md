@@ -241,7 +241,7 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
 - `--identity-command`(op seam)経由でも verify できること。
 - manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
-- 拒否 profile(work-minimal)では backup が実行拒否し、アーカイブを書かないこと。
+- 拒否 profile(work)では backup が実行拒否し、アーカイブを書かないこと。
 - 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
 - recipient 未指定は usage error(exit 2)になること。
 - restore が dry-run では何も書かず、`--apply` で原文どおり復元すること。
@@ -262,7 +262,7 @@ profile を解決できない・未知の profile・`true` 以外の値はすべ
 検証内容:
 
 - `profile_allows_secrets_access` が `allowSecretsAccess=true` の profile(personal)だけ許可し、
-  `false` の profile(work-minimal / work-dev)と未知 profile を拒否すること(vacuously true にしない)。
+  `false` の profile(work)と未知 profile を拒否すること(vacuously true にしない)。
 - chezmoi が見つからないとき `resolve_runtime_profile` / `require_secrets_access` が fail-closed で
   拒否すること(default profile に倒さない)。
 - chezmoi が profile を解決できる環境では、gate の判定が profiles.yaml の

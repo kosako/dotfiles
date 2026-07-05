@@ -27,7 +27,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 `enableRuntimeManagement` が制御するのは **mise config file の chezmoi 管理**であって、runtime を実際に install することではない。
 
-- `work-dev` は `enableRuntimeManagement=true`(config 管理は可)だが `installPackages=false`。実際の `mise install`(runtime を取得する install 操作)は **本人の明示手動操作に限定**し、repo が work 環境で自動実行することはしない。
+- `work` は `enableRuntimeManagement=true`(config 管理は可)だが `installPackages=false`。実際の `mise install`(runtime を取得する install 操作)は **本人の明示手動操作に限定**し、repo が work 環境で自動実行することはしない。
 - environmentKind の制約上、work / client / agent では install 系 capability が false 必須(`docs/policy-model.md`)。mise config を管理することと runtime を install することは別レイヤだと理解する。
 
 ## capability との対応

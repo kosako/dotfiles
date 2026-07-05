@@ -62,19 +62,24 @@ else
   miss "preflight must exit 0 with existing shell files"
 fi
 
-# 3. The same files under a profile without shell-extra (work-minimal) are
-#    left-as-is items, not replace warnings.
-if pf_out="$(HOME="$shell_home" "$SCRIPT_DIR/preflight.sh" work-minimal 2>&1)"; then
-  if grep -Fq "not managed for profile work-minimal (left as-is)" <<< "$pf_out" \
-    && ! grep -Fq "apply (shell-extra) replaces it" <<< "$pf_out"; then
-    pass "unmanaged profile: existing shell files are left-as-is items"
+# 3. A path whose module the profile does not carry is a left-as-is item,
+#    not a replace warning. work has no ssh-1password module, so an existing
+#    ~/.ssh/config exercises the unmanaged branch (shell files are managed by
+#    work since the #146 profile merge, so they no longer fit this case).
+unmanaged_home="$fixture_home/unmanaged"
+mkdir -p "$unmanaged_home/.ssh"
+printf 'Host canary-host\n' > "$unmanaged_home/.ssh/config"
+if pf_out="$(HOME="$unmanaged_home" "$SCRIPT_DIR/preflight.sh" work 2>&1)"; then
+  if grep -Fq "not managed for profile work (left as-is)" <<< "$pf_out" \
+    && ! grep -Fq "apply (ssh-1password) replaces it" <<< "$pf_out"; then
+    pass "unmanaged module path: existing ssh config is a left-as-is item"
   else
     printf '%s\n' "$pf_out" >&2
-    miss "unmanaged profile must not warn about replacing shell files"
+    miss "unmanaged module path must not warn about replacing ssh config"
   fi
 else
   printf '%s\n' "$pf_out" >&2
-  miss "preflight must exit 0 for work-minimal"
+  miss "preflight must exit 0 for work"
 fi
 
 # 4. ssh-1password apply impact: an existing ~/.ssh/config warns with the

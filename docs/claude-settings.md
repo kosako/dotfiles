@@ -63,7 +63,7 @@ permission 承認は対象外。
 
 `claude-settings` module(`.chezmoidata/modules.yaml`)が `.claude` /
 `.claude/settings.json` を宣言し、`personal` profile にのみ登録する。`.chezmoiignore` の
-module loop が、module を持たない profile(work-minimal / work-dev)では `.claude` を
+module loop が、module を持たない profile(work)では `.claude` を
 **ディレクトリごと** ignore する。`scripts/test-render.sh` が profile 別の managed set で
 この gate を回帰固定している。
 
