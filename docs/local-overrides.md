@@ -93,6 +93,17 @@ GitHub injection 防御(epic #119)の trust 基点の local 値は、managed fil
   `baseline present/absent: .config/dotfiles/github-trust.local` として表示し、中身=login /
   id は読まない。injection-guard section にも置き場ポインタを出す)。
 
+## clone context mapping(#177)
+
+`gclone`([directory-convention](directory-convention.md))の owner → context 対応の
+local 値は、managed file に焼かず **`~/.config/dotfiles/clone-contexts.local`**
+(chezmoi 管理外・非コミット)に置く。会社 org 名を public repo に入れないための seam。
+
+- 行形式: `<owner> <context-path>`(例: `<会社org> work/<会社org>`)。`#` 行はコメント。
+- 共通原則どおり managed 側はこの file が無くても壊れない(未マッチは対話確認 or
+  fail-closed 中断に倒れる)。
+- **`backup-paths.yaml`(category `git`)に載せ**、暗号化バックアップ(#60)の対象にする。
+
 ## agent-tools の checkout path(#73)
 
 `dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`

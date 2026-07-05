@@ -58,6 +58,9 @@ jobs:
       - name: zsh syntax check (managed shell files)
         run: zsh -n dot_zshenv dot_zshrc dot_zprofile
 
+      - name: gclone helper tests
+        run: ./scripts/test-gclone.sh
+
       - name: shellcheck (warning and above)
         run: shellcheck -S warning scripts/*.sh
 
