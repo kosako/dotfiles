@@ -42,20 +42,18 @@ else
 fi
 
 # 2. profile_installs_source: personal installs every installable source;
-#    work-minimal / work-dev install none (installPackages/GuiApps are false).
+#    work installs none (installPackages/GuiApps are false).
 for src in brew_formula npm_global go_install brew_cask mas; do
   if profile_installs_source personal "$src"; then
     pass "personal installs $src"
   else
     miss "personal should install $src"
   fi
-  for denied in work-minimal work-dev; do
-    if profile_installs_source "$denied" "$src"; then
-      miss "$denied must not install $src"
-    else
-      pass "$denied does not install $src"
-    fi
-  done
+  if profile_installs_source work "$src"; then
+    miss "work must not install $src"
+  else
+    pass "work does not install $src"
+  fi
 done
 
 # 3. Fail-closed: unknown profile and manual source never install.
@@ -105,13 +103,13 @@ fi
 
 # 5b. A resolved work profile plans zero installs (everything gates out before
 #     any probing, so this is deterministic and has no side effects).
-fake_chezmoi '{"profile":"work-minimal"}' 0
+fake_chezmoi '{"profile":"work"}' 0
 if out="$(PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)"; then
   if grep -Fq "dry-run: 0 would be installed" <<< "$out"; then
-    pass "work-minimal plans zero installs (gated out)"
+    pass "work plans zero installs (gated out)"
   else
     printf '%s\n' "$out" >&2
-    miss "work-minimal should plan zero installs"
+    miss "work should plan zero installs"
   fi
 else
   printf '%s\n' "$out" >&2

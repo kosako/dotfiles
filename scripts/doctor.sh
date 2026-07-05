@@ -311,7 +311,7 @@ fi
 section "managed-path orphans"
 # A file that carries the managed-by header but whose path is not
 # managed for this profile is likely left over from another profile
-# (e.g. ~/.npmrc after switching personal -> work-minimal). Report
+# (e.g. ~/.npmrc after switching personal -> work). Report
 # only; nothing is removed. Only the header line is inspected.
 orphan_count=0
 while IFS= read -r module; do

@@ -68,7 +68,7 @@ secret 全般は op + direnv で供給してよいが、**Git identity は対象
 
 direnv には 2 つの用途がある。本 doc が扱うのは後者(secret 供給)だけ。
 
-- **project env(PATH / runtime 切り替え等、secret 無関係)**: `enableDirenv` capability が制御する([runtime](runtime.md))。`work-dev` のように `enableDirenv=true` かつ `allowSecretsAccess=false` の構成があり得る(direnv は使うが secret 注入はしない)。
+- **project env(PATH / runtime 切り替え等、secret 無関係)**: `enableDirenv` capability が制御する([runtime](runtime.md))。`work` のように `enableDirenv=true` かつ `allowSecretsAccess=false` の構成があり得る(direnv は使うが secret 注入はしない)。
 - **secret 供給**: 本 doc の規約。`allowSecretsAccess` で別途 gate する。
 
 `direnv allow` / `mise trust` は自動化しない([runtime](runtime.md))。direnv の有効化と secret 供給の許可は独立した判断とする。

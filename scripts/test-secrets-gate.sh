@@ -20,19 +20,17 @@ miss() {
 }
 
 # 1. profile_allows_secrets_access: only allowSecretsAccess=true profiles
-#    pass. personal grants it; work-minimal / work-dev do not.
+#    pass. personal grants it; work does not.
 if profile_allows_secrets_access personal; then
   pass "personal grants secret access"
 else
   miss "personal should grant secret access"
 fi
-for denied in work-minimal work-dev; do
-  if profile_allows_secrets_access "$denied"; then
-    miss "$denied must not grant secret access"
-  else
-    pass "$denied denied secret access"
-  fi
-done
+if profile_allows_secrets_access work; then
+  miss "work must not grant secret access"
+else
+  pass "work denied secret access"
+fi
 
 # 2. An unknown profile must not pass (fail-closed, never vacuously true).
 if profile_allows_secrets_access no-such-profile; then
@@ -108,11 +106,11 @@ else
 fi
 
 # 4c. Healthy chezmoi resolving a denied profile -> refused.
-fake_chezmoi '{"profile":"work-minimal"}' 0
+fake_chezmoi '{"profile":"work"}' 0
 if with_fixture require_secrets_access; then
-  miss "gate must refuse for resolved work-minimal profile"
+  miss "gate must refuse for resolved work profile"
 else
-  pass "gate refuses for resolved work-minimal profile"
+  pass "gate refuses for resolved work profile"
 fi
 
 # 4d. Healthy chezmoi but no profile key -> fail closed (empty profile).

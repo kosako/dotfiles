@@ -131,8 +131,8 @@ git diff --check
 `preflight` / `doctor` を変更した場合:
 
 ```sh
-./scripts/preflight.sh work-minimal
-./scripts/doctor.sh work-minimal
+./scripts/preflight.sh work
+./scripts/doctor.sh work
 ```
 
 Git config source(`dot_gitconfig`)を変更した場合:

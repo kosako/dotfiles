@@ -95,7 +95,7 @@
 ## 管理対象と gate
 
 - `shell-extra` module の `paths:` に `.zshenv` / `.zshrc` / `.zprofile` / `.config/starship.toml` を宣言している(`.chezmoidata/modules.yaml`)。
-- `shell-extra` module を持つ profile(`personal` / `work-dev`)でのみ管理対象になる。持たない `work-minimal` ではいずれも `.chezmoiignore` の生成によって除外され、既存ファイルはそのまま残る。
+- `shell-extra` module を持つ profile(`personal` / `work`)でのみ管理対象になる。持たない profile ではいずれも `.chezmoiignore` の生成によって除外され、既存ファイルはそのまま残る。
 
 ## local override(repo に入れない)
 

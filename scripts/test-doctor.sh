@@ -21,23 +21,23 @@ status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
 
-# A leftover enforce-mode .npmrc, as after switching personal -> work-minimal.
+# A leftover enforce-mode .npmrc, as after switching personal -> work.
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n' \
   > "$fixture_home/.npmrc"
 
 orphan_marker="orphan from another profile"
 
-# work-minimal does not manage .npmrc (npmHardeningMode=report): orphan.
-if ! output="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work-minimal 2>&1)"; then
+# work does not manage .npmrc (npmHardeningMode=report): orphan.
+if ! output="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
   printf '%s\n' "$output" >&2
-  fail "test failed: doctor must stay exit 0 for work-minimal"
+  fail "test failed: doctor must stay exit 0 for work"
   status=1
 fi
 if grep -F "$orphan_marker" <<< "$output" | grep -Fq ".npmrc"; then
-  ok "test passed: orphan .npmrc reported for work-minimal"
+  ok "test passed: orphan .npmrc reported for work"
 else
   printf '%s\n' "$output" >&2
-  fail "test failed: orphan .npmrc not reported for work-minimal"
+  fail "test failed: orphan .npmrc not reported for work"
   status=1
 fi
 
@@ -57,7 +57,7 @@ fi
 
 # A file without the managed-by header is never an orphan.
 printf 'registry-noise=1\n' > "$fixture_home/.npmrc"
-if HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work-minimal 2>&1 | grep -Fq "$orphan_marker"; then
+if HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work 2>&1 | grep -Fq "$orphan_marker"; then
   fail "test failed: headerless file must not be reported as orphan"
   status=1
 else

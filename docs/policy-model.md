@@ -176,8 +176,7 @@ corepackMode:
 ## Initial Profiles
 
 - `personal`: 個人Mac向け。副作用のある capability は明示的に許可する。
-- `work-minimal`: 会社Mac向け最小構成。install 系は無効。
-- `work-dev`: 会社Mac向け開発構成。runtime / shell は許可し、install 系は無効。
+- `work`: 会社Mac向け開発構成。runtime / shell は許可し、install 系は無効(#146 で work-minimal / work-dev を統合)。
 
 ## Core に入れてよいもの
 

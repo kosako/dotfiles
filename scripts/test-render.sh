@@ -55,10 +55,7 @@ expected_managed() {
     personal)
       printf '%s\n' .claude .claude/settings.json .config .config/git .config/git/signing.gitconfig .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .npmrc .ssh .ssh/config .zprofile .zshenv .zshrc
       ;;
-    work-minimal)
-      printf '%s\n' .config .gitconfig
-      ;;
-    work-dev)
+    work)
       printf '%s\n' .config .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .zprofile .zshenv .zshrc
       ;;
     *)
@@ -140,9 +137,9 @@ section "non-interactive init"
 
 make_root
 if output="$(env HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME="$root/data" \
-  chezmoi init --source "$DOTFILES_ROOT" --promptString profile=work-minimal 2>&1)"; then
+  chezmoi init --source "$DOTFILES_ROOT" --promptString profile=work 2>&1)"; then
   config_file="$root/config/chezmoi/chezmoi.toml"
-  if grep -Fxq 'profile = "work-minimal"' "$config_file"; then
+  if grep -Fxq 'profile = "work"' "$config_file"; then
     ok "test passed: non-interactive init writes the chosen profile"
   else
     fail "test failed: init config does not contain the chosen profile"

@@ -220,11 +220,11 @@ else
 fi
 
 # 9. Runtime gate: a denied profile refuses to back up.
-set_profile work-minimal
+set_profile work
 if run backup --out "$fixture_home/out/denied.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
   miss "backup must refuse under a denied profile"
 else
-  pass "backup refuses under a denied profile (work-minimal)"
+  pass "backup refuses under a denied profile (work)"
 fi
 [[ -f "$fixture_home/out/denied.age" ]] && miss "denied backup must not write an archive"
 set_profile personal
@@ -341,11 +341,11 @@ else
 fi
 
 # 18. Runtime gate: a denied profile refuses to restore.
-set_profile work-minimal
+set_profile work
 if run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply >/dev/null 2>&1; then
   miss "restore must refuse under a denied profile"
 else
-  pass "restore refuses under a denied profile (work-minimal)"
+  pass "restore refuses under a denied profile (work)"
 fi
 set_profile personal
 
