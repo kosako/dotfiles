@@ -46,6 +46,20 @@ Git config では `user.useConfigOnly = true` を使い、known directory 外で
 
 既存 host で `~/.config` が 0755 の場合、初回 apply で 0700 に変わる。これは仕様。`chezmoi diff` に mode 変更として表示され、`preflight` も apply 前にこの差分を warning で知らせる。0700 を望まない場合は、その host で apply しないか、profile 構成を見直す。
 
+## clone(gclone)
+
+新しい repo は managed な `~/.zshrc` の `gclone <git-url>` で clone する(#177)。clone 先の
+context を fail-closed に解決して `~/src/<context>/<repo>` に置くので、配置を手で考えない:
+
+1. `github.com/kosako` → `personal`(managed ルール)
+2. 非追跡の `~/.config/dotfiles/clone-contexts.local`(`<owner> <context-path>` 行形式)の
+   マッチ。会社 org はここ(各マシンの local)にだけ書く([local-overrides](local-overrides.md))
+3. どれにも当たらなければ TTY で確認、非対話なら中断(黙って既定に倒さない)
+
+ghq は不採用(2026-07-05、#177): `<root>/<host>/<owner>/<repo>` layout の強制がこの
+context 階層(identity の `includeIf gitdir` が依存)と衝突し、remote を持たない sandbox を
+扱えないため。
+
 ## 許容された非標準配置
 
 標準は上記の `~/src/<context>/` だが、project を `~/src` の外(例: 単一の作業 directory に

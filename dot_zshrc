@@ -198,6 +198,86 @@ claude-update() {
   command -v claude >/dev/null 2>&1 && claude --version
 }
 
+# Clone into the directory convention (~/src/<context>/<repo>, #140) without
+# deciding placement by hand (#177). Context resolution is fail-closed:
+#   1. github.com/kosako -> personal (managed rule; the owner name is already
+#      public in this repo, same stance as the hasconfig identity rule, #52)
+#   2. ~/.config/dotfiles/clone-contexts.local — "<owner> <context-path>" lines
+#      (machine-local, never committed: company org names stay out of this
+#      public repo; see docs/local-overrides.md)
+#   3. no match: ask on a TTY, abort otherwise (never a silent default)
+# -n resolves and prints the destination without cloning (used by the test).
+# --- gclone begin ---
+gclone() {
+  emulate -L zsh
+  local dry=0
+  if [[ "${1-}" == "-n" ]]; then dry=1; shift; fi
+  local url="${1-}"
+  if [[ -z "$url" ]]; then
+    print -u2 -- "usage: gclone [-n] <git-url>"
+    return 2
+  fi
+  local rest host owner repo
+  case "$url" in
+    git@*:*/*)     rest="${url#git@}";       host="${rest%%:*}"; rest="${rest#*:}" ;;
+    ssh://git@*/*) rest="${url#ssh://git@}"; host="${rest%%/*}"; rest="${rest#*/}" ;;
+    https://*/*)   rest="${url#https://}";   host="${rest%%/*}"; rest="${rest#*/}" ;;
+    *)
+      print -u2 -- "gclone: unsupported url (https / ssh:// / git@host:owner/repo): $url"
+      return 2
+      ;;
+  esac
+  owner="${rest%%/*}"
+  repo="${rest#*/}"
+  repo="${repo%/}"
+  repo="${repo%.git}"
+  if [[ -z "$host" || -z "$owner" || -z "$repo" || "$repo" == */* || "$rest" != */* ]]; then
+    print -u2 -- "gclone: cannot parse owner/repo from: $url"
+    return 2
+  fi
+  local ctx=""
+  local map="$HOME/.config/dotfiles/clone-contexts.local"
+  if [[ "$host" == "github.com" && "$owner" == "kosako" ]]; then
+    ctx="personal"
+  elif [[ -r "$map" ]]; then
+    local m_owner m_ctx
+    while read -r m_owner m_ctx; do
+      [[ -z "$m_owner" || "$m_owner" == \#* ]] && continue
+      if [[ "$m_owner" == "$owner" ]]; then
+        ctx="$m_ctx"
+        break
+      fi
+    done < "$map"
+  fi
+  if [[ -z "$ctx" ]]; then
+    if [[ -t 0 && -t 2 ]]; then
+      print -u2 -- "gclone: no context rule for '$owner' ($host)."
+      print -u2 -- "  convention: personal | work/<org> | client/<name> | sandbox (docs/directory-convention.md)"
+      print -u2 -n -- "  context path (empty aborts): "
+      read -r ctx || ctx=""
+    fi
+    if [[ -z "$ctx" ]]; then
+      print -u2 -- "gclone: aborted — add \"$owner <context-path>\" to $map, or answer interactively"
+      return 1
+    fi
+  fi
+  if [[ "$ctx" == /* || "$ctx" == *..* ]]; then
+    print -u2 -- "gclone: invalid context path: $ctx"
+    return 2
+  fi
+  local dest="$HOME/src/$ctx/$repo"
+  if [[ -e "$dest" ]]; then
+    print -u2 -- "gclone: destination exists: $dest"
+    return 1
+  fi
+  if (( dry )); then
+    print -r -- "$dest"
+    return 0
+  fi
+  mkdir -p -- "${dest:h}" && git clone -- "$url" "$dest"
+}
+# --- gclone end ---
+
 # Local overrides win: machine-specific PATH, tool env, secrets, keybindings.
 # Sourced before the widget-wrapping plugins so any local keybindings are wrapped.
 [ -r "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"

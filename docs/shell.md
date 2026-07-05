@@ -48,6 +48,12 @@
 - autosuggestions(履歴からゴースト表示):`→` / `End` / `Ctrl-E` で全受け入れ、`Alt-F`(または `Ctrl-→`)で 1 単語だけ受け入れ。
 - **行頭にスペース**を付けて実行したコマンドは履歴に残さない(`HIST_IGNORE_SPACE`。秘密の一回限り用。基本は op/direnv 注入で secret をインライン入力しない = [secrets](secrets.md))。履歴はマシン外に同期しない。
 
+### clone(directory convention)
+
+- `gclone <git-url>` … repo を `~/src/<context>/<repo>` に規約どおり clone する
+  (context の解決順・local mapping・ghq 不採用の経緯は
+  [directory-convention](directory-convention.md) の「clone(gclone)」)。
+
 ### 出力のコピー(AI 連携)
 
 - `Ctrl-O` … **Enter の代わりに**押すと、そのコマンドを実行しつつ「`$ コマンド` + 出力 + `[exit status]`」をクリップボードへコピーする(AI チャットに貼って相談する用途)。普段は今までどおり Enter、コピーしたいコマンドだけ Ctrl-O。`&&` 連結 / pipe / 複数行コマンドも行全体を捕捉する。
