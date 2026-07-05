@@ -73,6 +73,12 @@ doctor / preflight は標準 root の不在を中立に報告し(警告ではな
 - 個人 project と会社 project を同じ階層に置かない。
 - client project は client ごとの下位階層に分ける。
 - agent project は `~/src/agent` に分離する。
+- `~/src/sandbox` は「project 未満」の作業スペース。git 管理外の実験・企画メモを
+  置いてもよいが、消しても痛くないものに限る(企画メモの正本は外部ナレッジツール)。
+- 昇格ルール: sandbox の中身が remote 付きの git repo に育ったら、本来の context
+  (通常は `~/src/personal/<repo>`)へ移す。
+- 新規 repo のディレクトリ名は kebab-case とし、remote の repo 名に一致させる
+  (既存 repo の rename はしない)。
 - `~/src` の外(unknown directory)では Git identity が解決されず commit が fail-closed に
   なる(意図した安全側の挙動)。標準 root の不在自体は doctor が中立に報告する(警告ではない)。
   非標準配置で運用する場合の解除方法は上の「許容された非標準配置」を参照。
