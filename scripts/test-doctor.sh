@@ -64,6 +64,46 @@ else
   ok "test passed: headerless file ignored"
 fi
 
+# False-positive guard (#174): unrelated tool data under a declared
+# DIRECTORY path that merely quotes the header (Claude Code session logs,
+# paste-cache) must not be scanned at all — directory declarations are
+# .chezmoiignore gate plumbing, not managed files.
+mkdir -p "$fixture_home/.claude/projects"
+printf 'transcript quoting: Managed by chezmoi from kosako/dotfiles\n' \
+  > "$fixture_home/.claude/projects/session.jsonl"
+for fp_profile in personal work; do
+  # Capture, then grep: `doctor | grep -Fq` dies of SIGPIPE under pipefail
+  # when grep matches early and the condition reads as "no match" (#143).
+  fp_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" "$fp_profile" 2>&1)"
+  if grep -Fq "projects/session.jsonl" <<< "$fp_out"; then
+    fail "test failed: $fp_profile must not report session data under a dir declaration"
+    status=1
+  else
+    ok "test passed: session data under dir declaration ignored ($fp_profile)"
+  fi
+done
+
+# Backup "never ran" is an actionable warn only where backup can run (#174):
+# work refuses backup by design (allowSecretsAccess=false) -> neutral item;
+# personal (allowed, marker absent in the fixture) keeps the warn.
+backup_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work 2>&1)"
+if grep -Fq "no backup recorded yet" <<< "$backup_out"; then
+  fail "test failed: work must not warn about a backup it is designed to refuse"
+  status=1
+elif grep -Fq "refused for profile work by design" <<< "$backup_out"; then
+  ok "test passed: work shows the neutral backup item"
+else
+  fail "test failed: work backup line missing entirely"
+  status=1
+fi
+backup_personal_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"
+if grep -Fq "no backup recorded yet" <<< "$backup_personal_out"; then
+  ok "test passed: personal keeps the no-backup warn"
+else
+  fail "test failed: personal must warn when no backup is recorded"
+  status=1
+fi
+
 # agent-tools report-only section. Presence is always reported; running
 # status.sh is opt-in via enableAgentToolsStatus. doctor must always
 # exit 0 and never write. The fake status.sh records that it ran so the

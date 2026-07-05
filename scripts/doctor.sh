@@ -304,8 +304,12 @@ if [[ -f "$backup_marker" ]]; then
     warn "backup marker present but unreadable"
   fi
   unset -f bm
-else
+elif profile_allows_secrets_access "$profile"; then
   warn "no backup recorded yet (run private-backup.sh backup)"
+else
+  # The backup runtime gate refuses profiles without allowSecretsAccess, so
+  # "never ran" is the designed steady state here, not an actionable warning.
+  item "no backup recorded (backup requires allowSecretsAccess=true; refused for profile $profile by design)"
 fi
 
 section "managed-path orphans"
@@ -313,30 +317,25 @@ section "managed-path orphans"
 # managed for this profile is likely left over from another profile
 # (e.g. ~/.npmrc after switching personal -> work). Report
 # only; nothing is removed. Only the header line is inspected.
+# Only declared FILE paths are inspected: directory declarations are
+# .chezmoiignore gate plumbing (every managed file has its own line in
+# modules.yaml), and recursing into them swept unrelated tool data that
+# merely quotes the header — ~/.claude session logs / paste-cache — into
+# false orphans (#174).
 orphan_count=0
 while IFS= read -r module; do
   [[ -z "$module" ]] && continue
   while IFS= read -r managed_path; do
     [[ -z "$managed_path" ]] && continue
     target="$HOME/$managed_path"
-    candidates=()
-    if [[ -f "$target" ]]; then
-      candidates=("$target")
-    elif [[ -d "$target" ]]; then
-      while IFS= read -r found_file; do
-        candidates+=("$found_file")
-      done < <(find "$target" -maxdepth 3 -type f 2>/dev/null)
+    [[ -f "$target" ]] || continue
+    grep -q "Managed by chezmoi" "$target" 2>/dev/null || continue
+    if module_active_for_profile "$profile" "$module"; then
+      item "managed and active: $target"
+    else
+      orphan_count=$((orphan_count + 1))
+      warn "managed-by header but not managed for profile $profile: $target (orphan from another profile?)"
     fi
-    [[ "${#candidates[@]}" -eq 0 ]] && continue
-    for candidate in "${candidates[@]}"; do
-      grep -q "Managed by chezmoi" "$candidate" 2>/dev/null || continue
-      if module_active_for_profile "$profile" "$module"; then
-        item "managed and active: $candidate"
-      else
-        orphan_count=$((orphan_count + 1))
-        warn "managed-by header but not managed for profile $profile: $candidate (orphan from another profile?)"
-      fi
-    done
   done < <(module_paths "$module")
 done < <(known_modules)
 if [[ "$orphan_count" -eq 0 ]]; then
