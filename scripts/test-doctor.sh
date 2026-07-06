@@ -505,8 +505,10 @@ fi
 
 # GitHub injection guard report (gateGitHubMcp / enableGitHubIsolatedReader, #119).
 # gateGitHubMcp is wired (PR2: MCP deny in managed settings.json); doctor must
-# report it as enforced when active. enableGitHubIsolatedReader is Phase 3, so it
-# stays "declared, not enforced". doctor stays exit 0 (no dead capability).
+# report it as enforced when active. enableGitHubIsolatedReader is wired too
+# (#137: PreToolUse hook registration in managed settings.json); doctor reports
+# the registration plus the agent-tools-deployed body's presence (absent ->
+# fail-open no-op warn). doctor stays exit 0 (no dead capability).
 # Throwaway repo copy so the flip does not touch the real data files.
 gh_root="$fixture_home/.dotfiles-ghguard"
 mkdir -p "$gh_root/.chezmoidata"

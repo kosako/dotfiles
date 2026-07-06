@@ -284,9 +284,11 @@ else
   status=1
 fi
 
-# 8c) enableGitHubIsolatedReader=false -> no hooks key at all (the gate
-#     contract: profiles without the capability render byte-identical to the
-#     pre-#137 shape), and the file stays valid JSON.
+# 8c) enableGitHubIsolatedReader=false -> no hooks key, and the hooks key is
+#     the ONLY thing the gate adds: deleting .hooks from the capability-on
+#     render must equal the capability-off render (normalized JSON compare, so
+#     a gate that leaked any other key/content would fail — the same exact-set
+#     spirit as the deny test, without a fixture that drifts).
 reader_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-reader.XXXXXX")"
 tmp_roots+=("$reader_src")
 cp -R "$DOTFILES_ROOT" "$reader_src/src"
@@ -297,11 +299,13 @@ if ! reader_off_file="$(render_personal_settings "$reader_src/src")"; then
   fail "test failed: personal apply (enableGitHubIsolatedReader=false) did not render"
   exit 1
 fi
-if yq -p json '.' "$reader_off_file" >/dev/null 2>&1 \
-  && [[ "$(yq -p json '.hooks // "absent"' "$reader_off_file")" == "absent" ]]; then
-  ok "test passed: enableGitHubIsolatedReader=false emits no hooks key (valid JSON)"
+on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
+reader_off_norm="$(yq -p json -o json '.' "$reader_off_file")"
+if [[ "$(yq -p json '.hooks // "absent"' "$reader_off_file")" == "absent" ]] \
+  && [[ -n "$reader_off_norm" && "$on_minus_hooks" == "$reader_off_norm" ]]; then
+  ok "test passed: enableGitHubIsolatedReader=false emits no hooks key and differs from the on-render by exactly the hooks key"
 else
-  fail "test failed: enableGitHubIsolatedReader=false still emits a hooks key (or invalid JSON)"
+  fail "test failed: enableGitHubIsolatedReader=false render is not the on-render minus the hooks key (gate leaked another change, emitted hooks, or invalid JSON)"
   status=1
 fi
 
