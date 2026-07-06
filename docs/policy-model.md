@@ -93,8 +93,13 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 - `gateGitHubMcp`(boolean): managed `~/.claude/settings.json` の `permissions.deny` に
   `mcp__github` を出して GitHub MCP server を deny する。効くのは `claude-settings` module
   が active な profile だけ(今は personal)。dangling は doctor が report。
-- `enableGitHubIsolatedReader`(boolean): Phase 3(#131)の隔離 reader 用。**宣言のみで未配線**
-  (declared, not enforced)。true でも enforcement は無く doctor が warn する。
+- `enableGitHubIsolatedReader`(boolean): managed `~/.claude/settings.json` に **PreToolUse
+  hook 登録**(matcher `Bash`)を出し、raw な `gh` 読取を safe-gh 隔離 reader へ誘導する
+  (#137)。hook body(`personal-safe-gh-hook`)は agent-tools が配布し、dotfiles は絶対
+  path 参照のみ(登録=dotfiles・実体=agent-tools。path 安定は agent-tools#146 の契約)。
+  **steering / fail-open で enforcement ではない**(body 不在・非 2 exit・不正 JSON は
+  すべて tool call 続行)。効くのは `claude-settings` module が active な profile だけ。
+  dangling(module 非 active / body 不在)は doctor が report。
 - GitHub 由来の deny は専用 capability を作らず **3 tier**(#119 Phase 2 task B): never-legit な
   secret 読取(`~/.ssh` と credential-store の `~/.aws` / `~/.config/gh` / `~/.netrc` /
   `~/.codex/auth.json`(#136)/ `printenv` / `env` / `gh secret` / `gh api *secrets*`)は
@@ -109,9 +114,10 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   切り出して常時 ON にする案も、この leak ゆえ「摩擦ゼロだが保護もゼロ」になるため採らない。射程と
   限界・接続規約の正本は [ai-environment-boundary](ai-environment-boundary.md)。
 - **状態**: `gateGitHubMcp` は **personal=true**(Phase 2 で github MCP deny を live 化。
-  render→diff→実機 dry-run の検証ゲート済み)、work 系=false(`claude-settings` 非 active)。
-  `enableGitHubIsolatedReader` は全 profile false(Phase 3)。github MCP は現状未構成なので
-  deny は実質 no-op = 将来 MCP を足したとき先回りで deny する defense-in-depth。
+  render→diff→実機 dry-run の検証ゲート済み)、work=false(`claude-settings` 非 active)。
+  `enableGitHubIsolatedReader` も **personal=true**(#137 で PreToolUse hook 登録を live 化)、
+  work=false。github MCP は現状未構成なので deny は実質 no-op = 将来 MCP を足したとき
+  先回りで deny する defense-in-depth。
 
 ## dormant capability の扱い(残す基準)
 
@@ -119,8 +125,8 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 (2026-07-02 監査 + #145 で確定):
 
 1. **owner のある生きた契約**: 実装先が issue で追跡されている接続契約
-   (例: `enableGitHubIsolatedReader` → Phase 3 #131)か、roadmap 上の placeholder
-   (例: `enableAiTools`)であること。
+   (例: かつての `enableGitHubIsolatedReader` → #131 で追跡され #137 で配線済み)か、
+   roadmap 上の placeholder(例: `enableAiTools`)であること。
 2. **doctor 開示**: doctor がその「未実装 / 未配線」を warn として開示していること
    (AGENTS.md「宣言だけで何も駆動しない capability を作らない」の実体)。
 

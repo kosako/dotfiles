@@ -15,6 +15,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model / effort / public plugin / 通知 / statusLine / tui / workflow 警告抑止 等の global preference) | public repo(`dot_claude/settings.json.tmpl`) | ✅ chezmoi(**personal profile のみ**) |
 | permission ブロック(#119): secret floor の無条件 deny 12 件(`~/.ssh` 読取 / credential-store 読取 / env dump / gh secret 系)、`gateGitHubMcp` の `mcp__github` deny(personal 既定 true で計 13 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
+| hooks **登録**(#137): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。スクリプト実体は agent-tools の責務([config-ownership](config-ownership.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | personal・機密(secret を含む設定など) | `~/.claude/settings.local.json` | ❌ 非コミット・管理外 |
 | work / client の settings | 暗号化バックアップ(#60)か各マシン手設定 | ❌ public repo に生値を置かない |
 | skill / instruction(`skills/`、`agent-tools/CLAUDE.md`) | agent-tools が配布 | ❌ 別 repo の責務 |
