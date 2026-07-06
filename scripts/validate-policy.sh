@@ -413,8 +413,25 @@ validate_profile() {
     done < <(environment_kind_forbidden_capabilities "$environment_kind")
     while IFS= read -r pair; do
       [[ -z "$pair" ]] && continue
+      # The table row itself is checked fail-closed: a malformed pair or a
+      # capability/value that the schema does not know would otherwise be a
+      # silently dead constraint — the exact failure mode this cross-check
+      # exists to prevent (#45).
+      if [[ "$pair" != *=* ]]; then
+        fail "forbidden-enum row malformed for $environment_kind: '$pair' (expected capability=value)"
+        status=1
+        ek_violations=$((ek_violations + 1))
+        continue
+      fi
       enum_cap="${pair%%=*}"
       forbidden_value="${pair#*=}"
+      if [[ "$(capability_type "$enum_cap")" != "enum" ]] \
+        || ! capability_value_is_allowed "$enum_cap" "$forbidden_value"; then
+        fail "forbidden-enum row invalid for $environment_kind: $pair (not a declared enum value)"
+        status=1
+        ek_violations=$((ek_violations + 1))
+        continue
+      fi
       value="$(capability_value "$profile" "$enum_cap")"
       if [[ "$value" == "$forbidden_value" ]]; then
         fail "environmentKind $environment_kind forbids $enum_cap=$forbidden_value (profile $profile)"

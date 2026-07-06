@@ -365,15 +365,18 @@ run_fail_contains \
 
 # enum cross-check (#45): work / client / agent forbid npmHardeningMode=off
 # (report is the floor; off drops the install-script defenses). Retag
-# personal (npmHardeningMode: enforce) to work and force off to prove the
-# enum row fires with the same message shape as the boolean rows.
-make_fixture
-replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: work"
-replace_once "$fixture/.chezmoidata/profiles.yaml" "      npmHardeningMode: enforce" "      npmHardeningMode: off"
-run_fail_contains \
-  "work environmentKind forbids npmHardeningMode=off" \
-  "environmentKind work forbids npmHardeningMode=off" \
-  "$fixture/scripts/validate-policy.sh" personal
+# personal (npmHardeningMode: enforce) to each kind and force off to prove
+# the enum row fires for every constrained kind with the same message shape
+# as the boolean rows.
+for ek_kind in work client agent; do
+  make_fixture
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "      npmHardeningMode: enforce" "      npmHardeningMode: off"
+  run_fail_contains \
+    "$ek_kind environmentKind forbids npmHardeningMode=off" \
+    "environmentKind $ek_kind forbids npmHardeningMode=off" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
 
 # Only the off value is forbidden — a required value ("work must be enforce")
 # is deliberately not modeled (the committed work profile runs report for
@@ -384,6 +387,28 @@ set_capability_all "$fixture" npmHardeningMode enforce
 run_ok \
   "npmHardeningMode=enforce is allowed for every environmentKind (only off is forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
+
+# The forbidden-enum table itself is validated fail-closed: a row naming a
+# value the schema does not declare (a typo would otherwise be a silently
+# dead constraint) and a row without '=' both hard-fail. Mutate the fixture's
+# lib-policy table to prove each branch fires.
+make_fixture
+replace_once "$fixture/scripts/lib-policy.sh" \
+  "      printf '%s\\\\n' 'npmHardeningMode=off'" \
+  "      printf '%s\\\\n' 'npmHardeningMode=typo'"
+run_fail_contains \
+  "a forbidden-enum row with an undeclared value fails closed" \
+  "forbidden-enum row invalid" \
+  "$fixture/scripts/validate-policy.sh" work
+
+make_fixture
+replace_once "$fixture/scripts/lib-policy.sh" \
+  "      printf '%s\\\\n' 'npmHardeningMode=off'" \
+  "      printf '%s\\\\n' 'npmHardeningMode off'"
+run_fail_contains \
+  "a forbidden-enum row without = fails closed" \
+  "forbidden-enum row malformed" \
+  "$fixture/scripts/validate-policy.sh" work
 
 # enforceAiSandbox is a safety-hardening capability (opposite polarity to the
 # install / secret / network / AI-tool capabilities), so it must NOT be in the
