@@ -393,11 +393,13 @@ validate_profile() {
     esac
   done < "$known_caps_file"
 
-  # environmentKind cross-check: capabilities the environmentKind forbids
-  # must be false. This makes the work/client/agent/sandbox restrictions a
-  # hard invariant rather than a convention (see docs/policy-model.md).
-  # Only meaningful for a valid kind; an unknown/missing environmentKind
-  # has already failed above, and must not print "satisfied".
+  # environmentKind cross-check: boolean capabilities the environmentKind
+  # forbids must be false, and enum capabilities must not carry a forbidden
+  # value (#45: npmHardeningMode=off is below the work/client/agent floor).
+  # This makes the work/client/agent/sandbox restrictions a hard invariant
+  # rather than a convention (see docs/policy-model.md). Only meaningful for
+  # a valid kind; an unknown/missing environmentKind has already failed
+  # above, and must not print "satisfied".
   if is_allowed_environment_kind "$environment_kind"; then
     ek_violations=0
     while IFS= read -r forbidden; do
@@ -409,6 +411,34 @@ validate_profile() {
         ek_violations=$((ek_violations + 1))
       fi
     done < <(environment_kind_forbidden_capabilities "$environment_kind")
+    while IFS= read -r pair; do
+      [[ -z "$pair" ]] && continue
+      # The table row itself is checked fail-closed: a malformed pair or a
+      # capability/value that the schema does not know would otherwise be a
+      # silently dead constraint — the exact failure mode this cross-check
+      # exists to prevent (#45).
+      if [[ "$pair" != *=* ]]; then
+        fail "forbidden-enum row malformed for $environment_kind: '$pair' (expected capability=value)"
+        status=1
+        ek_violations=$((ek_violations + 1))
+        continue
+      fi
+      enum_cap="${pair%%=*}"
+      forbidden_value="${pair#*=}"
+      if [[ "$(capability_type "$enum_cap")" != "enum" ]] \
+        || ! capability_value_is_allowed "$enum_cap" "$forbidden_value"; then
+        fail "forbidden-enum row invalid for $environment_kind: $pair (not a declared enum value)"
+        status=1
+        ek_violations=$((ek_violations + 1))
+        continue
+      fi
+      value="$(capability_value "$profile" "$enum_cap")"
+      if [[ "$value" == "$forbidden_value" ]]; then
+        fail "environmentKind $environment_kind forbids $enum_cap=$forbidden_value (profile $profile)"
+        status=1
+        ek_violations=$((ek_violations + 1))
+      fi
+    done < <(environment_kind_forbidden_enum_values "$environment_kind")
     if [[ "$ek_violations" -eq 0 ]]; then
       ok "environmentKind constraints satisfied: $environment_kind"
     fi
