@@ -363,6 +363,28 @@ run_fail_contains \
   "environmentKind agent forbids" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# enum cross-check (#45): work / client / agent forbid npmHardeningMode=off
+# (report is the floor; off drops the install-script defenses). Retag
+# personal (npmHardeningMode: enforce) to work and force off to prove the
+# enum row fires with the same message shape as the boolean rows.
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: work"
+replace_once "$fixture/.chezmoidata/profiles.yaml" "      npmHardeningMode: enforce" "      npmHardeningMode: off"
+run_fail_contains \
+  "work environmentKind forbids npmHardeningMode=off" \
+  "environmentKind work forbids npmHardeningMode=off" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+# Only the off value is forbidden — a required value ("work must be enforce")
+# is deliberately not modeled (the committed work profile runs report for
+# company-npm reasons and must keep validating). enforce must also pass for
+# every kind: flip all profiles to enforce and assert --all still validates.
+make_fixture
+set_capability_all "$fixture" npmHardeningMode enforce
+run_ok \
+  "npmHardeningMode=enforce is allowed for every environmentKind (only off is forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 # enforceAiSandbox is a safety-hardening capability (opposite polarity to the
 # install / secret / network / AI-tool capabilities), so it must NOT be in the
 # environmentKind forbidden table: a restrictive kind (work) may set it true.

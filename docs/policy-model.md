@@ -57,10 +57,22 @@ environmentKind は飾りラベルではなく、capability の不変条件を�
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 
-- 表は `scripts/lib-policy.sh` の `environment_kind_forbidden_capabilities` が持つ。
+enum capability には**禁止値**の制約を同じ仕組みで当てる(#45、2026-07-07 決定)。boolean の
+「false 必須」と違い、enum は特定の 1 値だけを禁止し、残りの選択は profile に委ねる:
+
+| environmentKind | 禁止値 |
+| --- | --- |
+| work / client / agent | `npmHardeningMode=off`(floor は report。off は install-script 防御の全停止で、制限環境でこれになるのは事故のみ) |
+| personal / sandbox | (制約なし) |
+
+- 表は `scripts/lib-policy.sh` の `environment_kind_forbidden_capabilities`(boolean)と
+  `environment_kind_forbidden_enum_values`(enum 禁止値)が持つ。
 - `personal` は明示許可前提なので無制約。`agent` は profile がまだ無いが、最小権限を明示するため先行定義してある(agent profile 追加時に即発効)。
-- enum capability(`npmHardeningMode` など)への制約は今回の対象外(必要なら別 follow-up)。
-- 将来 work 等で禁止 capability を正当に許したくなった場合は、warning で迂回せず、この表自体を見直す。
+- **required 値の制約(「work は enforce 必須」)は作らない**(#45 裁定): 会社 Mac の work は
+  会社 npm 設定との兼ね合いで report 稼働([supply-chain-npm](supply-chain-npm.md))であり、
+  required にすると稼働中のマシンが hard fail する。`corepackMode` も制約対象外
+  (off は「意図的非管理」の正当な選択で、security downgrade ではない。doctor が中立報告)。
+- 将来 work 等で禁止 capability / 禁止値を正当に許したくなった場合は、warning で迂回せず、この表自体を見直す。
 
 ## Claude Code sandbox (`enforceAiSandbox`)
 
@@ -80,7 +92,8 @@ sandbox ブロックを出して Claude Code に内部適用させる」意)。�
 - **既定は全 profile で false**(配線のみ・opt-in)。有効化は allowlist を詰め、push /
   install が壊れないか検証してから cap を反転する別ステップ。
 - 将来 agent profile を足すときは「特定 kind で true 必須」(forbidden の逆の不変条件)の
-  候補になるが、enum / required 制約は別 follow-up(#45)。今は作らない。
+  候補になるが、required 制約は今は作らない(#45 で enum の**禁止値**制約のみ導入し、
+  required 方式は不採用とした。上記「environmentKind の制約」)。
 
 ## GitHub injection guard (`gateGitHubMcp` / `enableGitHubIsolatedReader`)
 

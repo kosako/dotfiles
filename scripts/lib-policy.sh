@@ -193,9 +193,10 @@ is_allowed_environment_kind() {
 # Encodes the policy that work / client / agent environments do not carry
 # elevated permissions (install, system mutation, secrets, network, AI
 # tooling) by default, and that sandbox forbids secret access. personal
-# is unconstrained; enum capabilities are out of scope here. See
-# docs/policy-model.md. agent has no profile yet; the row is defined so
-# the constraint takes effect the moment an agent profile is added.
+# is unconstrained; enum capabilities have their own forbidden-VALUE table
+# below (#45). See docs/policy-model.md. agent has no profile yet; the row
+# is defined so the constraint takes effect the moment an agent profile is
+# added.
 environment_kind_forbidden_capabilities() {
   case "$1" in
     work | client | agent)
@@ -208,6 +209,26 @@ environment_kind_forbidden_capabilities() {
       ;;
     sandbox)
       printf '%s\n' allowSecretsAccess
+      ;;
+  esac
+}
+
+# Enum capability VALUES that are forbidden for a given environmentKind
+# (#45, the enum counterpart of the boolean table above). An enum row
+# forbids exactly one value and leaves the rest to the profile: work /
+# client / agent must not turn npm supply-chain hardening fully off
+# (npmHardeningMode=off drops the install-script defenses; report is the
+# floor). A required value (e.g. "work must be enforce") is deliberately
+# NOT modeled — work runs report because of company npm constraints
+# (docs/supply-chain-npm.md), so requiring enforce would hard-fail a
+# working machine. corepackMode is deliberately unconstrained: off means
+# "intentionally unmanaged", a legitimate stance doctor reports neutrally,
+# not a security downgrade. personal / sandbox are unconstrained.
+# Output format: one capability=forbidden_value pair per line.
+environment_kind_forbidden_enum_values() {
+  case "$1" in
+    work | client | agent)
+      printf '%s\n' 'npmHardeningMode=off'
       ;;
   esac
 }

@@ -393,11 +393,13 @@ validate_profile() {
     esac
   done < "$known_caps_file"
 
-  # environmentKind cross-check: capabilities the environmentKind forbids
-  # must be false. This makes the work/client/agent/sandbox restrictions a
-  # hard invariant rather than a convention (see docs/policy-model.md).
-  # Only meaningful for a valid kind; an unknown/missing environmentKind
-  # has already failed above, and must not print "satisfied".
+  # environmentKind cross-check: boolean capabilities the environmentKind
+  # forbids must be false, and enum capabilities must not carry a forbidden
+  # value (#45: npmHardeningMode=off is below the work/client/agent floor).
+  # This makes the work/client/agent/sandbox restrictions a hard invariant
+  # rather than a convention (see docs/policy-model.md). Only meaningful for
+  # a valid kind; an unknown/missing environmentKind has already failed
+  # above, and must not print "satisfied".
   if is_allowed_environment_kind "$environment_kind"; then
     ek_violations=0
     while IFS= read -r forbidden; do
@@ -409,6 +411,17 @@ validate_profile() {
         ek_violations=$((ek_violations + 1))
       fi
     done < <(environment_kind_forbidden_capabilities "$environment_kind")
+    while IFS= read -r pair; do
+      [[ -z "$pair" ]] && continue
+      enum_cap="${pair%%=*}"
+      forbidden_value="${pair#*=}"
+      value="$(capability_value "$profile" "$enum_cap")"
+      if [[ "$value" == "$forbidden_value" ]]; then
+        fail "environmentKind $environment_kind forbids $enum_cap=$forbidden_value (profile $profile)"
+        status=1
+        ek_violations=$((ek_violations + 1))
+      fi
+    done < <(environment_kind_forbidden_enum_values "$environment_kind")
     if [[ "$ek_violations" -eq 0 ]]; then
       ok "environmentKind constraints satisfied: $environment_kind"
     fi

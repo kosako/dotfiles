@@ -41,6 +41,9 @@ unknown profile / module / capability や capability enum の不正値は policy
 - すべての定義済み capability が profile に存在すること。
 - boolean capability が `true` または `false` であること。
 - enum capability が schema の `values` に含まれること。
+- environmentKind cross-check: kind が禁止する boolean capability が `true`(#43)、または
+  enum capability が禁止値(work / client / agent の `npmHardeningMode=off`、#45)だと
+  hard fail すること。
 - module の `paths:` が home 相対であること。同一 path を複数 module が宣言していないこと。
 - module の `requires:` の capability が定義済みで、値が schema の型に適合すること。
 - `requires:` があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
