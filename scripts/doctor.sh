@@ -475,10 +475,24 @@ if module_active_for_profile "$profile" claude-settings; then
   # server-side branch protection or the Phase 3 isolated reader (#131).
   item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; real block is branch protection or the Phase 3 isolated reader (#131)"
 fi
-# enableGitHubIsolatedReader is the isolated reader (Phase 3): the capability is
-# declared but its enforcement is not wired yet.
+# enableGitHubIsolatedReader wires the isolated-reader steering (#137): the
+# managed settings.json registers the PreToolUse hook (matcher Bash) that steers
+# raw `gh` reads of untrusted GitHub content to the safe-gh reader. Steering /
+# fail-open (a missing body, non-2 exit, bad JSON or timeout all let the tool
+# call continue; only exit 2 blocks) — NOT an enforcement boundary. The hook
+# body is agent-tools-deployed (registration=dotfiles, body=agent-tools;
+# agent-tools#146 pins the path); report its presence only, contents-blind.
 if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; then
-  warn "enableGitHubIsolatedReader=true but the isolated reader is not wired yet (#119 Phase 3, #131); declared, not enforced"
+  if module_active_for_profile "$profile" claude-settings; then
+    hook_body="$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook"
+    if [[ -x "$hook_body" ]]; then
+      ok "enableGitHubIsolatedReader=true; managed settings.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present"
+    else
+      warn "enableGitHubIsolatedReader=true; PreToolUse hook registered in managed settings.json but the body is absent or non-executable ($hook_body; agent-tools sync deploys it) — fail-open no-op until deployed"
+    fi
+  else
+    warn "enableGitHubIsolatedReader=true but the claude-settings module is inactive for this profile; no managed settings carry the hook registration (dangling capability)"
+  fi
 else
   ok "enableGitHubIsolatedReader not active (false)"
 fi

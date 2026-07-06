@@ -172,12 +172,22 @@ injection** 防御(epic #119)。capability 正本は [policy-model](policy-model
 Phase 1 は **配管だけ**を land した(既定 false・render は byte-identical)。**Phase 2 で
 personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 化した(render→diff→
 実機 dry-run の検証ゲート済み。github MCP は現状未構成なので実質 no-op = defense-in-depth)。
-`enforceAiSandbox` / `enableGitHubIsolatedReader` は全 profile false 継続。有効化しても
-下記のとおり **enforcement boundary ではない**:
+**#137 で personal の `enableGitHubIsolatedReader` も true** に反転し、PreToolUse hook 登録を
+live 化した。`enforceAiSandbox` は全 profile false 継続。有効化しても下記のとおり
+**enforcement boundary ではない**:
 
 - `gateGitHubMcp`: managed `~/.claude/settings.json` の `permissions.deny` に `mcp__github`
   を足し、GitHub MCP server を丸ごと deny する(`claude-settings` module が active な
   profile のみ実効。dangling は doctor が report)。
+- `enableGitHubIsolatedReader`(#137): managed `~/.claude/settings.json` に **PreToolUse
+  hook 登録**(matcher `Bash`)を出し、raw な `gh` 読取(untrusted な GitHub content)を
+  safe-gh 隔離 reader へ誘導する。hook body(`personal-safe-gh-hook`)と safe-gh reader の
+  実体は **agent-tools が配布**し(登録=dotfiles・実体=agent-tools の 2 管轄合流点。path
+  安定は agent-tools#146 の契約。[config-ownership](config-ownership.md))、dotfiles は
+  絶対 path を参照するだけで script body を配布しない。**steering / fail-open**: body 不在
+  (exit 127)・非 2 の非ゼロ exit・不正 JSON・timeout はすべて tool call 続行(block は
+  exit 2 のみ)なので、agent-tools 未 sync の新規マシンでも登録は安全な no-op。dangling
+  (claude-settings 非 active / body 不在)は doctor が report。
 - GitHub 由来の deny は **3 tier**(#119 Phase 2 task B。専用 capability は作らない):
   - **(1) never-legit secret floor は無条件**(常時 render)。SSH 秘密鍵読取(`~/.ssh`)・
     credential-store 読取(`~/.aws` / `~/.config/gh` の OAuth token / `~/.netrc` /
@@ -205,14 +215,16 @@ personal の `gateGitHubMcp` を true** に反転し、github MCP deny を live 
   read path・別経路の MCP・subagent のギャップ(PreToolUse 不発 [anthropics/claude-code#21460])
   で迂回しうる。
 - context-gated な write(他人由来の untrusted が無い clean なときだけ comment / label /
-  PR create / push を自律許可)は **PreToolUse hook 本体**が要るため、まだ**無い**(意図的。
-  hook 本体は Phase 2 から Phase 3 [#131] へ hand-off 済み)。
+  PR create / push を自律許可)を判定する **write-gate hook** はまだ**無い**(意図的。
+  Phase 2 から Phase 3 [#131] へ hand-off 済み。#137 で登録した read-steering hook とは
+  別物で、あれは読取を safe-gh に寄せる nudge だけを担う)。
 - egress は `enforceAiSandbox` の network allowlist = **hostname best-effort**(TLS 終端せず、
   DNS exfil は素通り。上の sandbox 節)。
 - **Phase 1 には trifecta(untrusted 読取 × secret × egress)を構造的に断つ hard 層が無い**。
   hard 層 ── 隔離 reader / network egress sandbox / token の物理分離 ── は Phase 3 [#131]。
-  `enableGitHubIsolatedReader` は Phase 3 [#131] の隔離 reader 用に **宣言だけ**してある
-  (declared, not enforced。doctor が warn)。
+  `enableGitHubIsolatedReader` が配線する hook 登録(#137)も **steering であって hard 層
+  ではない**(fail-open で黙って消えうる。hard 保証は hook に通さない ── fail-closed の床は
+  `permissions.deny` の側)。
 
 **subagent への適用(deny は継承・親 hook は subagent 不発)**: `permissions.deny` は main session
 だけでなく **subagent にも継承される**(Claude Code が subagent に親会話の permission context を

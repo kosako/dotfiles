@@ -54,9 +54,11 @@ untrusted。
 
 下記の read / write 規則は **目標方針(policy intent)であって、現状の enforcement ではない**。
 Phase 1 / 2 で実際に効いているのは steering 層と、Phase 2 で live 化した secret floor
-(never-legit な secret 読取の無条件 hard deny)+ `gateGitHubMcp` の `mcp__github` deny まで。
-context-gated な write(PreToolUse hook 本体)と trifecta を断つ hard 層(隔離 reader /
-token 隔離 / OS egress)は Phase 3(#131)へ hand-off 済み(射程と限界は
+(never-legit な secret 読取の無条件 hard deny)+ `gateGitHubMcp` の `mcp__github` deny、
+それに #137 で登録した read-steering hook(raw な `gh` 読取を safe-gh へ誘導する
+`personal-safe-gh-hook`。fail-open steering)まで。context-gated な write を判定する
+write-gate hook と trifecta を断つ hard 層(隔離 reader の hard 化 / token 隔離 /
+OS egress)は Phase 3(#131)へ hand-off 済み(射程と限界は
 [ai-environment-boundary](ai-environment-boundary.md))。
 
 - **read**: 自分の本文 = allow / 他人 = metadata only(title も入れない)/ 他人のコメント =

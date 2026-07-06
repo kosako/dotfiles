@@ -513,17 +513,18 @@ mkdir -p "$gh_root/.chezmoidata"
 cp -R "$DOTFILES_ROOT/scripts" "$gh_root/scripts"
 cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
 
-# P) committed personal: gateGitHubMcp is ON (Phase 2, #119) and claude-settings
-#    is active, so doctor reports the github MCP server denied (enforced,
-#    best-effort); enableGitHubIsolatedReader is still Phase 3 -> not active.
-#    exit 0. Check both so the section can't silently drop one (dead-capability
-#    guard).
+# P) committed personal: gateGitHubMcp AND enableGitHubIsolatedReader are ON
+#    (Phase 2 / #137) and claude-settings is active, so doctor reports the
+#    github MCP server denied and the PreToolUse hook registered. The fixture
+#    HOME has no agent-tools deployment, so the hook body is absent -> the
+#    body-absent warn (fail-open no-op), and doctor stays exit 0 (report-only).
+#    Check all so the section can't silently drop one (dead-capability guard).
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
-    && grep -Fq "enableGitHubIsolatedReader not active" <<< "$gh_out" \
+    && grep -Fq "hook registered in managed settings.json but the body is absent" <<< "$gh_out" \
     && grep -Fq "secret floor active" <<< "$gh_out" \
     && grep -Fq "human-legit write gate INERT" <<< "$gh_out"; then
-    ok "test passed: MCP deny + always-on secret floor active + human-legit gate inert (enforceAiSandbox off), isolated reader not active"
+    ok "test passed: MCP deny + secret floor active + human-legit gate inert + hook registered with absent body warned (fail-open)"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: GitHub guard capability not reported"
@@ -572,18 +573,22 @@ else
 fi
 rm -f "$fixture_home/.config/dotfiles/github-trust.local"
 
-# Q) gateGitHubMcp=true (claude-settings active for personal) -> reported as
-#    enforced (MCP deny in managed settings), NOT as not-wired. enableGitHubIsolatedReader
-#    flipped too -> still reported as Phase 3 / not enforced. exit 0.
+# Q) hook body PRESENT (executable) in the fixture HOME -> the isolated-reader
+#    line flips from the body-absent warn (case P) to the wired ok. Presence is
+#    reported contents-blind (doctor never reads the body). Clean up after so
+#    later cases see the absent state again.
 set_capability_all "$gh_root" gateGitHubMcp true
 set_capability_all "$gh_root" enableGitHubIsolatedReader true
+mkdir -p "$fixture_home/.claude/agent-tools/scripts"
+printf '#!/bin/sh\nexit 0\n' > "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
+chmod +x "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
-    && grep -Fq "isolated reader is not wired yet" <<< "$gh_out"; then
-    ok "test passed: gateGitHubMcp=true reported as enforced; isolated reader still Phase 3"
+    && grep -Fq "safe-gh steering (fail-open, not a boundary); hook body present" <<< "$gh_out"; then
+    ok "test passed: gateGitHubMcp=true reported as enforced; hook registration + present body reported as wired steering"
   else
     printf '%s\n' "$gh_out" >&2
-    fail "test failed: gateGitHubMcp wired-state or isolated-reader Phase 3 state not reported"
+    fail "test failed: gateGitHubMcp wired-state or isolated-reader wired state not reported"
     status=1
   fi
 else
@@ -591,6 +596,7 @@ else
   fail "test failed: doctor must stay exit 0 (GitHub guard, flipped true)"
   status=1
 fi
+rm -f "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
 
 # R) enforceAiSandbox=true: the injection-guard section discloses the human-legit
 #    write gate as ACTIVE (it rides on enforceAiSandbox), with the always-on secret

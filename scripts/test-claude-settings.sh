@@ -17,6 +17,9 @@ set -euo pipefail
 # which stays default false (absent until flipped). The matchers are
 # best-effort/steering; a bypass negative test keeps that visible. See
 # docs/ai-environment-boundary.md.
+# It also fixes the PreToolUse hook registration (#137): enableGitHubIsolatedReader
+# (ON for personal) -> exactly one PreToolUse/Bash command hook pointing at the
+# agent-tools-deployed personal-safe-gh-hook; false -> no hooks key at all.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -240,6 +243,66 @@ for bypass in 'git fetch' 'gh api *contents' 'gh issue view' 'WebFetch'; do
 done
 if [[ "$bypass_hit" -eq 0 ]]; then
   ok "test passed: known equivalent read/exfil paths are NOT covered (matchers are steering, not a boundary)"
+fi
+
+section "claude settings PreToolUse hook registration (#137)"
+
+# 8a) Committed personal: enableGitHubIsolatedReader is ON, so the managed
+#     settings.json registers EXACTLY one hook: PreToolUse / matcher Bash /
+#     one command hook pointing at the agent-tools-deployed body (absolute
+#     path per the agent-tools#146 stable-path contract). Pinned as an
+#     exact set (event count, matcher count, hook count, full command path),
+#     not just "a hooks key exists": this is security wiring, so a swapped
+#     matcher or an extra registered event must fail the test (#129 lesson).
+expected_hook_cmd="$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook"
+hook_events="$(yq -p json '.hooks | keys | length' "$off_file")"
+pre_len="$(yq -p json '.hooks.PreToolUse | length' "$off_file")"
+pre_matcher="$(yq -p json '.hooks.PreToolUse[0].matcher' "$off_file")"
+inner_len="$(yq -p json '.hooks.PreToolUse[0].hooks | length' "$off_file")"
+inner_type="$(yq -p json '.hooks.PreToolUse[0].hooks[0].type' "$off_file")"
+inner_cmd="$(yq -p json '.hooks.PreToolUse[0].hooks[0].command' "$off_file")"
+if [[ "$hook_events" == "1" && "$pre_len" == "1" && "$pre_matcher" == "Bash" \
+  && "$inner_len" == "1" && "$inner_type" == "command" \
+  && "$inner_cmd" == "$expected_hook_cmd" ]]; then
+  ok "test passed: committed personal registers exactly one PreToolUse/Bash command hook -> personal-safe-gh-hook (absolute path)"
+else
+  fail "test failed: hook registration wrong (events=$hook_events pre_len=$pre_len matcher=$pre_matcher inner_len=$inner_len type=$inner_type cmd=$inner_cmd)"
+  status=1
+fi
+
+# 8b) Bootstrap order is safe: the throwaway render home has NO agent-tools
+#     scripts, yet the apply succeeded and rendered the registration. The
+#     registration is declarative — it must not depend on the body being
+#     deployed. At runtime a missing body is fail-open (exit 127 is a
+#     non-blocking hook error; only exit 2 blocks — Claude Code hook
+#     semantics, verified 2026-06-25), and doctor reports the absent body.
+off_home="$(dirname "$(dirname "$off_file")")"
+if [[ ! -e "$off_home/.claude/agent-tools/scripts/personal-safe-gh-hook" ]]; then
+  ok "test passed: registration renders without the hook body present (agent-tools sync can come later; runtime is fail-open)"
+else
+  fail "test failed: throwaway render home unexpectedly contains a hook body (fixture assumption broken)"
+  status=1
+fi
+
+# 8c) enableGitHubIsolatedReader=false -> no hooks key at all (the gate
+#     contract: profiles without the capability render byte-identical to the
+#     pre-#137 shape), and the file stays valid JSON.
+reader_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-reader.XXXXXX")"
+tmp_roots+=("$reader_src")
+cp -R "$DOTFILES_ROOT" "$reader_src/src"
+rm -rf "$reader_src/src/.git"
+yq -i '.profiles.personal.capabilities.enableGitHubIsolatedReader = false' \
+  "$reader_src/src/.chezmoidata/profiles.yaml"
+if ! reader_off_file="$(render_personal_settings "$reader_src/src")"; then
+  fail "test failed: personal apply (enableGitHubIsolatedReader=false) did not render"
+  exit 1
+fi
+if yq -p json '.' "$reader_off_file" >/dev/null 2>&1 \
+  && [[ "$(yq -p json '.hooks // "absent"' "$reader_off_file")" == "absent" ]]; then
+  ok "test passed: enableGitHubIsolatedReader=false emits no hooks key (valid JSON)"
+else
+  fail "test failed: enableGitHubIsolatedReader=false still emits a hooks key (or invalid JSON)"
+  status=1
 fi
 
 if [[ "$status" -eq 0 ]]; then

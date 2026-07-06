@@ -61,4 +61,4 @@ capabilities:
     implemented: true
   enableGitHubIsolatedReader:
     type: boolean
-    implemented: false
+    implemented: true
