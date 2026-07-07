@@ -135,7 +135,12 @@ chezmoi apply --source ~/dotfiles          # 反映(target を絞るなら末尾
 ./scripts/doctor.sh personal               # 反映後の健康診断
 ```
 
-profile を切り替える別マシン(例: 会社 Mac)では、**先に `git pull` してから** `chezmoi init --promptString profile=<kind>` で profile を更新する(古い profile 値のまま apply すると `require-profile` が fail-closed で止まる=設計どおり)。
+profile を切り替える別マシン(例: 会社 Mac)では、**先に `git -C ~/dotfiles pull` してから** profile を更新する(古い profile 値のまま apply すると `require-profile` が fail-closed で止まる=設計どおり)。
+
+```sh
+git -C ~/dotfiles pull
+chezmoi init --source ~/dotfiles --promptString profile=<kind>
+```
 
 ## 何が得られるか
 
