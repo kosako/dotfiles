@@ -124,6 +124,24 @@ EOF
 ./scripts/preflight.sh personal # 新マシン適用前の危険検知
 ```
 
+### 更新を反映する
+
+dotfiles を更新したら、pull してから diff を確認して apply する。`apply` の前に必ず `diff` を読む(何が変わるかを見てから反映する)。
+
+```sh
+git -C ~/dotfiles pull                     # dotfiles を最新化
+chezmoi diff --source ~/dotfiles           # 何が変わるか確認(必ず読む)
+chezmoi apply --source ~/dotfiles          # 反映(target を絞るなら末尾に path)
+./scripts/doctor.sh personal               # 反映後の健康診断
+```
+
+profile を切り替える別マシン(例: 会社 Mac)では、**先に `git -C ~/dotfiles pull` してから** profile を更新する(古い profile 値のまま apply すると `require-profile` が fail-closed で止まる=設計どおり)。
+
+```sh
+git -C ~/dotfiles pull
+chezmoi init --source ~/dotfiles --promptString profile=<kind>
+```
+
 ## 何が得られるか
 
 - **Git identity が context を跨いで漏れない。** `user.useConfigOnly=true` と `includeIf` により、context 外では identity が解決されず commit が止まる(間違った identity で commit するより安全側に倒れる)。
