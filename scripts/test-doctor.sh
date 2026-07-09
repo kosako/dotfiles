@@ -524,9 +524,10 @@ cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
     && grep -Fq "hook registered in managed settings.json but the body is absent" <<< "$gh_out" \
+    && grep -Fq "registered in managed ~/.codex/hooks.json but the body is absent" <<< "$gh_out" \
     && grep -Fq "secret floor active" <<< "$gh_out" \
     && grep -Fq "human-legit write gate INERT" <<< "$gh_out"; then
-    ok "test passed: MCP deny + secret floor active + human-legit gate inert + hook registered with absent body warned (fail-open)"
+    ok "test passed: MCP deny + secret floor active + human-legit gate inert + Claude & Codex hooks registered with absent bodies warned (fail-open)"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: GitHub guard capability not reported"
@@ -584,13 +585,20 @@ set_capability_all "$gh_root" enableGitHubIsolatedReader true
 mkdir -p "$fixture_home/.claude/agent-tools/scripts"
 printf '#!/bin/sh\nexit 0\n' > "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
 chmod +x "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
+# Codex parity (#181): deploy the Codex-home body too so the codex-settings line
+# flips to its wired ok (present, contents-blind). Its stable path mirrors the
+# Claude one under ~/.codex (agent-tools#146).
+mkdir -p "$fixture_home/.codex/agent-tools/scripts"
+printf '#!/bin/sh\nexit 0\n' > "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
+chmod +x "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
-    && grep -Fq "safe-gh steering (fail-open, not a boundary); hook body present" <<< "$gh_out"; then
-    ok "test passed: gateGitHubMcp=true reported as enforced; hook registration + present body reported as wired steering"
+    && grep -Fq "managed settings.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present" <<< "$gh_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present" <<< "$gh_out"; then
+    ok "test passed: gateGitHubMcp=true enforced; Claude & Codex hook registration + present bodies reported as wired steering"
   else
     printf '%s\n' "$gh_out" >&2
-    fail "test failed: gateGitHubMcp wired-state or isolated-reader wired state not reported"
+    fail "test failed: gateGitHubMcp wired-state or isolated-reader (Claude/Codex) wired state not reported"
     status=1
   fi
 else
@@ -599,6 +607,7 @@ else
   status=1
 fi
 rm -f "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
+rm -f "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
 
 # R) enforceAiSandbox=true: the injection-guard section discloses the human-legit
 #    write gate as ACTIVE (it rides on enforceAiSandbox), with the always-on secret
