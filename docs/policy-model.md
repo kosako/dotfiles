@@ -106,13 +106,18 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 - `gateGitHubMcp`(boolean): managed `~/.claude/settings.json` の `permissions.deny` に
   `mcp__github` を出して GitHub MCP server を deny する。効くのは `claude-settings` module
   が active な profile だけ(今は personal)。dangling は doctor が report。
-- `enableGitHubIsolatedReader`(boolean): managed `~/.claude/settings.json` に **PreToolUse
-  hook 登録**(matcher `Bash`)を出し、raw な `gh` 読取を safe-gh 隔離 reader へ誘導する
-  (#137)。hook body(`personal-safe-gh-hook`)は agent-tools が配布し、dotfiles は絶対
+- `enableGitHubIsolatedReader`(boolean): **PreToolUse hook 登録**(matcher `Bash`)を出し、
+  raw な `gh` 読取を safe-gh 隔離 reader へ誘導する(#137 / #181)。**1 capability が 2 つの
+  AI home 両方**に登録を出す — Claude は managed `~/.claude/settings.json` の `hooks`
+  (#137、`claude-settings` module)、Codex は user 層の別ファイル `~/.codex/hooks.json`
+  (#181、`codex-settings` module。config.toml は codex 所有の live ファイルなので分離)。
+  hook body(`personal-safe-gh-hook`)は agent-tools が両 home へ配布し、dotfiles は絶対
   path 参照のみ(登録=dotfiles・実体=agent-tools。path 安定は agent-tools#146 の契約)。
   **steering / fail-open で enforcement ではない**(body 不在・非 2 exit・不正 JSON は
-  すべて tool call 続行)。効くのは `claude-settings` module が active な profile だけ。
-  dangling(module 非 active / body 不在)は doctor が report。
+  すべて tool call 続行)。Codex は加えて、登録済みでも一度 `/hooks` trust するまで silent
+  skip される inert stage がある(registration ≠ activation)。効くのは対応 module
+  (`claude-settings` / `codex-settings`)が active な profile だけ。dangling(module 非
+  active / body 不在)は doctor が report。
 - GitHub 由来の deny は専用 capability を作らず **3 tier**(#119 Phase 2 task B): never-legit な
   secret 読取(`~/.ssh` と credential-store の `~/.aws` / `~/.config/gh` / `~/.netrc` /
   `~/.codex/auth.json`(#136)/ `printenv` / `env` / `gh secret` / `gh api *secrets*`)は
@@ -128,9 +133,9 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   限界・接続規約の正本は [ai-environment-boundary](ai-environment-boundary.md)。
 - **状態**: `gateGitHubMcp` は **personal=true**(Phase 2 で github MCP deny を live 化。
   render→diff→実機 dry-run の検証ゲート済み)、work=false(`claude-settings` 非 active)。
-  `enableGitHubIsolatedReader` も **personal=true**(#137 で PreToolUse hook 登録を live 化)、
-  work=false。github MCP は現状未構成なので deny は実質 no-op = 将来 MCP を足したとき
-  先回りで deny する defense-in-depth。
+  `enableGitHubIsolatedReader` も **personal=true**(#137 で Claude、#181 で Codex の
+  PreToolUse hook 登録を live 化。両 home 同一 body)、work=false。github MCP は現状未構成
+  なので deny は実質 no-op = 将来 MCP を足したとき先回りで deny する defense-in-depth。
 
 ## dormant capability の扱い(残す基準)
 

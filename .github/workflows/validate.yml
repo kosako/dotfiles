@@ -129,6 +129,9 @@ jobs:
       - name: claude settings sandbox content tests
         run: ./scripts/test-claude-settings.sh
 
+      - name: codex settings hook registration tests
+        run: ./scripts/test-codex-settings.sh
+
       - name: git-signing gating tests
         run: ./scripts/test-git-signing.sh
 

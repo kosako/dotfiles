@@ -58,3 +58,10 @@ modules:
     paths:
       - .claude
       - .claude/settings.json
+  codex-settings:
+    description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook を登録する(#181・#137 の Codex parity)。registration=dotfiles / body=agent-tools。config.toml は codex 所有の live ファイルなので管理しない。
+    paths:
+      - .codex
+      - .codex/hooks.json
+    requires:
+      enableGitHubIsolatedReader: true

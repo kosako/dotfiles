@@ -12,6 +12,7 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | 資産 | 正本 | 配布 | 変更フロー |
 | --- | --- | --- | --- |
 | ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録** / plugin / statusLine / tui 等の global preference) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
+| Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181) | dotfiles(`dot_codex/hooks.json.tmpl`) | `chezmoi apply`(+ Codex で一度 `/hooks` trust) | dotfiles の Issue + PR |
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
 | マシン固有・動的値(`~/.claude/settings.local.json`、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
@@ -19,9 +20,14 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 
 補足:
 
-- **hooks は 2 管轄の合流点**(#137): settings.json への hooks **登録**は dotfiles、
-  スクリプト**実体**の配備と path の安定は agent-tools。どちらか一方だけでは活性化
-  しない。片方を変えるときはもう片方の Issue を確認する。
+- **hooks は 2 管轄の合流点**(#137 / #181): hooks **登録**は dotfiles、スクリプト
+  **実体**の配備と path の安定は agent-tools。どちらか一方だけでは活性化しない。
+  片方を変えるときはもう片方の Issue を確認する。登録先はハーネスごとに異なる:
+  Claude は `~/.claude/settings.json` の `hooks` キー、Codex は **別ファイル**
+  `~/.codex/hooks.json`(user 層)。Codex の `config.toml` は codex 自身が
+  `[hooks.state]` 等を書き込む live ファイルなので **dotfiles は触らない**(登録は
+  別ファイルへ分離。backup-paths で運ぶ codex 所有物)。Codex はさらに、登録済みでも
+  一度 `/hooks` で trust するまで無警告で不活性という段がある(#181)。
 - `~/.claude/CLAUDE.md`(ユーザー手書き)から参照される `~/.claude/agent-tools/CLAUDE.md`
   は 2 行目の配布物。本体と参照先で正本が異なる。
 - `settings.json` / `settings.local.json` の 2 層境界の正本は

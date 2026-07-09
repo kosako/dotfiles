@@ -1,0 +1,50 @@
+{{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- /* Codex parity of the Claude PreToolUse hook registration (#181, the
+       Codex side of #137). Same GitHub injection guard (epic #119), same
+       capability: enableGitHubIsolatedReader registers the safe-gh read-steering
+       hook in the user-layer ~/.codex/hooks.json so raw `gh` reads of untrusted
+       GitHub content are nudged toward the safe-gh isolated reader.
+
+       Why a SEPARATE file and not ~/.codex/config.toml's [hooks] table:
+       config.toml is a codex-owned live file (codex writes [hooks.state] etc.),
+       so templating it risks an overwrite conflict. The user-layer hooks.json is
+       an equivalent registration point (agent-tools probe, Codex 0.142.2) and
+       keeps dotfiles' managed surface disjoint from codex's live state
+       (registration = dotfiles / config.toml = codex; docs/config-ownership.md).
+
+       registration = dotfiles, body = agent-tools: the hook body
+       (personal-safe-gh-hook) is deployed by agent-tools to a stable path
+       (agent-tools#146 contract); dotfiles only references it by absolute path —
+       no script body is distributed from here. The schema under "hooks" is
+       identical to Claude Code's (PreToolUse -> matcher -> command hooks).
+
+       Steering / fail-open, NOT an enforcement boundary (docs/ai-environment-
+       boundary.md): a missing body (exit 127), any non-2 non-zero exit, bad JSON,
+       or a timeout all let the tool call continue (only exit 2 blocks), so
+       rendering this before agent-tools has synced is a safe no-op.
+
+       Codex-specific inert stage (honest-label): even a registered+present hook
+       is silently skipped until a one-time interactive `/hooks` trust in Codex
+       (trust recorded in ~/.codex/config.toml [hooks.state]). Registration alone
+       does not activate it. This whole file is gated by the codex-settings module
+       (requires enableGitHubIsolatedReader: true); when the capability is off the
+       template renders empty and chezmoi removes the target. */ -}}
+{{- if index $caps "enableGitHubIsolatedReader" -}}
+{
+  "description": "dotfiles-managed (registration): safe-gh read-steering PreToolUse hook. Body deployed by agent-tools. Steering / fail-open — not an enforcement boundary. Requires a one-time /hooks trust in Codex to activate.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.codex/agent-tools/scripts/personal-safe-gh-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+{{ end -}}

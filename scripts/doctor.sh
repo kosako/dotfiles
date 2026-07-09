@@ -475,13 +475,15 @@ if module_active_for_profile "$profile" claude-settings; then
   # server-side branch protection or the Phase 3 isolated reader (#131).
   item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; real block is branch protection or the Phase 3 isolated reader (#131)"
 fi
-# enableGitHubIsolatedReader wires the isolated-reader steering (#137): the
-# managed settings.json registers the PreToolUse hook (matcher Bash) that steers
-# raw `gh` reads of untrusted GitHub content to the safe-gh reader. Steering /
-# fail-open (a missing body, non-2 exit, bad JSON or timeout all let the tool
-# call continue; only exit 2 blocks) — NOT an enforcement boundary. The hook
-# body is agent-tools-deployed (registration=dotfiles, body=agent-tools;
-# agent-tools#146 pins the path); report its presence only, contents-blind.
+# enableGitHubIsolatedReader wires the isolated-reader steering (#137 + #181): one
+# capability registers the PreToolUse hook (matcher Bash) that steers raw `gh`
+# reads of untrusted GitHub content to the safe-gh reader, in BOTH AI homes — the
+# managed ~/.claude/settings.json (claude-settings) and the user-layer
+# ~/.codex/hooks.json (codex-settings). Steering / fail-open (a missing body,
+# non-2 exit, bad JSON or timeout all let the tool call continue; only exit 2
+# blocks) — NOT an enforcement boundary. The hook body is agent-tools-deployed
+# (registration=dotfiles, body=agent-tools; agent-tools#146 pins the path);
+# report its presence only, contents-blind.
 if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
     hook_body="$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook"
@@ -492,6 +494,22 @@ if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; 
     fi
   else
     warn "enableGitHubIsolatedReader=true but the claude-settings module is inactive for this profile; no managed settings carry the hook registration (dangling capability)"
+  fi
+  # Codex parity (#181): the same capability registers the hook in the user-layer
+  # ~/.codex/hooks.json (codex-settings module). Codex has an EXTRA inert stage vs
+  # Claude — even a registered+present hook is silently skipped until a one-time
+  # interactive `/hooks` trust (trust recorded in ~/.codex/config.toml
+  # [hooks.state]). Report registration + body presence contents-blind and honest-
+  # label the trust requirement; never read config.toml here.
+  if module_active_for_profile "$profile" codex-settings; then
+    codex_hook_body="$HOME/.codex/agent-tools/scripts/personal-safe-gh-hook"
+    if [[ -x "$codex_hook_body" ]]; then
+      ok "enableGitHubIsolatedReader=true; managed ~/.codex/hooks.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present (Codex: inert until a one-time /hooks trust)"
+    else
+      warn "enableGitHubIsolatedReader=true; PreToolUse hook registered in managed ~/.codex/hooks.json but the body is absent or non-executable ($codex_hook_body; agent-tools sync deploys it) — fail-open no-op until deployed (Codex also needs a one-time /hooks trust)"
+    fi
+  else
+    warn "enableGitHubIsolatedReader=true but the codex-settings module is inactive for this profile; no managed ~/.codex/hooks.json carries the hook registration (dangling capability on the Codex side)"
   fi
 else
   ok "enableGitHubIsolatedReader not active (false)"

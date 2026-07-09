@@ -179,15 +179,21 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
 - `gateGitHubMcp`: managed `~/.claude/settings.json` の `permissions.deny` に `mcp__github`
   を足し、GitHub MCP server を丸ごと deny する(`claude-settings` module が active な
   profile のみ実効。dangling は doctor が report)。
-- `enableGitHubIsolatedReader`(#137): managed `~/.claude/settings.json` に **PreToolUse
-  hook 登録**(matcher `Bash`)を出し、raw な `gh` 読取(untrusted な GitHub content)を
-  safe-gh 隔離 reader へ誘導する。hook body(`personal-safe-gh-hook`)と safe-gh reader の
-  実体は **agent-tools が配布**し(登録=dotfiles・実体=agent-tools の 2 管轄合流点。path
-  安定は agent-tools#146 の契約。[config-ownership](config-ownership.md))、dotfiles は
-  絶対 path を参照するだけで script body を配布しない。**steering / fail-open**: body 不在
-  (exit 127)・非 2 の非ゼロ exit・不正 JSON・timeout はすべて tool call 続行(block は
-  exit 2 のみ)なので、agent-tools 未 sync の新規マシンでも登録は安全な no-op。dangling
-  (claude-settings 非 active / body 不在)は doctor が report。
+- `enableGitHubIsolatedReader`(#137 / #181): **PreToolUse hook 登録**(matcher `Bash`)を
+  出し、raw な `gh` 読取(untrusted な GitHub content)を safe-gh 隔離 reader へ誘導する。
+  **1 capability が 2 つの AI home 両方**に登録を出す — Claude は managed
+  `~/.claude/settings.json` の `hooks` キー(#137、`claude-settings` module)、Codex は
+  user 層の **別ファイル** `~/.codex/hooks.json`(#181、`codex-settings` module)。Codex で
+  config.toml の `[hooks]` ではなく別ファイルにするのは、config.toml が codex 所有の live
+  ファイル(`[hooks.state]` 等を codex が書く)で上書き衝突を避けるため。hook body
+  (`personal-safe-gh-hook`)と safe-gh reader の実体は **agent-tools が両 home へ配布**し
+  (登録=dotfiles・実体=agent-tools の 2 管轄合流点。path 安定は agent-tools#146 の契約。
+  [config-ownership](config-ownership.md))、dotfiles は絶対 path を参照するだけで script
+  body を配布しない。**steering / fail-open**: body 不在(exit 127)・非 2 の非ゼロ exit・
+  不正 JSON・timeout はすべて tool call 続行(block は exit 2 のみ)なので、agent-tools 未
+  sync の新規マシンでも登録は安全な no-op。**Codex はさらに inert stage**: 登録済みでも一度
+  `/hooks` で trust するまで無警告で silent skip される(registration ≠ activation)。
+  dangling(claude-settings / codex-settings 非 active、body 不在)は doctor が report。
 - GitHub 由来の deny は **3 tier**(#119 Phase 2 task B。専用 capability は作らない):
   - **(1) never-legit secret floor は無条件**(常時 render)。SSH 秘密鍵読取(`~/.ssh`)・
     credential-store 読取(`~/.aws` / `~/.config/gh` の OAuth token / `~/.netrc` /
