@@ -26,9 +26,17 @@
        Codex-specific inert stage (honest-label): even a registered+present hook
        is silently skipped until a one-time interactive `/hooks` trust in Codex
        (trust recorded in ~/.codex/config.toml [hooks.state]). Registration alone
-       does not activate it. This whole file is gated by the codex-settings module
-       (requires enableGitHubIsolatedReader: true); when the capability is off the
-       template renders empty and chezmoi removes the target. */ -}}
+       does not activate it.
+
+       Gating (template self-gate, NOT a module `requires`): the file is managed
+       for profiles that list codex-settings (personal). The capability is gated
+       HERE — enableGitHubIsolatedReader=false renders EMPTY, and chezmoi removes a
+       managed target whose render is empty. A `requires:` on the module would
+       instead make .chezmoiignore drop the source, which leaves an already-applied
+       ~/.codex/hooks.json lingering (chezmoiignore does not prune existing
+       targets) — so disabling the capability would NOT remove a live hook. Doing
+       it in-template means flipping the capability off truly removes the file on
+       the next apply (Codex review #184; verified in test-codex-settings.sh). */ -}}
 {{- if index $caps "enableGitHubIsolatedReader" -}}
 {
   "description": "dotfiles-managed (registration): safe-gh read-steering PreToolUse hook. Body deployed by agent-tools. Steering / fail-open — not an enforcement boundary. Requires a one-time /hooks trust in Codex to activate.",

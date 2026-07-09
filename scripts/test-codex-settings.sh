@@ -9,8 +9,11 @@ set -euo pipefail
 #   - enableGitHubIsolatedReader=true (personal): a user-layer hooks.json with
 #     EXACTLY one PreToolUse/Bash command hook pointing at the agent-tools-deployed
 #     ~/.codex/agent-tools/scripts/personal-safe-gh-hook (absolute path), timeout 10.
-#   - enableGitHubIsolatedReader=false: no ~/.codex/hooks.json at all (the whole
-#     file is gated, unlike Claude where only the hooks *key* drops).
+#   - enableGitHubIsolatedReader=false: no ~/.codex/hooks.json at all, AND an
+#     already-applied file is REMOVED on the next apply (template self-gate renders
+#     empty -> chezmoi prunes the managed target). This is why the module uses a
+#     template self-gate instead of a `requires:` gate: chezmoiignore would drop
+#     the source but leave a live hook lingering (Codex review #184).
 # The registration is declarative and must render without the body deployed
 # (bootstrap-safe); runtime is fail-open (missing body / non-2 exit / bad JSON /
 # timeout continue the tool call — only exit 2 blocks), and Codex adds an inert
@@ -107,24 +110,40 @@ else
   status=1
 fi
 
-# 3) enableGitHubIsolatedReader=false -> the WHOLE ~/.codex/hooks.json is gone
-#    (the codex-settings module requires the capability, so chezmoiignore drops
-#    the path entirely — file-level gating, unlike Claude's key-level gating).
-#    Flip in a throwaway source copy so the committed default stays true.
-reader_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-off.XXXXXX")"
-tmp_roots+=("$reader_src")
-cp -R "$DOTFILES_ROOT" "$reader_src/src"
-rm -rf "$reader_src/src/.git"
+# 3) enableGitHubIsolatedReader=false REMOVES an ALREADY-APPLIED ~/.codex/hooks.json
+#    on the next apply — not just "does not newly create it". This is the exact
+#    lingering scenario a `requires:` module gate would miss (chezmoiignore drops
+#    the source but never prunes an existing target), so we drive both applies into
+#    the SAME home: cap ON renders the file, then cap OFF must delete it (the
+#    template self-gate renders empty and chezmoi prunes the managed target).
+off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-off-src.XXXXXX")"
+tmp_roots+=("$off_src")
+cp -R "$DOTFILES_ROOT" "$off_src/src"
+rm -rf "$off_src/src/.git"
 yq -i '.profiles.personal.capabilities.enableGitHubIsolatedReader = false' \
-  "$reader_src/src/.chezmoidata/profiles.yaml"
-if ! off_home="$(render_personal_home "$reader_src/src")"; then
-  fail "test failed: personal apply (enableGitHubIsolatedReader=false) did not render"
-  exit 1
-fi
-if [[ ! -e "$off_home/.codex/hooks.json" ]]; then
-  ok "test passed: enableGitHubIsolatedReader=false removes ~/.codex/hooks.json entirely (file-level gating)"
+  "$off_src/src/.chezmoidata/profiles.yaml"
+
+removal_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-removal.XXXXXX")"
+tmp_roots+=("$removal_root")
+mkdir -p "$removal_root/home"
+printf '[data]\nprofile = "personal"\n' > "$removal_root/chezmoi.toml"
+apply_into_removal_home() {
+  chezmoi --config "$removal_root/chezmoi.toml" \
+    --source "$1" --destination "$removal_root/home" apply >/dev/null 2>&1
+}
+if ! apply_into_removal_home "$DOTFILES_ROOT"; then
+  fail "test failed: cap-on apply into removal home did not render"
+  status=1
+elif [[ ! -f "$removal_root/home/.codex/hooks.json" ]]; then
+  fail "test failed: cap-on apply did not create ~/.codex/hooks.json (removal test precondition)"
+  status=1
+elif ! apply_into_removal_home "$off_src/src"; then
+  fail "test failed: cap-off apply into removal home did not run"
+  status=1
+elif [[ ! -e "$removal_root/home/.codex/hooks.json" ]]; then
+  ok "test passed: enableGitHubIsolatedReader=false removes an already-applied ~/.codex/hooks.json (template self-gate prunes the target — no lingering hook)"
 else
-  fail "test failed: enableGitHubIsolatedReader=false still rendered ~/.codex/hooks.json"
+  fail "test failed: enableGitHubIsolatedReader=false left a lingering ~/.codex/hooks.json (a requires: gate regression?)"
   status=1
 fi
 

@@ -59,9 +59,7 @@ modules:
       - .claude
       - .claude/settings.json
   codex-settings:
-    description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook を登録する(#181・#137 の Codex parity)。registration=dotfiles / body=agent-tools。config.toml は codex 所有の live ファイルなので管理しない。
+    description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook を登録する(#181・#137 の Codex parity)。registration=dotfiles / body=agent-tools。config.toml は codex 所有の live ファイルなので管理しない。cap gate は module の requires ではなく template 自己 gate で行う(enableGitHubIsolatedReader=false は空 render → chezmoi が既存 target も削除)。requires を使うと chezmoiignore が既存 file を prune せず残置するため(Codex review #184)。
     paths:
       - .codex
       - .codex/hooks.json
-    requires:
-      enableGitHubIsolatedReader: true
