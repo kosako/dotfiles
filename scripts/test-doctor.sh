@@ -630,6 +630,157 @@ else
   status=1
 fi
 
+# AIP) AI policy — Codex permission surface (#139). doctor watches the two
+#      accumulation channels report-only: (1) a fixed probe list of outward/
+#      escalation commands evaluated against the LIVE rules via `codex
+#      execpolicy check` — doctor never reads the rules file itself (Codex
+#      review #187: line-grepping misses blanket prefixes / multi-line rules /
+#      the omitted-decision default=allow, and echoing rule lines can leak
+#      secrets embedded in arbitrary strings); (2) [projects] trust in
+#      codex-owned config.toml -> warn on trusted whole-home and on trusted
+#      stale (nonexistent) paths, parsing ONLY section headers + trust_level
+#      (a canary in an MCP env block must never be echoed).
+#      The engine is faked with a PATH-front codex shim (fake-driven fixture,
+#      same pattern as the npm fakes in #150): the shim allows a probe iff its
+#      joined command string appears in $CODEX_FAKE_ALLOWS, so these cases pin
+#      doctor's REPORTING contract (probe loop, warn wording, no-echo, exit 0)
+#      deterministically — rules semantics themselves are the real engine's
+#      job at runtime. Committed personal profile (codex-settings active,
+#      enableAiPolicy=true) against $DOTFILES_ROOT scripts. exit 0 throughout.
+codex_fakebin="$fixture_home/codexfake"
+mkdir -p "$codex_fakebin" "$fixture_home/.codex/rules" "$fixture_home/real-project"
+cat > "$codex_fakebin/codex" <<'SH'
+#!/bin/sh
+# fake codex: execpolicy check --rules <path> <tokens...>
+# - logs each joined probe to $CODEX_FAKE_LOG (pins the probe SET in tests)
+# - CODEX_FAKE_MODE=fail -> exit 1 (engine-evaluation failure path; real codex
+#   exits 1 on a broken/missing rules file, verified 0.142.5)
+# - else emits an allow verdict iff the probe appears in $CODEX_FAKE_ALLOWS.
+[ "$1" = "execpolicy" ] && [ "$2" = "check" ] || exit 2
+shift 2
+[ "$1" = "--rules" ] && shift 2
+probe="$*"
+[ -n "${CODEX_FAKE_LOG:-}" ] && printf '%s\n' "$probe" >> "$CODEX_FAKE_LOG"
+[ "${CODEX_FAKE_MODE:-}" = "fail" ] && exit 1
+case ",${CODEX_FAKE_ALLOWS:-}," in
+  *",$probe,"*) printf '{"matchedRules":[{"x":1}],"decision":"allow"}\n' ;;
+  *)            printf '{"matchedRules":[]}\n' ;;
+esac
+SH
+chmod +x "$codex_fakebin/codex"
+# The rules file content is irrelevant to the fake (doctor must not read it) —
+# plant a canary to pin exactly that: a secret-looking string inside a rule
+# line must never reach doctor output.
+cat > "$fixture_home/.codex/rules/default.rules" <<'RULES'
+prefix_rule(pattern=["gh", "pr", "view"], decision="allow")
+prefix_rule(pattern=["curl", "-H", "Authorization: Bearer CANARY_RULES_LEAK_a71c"], decision="allow")
+RULES
+# TOML spelling coverage (Codex review #187, round 2): the whole-home entry is
+# COMPACT (trust_level="trusted", no spaces) and one stale entry is single-
+# quoted — both valid TOML codex may write; missing either would undercount and
+# silently skip the home-trust warn.
+cat > "$fixture_home/.codex/config.toml" <<TOML
+approval_policy = "on-request"
+
+[mcp_servers.fake.env]
+FAKE_TOKEN = "CANARY_CODEX_ENV_LEAK_3b9d"
+
+[projects."$fixture_home"]
+trust_level="trusted"
+
+[projects."$fixture_home/gone-project"]
+trust_level = 'trusted'
+
+[projects."$fixture_home/gone-untrusted"]
+trust_level = "untrusted"
+
+[projects."$fixture_home/real-project"]
+trust_level = "trusted"
+TOML
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    CODEX_FAKE_ALLOWS="git push,gh pr create" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "outward/escalation probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
+    && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
+    && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
+    && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
+    && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
+    && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out" \
+    && ! grep -Fq "CANARY_RULES_LEAK_a71c" <<< "$aip_out"; then
+    ok "test passed: allowed probes warned by name, trusted whole-home (compact TOML) + trusted stale (single-quoted) warned, untrusted entry ignored, contents never echoed"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: Codex permission-surface watch (probes/projects trust) not reported as expected"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (Codex permission surface)"
+  status=1
+fi
+
+# AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
+#        line (with the probe count), no warns from this watch. The shim log
+#        pins the EXACT probe set (policy-derived contract): a probe silently
+#        dropped from doctor.sh fails this test (coverage regression guard).
+cat > "$fixture_home/.codex/config.toml" <<TOML
+[projects."$fixture_home/real-project"]
+trust_level = "trusted"
+TOML
+aip_probe_log="$fixture_home/.codex-probe-log"
+: > "$aip_probe_log"
+expected_probes=$'curl https://example.invalid\ngh api --method POST repos/o/r/issues\ngh auth login\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nsudo -v\nwget https://example.invalid'
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "no outward/escalation probe is auto-allowed by the live Codex rules" <<< "$aip_out" \
+    && grep -Fq "1 path(s) trusted" <<< "$aip_out" \
+    && ! grep -Fq "outward/escalation probe auto-allowed" <<< "$aip_out" \
+    && ! grep -Fq "WHOLE home directory" <<< "$aip_out" \
+    && ! grep -Fq "stale Codex projects trust" <<< "$aip_out"; then
+    ok "test passed: clean Codex permission surface reports ok (no false warns)"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: clean Codex permission surface produced unexpected output"
+    status=1
+  fi
+  if probe_diff="$(diff <(printf '%s\n' "$expected_probes") <(sort "$aip_probe_log"))"; then
+    ok "test passed: doctor evaluated exactly the pinned outward/escalation probe set (27 probes)"
+  else
+    printf '%s\n' "$probe_diff" >&2
+    fail "test failed: outward/escalation probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (Codex permission surface, clean)"
+  status=1
+fi
+
+# AIP-3) Engine-evaluation failure (codex execpolicy exits 1 — broken rules
+#        file, incompatible codex): the scan must surface INCOMPLETE and must
+#        NOT emit the clean ok (a failure that reads as clean is the fail-open
+#        false-clean the review flagged). doctor stays exit 0 (report-only).
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    CODEX_FAKE_ALLOWS="" CODEX_FAKE_MODE="fail" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: probe-evaluation failure reports scan INCOMPLETE and suppresses the clean ok (no fail-open false-clean)"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: probe-evaluation failure did not surface as INCOMPLETE (or still claimed clean)"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (probe-evaluation failure)"
+  status=1
+fi
+rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
+  "$fixture_home/real-project" "$codex_fakebin" "$aip_probe_log"
+
 # NPM-A) A broken npm (shim without a runtime) must not kill the doctor:
 # report-only means warn + skip, exit 0 (#144).
 npm_fakebin="$fixture_home/npmfake"

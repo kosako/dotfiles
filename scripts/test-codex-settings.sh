@@ -158,6 +158,72 @@ else
   status=1
 fi
 
+section "codex approval-rules baseline (#139)"
+
+# 4) Committed personal: enableAiPolicy is ON, so ~/.codex/rules/default.rules
+#    renders the vetted READ-ONLY baseline. Pinned as the EXACT ordered file
+#    content (same spirit as the settings.json deny exact-set test): this is a
+#    security baseline, so an outward/escalation allow (git push, gh pr create,
+#    …) sneaking in — or a read rule silently swapped — must fail the test, not
+#    just "some rules exist".
+rules_file="${home:-}/.codex/rules/default.rules"
+expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "auth", "status"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")'
+if [[ ! -f "$rules_file" ]]; then
+  fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
+  status=1
+elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
+  ok "test passed: committed personal renders exactly the read-only rules baseline (10 allow rules, ordered; no outward/escalation rule, no git clone)"
+else
+  fail "test failed: rules baseline content mismatch; rendered was:"
+  cat "$rules_file" >&2
+  status=1
+fi
+
+# 5) Gate independence, both directions: the two files in this module ride on
+#    DIFFERENT capabilities, so flipping one must not disturb the other.
+#    5a) enableAiPolicy=false removes an already-applied rules file (true
+#        removal, same lingering scenario as case 3) while hooks.json survives.
+ai_off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-aioff.XXXXXX")"
+tmp_roots+=("$ai_off_src")
+cp -R "$DOTFILES_ROOT" "$ai_off_src/src"
+rm -rf "$ai_off_src/src/.git"
+yq -i '.profiles.personal.capabilities.enableAiPolicy = false' \
+  "$ai_off_src/src/.chezmoidata/profiles.yaml"
+rules_removal_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-rulesrm.XXXXXX")"
+tmp_roots+=("$rules_removal_root")
+mkdir -p "$rules_removal_root/home"
+printf '[data]\nprofile = "personal"\n' > "$rules_removal_root/chezmoi.toml"
+apply_into_rules_home() {
+  chezmoi --config "$rules_removal_root/chezmoi.toml" \
+    --source "$1" --destination "$rules_removal_root/home" apply >/dev/null 2>&1
+}
+if ! apply_into_rules_home "$DOTFILES_ROOT"; then
+  fail "test failed: cap-on apply into rules-removal home did not render"
+  status=1
+elif [[ ! -f "$rules_removal_root/home/.codex/rules/default.rules" ]]; then
+  fail "test failed: cap-on apply did not create the rules baseline (removal test precondition)"
+  status=1
+elif ! apply_into_rules_home "$ai_off_src/src"; then
+  fail "test failed: enableAiPolicy=false apply did not run"
+  status=1
+elif [[ ! -e "$rules_removal_root/home/.codex/rules/default.rules" ]] \
+  && [[ -f "$rules_removal_root/home/.codex/hooks.json" ]]; then
+  ok "test passed: enableAiPolicy=false removes an already-applied rules baseline while hooks.json stays (independent gates)"
+else
+  fail "test failed: enableAiPolicy=false left the rules baseline lingering or disturbed hooks.json"
+  status=1
+fi
+
+#    5b) The case-3 reader-off render (same home, enableGitHubIsolatedReader
+#        already flipped false there) must still carry the rules baseline:
+#        hooks gone, rules present.
+if [[ -f "$removal_root/home/.codex/rules/default.rules" ]]; then
+  ok "test passed: enableGitHubIsolatedReader=false keeps the rules baseline (independent gates, other direction)"
+else
+  fail "test failed: enableGitHubIsolatedReader=false unexpectedly removed the rules baseline"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "codex settings tests passed"
 fi

@@ -40,6 +40,13 @@ profiles:
       # ~/.zshrc.local (the concrete path is never baked into tracked files; see
       # docs/local-overrides.md).
       enableAgentToolsStatus: true
+      # #139: beyond the policy docs + report-only checks, this now drives the
+      # managed Codex approval-rules baseline (~/.codex/rules/default.rules via
+      # codex-settings, template self-gated): a read-only allowlist so outward /
+      # escalation actions stay behind per-invocation approval. Accumulated
+      # grants surface as drift and `chezmoi apply` resets them (棚卸し). The
+      # other accumulation channel — [projects] trust in codex-owned
+      # config.toml — cannot be managed (#181) and is watched by doctor only.
       enableAiPolicy: true
       # Phase 2 (#119): deny the github MCP server in the managed settings.json.
       # Best-effort / steering (not an enforcement boundary; see

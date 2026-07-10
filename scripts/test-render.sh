@@ -53,7 +53,7 @@ expected_managed() {
   local profile="$1"
   case "$profile" in
     personal)
-      printf '%s\n' .claude .claude/settings.json .codex .codex/hooks.json .config .config/git .config/git/signing.gitconfig .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .npmrc .ssh .ssh/config .zprofile .zshenv .zshrc
+      printf '%s\n' .claude .claude/settings.json .codex .codex/hooks.json .codex/rules .codex/rules/default.rules .config .config/git .config/git/signing.gitconfig .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .npmrc .ssh .ssh/config .zprofile .zshenv .zshrc
       ;;
     work)
       printf '%s\n' .config .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .zprofile .zshenv .zshrc
