@@ -385,6 +385,135 @@ if [[ "$npm_mode" == "enforce" && -f "$HOME/.npmrc" ]]; then
   fi
 fi
 
+# Codex permission-surface watchers (#139), extracted as functions: the AI
+# policy section is the most-edited part of doctor (probe/watch additions in
+# #139/#181/#137) and sat five levels of nesting deep inline. Both are
+# report-only — every path ends in ok/item/warn (return 0), so the plain
+# calls below are set -e safe without || true.
+report_codex_rules_probes() {
+  local codex_rules outward_probes outward_allowed probe_failures probe verdict
+  codex_rules="$HOME/.codex/rules/default.rules"
+  if [[ -f "$codex_rules" ]]; then
+    ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
+    # Rules semantics are delegated to Codex's own engine: a fixed probe list
+    # of outward/escalation commands is evaluated with `codex execpolicy
+    # check` against the LIVE rules file. Grepping rule lines was rejected
+    # (Codex review #187): it misses blanket prefixes (["gh","pr"] auto-allows
+    # `gh pr create` — the exact 2026-07-02 regression form), multi-line
+    # rules, and the omitted-decision default (= allow), and echoing rule
+    # lines could leak secrets embedded in arbitrary pattern/justification
+    # strings. The probe approach never reads the rules file here (the path is
+    # only passed to codex) and only OUR fixed probe strings are echoed.
+    if command -v codex >/dev/null 2>&1; then
+      # Policy-derived probe set: every outward-action / escalation family the
+      # Approval Required list in docs/ai-policy.md names, plus the raw-write
+      # escape hatches (gh api POST, gh secret). Keep in sync with the pin in
+      # test-doctor.sh (the fake-shim log asserts this exact set so a dropped
+      # probe fails the test).
+      outward_probes=(
+        "git push"
+        "git clone https://example.invalid/repo"
+        "gh pr create"
+        "gh pr merge"
+        "gh pr comment"
+        "gh pr edit"
+        "gh pr close"
+        "gh issue create"
+        "gh issue comment"
+        "gh issue edit"
+        "gh issue close"
+        "gh issue delete"
+        "gh issue transfer"
+        "gh release create"
+        "gh release edit"
+        "gh release delete"
+        "gh release upload"
+        "gh repo delete"
+        "gh repo edit"
+        "gh repo archive"
+        "gh repo rename"
+        "gh api --method POST repos/o/r/issues"
+        "gh secret set"
+        "gh auth login"
+        "sudo -v"
+        "curl https://example.invalid"
+        "wget https://example.invalid"
+      )
+      outward_allowed=0
+      probe_failures=0
+      for probe in "${outward_probes[@]}"; do
+        # shellcheck disable=SC2086 # probes are fixed strings; word-splitting into tokens is intended
+        if verdict="$(codex execpolicy check --rules "$codex_rules" $probe 2>/dev/null)"; then
+          if grep -Fq '"decision":"allow"' <<< "$verdict"; then
+            outward_allowed=$((outward_allowed + 1))
+            warn "outward/escalation probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
+          fi
+        else
+          # rc!=0 = the engine could not evaluate (broken rules file, old
+          # codex, unreadable path) — that is NOT "not allowed". Never let an
+          # evaluation failure read as a clean scan (fail-open false-clean).
+          probe_failures=$((probe_failures + 1))
+        fi
+      done
+      if [[ "$probe_failures" -gt 0 ]]; then
+        warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error — broken rules file or incompatible codex?); do NOT read this as clean"
+      elif [[ "$outward_allowed" -eq 0 ]]; then
+        ok "no outward/escalation probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
+      fi
+    else
+      item "codex CLI not found; rules-semantics probe skipped (baseline presence still verified above)"
+    fi
+  else
+    item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
+  fi
+}
+
+report_codex_projects_trust() {
+  local codex_config trusted_paths trusted_path trusted_total
+  # [projects] trust watch: parse ONLY [projects."<path>"] section headers and
+  # the trust_level key inside each section (an entry can be "untrusted" —
+  # only trusted ones matter). config.toml also carries MCP server env blocks
+  # that may hold secrets, so nothing else is read or echoed (key-name-only
+  # discipline, same as the #148 token scan).
+  codex_config="$HOME/.codex/config.toml"
+  if [[ -f "$codex_config" ]]; then
+    # Tolerate the valid TOML spellings codex may write: optional whitespace
+    # around `=` (compact `trust_level="trusted"` included) and single-quoted
+    # literal strings. A parse/read failure must surface as an INCOMPLETE
+    # scan, never as "0 trusted" (fail-open false-clean).
+    if trusted_paths="$(awk '
+      /^[[:space:]]*\[projects\."/ {
+        p = $0
+        sub(/^[[:space:]]*\[projects\."/, "", p)
+        sub(/"\][[:space:]]*$/, "", p)
+        current = p
+        next
+      }
+      /^[[:space:]]*\[/ { current = "" ; next }
+      current != "" && $0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("trusted"|'\''trusted'\'')[[:space:]]*(#.*)?$/ {
+        print current
+        current = ""
+      }
+    ' "$codex_config" 2>/dev/null)"; then
+      trusted_total=0
+      while IFS= read -r trusted_path; do
+        [[ -z "$trusted_path" ]] && continue
+        trusted_total=$((trusted_total + 1))
+        if [[ "$trusted_path" == "$HOME" ]]; then
+          warn "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)"
+        elif [[ ! -d "$trusted_path" ]]; then
+          warn "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex"
+        fi
+      done <<< "$trusted_paths"
+      item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, project headers + trust_level scanned only)"
+    else
+      warn "projects-trust scan INCOMPLETE: could not parse ~/.codex/config.toml project headers; do NOT read this as zero trusted"
+    fi
+  else
+    item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
+  fi
+}
+
 section "AI policy"
 if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
   ok "enableAiPolicy=true (policy docs + report-only checks; see docs/ai-policy.md)"
@@ -405,122 +534,8 @@ if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
   # Report-only, exit 0. Only meaningful where codex-settings manages the Codex
   # home at all (work has no Codex management; keep it silent there).
   if module_active_for_profile "$profile" codex-settings; then
-    codex_rules="$HOME/.codex/rules/default.rules"
-    if [[ -f "$codex_rules" ]]; then
-      ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
-      # Rules semantics are delegated to Codex's own engine: a fixed probe list
-      # of outward/escalation commands is evaluated with `codex execpolicy
-      # check` against the LIVE rules file. Grepping rule lines was rejected
-      # (Codex review #187): it misses blanket prefixes (["gh","pr"] auto-allows
-      # `gh pr create` — the exact 2026-07-02 regression form), multi-line
-      # rules, and the omitted-decision default (= allow), and echoing rule
-      # lines could leak secrets embedded in arbitrary pattern/justification
-      # strings. The probe approach never reads the rules file here (the path is
-      # only passed to codex) and only OUR fixed probe strings are echoed.
-      if command -v codex >/dev/null 2>&1; then
-        # Policy-derived probe set: every outward-action / escalation family the
-        # Approval Required list in docs/ai-policy.md names, plus the raw-write
-        # escape hatches (gh api POST, gh secret). Keep in sync with the pin in
-        # test-doctor.sh (the fake-shim log asserts this exact set so a dropped
-        # probe fails the test).
-        outward_probes=(
-          "git push"
-          "git clone https://example.invalid/repo"
-          "gh pr create"
-          "gh pr merge"
-          "gh pr comment"
-          "gh pr edit"
-          "gh pr close"
-          "gh issue create"
-          "gh issue comment"
-          "gh issue edit"
-          "gh issue close"
-          "gh issue delete"
-          "gh issue transfer"
-          "gh release create"
-          "gh release edit"
-          "gh release delete"
-          "gh release upload"
-          "gh repo delete"
-          "gh repo edit"
-          "gh repo archive"
-          "gh repo rename"
-          "gh api --method POST repos/o/r/issues"
-          "gh secret set"
-          "gh auth login"
-          "sudo -v"
-          "curl https://example.invalid"
-          "wget https://example.invalid"
-        )
-        outward_allowed=0
-        probe_failures=0
-        for probe in "${outward_probes[@]}"; do
-          # shellcheck disable=SC2086 # probes are fixed strings; word-splitting into tokens is intended
-          if verdict="$(codex execpolicy check --rules "$codex_rules" $probe 2>/dev/null)"; then
-            if grep -Fq '"decision":"allow"' <<< "$verdict"; then
-              outward_allowed=$((outward_allowed + 1))
-              warn "outward/escalation probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
-            fi
-          else
-            # rc!=0 = the engine could not evaluate (broken rules file, old
-            # codex, unreadable path) — that is NOT "not allowed". Never let an
-            # evaluation failure read as a clean scan (fail-open false-clean).
-            probe_failures=$((probe_failures + 1))
-          fi
-        done
-        if [[ "$probe_failures" -gt 0 ]]; then
-          warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error — broken rules file or incompatible codex?); do NOT read this as clean"
-        elif [[ "$outward_allowed" -eq 0 ]]; then
-          ok "no outward/escalation probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
-        fi
-      else
-        item "codex CLI not found; rules-semantics probe skipped (baseline presence still verified above)"
-      fi
-    else
-      item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
-    fi
-    # [projects] trust watch: parse ONLY [projects."<path>"] section headers and
-    # the trust_level key inside each section (an entry can be "untrusted" —
-    # only trusted ones matter). config.toml also carries MCP server env blocks
-    # that may hold secrets, so nothing else is read or echoed (key-name-only
-    # discipline, same as the #148 token scan).
-    codex_config="$HOME/.codex/config.toml"
-    if [[ -f "$codex_config" ]]; then
-      # Tolerate the valid TOML spellings codex may write: optional whitespace
-      # around `=` (compact `trust_level="trusted"` included) and single-quoted
-      # literal strings. A parse/read failure must surface as an INCOMPLETE
-      # scan, never as "0 trusted" (fail-open false-clean).
-      if trusted_paths="$(awk '
-        /^[[:space:]]*\[projects\."/ {
-          p = $0
-          sub(/^[[:space:]]*\[projects\."/, "", p)
-          sub(/"\][[:space:]]*$/, "", p)
-          current = p
-          next
-        }
-        /^[[:space:]]*\[/ { current = "" ; next }
-        current != "" && $0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("trusted"|'\''trusted'\'')[[:space:]]*(#.*)?$/ {
-          print current
-          current = ""
-        }
-      ' "$codex_config" 2>/dev/null)"; then
-        trusted_total=0
-        while IFS= read -r trusted_path; do
-          [[ -z "$trusted_path" ]] && continue
-          trusted_total=$((trusted_total + 1))
-          if [[ "$trusted_path" == "$HOME" ]]; then
-            warn "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)"
-          elif [[ ! -d "$trusted_path" ]]; then
-            warn "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex"
-          fi
-        done <<< "$trusted_paths"
-        item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, project headers + trust_level scanned only)"
-      else
-        warn "projects-trust scan INCOMPLETE: could not parse ~/.codex/config.toml project headers; do NOT read this as zero trusted"
-      fi
-    else
-      item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
-    fi
+    report_codex_rules_probes
+    report_codex_projects_trust
   else
     item "Codex-side permission files not managed for this profile (codex-settings module inactive)"
   fi
@@ -542,7 +557,10 @@ fi
 # environment_kind_forbidden_capabilities. The sandbox block only reaches a
 # real settings.json where the claude-settings module is active (personal
 # today), so a true value without that module is reported as dangling.
-if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
+# Captured once and reused by the injection-guard section below (the same
+# single-read pattern as npm_mode near the top).
+enforce_ai_sandbox="$(capability_value "$profile" enforceAiSandbox)"
+if [[ "$enforce_ai_sandbox" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
     ok "enforceAiSandbox=true; managed ~/.claude/settings.json carries the native sandbox (Bash fs+network) and the human-legit GitHub write gate (main-push + .env-read deny, release/protection ask; best-effort — the never-legit secret floor is unconditional, see the injection guard section)"
   else
@@ -587,7 +605,7 @@ if module_active_for_profile "$profile" claude-settings; then
   # keeps false (its egress block is unusable on a daily driver). A restricted
   # context for these is #119 Phase 3 (#131) — disclose the live state so the
   # green line above is not read as a complete injection guard.
-  if [[ "$(capability_value "$profile" enforceAiSandbox)" == "true" ]]; then
+  if [[ "$enforce_ai_sandbox" == "true" ]]; then
     item "human-legit write gate active (enforceAiSandbox): main-push + .env-read deny, release/protection ask"
   else
     item "human-legit write gate INERT (enforceAiSandbox=false): main-push / .env-read deny and release/protection ask are not rendered — needs a restricted context (#119 Phase 3, #131), not the daily-driver egress block"
