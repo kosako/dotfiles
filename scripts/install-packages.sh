@@ -64,18 +64,8 @@ is_installed() {
   esac
 }
 
-# Whether the manager SOURCE needs is on PATH. npm_global / go_install depend
-# on a runtime (node / go) that mise provides, and mas needs the `mas` CLI;
-# absence means "skip", not "install failed".
-manager_present() {
-  case "$1" in
-    brew_formula | brew_cask) command -v brew >/dev/null 2>&1 ;;
-    npm_global) command -v npm >/dev/null 2>&1 ;;
-    go_install) command -v go >/dev/null 2>&1 ;;
-    mas) command -v mas >/dev/null 2>&1 ;;
-    *) return 1 ;;
-  esac
-}
+# manager_present (source -> required manager mapping) lives in
+# lib-policy.sh so the catalog drift report shares the same table.
 
 # Build the install command for SOURCE into the INSTALL_CMD array (global),
 # using CANONICAL (= pkg, defaulting to name) as the install id. Returns 1

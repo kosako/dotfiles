@@ -349,15 +349,9 @@ else
 fi
 set_profile personal
 
-# Octal mode of a path (same OS branch as file_mode in private-backup.sh,
-# which the test cannot source: running the script under test executes main).
-mode_of() {
-  if stat -f '%Lp' "$1" >/dev/null 2>&1; then
-    stat -f '%Lp' "$1"
-  else
-    stat -c '%a' "$1"
-  fi
-}
+# file_mode comes from lib-policy.sh (already sourced): the same helper
+# private-backup.sh itself uses, which the test cannot source directly
+# (running the script under test executes main).
 
 # 19. A group-writable file (664) round-trips: capture, verify, and restore
 #     keep the recorded mode. Regression for the umask bug: extraction
@@ -378,10 +372,10 @@ if [[ "$gw_rc" -eq 0 ]] && HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$
   if HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
     restore --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" \
     --target-home "$gw_dst" --apply >/dev/null 2>&1 \
-    && [[ "$(mode_of "$gw_dst/.zshrc.local")" == "664" ]]; then
+    && [[ "$(file_mode "$gw_dst/.zshrc.local")" == "664" ]]; then
     pass "group-writable file (664) survives backup/verify/restore with its mode"
   else
-    miss "restored group-writable file lost its mode (want 664, got $(mode_of "$gw_dst/.zshrc.local" 2>/dev/null))"
+    miss "restored group-writable file lost its mode (want 664, got $(file_mode "$gw_dst/.zshrc.local" 2>/dev/null))"
   fi
 else
   miss "verify rejected an archive containing a group-writable file (umask regression)"

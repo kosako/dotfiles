@@ -16,6 +16,20 @@ Validate profile/module/capability policy data.
 EOF
 }
 
+# Report every line on stdin (a `sort | uniq -d` stream) as a duplicate,
+# prefixed with $1. Returns non-zero when any duplicate was seen; callers
+# fold that into their status with `fail_duplicates "..." < <(...) ||
+# status=1` (keep the `||` — a bare call would trip set -e).
+fail_duplicates() {
+  local d found=0
+  while IFS= read -r d; do
+    [[ -z "$d" ]] && continue
+    fail "$1$d"
+    found=1
+  done
+  [[ "$found" -eq 0 ]]
+}
+
 # Modules that declare paths drive .chezmoiignore generation, so their
 # declarations must be valid on their own (independent of any profile).
 validate_modules() {
@@ -89,11 +103,8 @@ validate_modules() {
   done < "$known_modules_file"
 
   # A path claimed by two modules would make the ignore gate ambiguous.
-  while IFS= read -r path; do
-    [[ -z "$path" ]] && continue
-    fail "path declared by multiple modules: $path"
-    status=1
-  done < <(sort "$all_paths_file" | uniq -d)
+  fail_duplicates "path declared by multiple modules: " \
+    < <(sort "$all_paths_file" | uniq -d) || status=1
   rm -f "$all_paths_file"
 
   if [[ "$status" -eq 0 ]]; then
@@ -154,7 +165,7 @@ validate_capability_registry() {
 # or app id), and names must be unique.
 validate_packages() {
   local status=0
-  local name source pkg bin track_only duplicate entry_ok rows
+  local name source pkg bin track_only entry_ok rows
   local sources_file names_file
   sources_file="$(mktemp)"
   names_file="$(mktemp)"
@@ -212,11 +223,8 @@ validate_packages() {
     [[ "$entry_ok" -eq 1 ]] && ok "package: $name ($source)"
   done <<< "$rows"
 
-  while IFS= read -r duplicate; do
-    [[ -z "$duplicate" ]] && continue
-    fail "duplicate package name: $duplicate"
-    status=1
-  done < <(sort "$names_file" | uniq -d)
+  fail_duplicates "duplicate package name: " \
+    < <(sort "$names_file" | uniq -d) || status=1
   rm -f "$sources_file" "$names_file"
 
   if [[ "$status" -eq 0 ]]; then
@@ -236,7 +244,7 @@ validate_packages() {
 # the mechanical safety rules only.
 validate_backup_paths() {
   local status=0
-  local path type category duplicate entry_ok rows
+  local path type category entry_ok rows
   local types_file paths_file
   types_file="$(mktemp)"
   paths_file="$(mktemp)"
@@ -288,11 +296,8 @@ validate_backup_paths() {
     [[ "$entry_ok" -eq 1 ]] && ok "backup path: $path"
   done <<< "$rows"
 
-  while IFS= read -r duplicate; do
-    [[ -z "$duplicate" ]] && continue
-    fail "duplicate backup path: $duplicate"
-    status=1
-  done < <(sort "$paths_file" | uniq -d)
+  fail_duplicates "duplicate backup path: " \
+    < <(sort "$paths_file" | uniq -d) || status=1
   rm -f "$types_file" "$paths_file"
 
   if [[ "$status" -eq 0 ]]; then
@@ -307,7 +312,7 @@ validate_backup_paths() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type duplicate forbidden ek_violations
+  local environment_kind module capability value type forbidden ek_violations
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -347,17 +352,11 @@ validate_profile() {
     fi
   done < <(profile_capabilities "$profile")
 
-  while IFS= read -r duplicate; do
-    [[ -z "$duplicate" ]] && continue
-    fail "duplicate capability in $profile: $duplicate"
-    status=1
-  done < <(profile_capabilities "$profile" | sort | uniq -d)
+  fail_duplicates "duplicate capability in $profile: " \
+    < <(profile_capabilities "$profile" | sort | uniq -d) || status=1
 
-  while IFS= read -r duplicate; do
-    [[ -z "$duplicate" ]] && continue
-    fail "duplicate module in $profile: $duplicate"
-    status=1
-  done < <(profile_modules "$profile" | sort | uniq -d)
+  fail_duplicates "duplicate module in $profile: " \
+    < <(profile_modules "$profile" | sort | uniq -d) || status=1
 
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue

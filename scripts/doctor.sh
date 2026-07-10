@@ -10,9 +10,7 @@ profile="${1:-personal}"
 section "doctor profile: $profile"
 
 section "policy"
-if ! "$SCRIPT_DIR/validate-policy.sh" "$profile"; then
-  exit 1
-fi
+run_policy_validation "$profile" || exit 1
 
 environment_kind="$(profile_environment_kind "$profile")"
 ok "environmentKind: $environment_kind"
@@ -748,16 +746,7 @@ if [[ "$tunnel_tools_found" -eq 0 ]]; then
 fi
 
 section "project roots"
-# Standard roots (docs/directory-convention.md). They are optional: repos may
-# live outside ~/src (a non-standard placement) with repo-local identity, so a
-# missing standard root is reported neutrally, not as a warning (#134).
-for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
-  if [[ -d "$dir" ]]; then
-    ok "exists: $dir"
-  else
-    item "not present (standard root, optional): $dir"
-  fi
-done
+report_standard_project_roots
 
 # doctor is report-only: warnings never change the exit code.
 # The only non-zero path is the policy validation at the top.
