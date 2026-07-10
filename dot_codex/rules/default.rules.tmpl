@@ -1,0 +1,36 @@
+{{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- /* Codex approval-rules baseline (#139). The canonical, vetted allowlist for
+       Codex's command-approval rules: READ-ONLY subcommands and local-only git
+       operations. Nothing here may auto-allow an outward action (push, PR/issue
+       create, comment, release, external send) or an escalation (sudo, auth
+       login) — those must go through Codex's per-invocation approval until the
+       #131 write-gate hook makes them context-gated (docs/ai-policy.md).
+
+       Why this file is chezmoi-managed (#139 decision): Codex approval grants
+       accumulate ("don't ask again" piles up in local state) and the permission
+       gate erodes silently — the 2026-07-02 audit found outward allows (git
+       push, blanket gh pr/issue) that nobody decided deliberately. Managing the
+       baseline turns that erosion into visible drift: accumulated grants show up
+       in `chezmoi status` / doctor's drift report, and `chezmoi apply` resets
+       the file to this vetted baseline (the 定期棚卸し principle, mechanized).
+       NOTE: [projects] trust in ~/.codex/config.toml is the OTHER accumulation
+       channel and cannot be managed (codex-owned live file, #181) — doctor
+       watches it report-only instead.
+
+       Gating (template self-gate, NOT a module `requires` — #184 lesson):
+       enableAiPolicy=false renders EMPTY and chezmoi removes the managed target
+       (a `requires:` gate would leave an already-applied file lingering).
+       Active for profiles that list the codex-settings module (personal). */ -}}
+{{- if index $caps "enableAiPolicy" -}}
+prefix_rule(pattern=["git", "commit"], decision="allow")
+prefix_rule(pattern=["git", "add"], decision="allow")
+prefix_rule(pattern=["git", "clone"], decision="allow")
+prefix_rule(pattern=["git", "checkout"], decision="allow")
+prefix_rule(pattern=["gh", "auth", "status"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "view"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "list"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "diff"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "checks"], decision="allow")
+prefix_rule(pattern=["gh", "issue", "view"], decision="allow")
+prefix_rule(pattern=["gh", "issue", "list"], decision="allow")
+{{ end -}}

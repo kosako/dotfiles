@@ -630,6 +630,83 @@ else
   status=1
 fi
 
+# AIP) AI policy — Codex permission surface (#139). doctor watches the two
+#      accumulation channels report-only: (1) outward/escalation auto-allow in
+#      the live rules file -> warn naming the exact rule; (2) [projects] trust
+#      in codex-owned config.toml -> warn on whole-home trust and on stale
+#      (nonexistent) paths, reading ONLY the section-header paths (a canary in
+#      an MCP env block must never be echoed — contents-blind discipline).
+#      Uses the committed personal profile (codex-settings active,
+#      enableAiPolicy=true) against $DOTFILES_ROOT scripts. exit 0 throughout.
+mkdir -p "$fixture_home/.codex/rules" "$fixture_home/real-project"
+cat > "$fixture_home/.codex/rules/default.rules" <<'RULES'
+prefix_rule(pattern=["gh", "pr", "view"], decision="allow")
+prefix_rule(pattern=["git", "push"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "create"], decision="allow")
+RULES
+cat > "$fixture_home/.codex/config.toml" <<TOML
+approval_policy = "on-request"
+
+[mcp_servers.fake.env]
+FAKE_TOKEN = "CANARY_CODEX_ENV_LEAK_3b9d"
+
+[projects."$fixture_home"]
+trust_level = "trusted"
+
+[projects."$fixture_home/gone-project"]
+trust_level = "trusted"
+
+[projects."$fixture_home/real-project"]
+trust_level = "trusted"
+TOML
+if aip_out="$(HOME="$fixture_home" "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq 'outward/escalation auto-allow in Codex rules' <<< "$aip_out" \
+    && grep -Fq '"git", "push"' <<< "$aip_out" \
+    && grep -Fq '"gh", "pr", "create"' <<< "$aip_out" \
+    && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
+    && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
+    && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
+    && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out"; then
+    ok "test passed: outward rules warned by name, whole-home + stale trust warned, real project not warned, config.toml contents never echoed"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: Codex permission-surface watch (rules/projects trust) not reported as expected"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (Codex permission surface)"
+  status=1
+fi
+
+# AIP-2) Clean state: read-only rules and no over-broad/stale trust -> the ok
+#        lines, no warns from this watch.
+cat > "$fixture_home/.codex/rules/default.rules" <<'RULES'
+prefix_rule(pattern=["gh", "pr", "view"], decision="allow")
+RULES
+cat > "$fixture_home/.codex/config.toml" <<TOML
+[projects."$fixture_home/real-project"]
+trust_level = "trusted"
+TOML
+if aip_out="$(HOME="$fixture_home" "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "Codex rules contain no outward/escalation auto-allow" <<< "$aip_out" \
+    && grep -Fq "1 path(s) trusted" <<< "$aip_out" \
+    && ! grep -Fq "outward/escalation auto-allow in Codex rules" <<< "$aip_out" \
+    && ! grep -Fq "WHOLE home directory" <<< "$aip_out" \
+    && ! grep -Fq "stale Codex projects trust" <<< "$aip_out"; then
+    ok "test passed: clean Codex permission surface reports ok (no false warns)"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: clean Codex permission surface produced unexpected output"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (Codex permission surface, clean)"
+  status=1
+fi
+rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" "$fixture_home/real-project"
+
 # NPM-A) A broken npm (shim without a runtime) must not kill the doctor:
 # report-only means warn + skip, exit 0 (#144).
 npm_fakebin="$fixture_home/npmfake"

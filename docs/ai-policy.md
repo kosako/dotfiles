@@ -4,6 +4,31 @@ AI tools は後続 module とする。ただし、AI agent の権限ポリシー
 
 `dotfiles` と別 project として管理する AI skills / agents repository の境界は [AI Environment Boundary](ai-environment-boundary.md) に定義する。
 
+## 権限方針の正本と管理点(#139)
+
+「AI エージェントに何を無確認で許すか」の正本はこの文書。tool ごとの**実装(どこで効かせるか)**は
+次の管理点に置き、どちらの tool も同じ原則に従わせる(Codex 側との対称性):
+
+| tool | 権限面 | 管理点 | 堆積への手当て |
+| --- | --- | --- | --- |
+| Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は `settings.local.json`(管理外)に隔離。managed 側は apply で戻る |
+| Codex | 承認 rules(コマンド allowlist) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(定期棚卸しの仕組み化) |
+| Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
+
+原則(両 tool 共通):
+
+- **read(ローカル完結・読み取り)は無確認で許可してよい**。Codex baseline の allow は
+  read 系サブコマンド(`gh pr view/list/diff/checks`、`gh issue view/list`、`gh auth status`)と
+  ローカル git 操作(`commit/add/clone/checkout`)のみ。
+- **マシン外に出る操作(push・PR/issue/comment 作成・release・外部送信)と昇格系
+  (sudo・auth login)は無確認 allow にしない**。都度承認を通す。将来は #131 の
+  write-gate hook で「untrusted がセッションに無ければ自律許可」の context-gated に
+  置き換える(下記 #119 節の write 規則が目標形)。
+- **一時許可は堆積させず定期棚卸しする**。Codex rules は managed baseline へのリセットで
+  機械化。projects trust はリセット手段がない(codex 所有)ため doctor の warn を見て
+  codex 側で手動除去する。堆積は実際に再発する(2026-07-02 に是正した home-root trust が
+  2026-07-10 の監査で復活していた)ので、「一度直したから大丈夫」とみなさない。
+
 ## Default
 
 AI agent は default deny。

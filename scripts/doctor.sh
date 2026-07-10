@@ -399,6 +399,55 @@ if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
   else
     item "agent project root not present (standard root, optional): $HOME/src/agent"
   fi
+  # Codex permission surface (#139). Two accumulation channels erode the human
+  # gate silently ("don't ask again" piles up): the approval rules file and the
+  # [projects] trust in config.toml. The rules baseline is chezmoi-managed (a
+  # read-only allowlist; accumulated grants surface as drift and reset on apply);
+  # config.toml is codex-owned (#181) so its trust list can only be WATCHED here.
+  # Report-only, exit 0. Only meaningful where codex-settings manages the Codex
+  # home at all (work has no Codex management; keep it silent there).
+  if module_active_for_profile "$profile" codex-settings; then
+    codex_rules="$HOME/.codex/rules/default.rules"
+    if [[ -f "$codex_rules" ]]; then
+      ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
+      # No allow rule in the live file may cover an outward action (push, PR/
+      # issue create, comment, release, external send) or an escalation (sudo,
+      # auth login). Pattern lines contain only command words — echoing them is
+      # safe and names the exact grant to revoke.
+      outward_hits="$(grep -E 'decision="allow"' "$codex_rules" 2>/dev/null \
+        | grep -E '"(push|create|merge|comment|edit|delete|close|release|secret|login|sudo|curl|wget)"')" || true
+      if [[ -n "$outward_hits" ]]; then
+        while IFS= read -r rule_line; do
+          warn "outward/escalation auto-allow in Codex rules (revoke or move behind approval): $rule_line"
+        done <<< "$outward_hits"
+      else
+        ok "Codex rules contain no outward/escalation auto-allow (read-only baseline holding)"
+      fi
+    else
+      item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
+    fi
+    # [projects] trust watch: read ONLY the section-header paths — config.toml
+    # also carries MCP server env blocks that may hold secrets, so nothing else
+    # is read or echoed (key-name-only discipline, same as the #148 token scan).
+    codex_config="$HOME/.codex/config.toml"
+    if [[ -f "$codex_config" ]]; then
+      trusted_total=0
+      while IFS= read -r trusted_path; do
+        [[ -z "$trusted_path" ]] && continue
+        trusted_total=$((trusted_total + 1))
+        if [[ "$trusted_path" == "$HOME" ]]; then
+          warn "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)"
+        elif [[ ! -d "$trusted_path" ]]; then
+          warn "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex"
+        fi
+      done < <(sed -n 's/^\[projects\."\(.*\)"\]$/\1/p' "$codex_config")
+      item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, headers scanned only)"
+    else
+      item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
+    fi
+  else
+    item "Codex-side permission files not managed for this profile (codex-settings module inactive)"
+  fi
 else
   ok "AI policy checks disabled for profile"
 fi
