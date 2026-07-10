@@ -67,6 +67,39 @@ require_data_files() {
   [[ "$missing" -eq 0 ]]
 }
 
+# stat mode (octal permission bits) portably across BSD (macOS) and GNU.
+# BSD and GNU stat take different flags; pick by OS rather than chaining
+# them, since `stat -f` means --file-system on GNU.
+file_mode() {
+  if [[ "$(uname)" == "Darwin" ]]; then
+    stat -f '%Lp' "$1"
+  else
+    stat -c '%a' "$1"
+  fi
+}
+
+# The policy gate shared by doctor and preflight. Callers print their own
+# section header and keep the exit path (`|| exit 1`) at the call site: it
+# is the only non-zero path in those report-only scripts.
+run_policy_validation() {
+  "$SCRIPT_DIR/validate-policy.sh" "$1"
+}
+
+# Standard project roots (docs/directory-convention.md), shared by doctor
+# and preflight. They are optional: repos may live outside ~/src (a
+# non-standard placement) with repo-local identity, so a missing standard
+# root is reported neutrally, not as a warning (#134).
+report_standard_project_roots() {
+  local dir
+  for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
+    if [[ -d "$dir" ]]; then
+      ok "exists: $dir"
+    else
+      item "not present (standard root, optional): $dir"
+    fi
+  done
+}
+
 # Names are passed to yq via strenv(), never interpolated into the
 # expression, so a name with special characters cannot break or inject
 # into the query.
@@ -259,12 +292,6 @@ catalog_packages() {
   yq '.packages[]? | [(.name // ""), (.source // ""), (.pkg // ""), (.bin // ""), ((.track_only // false) | tostring)] | join("|")' "$PACKAGES_FILE"
 }
 
-# Emit the advisory source-preference order for a category (cli / gui).
-catalog_source_preference() {
-  local category="$1"
-  c="$category" yq '.source_preference[strenv(c)][]?' "$PACKAGES_FILE"
-}
-
 # Map a catalog source to the capability that gates installing it (#53 stage
 # 2). brew_formula / npm_global / go_install are package installs
 # (installPackages); brew_cask / mas are GUI apps (installGuiApps). manual and
@@ -274,6 +301,20 @@ source_install_capability() {
   case "$1" in
     brew_formula | npm_global | go_install) printf 'installPackages\n' ;;
     brew_cask | mas) printf 'installGuiApps\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether the manager SOURCE needs is on PATH. npm_global / go_install depend
+# on a runtime (node / go) that mise provides, and mas needs the `mas` CLI;
+# absence means "skip", not "install failed". Single source for the
+# source -> manager mapping (installer and catalog drift both use it).
+manager_present() {
+  case "$1" in
+    brew_formula | brew_cask) command -v brew >/dev/null 2>&1 ;;
+    npm_global) command -v npm >/dev/null 2>&1 ;;
+    go_install) command -v go >/dev/null 2>&1 ;;
+    mas) command -v mas >/dev/null 2>&1 ;;
     *) return 1 ;;
   esac
 }
@@ -384,13 +425,13 @@ report_catalog_drift() {
   # flags gate whether absence means "not installed" or "manager not
   # present, skip".
   local have_brew=0 have_npm=0 have_go=0 have_mas=0 gobin=""
-  if command -v brew >/dev/null 2>&1; then
+  if manager_present brew_formula; then
     have_brew=1
     installed_inventory brew_formula | sort > "$brew_formulae"
     installed_inventory brew_leaves | sort > "$brew_leaves"
     installed_inventory brew_cask | sort > "$brew_casks"
   fi
-  if command -v npm >/dev/null 2>&1; then
+  if manager_present npm_global; then
     have_npm=1
     installed_inventory npm_global \
       | grep -vxE 'npm|corepack' | sort > "$npm_globals" || true
@@ -399,12 +440,12 @@ report_catalog_drift() {
   # but treating go like the other managers (absent -> skip, not "not
   # installed") keeps the contract uniform and avoids guessing GOPATH when
   # go cannot tell us where it is.
-  if command -v go >/dev/null 2>&1; then
+  if manager_present go_install; then
     have_go=1
     gobin="$(go_bin_dir)"
     installed_inventory go_install | sort > "$go_bins"
   fi
-  if command -v mas >/dev/null 2>&1; then
+  if manager_present mas; then
     have_mas=1
     installed_inventory mas | sort > "$mas_ids"
   fi

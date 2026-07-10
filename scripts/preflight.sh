@@ -10,9 +10,7 @@ profile="${1:-personal}"
 section "preflight profile: $profile"
 
 section "policy"
-if ! "$SCRIPT_DIR/validate-policy.sh" "$profile"; then
-  exit 1
-fi
+run_policy_validation "$profile" || exit 1
 
 section "system"
 ok "arch: $(uname -m)"
@@ -93,13 +91,7 @@ config_dir="$HOME/.config"
 if [[ -L "$config_dir" ]]; then
   warn "$config_dir is a symlink; apply may replace or follow it (verify with chezmoi diff)"
 elif [[ -d "$config_dir" ]]; then
-  # BSD (macOS) and GNU stat take different flags; pick by OS rather
-  # than chaining them, since `stat -f` means --file-system on GNU.
-  if [[ "$(uname)" == "Darwin" ]]; then
-    config_mode="$(stat -f '%Lp' "$config_dir" 2>/dev/null || echo unknown)"
-  else
-    config_mode="$(stat -c '%a' "$config_dir" 2>/dev/null || echo unknown)"
-  fi
+  config_mode="$(file_mode "$config_dir" 2>/dev/null || echo unknown)"
   if [[ "$config_mode" == "700" ]]; then
     ok "$config_dir mode already 0700"
   else
@@ -158,16 +150,7 @@ else
 fi
 
 section "known project roots"
-# Standard roots (docs/directory-convention.md). Optional: repos may live
-# outside ~/src (a non-standard placement) with repo-local identity, so a
-# missing standard root is reported neutrally, not as a warning (#134).
-for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
-  if [[ -d "$dir" ]]; then
-    ok "exists: $dir"
-  else
-    item "not present (standard root, optional): $dir"
-  fi
-done
+report_standard_project_roots
 
 # preflight is report-only: warnings never change the exit code.
 # The only non-zero path is the policy validation at the top.

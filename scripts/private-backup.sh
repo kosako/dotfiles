@@ -51,15 +51,6 @@ All refuse unless the host profile grants allowSecretsAccess.
 EOF
 }
 
-# stat mode (octal permission bits) portably across BSD (macOS) and GNU.
-file_mode() {
-  if [[ "$(uname)" == "Darwin" ]]; then
-    stat -f '%Lp' "$1"
-  else
-    stat -c '%a' "$1"
-  fi
-}
-
 sha256_of() {
   shasum -a 256 "$1" | awk '{print $1}'
 }
