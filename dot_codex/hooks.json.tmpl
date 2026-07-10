@@ -1,4 +1,5 @@
-{{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- template "require-profile" . -}}
+{{- $caps := index .profiles .profile "capabilities" -}}
 {{- /* Codex parity of the Claude PreToolUse hook registration (#181, the
        Codex side of #137). Same GitHub injection guard (epic #119), same
        capability: enableGitHubIsolatedReader registers the safe-gh read-steering
@@ -16,7 +17,10 @@
        (personal-safe-gh-hook) is deployed by agent-tools to a stable path
        (agent-tools#146 contract); dotfiles only references it by absolute path —
        no script body is distributed from here. The schema under "hooks" is
-       identical to Claude Code's (PreToolUse -> matcher -> command hooks).
+       identical to Claude Code's (PreToolUse -> matcher -> command hooks); the
+       JSON body is shared with the Claude registration via
+       .chezmoitemplates/safe-gh-hook-json (#137/#181 parity — edit it once
+       there).
 
        Rendered JSON is the MINIMAL {"hooks": {...}} — no top-level "description"
        or any other key. Codex 0.142.5 rejects unknown top-level keys in
@@ -47,19 +51,6 @@
        the next apply (Codex review #184; verified in test-codex-settings.sh). */ -}}
 {{- if index $caps "enableGitHubIsolatedReader" -}}
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{ .chezmoi.homeDir }}/.codex/agent-tools/scripts/personal-safe-gh-hook",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
+{{ template "safe-gh-hook-json" (dict "homeDir" .chezmoi.homeDir "agentDir" ".codex" "timeout" 10) }}
 }
 {{ end -}}

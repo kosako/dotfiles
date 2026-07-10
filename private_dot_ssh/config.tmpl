@@ -4,6 +4,7 @@
 # managed blocks win (ssh_config is first-match-wins = managed-wins). The local
 # file may only ADD hosts this file does not define. See docs/ssh.md and
 # docs/local-overrides.md.
+{{ template "require-profile" . -}}
 {{ $caps := index .profiles .profile "capabilities" -}}
 {{ if $caps.enable1PasswordSSH -}}
 

@@ -1,4 +1,5 @@
-{{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- template "require-profile" . -}}
+{{- $caps := index .profiles .profile "capabilities" -}}
 {{- /* Codex approval-rules baseline (#139). The canonical, vetted allowlist for
        Codex's command-approval rules: READ-ONLY subcommands and local-only git
        operations. Nothing here may auto-allow an outward action (push, PR/issue
