@@ -5,6 +5,10 @@
        create, comment, release, external send) or an escalation (sudo, auth
        login) — those must go through Codex's per-invocation approval until the
        #131 write-gate hook makes them context-gated (docs/ai-policy.md).
+       `git clone` is deliberately NOT allowed (Codex review #187): a clone
+       fetches from an arbitrary remote (network egress; the URL itself is a
+       covert channel under the injection threat model), so it stays behind
+       per-invocation approval.
 
        Why this file is chezmoi-managed (#139 decision): Codex approval grants
        accumulate ("don't ask again" piles up in local state) and the permission
@@ -12,7 +16,8 @@
        push, blanket gh pr/issue) that nobody decided deliberately. Managing the
        baseline turns that erosion into visible drift: accumulated grants show up
        in `chezmoi status` / doctor's drift report, and `chezmoi apply` resets
-       the file to this vetted baseline (the 定期棚卸し principle, mechanized).
+       the file to this vetted baseline (the reset half of 棚卸し, mechanized;
+       apply itself stays a manual step).
        NOTE: [projects] trust in ~/.codex/config.toml is the OTHER accumulation
        channel and cannot be managed (codex-owned live file, #181) — doctor
        watches it report-only instead.
@@ -24,7 +29,6 @@
 {{- if index $caps "enableAiPolicy" -}}
 prefix_rule(pattern=["git", "commit"], decision="allow")
 prefix_rule(pattern=["git", "add"], decision="allow")
-prefix_rule(pattern=["git", "clone"], decision="allow")
 prefix_rule(pattern=["git", "checkout"], decision="allow")
 prefix_rule(pattern=["gh", "auth", "status"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "view"], decision="allow")

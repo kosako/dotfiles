@@ -167,12 +167,12 @@ section "codex approval-rules baseline (#139)"
 #    …) sneaking in — or a read rule silently swapped — must fail the test, not
 #    just "some rules exist".
 rules_file="${home:-}/.codex/rules/default.rules"
-expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "clone"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "auth", "status"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")'
+expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "auth", "status"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")'
 if [[ ! -f "$rules_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
   status=1
 elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
-  ok "test passed: committed personal renders exactly the read-only rules baseline (11 allow rules, ordered; no outward/escalation rule)"
+  ok "test passed: committed personal renders exactly the read-only rules baseline (10 allow rules, ordered; no outward/escalation rule, no git clone)"
 else
   fail "test failed: rules baseline content mismatch; rendered was:"
   cat "$rules_file" >&2

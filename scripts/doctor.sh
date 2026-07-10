@@ -410,25 +410,56 @@ if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
     codex_rules="$HOME/.codex/rules/default.rules"
     if [[ -f "$codex_rules" ]]; then
       ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
-      # No allow rule in the live file may cover an outward action (push, PR/
-      # issue create, comment, release, external send) or an escalation (sudo,
-      # auth login). Pattern lines contain only command words — echoing them is
-      # safe and names the exact grant to revoke.
-      outward_hits="$(grep -E 'decision="allow"' "$codex_rules" 2>/dev/null \
-        | grep -E '"(push|create|merge|comment|edit|delete|close|release|secret|login|sudo|curl|wget)"')" || true
-      if [[ -n "$outward_hits" ]]; then
-        while IFS= read -r rule_line; do
-          warn "outward/escalation auto-allow in Codex rules (revoke or move behind approval): $rule_line"
-        done <<< "$outward_hits"
+      # Rules semantics are delegated to Codex's own engine: a fixed probe list
+      # of outward/escalation commands is evaluated with `codex execpolicy
+      # check` against the LIVE rules file. Grepping rule lines was rejected
+      # (Codex review #187): it misses blanket prefixes (["gh","pr"] auto-allows
+      # `gh pr create` — the exact 2026-07-02 regression form), multi-line
+      # rules, and the omitted-decision default (= allow), and echoing rule
+      # lines could leak secrets embedded in arbitrary pattern/justification
+      # strings. The probe approach never reads the rules file here (the path is
+      # only passed to codex) and only OUR fixed probe strings are echoed.
+      if command -v codex >/dev/null 2>&1; then
+        outward_probes=(
+          "git push"
+          "git clone https://example.invalid/repo"
+          "gh pr create"
+          "gh pr merge"
+          "gh pr comment"
+          "gh pr edit"
+          "gh pr close"
+          "gh issue create"
+          "gh issue comment"
+          "gh release create"
+          "gh repo delete"
+          "gh auth login"
+          "sudo -v"
+          "curl https://example.invalid"
+          "wget https://example.invalid"
+        )
+        outward_allowed=0
+        for probe in "${outward_probes[@]}"; do
+          # shellcheck disable=SC2086 # probes are fixed strings; word-splitting into tokens is intended
+          verdict="$(codex execpolicy check --rules "$codex_rules" $probe 2>/dev/null)" || verdict=""
+          if grep -Fq '"decision":"allow"' <<< "$verdict"; then
+            outward_allowed=$((outward_allowed + 1))
+            warn "outward/escalation probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
+          fi
+        done
+        if [[ "$outward_allowed" -eq 0 ]]; then
+          ok "no outward/escalation probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
+        fi
       else
-        ok "Codex rules contain no outward/escalation auto-allow (read-only baseline holding)"
+        item "codex CLI not found; rules-semantics probe skipped (baseline presence still verified above)"
       fi
     else
       item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
     fi
-    # [projects] trust watch: read ONLY the section-header paths — config.toml
-    # also carries MCP server env blocks that may hold secrets, so nothing else
-    # is read or echoed (key-name-only discipline, same as the #148 token scan).
+    # [projects] trust watch: parse ONLY [projects."<path>"] section headers and
+    # the trust_level key inside each section (an entry can be "untrusted" —
+    # only trusted ones matter). config.toml also carries MCP server env blocks
+    # that may hold secrets, so nothing else is read or echoed (key-name-only
+    # discipline, same as the #148 token scan).
     codex_config="$HOME/.codex/config.toml"
     if [[ -f "$codex_config" ]]; then
       trusted_total=0
@@ -440,8 +471,21 @@ if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
         elif [[ ! -d "$trusted_path" ]]; then
           warn "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex"
         fi
-      done < <(sed -n 's/^\[projects\."\(.*\)"\]$/\1/p' "$codex_config")
-      item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, headers scanned only)"
+      done < <(awk '
+        /^\[projects\."/ {
+          p = $0
+          sub(/^\[projects\."/, "", p)
+          sub(/"\]$/, "", p)
+          current = p
+          next
+        }
+        /^\[/ { current = "" ; next }
+        current != "" && $1 == "trust_level" && $3 == "\"trusted\"" {
+          print current
+          current = ""
+        }
+      ' "$codex_config")
+      item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, project headers + trust_level scanned only)"
     else
       item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
     fi
