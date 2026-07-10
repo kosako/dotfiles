@@ -244,7 +244,7 @@ validate_packages() {
 # the mechanical safety rules only.
 validate_backup_paths() {
   local status=0
-  local path type category entry_ok rows
+  local path type _category entry_ok rows
   local types_file paths_file
   types_file="$(mktemp)"
   paths_file="$(mktemp)"
@@ -266,7 +266,10 @@ validate_backup_paths() {
   # entry that resolves to an empty path (a null/empty list item, or a
   # missing path: key) must fail closed, not be silently skipped: backup_paths
   # always emits at least two "|" per entry, so there are no blank rows to skip.
-  while IFS='|' read -r type category path; do
+  # _category is a field-splitting placeholder: backup_paths emits
+  # type|category|path but validation has no category rule (the leading
+  # underscore marks it intentionally unused for SC2034).
+  while IFS='|' read -r type _category path; do
     entry_ok=1
     if [[ -z "$path" ]]; then
       fail "backup path entry missing path"
