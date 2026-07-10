@@ -14,6 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
@@ -33,15 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Apply the personal profile from $1 into a fresh home under root $2, and echo
-# the rendered home path. Each call gets its own root (config + home) under base.
-apply_personal() {
-  local source_dir="$1" root="$2"
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
-  chezmoi --config "$root/chezmoi.toml" \
-    --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1
-}
+# Renders use render_personal_into (test-lib.sh): each call gets its own
+# root (config + home) under base, which the single trap cleans up.
 
 section "ssh-1password gating"
 
@@ -49,7 +44,7 @@ section "ssh-1password gating"
 #    github.com (scoped) and the local Include. personal's committed default is
 #    true, so render from the real source.
 on_root="$base/on"
-if ! apply_personal "$DOTFILES_ROOT" "$on_root"; then
+if ! render_personal_into "$DOTFILES_ROOT" "$on_root"; then
   fail "test failed: personal apply (enable1PasswordSSH=true) did not render"
   exit 1
 fi
@@ -70,13 +65,12 @@ fi
 # 2) enable1PasswordSSH=false: the config is still applied (module membership),
 #    but the agent setting is NOT emitted; the Include escape hatch remains.
 #    Force the value in a copy so the test is independent of the committed default.
-off_src="$base/off-src"
-cp -R "$DOTFILES_ROOT" "$off_src"
-rm -rf "$off_src/.git"
-yq -i '.profiles.personal.capabilities.enable1PasswordSSH = false' \
-  "$off_src/.chezmoidata/profiles.yaml"
+off_fixture="$base/off-fixture"
+mkdir -p "$off_fixture"
+make_flipped_source "$off_fixture"
+flip_personal_capability "$off_fixture/src" enable1PasswordSSH false
 off_root="$base/off"
-if ! apply_personal "$off_src" "$off_root"; then
+if ! render_personal_into "$off_fixture/src" "$off_root"; then
   fail "test failed: personal apply (enable1PasswordSSH=false) did not render"
   exit 1
 fi

@@ -135,9 +135,7 @@ fi
 #    profiles.yaml in a repo copy — the mutation is fail-closed because the
 #    exit-1 assertion itself would fail on a no-op).
 broken_root="$fixture_home/broken"
-mkdir -p "$broken_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$broken_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$broken_root/.chezmoidata/"
+copy_repo_fixture "$broken_root"
 printf 'profiles: {}\n' > "$broken_root/.chezmoidata/profiles.yaml"
 if HOME="$empty_home" "$broken_root/scripts/preflight.sh" personal >/dev/null 2>&1; then
   miss "preflight must exit non-zero when policy validation fails"

@@ -176,18 +176,8 @@ else
   }
   trap cleanup EXIT
 
-  # Apply personal from SOURCE_DIR into ROOT/home. ROOT is created by the
-  # CALLER and registered in tmp_roots there: a helper that mktemps and
-  # returns via command substitution would append to tmp_roots only inside
-  # the substitution subshell, so the cleanup trap would never see it and
-  # the render roots would leak (Codex review, #150).
-  render_personal_into() {
-    local source_dir="$1" root="$2"
-    mkdir -p "$root/home"
-    printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
-    chezmoi --config "$root/chezmoi.toml" \
-      --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1
-  }
+  # render_personal_into comes from test-lib.sh (caller-creates-root
+  # contract; see the #150 leak note there).
 
   # enforce (personal default): every hardening line renders, tokens never do.
   enforce_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-render.XXXXXX")"

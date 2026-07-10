@@ -23,9 +23,7 @@ trap cleanup EXIT
 make_fixture() {
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-test.XXXXXX")"
   tmp_roots+=("$fixture")
-  mkdir -p "$fixture/.chezmoidata"
-  cp -R "$DOTFILES_ROOT/scripts" "$fixture/scripts"
-  cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$fixture/.chezmoidata/"
+  copy_repo_fixture "$fixture"
 }
 
 insert_once() {
