@@ -1,4 +1,5 @@
-{{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- template "require-profile" . -}}
+{{- $caps := index .profiles .profile "capabilities" -}}
 {{- /* GitHub injection guard (epic #119). Best-effort / steering only:
        command-string matchers are bypassable ($(), equivalent read paths like
        xxd / python open(), MCP by other means, subagent gaps) and are NOT an
@@ -36,7 +37,9 @@
        isolated reader. Steering / fail-open: a missing body (exit 127), any
        non-2 non-zero exit, bad JSON, or a timeout all let the tool call
        continue (only exit 2 blocks), so registering before agent-tools has
-       synced is a safe no-op. This is NOT the context-gated write hook above. */ -}}
+       synced is a safe no-op. This is NOT the context-gated write hook above.
+       The JSON body is shared with the Codex registration via
+       .chezmoitemplates/safe-gh-hook-json (#181 parity — edit it once there). */ -}}
 {{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list -}}
@@ -64,19 +67,7 @@
     ]
   },
 {{- if index $caps "enableGitHubIsolatedReader" }}
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{ .chezmoi.homeDir }}/.claude/agent-tools/scripts/personal-safe-gh-hook"
-          }
-        ]
-      }
-    ]
-  },
+{{ template "safe-gh-hook-json" (dict "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
   "model": "opus[1m]",
   "statusLine": {
