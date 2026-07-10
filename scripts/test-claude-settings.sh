@@ -25,6 +25,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
@@ -44,30 +46,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Apply the personal profile from SOURCE_DIR into a throwaway home and print
-# the path to the rendered ~/.claude/settings.json. Returns non-zero on a
-# failed apply.
-render_personal_settings() {
-  local source_dir="$1" root
-  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-  tmp_roots+=("$root")
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
-  if ! chezmoi --config "$root/chezmoi.toml" \
-      --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1; then
-    return 1
-  fi
-  printf '%s\n' "$root/home/.claude/settings.json"
-}
+# Renders use render_personal_into (test-lib.sh): the caller mktemps the
+# root and registers it in tmp_roots, then reads the rendered
+# ~/.claude/settings.json out of ROOT/home (caller-creates-root contract;
+# see the #150 leak note in test-lib.sh).
 
 section "claude settings sandbox content"
 
 # 1) Committed default: enforceAiSandbox=false -> no sandbox block, and the
 #    file is still valid JSON (the conditional must not corrupt it).
-if ! off_file="$(render_personal_settings "$DOTFILES_ROOT")"; then
+off_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$off_root")
+if ! render_personal_into "$DOTFILES_ROOT" "$off_root"; then
   fail "test failed: personal apply (default) did not render"
   exit 1
 fi
+off_file="$off_root/home/.claude/settings.json"
 if ! yq -p json '.' "$off_file" >/dev/null 2>&1; then
   fail "test failed: default settings.json is not valid JSON"
   status=1
@@ -83,15 +77,16 @@ fi
 #    default stays false.
 src_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-src.XXXXXX")"
 tmp_roots+=("$src_root")
-cp -R "$DOTFILES_ROOT" "$src_root/src"
-rm -rf "$src_root/src/.git"
-yq -i '.profiles.personal.capabilities.enforceAiSandbox = true' \
-  "$src_root/src/.chezmoidata/profiles.yaml"
+make_flipped_source "$src_root"
+flip_personal_capability "$src_root/src" enforceAiSandbox true
 
-if ! on_file="$(render_personal_settings "$src_root/src")"; then
+on_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$on_root")
+if ! render_personal_into "$src_root/src" "$on_root"; then
   fail "test failed: personal apply (enforceAiSandbox=true) did not render"
   exit 1
 fi
+on_file="$on_root/home/.claude/settings.json"
 if ! yq -p json '.' "$on_file" >/dev/null 2>&1; then
   fail "test failed: enabled settings.json is not valid JSON"
   status=1
@@ -189,14 +184,15 @@ fi
 #    throwaway copy so the committed default stays false.
 mcp_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-mcp.XXXXXX")"
 tmp_roots+=("$mcp_src")
-cp -R "$DOTFILES_ROOT" "$mcp_src/src"
-rm -rf "$mcp_src/src/.git"
-yq -i '.profiles.personal.capabilities.gateGitHubMcp = true' \
-  "$mcp_src/src/.chezmoidata/profiles.yaml"
-if ! mcp_file="$(render_personal_settings "$mcp_src/src")"; then
+make_flipped_source "$mcp_src"
+flip_personal_capability "$mcp_src/src" gateGitHubMcp true
+mcp_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$mcp_root")
+if ! render_personal_into "$mcp_src/src" "$mcp_root"; then
   fail "test failed: personal apply (gateGitHubMcp=true) did not render"
   exit 1
 fi
+mcp_file="$mcp_root/home/.claude/settings.json"
 # Valid JSON (comma regression guard for the conditional deny block) + the bare
 # server-name deny (mcp__github covers all tools; mcp__github__* is redundant).
 if yq -p json '.' "$mcp_file" >/dev/null 2>&1 \
@@ -211,14 +207,16 @@ fi
 #     (catches a comma regression when several conditional keys are present).
 both_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-both.XXXXXX")"
 tmp_roots+=("$both_src")
-cp -R "$DOTFILES_ROOT" "$both_src/src"
-rm -rf "$both_src/src/.git"
-yq -i '.profiles.personal.capabilities.gateGitHubMcp = true | .profiles.personal.capabilities.enforceAiSandbox = true' \
-  "$both_src/src/.chezmoidata/profiles.yaml"
-if ! both_file="$(render_personal_settings "$both_src/src")"; then
+make_flipped_source "$both_src"
+flip_personal_capability "$both_src/src" gateGitHubMcp true
+flip_personal_capability "$both_src/src" enforceAiSandbox true
+both_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$both_root")
+if ! render_personal_into "$both_src/src" "$both_root"; then
   fail "test failed: personal apply (both gates true) did not render"
   exit 1
 fi
+both_file="$both_root/home/.claude/settings.json"
 if yq -p json '.' "$both_file" >/dev/null 2>&1 \
   && grep -Fq '"mcp__github"' "$both_file" \
   && grep -Fq '"Bash(git push * main)"' "$both_file"; then
@@ -291,14 +289,15 @@ fi
 #     spirit as the deny test, without a fixture that drifts).
 reader_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-reader.XXXXXX")"
 tmp_roots+=("$reader_src")
-cp -R "$DOTFILES_ROOT" "$reader_src/src"
-rm -rf "$reader_src/src/.git"
-yq -i '.profiles.personal.capabilities.enableGitHubIsolatedReader = false' \
-  "$reader_src/src/.chezmoidata/profiles.yaml"
-if ! reader_off_file="$(render_personal_settings "$reader_src/src")"; then
+make_flipped_source "$reader_src"
+flip_personal_capability "$reader_src/src" enableGitHubIsolatedReader false
+reader_off_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$reader_off_root")
+if ! render_personal_into "$reader_src/src" "$reader_off_root"; then
   fail "test failed: personal apply (enableGitHubIsolatedReader=false) did not render"
   exit 1
 fi
+reader_off_file="$reader_off_root/home/.claude/settings.json"
 on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
 reader_off_norm="$(yq -p json -o json '.' "$reader_off_file")"
 if [[ "$(yq -p json '.hooks // "absent"' "$reader_off_file")" == "absent" ]] \

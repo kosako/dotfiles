@@ -14,6 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
@@ -33,20 +35,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Apply the personal profile from SOURCE_DIR into a throwaway home and print the
-# home path. Returns non-zero on a failed apply.
-apply_personal() {
-  local source_dir="$1" root
-  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing.XXXXXX")"
-  tmp_roots+=("$root")
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
-  if ! chezmoi --config "$root/chezmoi.toml" \
-      --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1; then
-    return 1
-  fi
-  printf '%s\n' "$root/home"
-}
+# Renders use render_personal_into (test-lib.sh): the caller mktemps the
+# root and registers it in tmp_roots, then inspects ROOT/home
+# (caller-creates-root contract; see the #150 leak note in test-lib.sh).
 
 section "git-signing gating"
 
@@ -54,14 +45,15 @@ section "git-signing gating"
 #    a copy so the test is independent of the committed default.
 off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing-off.XXXXXX")"
 tmp_roots+=("$off_src")
-cp -R "$DOTFILES_ROOT" "$off_src/src"
-rm -rf "$off_src/src/.git"
-yq -i '.profiles.personal.capabilities.enableGitSigning = false' \
-  "$off_src/src/.chezmoidata/profiles.yaml"
-if ! off_home="$(apply_personal "$off_src/src")"; then
+make_flipped_source "$off_src"
+flip_personal_capability "$off_src/src" enableGitSigning false
+off_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing.XXXXXX")"
+tmp_roots+=("$off_root")
+if ! render_personal_into "$off_src/src" "$off_root"; then
   fail "test failed: personal apply (enableGitSigning=false) did not render"
   exit 1
 fi
+off_home="$off_root/home"
 if [[ -e "$off_home/.config/git/signing.gitconfig" ]]; then
   fail "test failed: signing.gitconfig applied while enableGitSigning=false"
   status=1
@@ -72,15 +64,16 @@ fi
 # 2) enableGitSigning=true: signing.gitconfig is applied with the SSH mechanism.
 src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing-src.XXXXXX")"
 tmp_roots+=("$src")
-cp -R "$DOTFILES_ROOT" "$src/src"
-rm -rf "$src/src/.git"
-yq -i '.profiles.personal.capabilities.enableGitSigning = true' \
-  "$src/src/.chezmoidata/profiles.yaml"
+make_flipped_source "$src"
+flip_personal_capability "$src/src" enableGitSigning true
 
-if ! on_home="$(apply_personal "$src/src")"; then
+on_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing.XXXXXX")"
+tmp_roots+=("$on_root")
+if ! render_personal_into "$src/src" "$on_root"; then
   fail "test failed: personal apply (enableGitSigning=true) did not render"
   exit 1
 fi
+on_home="$on_root/home"
 f="$on_home/.config/git/signing.gitconfig"
 if [[ ! -f "$f" ]]; then
   fail "test failed: signing.gitconfig not applied while enableGitSigning=true"

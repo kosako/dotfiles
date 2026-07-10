@@ -86,10 +86,15 @@ policy validation 失敗時のみ非 0、をカバーする。
 
 ## test-lib.sh
 
-test-*.sh が共有する fixture 編集 helper(source 専用、lib-policy.sh の後に source する)。
+test-*.sh が共有する fixture helper(source 専用、lib-policy.sh の後に source する)。
 `set_capability_all` / `remove_module_all` が fixture の profiles.yaml を yq で構造的に
 編集し、対象が存在しなければ fail する(行形式一致の awk 直書きが無言で no-op 化して
-テストが vacuous pass する事故の再発防止。#149)。
+テストが vacuous pass する事故の再発防止。#149)。ほかに render/fixture 構築の共有形:
+`render_personal_into`(throwaway home への personal apply。root は呼び出し側が mktemp +
+cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp する形は cleanup trap から
+漏れる、#150)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
+限定 capability flip。boolean 専用)、`copy_repo_fixture`(scripts + .chezmoidata の最小
+repo copy)。
 
 ## test-policy.sh
 

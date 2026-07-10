@@ -17,6 +17,38 @@ source "$SCRIPT_DIR/test-lib.sh"
 # here; the AT-override case re-sets it explicitly for its own invocation.
 unset AGENT_TOOLS
 
+# write_root_pinned_status_sh DEST JSON_PAYLOAD
+# Write a fake agent-tools status.sh at DEST that models the status
+# contract: accept `--root DIR` and `--json` in any order, and assert the
+# caller pins the inspection root to the checkout DEST lives in, not its
+# own cwd (#73; the AGENT_TOOLS-override case regresses #71 the same way).
+# status.sh defaults its root to cwd, so a doctor that omits --root would
+# inspect the wrong dir; exit non-zero on a wrong/missing root to regress
+# that loudly. Touches ../ran-marker so tests can prove it ran, then
+# prints JSON_PAYLOAD verbatim (one line + newline).
+write_root_pinned_status_sh() {
+  local dest="$1" payload="$2"
+  cat > "$dest" <<'SH'
+#!/bin/sh
+root=""; json=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) root="$2"; shift 2 ;;
+    --json) json=1; shift ;;
+    *) shift ;;
+  esac
+done
+[ "$json" = 1 ] || exit 1
+[ -n "$root" ] || exit 3
+root="$(CDPATH= cd -- "$root" 2>/dev/null && pwd)" || exit 3
+expected="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+[ "$root" = "$expected" ] || exit 3
+: > "$(dirname "$0")/../ran-marker"
+SH
+  printf '%s\n' "cat <<'JSON'" "$payload" "JSON" >> "$dest"
+  chmod +x "$dest"
+}
+
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
@@ -112,39 +144,15 @@ agent_dir="$fixture_home/src/agent/agent-tools"
 agent_scripts="$agent_dir/scripts"
 agent_marker="$agent_dir/ran-marker"
 mkdir -p "$agent_scripts"
-cat > "$agent_scripts/status.sh" <<'SH'
-#!/bin/sh
-# Model the status contract: accept `--root DIR` and `--json` in any order, and
-# assert doctor pins the inspection root to this checkout, not its own cwd (#73).
-# status.sh defaults its root to cwd, so a doctor that omits --root would inspect
-# the wrong dir; exit non-zero on a wrong/missing root to regress that loudly.
-root=""; json=0
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --root) root="$2"; shift 2 ;;
-    --json) json=1; shift ;;
-    *) shift ;;
-  esac
-done
-[ "$json" = 1 ] || exit 1
-[ -n "$root" ] || exit 3
-root="$(CDPATH= cd -- "$root" 2>/dev/null && pwd)" || exit 3
-expected="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-[ "$root" = "$expected" ] || exit 3
-: > "$(dirname "$0")/../ran-marker"
-cat <<'JSON'
-{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"}]}
-JSON
-SH
-chmod +x "$agent_scripts/status.sh"
+# Root-pinning fake (see write_root_pinned_status_sh): regression for #73.
+write_root_pinned_status_sh "$agent_scripts/status.sh" \
+  '{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"}]}'
 
 # A) Opt-in disabled: present but status.sh must not run. Force the capability
 #    off in a throwaway copy so the test is independent of the real default
 #    (personal opts in by default since #73), mirroring the opt-in copy below.
 optout_root="$fixture_home/.dotfiles-optout"
-mkdir -p "$optout_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$optout_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$optout_root/.chezmoidata/"
+copy_repo_fixture "$optout_root"
 set_capability_all "$optout_root" enableAgentToolsStatus false
 rm -f "$agent_marker"
 if at_out="$(HOME="$fixture_home" "$optout_root/scripts/doctor.sh" personal 2>&1)"; then
@@ -164,9 +172,7 @@ fi
 # Throwaway repo copy with the opt-in enabled for every profile, so the
 # test does not depend on which profile comes first.
 optin_root="$fixture_home/.dotfiles-optin"
-mkdir -p "$optin_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$optin_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$optin_root/.chezmoidata/"
+copy_repo_fixture "$optin_root"
 set_capability_all "$optin_root" enableAgentToolsStatus true
 
 # B) Opt-in enabled: status.sh runs, summary shown, conflict flagged.
@@ -284,29 +290,10 @@ override_dir="$fixture_home/custom/agent-tools"
 override_scripts="$override_dir/scripts"
 override_marker="$override_dir/ran-marker"
 mkdir -p "$override_scripts"
-cat > "$override_scripts/status.sh" <<'SH'
-#!/bin/sh
 # Same root-pinning contract as the default-path fake: doctor must pass
 # --root equal to the AGENT_TOOLS-overridden checkout (#71 + #73).
-root=""; json=0
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --root) root="$2"; shift 2 ;;
-    --json) json=1; shift ;;
-    *) shift ;;
-  esac
-done
-[ "$json" = 1 ] || exit 1
-[ -n "$root" ] || exit 3
-root="$(CDPATH= cd -- "$root" 2>/dev/null && pwd)" || exit 3
-expected="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-[ "$root" = "$expected" ] || exit 3
-: > "$(dirname "$0")/../ran-marker"
-cat <<'JSON'
-{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":0,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":0,"stale":0},"register":{"catalog_present":false,"registered":0,"human_review_required":0,"unsupported":0},"sync_targets":[]}
-JSON
-SH
-chmod +x "$override_scripts/status.sh"
+write_root_pinned_status_sh "$override_scripts/status.sh" \
+  '{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":0,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":0,"stale":0},"register":{"catalog_present":false,"registered":0,"human_review_required":0,"unsupported":0},"sync_targets":[]}'
 rm -f "$override_marker"
 if at_out="$(HOME="$fixture_home" AGENT_TOOLS="$override_dir" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "agent-tools present; status contract v2" <<< "$at_out" && [[ -e "$override_marker" ]]; then
@@ -424,9 +411,7 @@ fi
 # git-signing module inactive) cases. Throwaway repo copy so the edits do not
 # touch the real data files.
 sign_root="$fixture_home/.dotfiles-signing"
-mkdir -p "$sign_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$sign_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$sign_root/.chezmoidata/"
+copy_repo_fixture "$sign_root"
 
 # L) enableGitSigning=true with the git-signing module active -> managed mechanism.
 set_capability_all "$sign_root" enableGitSigning true
@@ -466,9 +451,7 @@ fi
 # (capability true but ssh-1password module inactive) cases. Throwaway repo
 # copy so the edits do not touch the real data files.
 ssh_root="$fixture_home/.dotfiles-ssh"
-mkdir -p "$ssh_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$ssh_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$ssh_root/.chezmoidata/"
+copy_repo_fixture "$ssh_root"
 
 # N) enable1PasswordSSH=true with the ssh-1password module active -> managed agent.
 #    personal's committed default is true + module present, so no mutation needed.
@@ -511,9 +494,7 @@ fi
 # fail-open no-op warn). doctor stays exit 0 (no dead capability).
 # Throwaway repo copy so the flip does not touch the real data files.
 gh_root="$fixture_home/.dotfiles-ghguard"
-mkdir -p "$gh_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$gh_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$gh_root/.chezmoidata/"
+copy_repo_fixture "$gh_root"
 
 # P) committed personal: gateGitHubMcp AND enableGitHubIsolatedReader are ON
 #    (Phase 2 / #137) and claude-settings is active, so doctor reports the
@@ -892,9 +873,7 @@ fi
 # with a corepack on PATH reports its version line (fake for determinism —
 # the CI validate job may or may not ship corepack) (#150).
 cp_root="$fixture_home/.dotfiles-corepack"
-mkdir -p "$cp_root/.chezmoidata"
-cp -R "$DOTFILES_ROOT/scripts" "$cp_root/scripts"
-cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$cp_root/.chezmoidata/"
+copy_repo_fixture "$cp_root"
 set_capability_all "$cp_root" corepackMode off
 if cp_out="$(HOME="$fixture_home" "$cp_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "corepack intentionally unmanaged" <<< "$cp_out"; then

@@ -62,3 +62,56 @@ remove_module_all() {
   fi
   M="$module" yq -i 'del(.profiles[].modules[] | select(. == strenv(M)))' "$file"
 }
+
+# render_personal_into SOURCE_DIR ROOT
+# Apply the personal profile from SOURCE_DIR into ROOT/home (writes
+# ROOT/chezmoi.toml; requires chezmoi — render tests check for it upfront).
+# ROOT is created by the CALLER and registered in tmp_roots there: a helper
+# that mktemps and returns via command substitution would append to
+# tmp_roots only inside the substitution subshell, so the cleanup trap
+# would never see it and the render roots would leak (Codex review, #150).
+render_personal_into() {
+  local source_dir="$1" root="$2"
+  mkdir -p "$root/home"
+  printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
+  chezmoi --config "$root/chezmoi.toml" \
+    --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1
+}
+
+# make_flipped_source DEST_PARENT
+# Copy the committed source into DEST_PARENT/src (dropping .git) so a test
+# can flip capabilities without touching the real data files. DEST_PARENT
+# is created and registered for cleanup by the caller. Call as a plain
+# statement, never inside $(...) (the subshell would hide caller-side
+# cleanup registration — same trap as render_personal_into).
+make_flipped_source() {
+  local dest_parent="$1"
+  cp -R "$DOTFILES_ROOT" "$dest_parent/src"
+  rm -rf "$dest_parent/src/.git"
+}
+
+# flip_personal_capability SRC CAP VALUE
+# Set CAP to VALUE for the personal profile only, in
+# SRC/.chezmoidata/profiles.yaml (SRC is a make_flipped_source copy).
+# Boolean capabilities only: env(V) parses true/false into booleans; an
+# enum-valued capability would need strenv. Personal-only on purpose —
+# set_capability_all (above) is the all-profile, fail-closed variant with
+# a different contract (test-policy.sh pins that contract).
+flip_personal_capability() {
+  local src="$1" cap="$2" value="$3"
+  C="$cap" V="$value" yq -i \
+    '.profiles.personal.capabilities[strenv(C)] = env(V)' \
+    "$src/.chezmoidata/profiles.yaml"
+}
+
+# copy_repo_fixture DEST
+# Minimal repo-copy fixture: scripts/ plus the .chezmoidata data files —
+# just enough for doctor / preflight / validate-policy to run against
+# DEST. mktemp, cleanup registration, and any per-case fixture mutation
+# (capability flips, extra files) stay with the caller. No output.
+copy_repo_fixture() {
+  local dest="$1"
+  mkdir -p "$dest/.chezmoidata"
+  cp -R "$DOTFILES_ROOT/scripts" "$dest/scripts"
+  cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$dest/.chezmoidata/"
+}

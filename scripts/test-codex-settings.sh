@@ -24,6 +24,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
@@ -43,21 +45,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Apply the personal profile from SOURCE_DIR into a throwaway home and print the
-# path to that home (so callers can inspect the presence/absence of files).
-# Returns non-zero on a failed apply.
-render_personal_home() {
-  local source_dir="$1" root
-  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
-  tmp_roots+=("$root")
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
-  if ! chezmoi --config "$root/chezmoi.toml" \
-      --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1; then
-    return 1
-  fi
-  printf '%s\n' "$root/home"
-}
+# Renders use render_personal_into (test-lib.sh): the caller mktemps the
+# root and registers it in tmp_roots, then inspects ROOT/home
+# (caller-creates-root contract; see the #150 leak note in test-lib.sh).
 
 section "codex settings PreToolUse hook registration (#181)"
 
@@ -68,10 +58,13 @@ section "codex settings PreToolUse hook registration (#181)"
 #    (event count, matcher, hook count, type, command, timeout), not just "a hook
 #    exists": this is security wiring, so a swapped matcher / extra event / wrong
 #    path must fail the test.
-if ! home="$(render_personal_home "$DOTFILES_ROOT")"; then
+home_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
+tmp_roots+=("$home_root")
+if ! render_personal_into "$DOTFILES_ROOT" "$home_root"; then
   fail "test failed: personal apply (default) did not render"
   exit 1
 fi
+home="$home_root/home"
 hooks_file="$home/.codex/hooks.json"
 expected_hook_cmd="$HOME/.codex/agent-tools/scripts/personal-safe-gh-hook"
 if [[ ! -f "$hooks_file" ]]; then
@@ -129,10 +122,8 @@ fi
 #    template self-gate renders empty and chezmoi prunes the managed target).
 off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-off-src.XXXXXX")"
 tmp_roots+=("$off_src")
-cp -R "$DOTFILES_ROOT" "$off_src/src"
-rm -rf "$off_src/src/.git"
-yq -i '.profiles.personal.capabilities.enableGitHubIsolatedReader = false' \
-  "$off_src/src/.chezmoidata/profiles.yaml"
+make_flipped_source "$off_src"
+flip_personal_capability "$off_src/src" enableGitHubIsolatedReader false
 
 removal_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-removal.XXXXXX")"
 tmp_roots+=("$removal_root")
@@ -185,10 +176,8 @@ fi
 #        removal, same lingering scenario as case 3) while hooks.json survives.
 ai_off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-aioff.XXXXXX")"
 tmp_roots+=("$ai_off_src")
-cp -R "$DOTFILES_ROOT" "$ai_off_src/src"
-rm -rf "$ai_off_src/src/.git"
-yq -i '.profiles.personal.capabilities.enableAiPolicy = false' \
-  "$ai_off_src/src/.chezmoidata/profiles.yaml"
+make_flipped_source "$ai_off_src"
+flip_personal_capability "$ai_off_src/src" enableAiPolicy false
 rules_removal_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-rulesrm.XXXXXX")"
 tmp_roots+=("$rules_removal_root")
 mkdir -p "$rules_removal_root/home"
