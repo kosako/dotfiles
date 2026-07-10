@@ -18,6 +18,14 @@
        no script body is distributed from here. The schema under "hooks" is
        identical to Claude Code's (PreToolUse -> matcher -> command hooks).
 
+       Rendered JSON is the MINIMAL {"hooks": {...}} — no top-level "description"
+       or any other key. Codex 0.142.5 rejects unknown top-level keys in
+       hooks.json (a top-level "description" is a parse error in the TUI hook-
+       review path, so the hook fails to load), even though the 0.142.2 plugin
+       example carried one. So all human-facing notes live in THIS template
+       comment, never in the rendered JSON (#185). test-codex-settings.sh pins the
+       top-level key set to exactly {hooks} as a parse-safety regression guard.
+
        Steering / fail-open, NOT an enforcement boundary (docs/ai-environment-
        boundary.md): a missing body (exit 127), any non-2 non-zero exit, bad JSON,
        or a timeout all let the tool call continue (only exit 2 blocks), so
@@ -39,7 +47,6 @@
        the next apply (Codex review #184; verified in test-codex-settings.sh). */ -}}
 {{- if index $caps "enableGitHubIsolatedReader" -}}
 {
-  "description": "dotfiles-managed (registration): safe-gh read-steering PreToolUse hook. Body deployed by agent-tools. Steering / fail-open — not an enforcement boundary. Requires a one-time /hooks trust in Codex to activate.",
   "hooks": {
     "PreToolUse": [
       {

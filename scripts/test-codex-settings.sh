@@ -81,6 +81,17 @@ elif ! yq -p json '.' "$hooks_file" >/dev/null 2>&1; then
   fail "test failed: ~/.codex/hooks.json is not valid JSON"
   status=1
 else
+  # 0.142.5 parse-safety: the top-level object must be EXACTLY {hooks} — Codex
+  # 0.142.5 rejects unknown top-level keys (a top-level "description" is a parse
+  # error and the hook fails to load), so pin the key set, not just "hooks
+  # exists" (#185).
+  top_keys="$(yq -p json -o json '[keys[]] | sort' "$hooks_file" 2>/dev/null | tr -d ' \n')"
+  if [[ "$top_keys" == '["hooks"]' ]]; then
+    ok "test passed: top-level keys are exactly {hooks} (no description/unknown key — Codex 0.142.5 parse-safe)"
+  else
+    fail "test failed: unexpected top-level key(s) in ~/.codex/hooks.json: $top_keys (Codex 0.142.5 rejects unknown top-level keys — #185)"
+    status=1
+  fi
   events="$(yq -p json '.hooks | keys | length' "$hooks_file")"
   pre_len="$(yq -p json '.hooks.PreToolUse | length' "$hooks_file")"
   matcher="$(yq -p json '.hooks.PreToolUse[0].matcher' "$hooks_file")"
