@@ -194,16 +194,21 @@ else
 fi
 
 # C) Opt-in + unknown contract version: not interpreted, still exit 0.
+# Sentinel fields prove fail-closed: a doctor that warns but still interprets
+# fields would emit the summary lines below, so their absence is asserted too.
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
 json=0
 for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 [ "$json" = 1 ] || exit 1
-echo '{"contract_version":99}'
+echo '{"contract_version":99,"repo":{"present":true,"clean":true},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"},{"tool":"codex","name":"y","state":"deployed_but_inactive"}]}'
 SH
 chmod +x "$agent_scripts/status.sh"
 if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "expected 3 (not interpreting fields)" <<< "$at_out"; then
+  if grep -Fq "expected 3 (not interpreting fields)" <<< "$at_out" \
+    && ! grep -Fq "agent-tools working tree clean" <<< "$at_out" \
+    && ! grep -Fq "sync conflicts" <<< "$at_out" \
+    && ! grep -Fq "deployed-but-inactive sync targets" <<< "$at_out"; then
     ok "test passed: unknown contract version is not interpreted (exit 0)"
   else
     printf '%s\n' "$at_out" >&2
