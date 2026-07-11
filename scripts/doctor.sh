@@ -670,7 +670,7 @@ section "agent-tools (report-only)"
 # (executing code from another repo) is opt-in via enableAgentToolsStatus
 # so doctor's no-side-effects invariant is never delegated implicitly.
 # See docs/ai-environment-boundary.md and the agent-tools
-# status-manifest-contract (contract_version 2).
+# status-manifest-contract (contract_version 3).
 # The expected path defaults to the dotfiles directory convention
 # (~/src/agent/agent-tools) but is overridable via the AGENT_TOOLS env so a
 # non-standard checkout can still be reported. presence only; never cloned.
@@ -695,10 +695,10 @@ else
     # the JSON is malformed (a failed substitution would trip set -e).
     sj() { printf '%s' "$status_json" | yq -p json "$1" 2>/dev/null || true; }
     contract_version="$(sj '.contract_version // ""')"
-    if [[ "$contract_version" != "2" ]]; then
-      warn "agent-tools status contract_version=${contract_version:-unknown}, expected 2 (not interpreting fields)"
+    if [[ "$contract_version" != "3" ]]; then
+      warn "agent-tools status contract_version=${contract_version:-unknown}, expected 3 (not interpreting fields)"
     else
-      ok "agent-tools present; status contract v2"
+      ok "agent-tools present; status contract v3"
 
       if [[ "$(sj '.repo.clean // false')" == "true" ]]; then
         ok "agent-tools working tree clean"
@@ -740,6 +740,10 @@ else
       fi
       if [[ "$(sj '[.sync_targets[]? | select(.state == "stale")] | length')" != "0" ]]; then
         warn "agent-tools has stale sync targets (generated artifact newer than target)"
+      fi
+      # v3 (#194): gated-but-still-deployed leftovers are cleanup candidates.
+      if [[ "$(sj '[.sync_targets[]? | select(.state == "deployed_but_inactive")] | length')" != "0" ]]; then
+        warn "agent-tools has deployed-but-inactive sync targets (gated entries still on disk; clean up or re-approve)"
       fi
     fi
     unset -f sj
