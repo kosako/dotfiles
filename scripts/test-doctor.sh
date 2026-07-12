@@ -146,7 +146,7 @@ agent_marker="$agent_dir/ran-marker"
 mkdir -p "$agent_scripts"
 # Root-pinning fake (see write_root_pinned_status_sh): regression for #73.
 write_root_pinned_status_sh "$agent_scripts/status.sh" \
-  '{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"}]}'
+  '{"contract_version":3,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"},{"tool":"codex","name":"y","state":"deployed_but_inactive"}]}'
 
 # A) Opt-in disabled: present but status.sh must not run. Force the capability
 #    off in a throwaway copy so the test is independent of the real default
@@ -178,9 +178,10 @@ set_capability_all "$optin_root" enableAgentToolsStatus true
 # B) Opt-in enabled: status.sh runs, summary shown, conflict flagged.
 rm -f "$agent_marker"
 if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "agent-tools present; status contract v2" <<< "$at_out" \
-    && grep -Fq "sync conflicts" <<< "$at_out" && [[ -e "$agent_marker" ]]; then
-    ok "test passed: opt-in runs status.sh and summarizes (conflict flagged)"
+  if grep -Fq "agent-tools present; status contract v3" <<< "$at_out" \
+    && grep -Fq "sync conflicts" <<< "$at_out" \
+    && grep -Fq "deployed-but-inactive sync targets" <<< "$at_out" && [[ -e "$agent_marker" ]]; then
+    ok "test passed: opt-in runs status.sh and summarizes (conflict + inactive leftovers flagged)"
   else
     printf '%s\n' "$at_out" >&2
     fail "test failed: opt-in summary/conflict/marker missing"
@@ -193,16 +194,21 @@ else
 fi
 
 # C) Opt-in + unknown contract version: not interpreted, still exit 0.
+# Sentinel fields prove fail-closed: a doctor that warns but still interprets
+# fields would emit the summary lines below, so their absence is asserted too.
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
 json=0
 for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 [ "$json" = 1 ] || exit 1
-echo '{"contract_version":99}'
+echo '{"contract_version":99,"repo":{"present":true,"clean":true},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"},{"tool":"codex","name":"y","state":"deployed_but_inactive"}]}'
 SH
 chmod +x "$agent_scripts/status.sh"
 if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "expected 2 (not interpreting fields)" <<< "$at_out"; then
+  if grep -Fq "expected 3 (not interpreting fields)" <<< "$at_out" \
+    && ! grep -Fq "agent-tools working tree clean" <<< "$at_out" \
+    && ! grep -Fq "sync conflicts" <<< "$at_out" \
+    && ! grep -Fq "deployed-but-inactive sync targets" <<< "$at_out"; then
     ok "test passed: unknown contract version is not interpreted (exit 0)"
   else
     printf '%s\n' "$at_out" >&2
@@ -284,7 +290,7 @@ else
 fi
 
 # AT-override) AGENT_TOOLS overrides the expected path (issue #71). The
-#    default ~/src/agent/agent-tools is absent (removed in E), so a v2 summary
+#    default ~/src/agent/agent-tools is absent (removed in E), so a v3 summary
 #    plus the run marker proves doctor read the overridden checkout.
 override_dir="$fixture_home/custom/agent-tools"
 override_scripts="$override_dir/scripts"
@@ -293,10 +299,10 @@ mkdir -p "$override_scripts"
 # Same root-pinning contract as the default-path fake: doctor must pass
 # --root equal to the AGENT_TOOLS-overridden checkout (#71 + #73).
 write_root_pinned_status_sh "$override_scripts/status.sh" \
-  '{"contract_version":2,"repo":{"present":true,"clean":true},"assets":{"total":0,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":0,"stale":0},"register":{"catalog_present":false,"registered":0,"human_review_required":0,"unsupported":0},"sync_targets":[]}'
+  '{"contract_version":3,"repo":{"present":true,"clean":true},"assets":{"total":0,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":0,"stale":0},"register":{"catalog_present":false,"registered":0,"human_review_required":0,"unsupported":0},"sync_targets":[]}'
 rm -f "$override_marker"
 if at_out="$(HOME="$fixture_home" AGENT_TOOLS="$override_dir" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "agent-tools present; status contract v2" <<< "$at_out" && [[ -e "$override_marker" ]]; then
+  if grep -Fq "agent-tools present; status contract v3" <<< "$at_out" && [[ -e "$override_marker" ]]; then
     ok "test passed: AGENT_TOOLS overrides the expected path"
   else
     printf '%s\n' "$at_out" >&2
