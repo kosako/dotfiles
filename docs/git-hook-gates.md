@@ -41,10 +41,11 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
 1. **intent** = `enableGitHookGates`(profile の方針)。agent-tools を使う
    profile(personal)だけ true。work は false(会社マシンに deploy はない)。
 2. **readiness** = destination に agent-tools 配備が**完全に**存在すること
-   (dispatcher + 両 gate の **3 本すべて**。`.chezmoitemplates/git-hook-gates-armed`
-   が render 時に destination を probe する)。dispatcher 1 本では判定しない —
-   gate 欠けの部分配備でも dispatcher は fail-closed なので、3 本そろって
-   初めて安全に武装(arm)できる。
+   (dispatcher + 両 gate の **3 本すべてが regular file かつ実行可能**。
+   `.chezmoitemplates/git-hook-gates-armed` が render 時に destination を
+   probe する — doctor / preflight の `-x` 判定と同じ基準)。dispatcher 1 本や
+   presence だけでは判定しない — gate 欠け・非実行の部分配備でも dispatcher は
+   fail-closed なので、3 本が実行可能にそろって初めて安全に武装(arm)できる。
 
 挙動:
 
