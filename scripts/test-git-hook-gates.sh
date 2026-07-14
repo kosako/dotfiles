@@ -112,6 +112,26 @@ else
   status=1
 fi
 
+# 2b) Non-executable deploy (all three present, dispatcher chmod 644): must
+#     NOT arm. The probe requires the same `-x` readiness doctor and preflight
+#     report — a presence-only probe would arm here while preflight says
+#     "will NOT arm", and the armed shim then bricks every commit (Codex
+#     re-review on PR #197).
+nonexec_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-nonexec.XXXXXX")"
+tmp_roots+=("$nonexec_root")
+mkdir -p "$nonexec_root/home"
+plant_gate_deploy "$nonexec_root/home" "${GATE_SCRIPTS[@]}"
+chmod 644 "$nonexec_root/home/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
+if ! render_personal_into "$DOTFILES_ROOT" "$nonexec_root"; then
+  fail "test failed: personal apply with a non-executable dispatcher did not render"
+  status=1
+elif gate_files_absent "$nonexec_root/home"; then
+  ok "test passed: non-executable dispatcher stays unarmed (probe requires the same -x readiness as doctor/preflight)"
+else
+  fail "test failed: non-executable dispatcher armed the wiring (presence-only probe regression)"
+  status=1
+fi
+
 section "git hook gates rendered content (full deploy)"
 
 # 3) Full deploy planted BEFORE apply: both shims and hooks.gitconfig render

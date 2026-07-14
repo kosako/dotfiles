@@ -13,11 +13,28 @@
        apply` before agent-tools is deployed without bricking every git
        commit; re-running apply after agent-tools sync arms the gates, and
        apply after a deploy removal visibly disarms them (chezmoi prunes the
-       then-empty renders). Presence-only on purpose: sync deploys 0755, and
-       doctor checks executability at runtime (report-only).
+       then-empty renders).
+
+       Each script must be a regular file WITH the owner-execute bit — the
+       same `-x` readiness doctor and preflight report (Codex re-review on
+       PR #197: a presence-only probe would arm on a 0644 dispatcher while
+       preflight says "will NOT arm", and the armed shim then bricks every
+       commit). stat follows symlinks; owner-exec is perm/64 mod 2 (no
+       bitwise ops in templates).
 
        Input: (dict "destDir" .chezmoi.destDir). destDir, not homeDir, so
        throwaway-destination renders (tests, CI) probe the destination they
        actually write to. */ -}}
 {{- $scripts := joinPath .destDir ".claude/agent-tools/scripts" -}}
-{{- if and (stat (joinPath $scripts "personal-git-hook-dispatcher")) (stat (joinPath $scripts "personal-public-safety-gate")) (stat (joinPath $scripts "personal-ai-trailer-gate")) -}}armed{{- end -}}
+{{- $armed := true -}}
+{{- range list "personal-git-hook-dispatcher" "personal-public-safety-gate" "personal-ai-trailer-gate" -}}
+{{-   $st := stat (joinPath $scripts .) -}}
+{{-   if $st -}}
+{{-     if or (ne $st.type "file") (ne (mod (div $st.perm 64) 2) 1) -}}
+{{-       $armed = false -}}
+{{-     end -}}
+{{-   else -}}
+{{-     $armed = false -}}
+{{-   end -}}
+{{- end -}}
+{{- if $armed -}}armed{{- end -}}

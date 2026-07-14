@@ -125,7 +125,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     elif [[ "$hook_gates_wired" -eq 1 ]]; then
       warn "agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and both gates in $hook_gates_deploy_dir — or set enableGitHookGates=false and apply"
     else
-      warn "agent-tools deploy incomplete (dispatcher and/or a gate missing in $hook_gates_deploy_dir; agent-tools sync deploys them); wiring is not armed, commits are not gated yet"
+      warn "agent-tools deploy incomplete (dispatcher and/or a gate missing in $hook_gates_deploy_dir; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
     fi
     item "best-effort guardrail: git commit --no-verify and a repo-local core.hooksPath (husky etc.) bypass the gates (docs/git-hook-gates.md)"
   else
