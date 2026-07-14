@@ -1,0 +1,28 @@
+{{- template "require-profile" . -}}
+{{- $caps := index .profiles .profile "capabilities" -}}
+{{- $armed := eq (includeTemplate "git-hook-gates-armed" (dict "destDir" .chezmoi.destDir)) "armed" -}}
+{{- /* core.hooksPath wiring for the commit-boundary git hook gates (#196).
+       Pulled into ~/.gitconfig via an UNCONDITIONAL [include] there: Git
+       silently ignores a missing include path, so the include is a no-op
+       until this file renders — the exact signing.gitconfig pattern. Git
+       tilde-expands core.hooksPath (pathname type), so no literal home path
+       is baked into the render.
+
+       Two-key gate, same as the shims: enableGitHookGates (intent) AND the
+       armed probe (readiness — the full agent-tools deploy is present;
+       .chezmoitemplates/git-hook-gates-armed). hooksPath and the shims arm
+       and disarm TOGETHER: a hooksPath pointing at pruned shims would break
+       every commit (hooksPath has no fallback to .git/hooks), and shims
+       without hooksPath would be dead wiring.
+
+       Template self-gate (not a module `requires`): an unmet key renders
+       EMPTY and chezmoi prunes the target, which un-sets the wiring on the
+       next apply (#184 lesson). */ -}}
+{{- if and (index $caps "enableGitHookGates") $armed -}}
+# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).
+# Read via the unconditional [include] in ~/.gitconfig. Points every repo's
+# hooks at the managed shim directory; the shims chain to each repo's own
+# .git/hooks, so existing repo hooks keep running (docs/git-hook-gates.md).
+[core]
+	hooksPath = ~/.config/git-hook-gates/hooks
+{{ end -}}

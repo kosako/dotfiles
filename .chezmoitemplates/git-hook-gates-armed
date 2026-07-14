@@ -1,0 +1,40 @@
+{{- /* Arming probe for the git hook gates wiring (#196, Codex review must-1
+       on PR #197). Renders the literal string "armed" iff the agent-tools
+       deploy this wiring depends on is COMPLETE in the destination home:
+       the dispatcher AND both stage gates. The dispatcher is fail-closed
+       (exit 2) when a gate next to it is missing, so arming on the
+       dispatcher alone would still brick commits on a partial deploy —
+       all three or nothing.
+
+       Callers (the two shims + hooks.gitconfig) treat this as the readiness
+       half of a two-key gate: enableGitHookGates is the INTENT (profile
+       policy), this probe is the READINESS (machine state). Both must hold
+       for the wiring to render, so a fresh personal machine can `chezmoi
+       apply` before agent-tools is deployed without bricking every git
+       commit; re-running apply after agent-tools sync arms the gates, and
+       apply after a deploy removal visibly disarms them (chezmoi prunes the
+       then-empty renders).
+
+       Each script must be a regular file WITH the owner-execute bit — the
+       same `-x` readiness doctor and preflight report (Codex re-review on
+       PR #197: a presence-only probe would arm on a 0644 dispatcher while
+       preflight says "will NOT arm", and the armed shim then bricks every
+       commit). stat follows symlinks; owner-exec is perm/64 mod 2 (no
+       bitwise ops in templates).
+
+       Input: (dict "destDir" .chezmoi.destDir). destDir, not homeDir, so
+       throwaway-destination renders (tests, CI) probe the destination they
+       actually write to. */ -}}
+{{- $scripts := joinPath .destDir ".claude/agent-tools/scripts" -}}
+{{- $armed := true -}}
+{{- range list "personal-git-hook-dispatcher" "personal-public-safety-gate" "personal-ai-trailer-gate" -}}
+{{-   $st := stat (joinPath $scripts .) -}}
+{{-   if $st -}}
+{{-     if or (ne $st.type "file") (ne (mod (div $st.perm 64) 2) 1) -}}
+{{-       $armed = false -}}
+{{-     end -}}
+{{-   else -}}
+{{-     $armed = false -}}
+{{-   end -}}
+{{- end -}}
+{{- if $armed -}}armed{{- end -}}

@@ -135,6 +135,9 @@ jobs:
       - name: git-signing gating tests
         run: ./scripts/test-git-signing.sh
 
+      - name: git hook gates wiring tests
+        run: ./scripts/test-git-hook-gates.sh
+
       - name: starship prompt config tests
         run: ./scripts/test-starship.sh
 

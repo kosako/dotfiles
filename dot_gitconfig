@@ -64,3 +64,13 @@
 # (see docs/git-identity.md).
 [include]
 	path = ~/.config/git/signing.gitconfig
+
+# Commit-boundary git hook gates (public-safety / AI trailer; #196), managed
+# only when enableGitHookGates is on (git-hook-gates module). Same pattern as
+# the signing include above: unconditional here, a silent no-op until the
+# capability renders ~/.config/git-hook-gates/hooks.gitconfig, which sets
+# core.hooksPath to the managed shim directory. Best-effort guardrail, not an
+# enforcement boundary: --no-verify and a repo-local core.hooksPath (husky
+# etc.) bypass it. See docs/git-hook-gates.md.
+[include]
+	path = ~/.config/git-hook-gates/hooks.gitconfig

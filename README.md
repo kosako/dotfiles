@@ -38,6 +38,7 @@ personal project として段階的に作っている。現時点の実装状況
 | VS Code settings の管理 | 管理しない(未使用のため見送り #16、dormant 配線も削除済み #145) |
 | SSH(ssh-1password)の管理 | 実装済み・実機適用済み(personal のみ、#17/#121) |
 | GitHub injection 防御(secret floor / MCP deny、steering) | Phase 2 まで実機適用済み(hard 層は #131) |
+| Git hook gates 配線(commit 境界の public-safety / AI trailer gate、実体は agent-tools) | 実装済み(personal のみ、#196) |
 
 「実機適用済み」は、現時点でこの author の Mac 上で managed file が実際に稼働しているという意味(実機の状態は repo からは検証できないので、この列は運用記録。repo 側で機械検証されるのは managed template と render / test の整合まで)。VS Code は未使用のため管理しない(#16。dormant 配線も #145 で削除)。SSH の移行手順は [docs/ssh.md](docs/ssh.md)。
 

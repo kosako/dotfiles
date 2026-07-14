@@ -13,6 +13,7 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | --- | --- | --- | --- |
 | ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録** / plugin / statusLine / tui 等の global preference) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
 | Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181) | dotfiles(`dot_codex/hooks.json.tmpl`) | `chezmoi apply`(+ Codex で一度 `/hooks` trust) | dotfiles の Issue + PR |
+| git hook gates の**配線**(`~/.config/git-hook-gates/` の shim + `core.hooksPath` include・#196。gate/dispatcher **実体**は agent-tools) | dotfiles(`private_dot_config/git-hook-gates/`、[git-hook-gates](git-hook-gates.md)) | `chezmoi apply` | dotfiles の Issue + PR |
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
 | マシン固有・動的値(`~/.claude/settings.local.json`、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
