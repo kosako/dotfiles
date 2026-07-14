@@ -354,6 +354,29 @@ else
   status=1
 fi
 
+section "observer read form (doctor / preflight)"
+
+# 7) doctor and preflight read core.hooksPath with --includes. The managed
+#    value lives in the INCLUDED hooks.gitconfig, and `git config --global
+#    --get` skips includes by default when a scope file is given, so without
+#    the flag a correctly wired machine misreports as unwired (found in the
+#    #196 live smoke: wiring worked, the observers said "not set"). Static
+#    pin on purpose — the observers' own read form IS the contract here.
+for observer in doctor preflight; do
+  if grep -Fq 'git config --global --includes --get core.hooksPath' "$SCRIPT_DIR/$observer.sh"; then
+    ok "test passed: $observer reads core.hooksPath with --includes"
+  else
+    fail "test failed: $observer reads core.hooksPath without --includes (misreports a wired machine as unwired)"
+    status=1
+  fi
+done
+if grep -Eq 'git config --global --get core\.hooksPath' "$SCRIPT_DIR/doctor.sh" "$SCRIPT_DIR/preflight.sh"; then
+  fail "test failed: an includes-less core.hooksPath read remains in doctor/preflight"
+  status=1
+else
+  ok "test passed: no includes-less core.hooksPath read remains"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "git hook gates tests passed"
 fi

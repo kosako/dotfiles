@@ -153,7 +153,11 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     ok "agent-tools deploy complete: apply arms the commit gates (fail-closed on the normal git commit path)"
   fi
   if command -v git >/dev/null 2>&1; then
-    hook_gates_path="$(git config --global --get core.hooksPath || true)"
+    # --includes is load-bearing: the managed value lives in the INCLUDED
+    # hooks.gitconfig, and `git config --global --get` skips includes by
+    # default when a scope file is given — without the flag a correctly
+    # wired machine misreports (found in the #196 live smoke).
+    hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
     # shellcheck disable=SC2088 # literal gitconfig value comparison (git expands the tilde, not the shell)
     case "$hook_gates_path" in
       "")
