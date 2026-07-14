@@ -101,7 +101,11 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       fi
     done
     if command -v git >/dev/null 2>&1; then
-      hook_gates_path="$(git config --global --get core.hooksPath || true)"
+      # --includes is load-bearing: the value lives in the INCLUDED
+      # hooks.gitconfig, and `git config --global --get` skips includes by
+      # default when a scope file is given — without the flag a correctly
+      # wired machine misreports as unwired (found in the #196 live smoke).
+      hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
       # shellcheck disable=SC2088 # the first pattern is the literal value stored in gitconfig (git expands the tilde, not the shell)
       case "$hook_gates_path" in
         "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks")
@@ -140,7 +144,8 @@ else
     [[ -e "$hook_gates_dir/hooks/$hook_stage" ]] && hook_gates_lingering=1
   done
   if command -v git >/dev/null 2>&1; then
-    hook_gates_path="$(git config --global --get core.hooksPath || true)"
+    # --includes for the same reason as the enabled branch above.
+    hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
     # shellcheck disable=SC2088 # literal gitconfig value comparison, as above
     case "$hook_gates_path" in
       "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks") hook_gates_lingering=1 ;;
