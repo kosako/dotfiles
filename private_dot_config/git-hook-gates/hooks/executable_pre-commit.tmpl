@@ -1,0 +1,26 @@
+{{- template "require-profile" . -}}
+{{- $caps := index .profiles .profile "capabilities" -}}
+{{- /* Commit-boundary git hook shim (#196): thin entry only, no gate logic.
+       The dispatcher is deployed by agent-tools sync to BOTH tool homes with
+       identical bytes (agent-tools#202); pointing at the ~/.claude deploy is
+       the dotfiles pick of record (docs/git-hook-gates.md). $HOME is expanded
+       by sh at runtime, so no literal home path is baked into the render.
+
+       The dispatcher runs the pre-commit gate (personal-public-safety-gate)
+       and then chains to the repo's own $GIT_DIR/hooks/pre-commit. It is
+       FAIL-CLOSED (exit 2) when its gates are missing, so this shim must only
+       render where agent-tools is deployed — enableGitHookGates gates that.
+
+       Template self-gate, NOT a module `requires`: false renders EMPTY and
+       chezmoi prunes the managed target, so flipping the capability off truly
+       removes the shim on the next apply. A `requires:` gate would leave an
+       already-applied fail-closed shim lingering (chezmoiignore never prunes
+       existing targets — the #184 lesson, same as codex-settings). */ -}}
+{{- if index $caps "enableGitHookGates" -}}
+#!/bin/sh
+# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).
+# Thin shim: gate logic lives in agent-tools (contract: docs/git-hook-gates.md
+# there). Best-effort guardrail — --no-verify and a repo-local core.hooksPath
+# bypass it.
+exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"
+{{ end -}}

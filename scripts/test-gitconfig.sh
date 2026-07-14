@@ -61,6 +61,12 @@ done
 check_contains "git-signing include directive" "[include]"
 check_contains "git-signing include path" "path = ~/.config/git/signing.gitconfig"
 
+# The git hook gates (#196) use the same unconditional-include pattern: the
+# include target only renders when enableGitHookGates is on, and a missing
+# path is a silent no-op. test-git-hook-gates.sh drives the rendered chain;
+# here we pin that the plain gitconfig carries the include at all.
+check_contains "git-hook-gates include path" "path = ~/.config/git-hook-gates/hooks.gitconfig"
+
 # Commit/tag signing defaults off (unattended commits never block on the signer
 # prompt); opt-in is per-repo/context. The managed file must carry the false
 # default and must NEVER force signing on globally: a global `gpgsign = true`

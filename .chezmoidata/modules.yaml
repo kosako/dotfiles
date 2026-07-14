@@ -58,6 +58,14 @@ modules:
     paths:
       - .claude
       - .claude/settings.json
+  git-hook-gates:
+    description: commit 境界の git hook gates 配線(#196)。~/.config/git-hook-gates/hooks に薄い shim(pre-commit / commit-msg)を置き、agent-tools 配備の personal-git-hook-dispatcher へ exec で委譲する(実体=agent-tools・配線=dotfiles。契約の正本は agent-tools の docs/git-hook-gates.md)。global core.hooksPath は dot_gitconfig の無条件 include が読む hooks.gitconfig(この module の managed file)で設定する(missing なら git が無視=signing.gitconfig と同型)。cap gate は module の requires ではなく template 自己 gate(enableGitHookGates=false は空 render → chezmoi が既存 target も削除。requires だと chezmoiignore が既存 file を prune せず、fail-closed な shim が残置される)。置き場を ~/.config/git 配下にしないのは意図的 — そこは git-signing module の path で、enableGitSigning=false の profile では chezmoiignore が dir ごと subtree を落とし、gate が黙って消えるため(実測)。
+    paths:
+      - .config/git-hook-gates
+      - .config/git-hook-gates/hooks.gitconfig
+      - .config/git-hook-gates/hooks
+      - .config/git-hook-gates/hooks/pre-commit
+      - .config/git-hook-gates/hooks/commit-msg
   codex-settings:
     description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook を登録し(#181・#137 の Codex parity・gate=enableGitHubIsolatedReader)、~/.codex/rules/default.rules に承認 rules の read-only baseline を配る(#139・gate=enableAiPolicy。堆積 grant を drift 可視化し apply で棚卸し)。registration=dotfiles / body=agent-tools。config.toml は codex 所有の live ファイルなので管理しない(projects trust は doctor が report-only 監視)。cap gate はすべて module の requires ではなく template 自己 gate で行う(false は空 render → chezmoi が既存 target も削除)。requires を使うと chezmoiignore が既存 file を prune せず残置するため(Codex review #184)。
     paths:

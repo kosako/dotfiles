@@ -19,6 +19,7 @@ profiles:
       - claude-settings
       - codex-settings
       - git-signing
+      - git-hook-gates
     capabilities:
       installPackages: true
       installGuiApps: true
@@ -64,6 +65,16 @@ profiles:
       # are deployed by agent-tools (registration=dotfiles, body=agent-tools;
       # docs/config-ownership.md, agent-tools#146).
       enableGitHubIsolatedReader: true
+      # #196: wire the commit-boundary git hook gates (public-safety /
+      # AI trailer). Thin shims in ~/.config/git-hook-gates/hooks exec
+      # agent-tools' personal-git-hook-dispatcher, and global core.hooksPath
+      # points there (include in dot_gitconfig -> managed hooks.gitconfig).
+      # The dispatcher is FAIL-CLOSED (exit 2) when its gates are missing, so
+      # this must stay false on machines without the agent-tools deploy —
+      # wiring the shims there would block every git commit. Best-effort
+      # guardrail (--no-verify / repo-local core.hooksPath bypass), not an
+      # enforcement boundary. See docs/git-hook-gates.md.
+      enableGitHookGates: true
 
   work:
     environmentKind: work
@@ -97,3 +108,6 @@ profiles:
       enableAiPolicy: true
       gateGitHubMcp: false
       enableGitHubIsolatedReader: false
+      # #196: no agent-tools deploy on work machines; the dispatcher is
+      # fail-closed, so wiring the shims here would block every git commit.
+      enableGitHookGates: false

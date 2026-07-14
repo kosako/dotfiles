@@ -126,6 +126,27 @@ if command -v git >/dev/null 2>&1; then
   fi
 fi
 
+# Apply impact of the git hook gates (#196): with enableGitHookGates on,
+# apply wires global core.hooksPath at thin shims that exec agent-tools'
+# personal-git-hook-dispatcher, and the dispatcher is FAIL-CLOSED (exit 2)
+# when it or its gates are missing. Applying the wiring on a machine without
+# the agent-tools deploy would block every git commit — detect that BEFORE
+# apply. Report-only, like everything here.
+section "git hook gates (apply impact)"
+if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
+  hook_gates_dispatcher="$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
+  if [[ -x "$hook_gates_dispatcher" ]]; then
+    ok "dispatcher deployed: $hook_gates_dispatcher"
+  else
+    warn "enableGitHookGates=true but the dispatcher is missing or not executable: $hook_gates_dispatcher — apply wires FAIL-CLOSED commit gates, so git commit will be blocked until agent-tools sync deploys it (or set enableGitHookGates=false first)"
+  fi
+  if command -v git >/dev/null 2>&1 && git config --global --get core.hooksPath >/dev/null 2>&1; then
+    warn "global core.hooksPath is already set (value not shown) — apply replaces ~/.gitconfig and the managed include takes over; diff first"
+  fi
+else
+  ok "git hook gates disabled for this profile (enableGitHookGates=false)"
+fi
+
 section "commands"
 for command_name in git chezmoi brew op node npm corepack mise direnv yq shellcheck shfmt; do
   command_status "$command_name" || true

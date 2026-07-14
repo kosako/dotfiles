@@ -62,3 +62,6 @@ capabilities:
   enableGitHubIsolatedReader:
     type: boolean
     implemented: true
+  enableGitHookGates:
+    type: boolean
+    implemented: true

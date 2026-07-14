@@ -66,6 +66,66 @@ else
   warn "git not found"
 fi
 
+# enableGitHookGates wires the commit-boundary git hook gates (#196): thin
+# shims in ~/.config/git-hook-gates/hooks exec agent-tools'
+# personal-git-hook-dispatcher (pre-commit -> public-safety gate, commit-msg ->
+# AI trailer gate, then chain to the repo's own .git/hooks), and global
+# core.hooksPath points at the shim directory via the unconditional include in
+# the managed ~/.gitconfig. Report the whole chain honestly: shims + hooksPath
+# are dotfiles' side, the dispatcher body is agent-tools'. The dispatcher is
+# FAIL-CLOSED (exit 2) when its gates are missing, so "wired but not deployed"
+# means commits are blocked — say so loudly. Best-effort guardrail, NOT an
+# enforcement boundary: --no-verify and a repo-local core.hooksPath (husky
+# etc.) bypass it (docs/git-hook-gates.md).
+section "git hook gates (report-only)"
+hook_gates_dir="$HOME/.config/git-hook-gates"
+hook_gates_dispatcher="$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
+if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
+  if module_active_for_profile "$profile" git-hook-gates; then
+    hook_gates_wired=1
+    for hook_stage in pre-commit commit-msg; do
+      if [[ -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
+        ok "shim present and executable: $hook_gates_dir/hooks/$hook_stage"
+      else
+        warn "shim missing or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply deploys it)"
+        hook_gates_wired=0
+      fi
+    done
+    if command -v git >/dev/null 2>&1; then
+      hook_gates_path="$(git config --global --get core.hooksPath || true)"
+      # shellcheck disable=SC2088 # the first pattern is the literal value stored in gitconfig (git expands the tilde, not the shell)
+      case "$hook_gates_path" in
+        "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks")
+          ok "global core.hooksPath -> managed shim directory"
+          ;;
+        "")
+          warn "global core.hooksPath is not set (chezmoi apply wires it via the ~/.gitconfig include)"
+          hook_gates_wired=0
+          ;;
+        *)
+          warn "global core.hooksPath points somewhere else (value not shown); the managed gates are NOT on the commit path"
+          hook_gates_wired=0
+          ;;
+      esac
+    else
+      warn "git not found, cannot check core.hooksPath"
+      hook_gates_wired=0
+    fi
+    if [[ -x "$hook_gates_dispatcher" ]]; then
+      ok "dispatcher deployed: $hook_gates_dispatcher (body owned by agent-tools sync)"
+    elif [[ "$hook_gates_wired" -eq 1 ]]; then
+      warn "dispatcher missing but the hooks are wired: git commit is BLOCKED fail-closed (exit 2) until agent-tools sync deploys $hook_gates_dispatcher — or set enableGitHookGates=false and apply"
+    else
+      warn "dispatcher missing: $hook_gates_dispatcher (agent-tools sync deploys it); wiring is also incomplete, so commits are not gated yet"
+    fi
+    item "best-effort guardrail: git commit --no-verify and a repo-local core.hooksPath (husky etc.) bypass the gates (docs/git-hook-gates.md)"
+  else
+    warn "enableGitHookGates=true but the git-hook-gates module is inactive for this profile (shims and hooksPath not managed — dangling capability)"
+  fi
+else
+  ok "git hook gates not wired (enableGitHookGates=false)"
+fi
+
 section "Git identity contexts"
 for context in personal work client sandbox agent; do
   identity_file="$HOME/.config/git/$context.gitconfig"
