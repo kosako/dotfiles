@@ -31,22 +31,37 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
   gate 通過後に repo 自身の `.git/hooks/<stage>` へ chain するので、既存 repo hook は
   動き続ける(契約の詳細は agent-tools 側 doc)。
 
-## gating(fail-closed 配布条件)
+## gating(2 段 gate = intent × readiness)
 
 dispatcher は自分と同じ directory の gate が欠けていると **fail-closed(exit 2)で
-commit を止める**。つまり agent-tools 未配備のマシンに配線だけ配ると、全 repo の
-`git commit` が止まる。このため:
+commit を止める**。つまり配備が不完全なマシンに配線だけ配ると、全 repo の
+`git commit` が止まる。これを防ぐため、配線の render は **2 つの鍵が両方
+そろったときだけ**行う(PR #197 の Codex must 指摘で確定):
 
-- capability は **agent-tools が配備されている profile(personal)だけ true**。
-  work は false(会社マシンに agent-tools deploy はない)。
-- `preflight` は apply **前**に dispatcher 不在を warn する(apply impact)。
-  `doctor` は apply **後**の配線 chain(shim / hooksPath / dispatcher)を
-  report-only で監視し、「配線済みなのに dispatcher 不在 = commit が止まっている」を
-  最も強い警告にする。
-- gate は module の `requires` ではなく **template 自己 gate**(false は空 render →
-  chezmoi が既存 target も削除)。`requires` だと chezmoiignore が既存 file を prune
-  せず、fail-closed な shim が残置される(#184 の教訓)。off にした後に
-  `hooks.gitconfig` も消えるので、`core.hooksPath` の配線ごと外れる。
+1. **intent** = `enableGitHookGates`(profile の方針)。agent-tools を使う
+   profile(personal)だけ true。work は false(会社マシンに deploy はない)。
+2. **readiness** = destination に agent-tools 配備が**完全に**存在すること
+   (dispatcher + 両 gate の **3 本すべて**。`.chezmoitemplates/git-hook-gates-armed`
+   が render 時に destination を probe する)。dispatcher 1 本では判定しない —
+   gate 欠けの部分配備でも dispatcher は fail-closed なので、3 本そろって
+   初めて安全に武装(arm)できる。
+
+挙動:
+
+- **新規マシン**(agent-tools 未配備)で apply → 配線は render されず素通り
+  (brick しない)。agent-tools sync 後にもう一度 apply すると武装する
+  (doctor / preflight が誘導する)。
+- **配備が消えた**場合 → 次の apply が配線を可視に解除(disarm)する。apply
+  するまでの間は fail-closed で commit が止まる(doctor が最も強く warn)。
+- `preflight` は apply **前**に 3 本の配備状態と「apply が武装するか」を報告する
+  (apply impact)。`doctor` は apply **後**の配線 chain(shim / hooksPath /
+  3 script)を report-only で監視し、「配線済みなのに配備不完全 = commit が
+  止まっている」を最も強い警告にする。capability off で配線が残置していれば
+  それも warn する(apply で prune)。
+- gate は module の `requires` ではなく **template 自己 gate**(鍵が欠けると空
+  render → chezmoi が既存 target も削除)。`requires` だと chezmoiignore が既存
+  file を prune せず、fail-closed な shim が残置される(#184 の教訓)。off にした
+  後に `hooks.gitconfig` も消えるので、`core.hooksPath` の配線ごと外れる。
 
 ## 置き場所が `~/.config/git/` 配下でない理由
 
@@ -72,13 +87,14 @@ hard な床(credential 隔離 / egress / CI required checks / server-side protec
 
 ## 導入・無効化
 
-- 導入: `enableGitHookGates=true` の profile で `chezmoi apply`(事前に
-  `preflight`、事後に `doctor` で chain を確認)。agent-tools 側の配備は
-  agent-tools の sync が行う。
+- 導入: agent-tools の sync で実体を配備 → `enableGitHookGates=true` の profile で
+  `chezmoi apply`(事前に `preflight`、事後に `doctor` で chain を確認)。配備が
+  先でなくても apply は安全(武装しないだけ)で、配備後の再 apply で武装する。
 - 無効化: capability を false にして `chezmoi apply`(shim と hooks.gitconfig が
-  削除され、include が no-op に戻る)。緊急時(dispatcher 欠損で commit が止まった
-  等)は agent-tools の sync で実体を復旧するか、上記の無効化 apply で外す。
+  削除され、include が no-op に戻る)。緊急時(配備欠損で commit が止まった等)は
+  agent-tools の sync で実体を復旧するか、上記の無効化 apply で外す。
 
-検証は `scripts/test-git-hook-gates.sh`(render 内容の exact pin + rendered
-`~/.gitconfig` で実 commit を通す end-to-end + cap-off の真の削除 + git-signing との
-独立性)。実機 smoke の記録は #196。
+検証は `scripts/test-git-hook-gates.sh`(bare / partial deploy が武装しないことの
+pin + render 内容の exact pin + rendered `~/.gitconfig` で実 commit を通す
+end-to-end + cap-off の真の削除 + git-signing との独立性)。実機 smoke の記録は
+#196。

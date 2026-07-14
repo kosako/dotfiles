@@ -71,15 +71,24 @@ fi
 # personal-git-hook-dispatcher (pre-commit -> public-safety gate, commit-msg ->
 # AI trailer gate, then chain to the repo's own .git/hooks), and global
 # core.hooksPath points at the shim directory via the unconditional include in
-# the managed ~/.gitconfig. Report the whole chain honestly: shims + hooksPath
-# are dotfiles' side, the dispatcher body is agent-tools'. The dispatcher is
-# FAIL-CLOSED (exit 2) when its gates are missing, so "wired but not deployed"
-# means commits are blocked — say so loudly. Best-effort guardrail, NOT an
-# enforcement boundary: --no-verify and a repo-local core.hooksPath (husky
-# etc.) bypass it (docs/git-hook-gates.md).
+# the managed ~/.gitconfig. The wiring is a TWO-KEY gate: the capability
+# (intent) AND a complete agent-tools deploy in the destination (readiness;
+# the templates render empty otherwise). Report the whole chain honestly:
+# shims + hooksPath are dotfiles' side, the three gate scripts are
+# agent-tools'. The dispatcher is FAIL-CLOSED (exit 2) when a gate NEXT TO IT
+# is missing — the readiness check must cover all three scripts, not just the
+# dispatcher, or a partial deploy shows green while commits are blocked
+# (Codex review, PR #197). Best-effort guardrail, NOT an enforcement
+# boundary: --no-verify and a repo-local core.hooksPath (husky etc.) bypass
+# it (docs/git-hook-gates.md).
 section "git hook gates (report-only)"
 hook_gates_dir="$HOME/.config/git-hook-gates"
-hook_gates_dispatcher="$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
+hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
+hook_gates_scripts=(personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate)
+hook_gates_deploy_complete=1
+for hook_gates_script in "${hook_gates_scripts[@]}"; do
+  [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
+done
 if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   if module_active_for_profile "$profile" git-hook-gates; then
     hook_gates_wired=1
@@ -87,7 +96,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       if [[ -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
         ok "shim present and executable: $hook_gates_dir/hooks/$hook_stage"
       else
-        warn "shim missing or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply deploys it)"
+        warn "shim missing or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
         hook_gates_wired=0
       fi
     done
@@ -99,7 +108,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
           ok "global core.hooksPath -> managed shim directory"
           ;;
         "")
-          warn "global core.hooksPath is not set (chezmoi apply wires it via the ~/.gitconfig include)"
+          warn "global core.hooksPath is not set (chezmoi apply arms it via the ~/.gitconfig include once the agent-tools deploy is complete)"
           hook_gates_wired=0
           ;;
         *)
@@ -111,19 +120,37 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       warn "git not found, cannot check core.hooksPath"
       hook_gates_wired=0
     fi
-    if [[ -x "$hook_gates_dispatcher" ]]; then
-      ok "dispatcher deployed: $hook_gates_dispatcher (body owned by agent-tools sync)"
+    if [[ "$hook_gates_deploy_complete" -eq 1 ]]; then
+      ok "agent-tools deploy complete: dispatcher + both gates executable in $hook_gates_deploy_dir (bodies owned by agent-tools sync)"
     elif [[ "$hook_gates_wired" -eq 1 ]]; then
-      warn "dispatcher missing but the hooks are wired: git commit is BLOCKED fail-closed (exit 2) until agent-tools sync deploys $hook_gates_dispatcher — or set enableGitHookGates=false and apply"
+      warn "agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and both gates in $hook_gates_deploy_dir — or set enableGitHookGates=false and apply"
     else
-      warn "dispatcher missing: $hook_gates_dispatcher (agent-tools sync deploys it); wiring is also incomplete, so commits are not gated yet"
+      warn "agent-tools deploy incomplete (dispatcher and/or a gate missing in $hook_gates_deploy_dir; agent-tools sync deploys them); wiring is not armed, commits are not gated yet"
     fi
     item "best-effort guardrail: git commit --no-verify and a repo-local core.hooksPath (husky etc.) bypass the gates (docs/git-hook-gates.md)"
   else
     warn "enableGitHookGates=true but the git-hook-gates module is inactive for this profile (shims and hooksPath not managed — dangling capability)"
   fi
 else
-  ok "git hook gates not wired (enableGitHookGates=false)"
+  # Disabled is only honest if no wiring lingers from before the flip: a
+  # leftover hooksPath/shim pair still routes (or blocks) every commit until
+  # the next apply prunes it (Codex review, PR #197).
+  hook_gates_lingering=0
+  for hook_stage in pre-commit commit-msg; do
+    [[ -e "$hook_gates_dir/hooks/$hook_stage" ]] && hook_gates_lingering=1
+  done
+  if command -v git >/dev/null 2>&1; then
+    hook_gates_path="$(git config --global --get core.hooksPath || true)"
+    # shellcheck disable=SC2088 # literal gitconfig value comparison, as above
+    case "$hook_gates_path" in
+      "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks") hook_gates_lingering=1 ;;
+    esac
+  fi
+  if [[ "$hook_gates_lingering" -eq 1 ]]; then
+    warn "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present) — run chezmoi apply to prune it"
+  else
+    ok "git hook gates not wired (enableGitHookGates=false)"
+  fi
 fi
 
 section "Git identity contexts"

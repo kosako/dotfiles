@@ -128,20 +128,43 @@ fi
 
 # Apply impact of the git hook gates (#196): with enableGitHookGates on,
 # apply wires global core.hooksPath at thin shims that exec agent-tools'
-# personal-git-hook-dispatcher, and the dispatcher is FAIL-CLOSED (exit 2)
-# when it or its gates are missing. Applying the wiring on a machine without
-# the agent-tools deploy would block every git commit — detect that BEFORE
-# apply. Report-only, like everything here.
+# personal-git-hook-dispatcher. The templates only render when the
+# agent-tools deploy is COMPLETE in the destination (two-key gate), so a
+# fresh machine does not get bricked — but readiness must be judged on ALL
+# THREE scripts: the dispatcher is FAIL-CLOSED (exit 2) when a gate next to
+# it is missing, so "dispatcher present, gate missing" would arm the wiring
+# and then block every commit (Codex review, PR #197). Report-only, like
+# everything here.
 section "git hook gates (apply impact)"
 if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
-  hook_gates_dispatcher="$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
-  if [[ -x "$hook_gates_dispatcher" ]]; then
-    ok "dispatcher deployed: $hook_gates_dispatcher"
+  hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
+  hook_gates_missing=0
+  for hook_gates_script in personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate; do
+    if [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]]; then
+      ok "deployed: $hook_gates_deploy_dir/$hook_gates_script"
+    else
+      warn "missing or not executable: $hook_gates_deploy_dir/$hook_gates_script"
+      hook_gates_missing=1
+    fi
+  done
+  if [[ "$hook_gates_missing" -eq 1 ]]; then
+    warn "agent-tools deploy incomplete: apply will NOT arm the commit gates (two-key gate); run agent-tools sync first, then apply again. Do not arm a partial deploy — the dispatcher fails closed and would block every git commit"
   else
-    warn "enableGitHookGates=true but the dispatcher is missing or not executable: $hook_gates_dispatcher — apply wires FAIL-CLOSED commit gates, so git commit will be blocked until agent-tools sync deploys it (or set enableGitHookGates=false first)"
+    ok "agent-tools deploy complete: apply arms the commit gates (fail-closed on the normal git commit path)"
   fi
-  if command -v git >/dev/null 2>&1 && git config --global --get core.hooksPath >/dev/null 2>&1; then
-    warn "global core.hooksPath is already set (value not shown) — apply replaces ~/.gitconfig and the managed include takes over; diff first"
+  if command -v git >/dev/null 2>&1; then
+    hook_gates_path="$(git config --global --get core.hooksPath || true)"
+    # shellcheck disable=SC2088 # literal gitconfig value comparison (git expands the tilde, not the shell)
+    case "$hook_gates_path" in
+      "")
+        ;;
+      "~/.config/git-hook-gates/hooks" | "$HOME/.config/git-hook-gates/hooks")
+        ok "global core.hooksPath already points at the managed shim directory"
+        ;;
+      *)
+        warn "global core.hooksPath is set to something else (value not shown) — apply replaces ~/.gitconfig and the managed include takes over; diff first"
+        ;;
+    esac
   fi
 else
   ok "git hook gates disabled for this profile (enableGitHookGates=false)"

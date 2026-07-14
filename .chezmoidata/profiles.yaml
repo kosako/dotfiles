@@ -69,11 +69,14 @@ profiles:
       # AI trailer). Thin shims in ~/.config/git-hook-gates/hooks exec
       # agent-tools' personal-git-hook-dispatcher, and global core.hooksPath
       # points there (include in dot_gitconfig -> managed hooks.gitconfig).
-      # The dispatcher is FAIL-CLOSED (exit 2) when its gates are missing, so
-      # this must stay false on machines without the agent-tools deploy —
-      # wiring the shims there would block every git commit. Best-effort
-      # guardrail (--no-verify / repo-local core.hooksPath bypass), not an
-      # enforcement boundary. See docs/git-hook-gates.md.
+      # true is the INTENT half of a two-key gate: the wiring only renders
+      # when the destination also has the COMPLETE agent-tools deploy
+      # (dispatcher + both gates — the dispatcher is FAIL-CLOSED when a gate
+      # next to it is missing), so a fresh personal machine can apply before
+      # agent-tools exists without bricking git commit; re-apply after sync
+      # arms the gates (PR #197 Codex must). Best-effort guardrail
+      # (--no-verify / repo-local core.hooksPath bypass), not an enforcement
+      # boundary. See docs/git-hook-gates.md.
       enableGitHookGates: true
 
   work:
@@ -108,6 +111,7 @@ profiles:
       enableAiPolicy: true
       gateGitHubMcp: false
       enableGitHubIsolatedReader: false
-      # #196: no agent-tools deploy on work machines; the dispatcher is
-      # fail-closed, so wiring the shims here would block every git commit.
+      # #196: intent off — agent-tools is not part of the work policy (no
+      # deploy on work machines; the readiness key of the two-key gate would
+      # stay unmet there anyway).
       enableGitHookGates: false

@@ -1,12 +1,14 @@
 {{- template "require-profile" . -}}
 {{- $caps := index .profiles .profile "capabilities" -}}
+{{- $armed := eq (includeTemplate "git-hook-gates-armed" (dict "destDir" .chezmoi.destDir)) "armed" -}}
 {{- /* Commit-boundary git hook shim (#196): thin entry only, no gate logic.
        Same contract as the pre-commit shim next to this one (see the comment
-       there for the ~/.claude pick, the fail-closed dispatcher, and why the
-       gate is a template self-gate instead of a module `requires`). The
-       commit-msg stage runs personal-ai-trailer-gate and then chains to the
-       repo's own $GIT_DIR/hooks/commit-msg. */ -}}
-{{- if index $caps "enableGitHookGates" -}}
+       there for the ~/.claude pick, the fail-closed dispatcher, the two-key
+       gate — capability intent AND armed readiness — and why this is a
+       template self-gate instead of a module `requires`). The commit-msg
+       stage runs personal-ai-trailer-gate and then chains to the repo's own
+       $GIT_DIR/hooks/commit-msg. */ -}}
+{{- if and (index $caps "enableGitHookGates") $armed -}}
 #!/bin/sh
 # Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).
 # Thin shim: gate logic lives in agent-tools (contract: docs/git-hook-gates.md

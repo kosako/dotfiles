@@ -1,0 +1,23 @@
+{{- /* Arming probe for the git hook gates wiring (#196, Codex review must-1
+       on PR #197). Renders the literal string "armed" iff the agent-tools
+       deploy this wiring depends on is COMPLETE in the destination home:
+       the dispatcher AND both stage gates. The dispatcher is fail-closed
+       (exit 2) when a gate next to it is missing, so arming on the
+       dispatcher alone would still brick commits on a partial deploy —
+       all three or nothing.
+
+       Callers (the two shims + hooks.gitconfig) treat this as the readiness
+       half of a two-key gate: enableGitHookGates is the INTENT (profile
+       policy), this probe is the READINESS (machine state). Both must hold
+       for the wiring to render, so a fresh personal machine can `chezmoi
+       apply` before agent-tools is deployed without bricking every git
+       commit; re-running apply after agent-tools sync arms the gates, and
+       apply after a deploy removal visibly disarms them (chezmoi prunes the
+       then-empty renders). Presence-only on purpose: sync deploys 0755, and
+       doctor checks executability at runtime (report-only).
+
+       Input: (dict "destDir" .chezmoi.destDir). destDir, not homeDir, so
+       throwaway-destination renders (tests, CI) probe the destination they
+       actually write to. */ -}}
+{{- $scripts := joinPath .destDir ".claude/agent-tools/scripts" -}}
+{{- if and (stat (joinPath $scripts "personal-git-hook-dispatcher")) (stat (joinPath $scripts "personal-public-safety-gate")) (stat (joinPath $scripts "personal-ai-trailer-gate")) -}}armed{{- end -}}
