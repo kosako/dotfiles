@@ -1,10 +1,19 @@
 {{- template "require-profile" . -}}
 {{- $caps := index .profiles .profile "capabilities" -}}
-{{- /* Codex parity of the Claude PreToolUse hook registration (#181, the
-       Codex side of #137). Same GitHub injection guard (epic #119), same
-       capability: enableGitHubIsolatedReader registers the safe-gh read-steering
-       hook in the user-layer ~/.codex/hooks.json so raw `gh` reads of untrusted
-       GitHub content are nudged toward the safe-gh isolated reader.
+{{- /* Codex parity of the Claude hook registrations (#181, the Codex side of
+       #137; #199 for the quality loop). Same capabilities as the Claude side:
+       enableGitHubIsolatedReader registers the safe-gh read-steering PreToolUse
+       hook (GitHub injection guard, epic #119) so raw `gh` reads of untrusted
+       GitHub content are nudged toward the safe-gh isolated reader, and
+       enableQualityLoopHooks registers the quality-loop pair (agent-tools#203):
+       PostToolUse / Edit|Write -> personal-fast-edit-check (steering) and Stop
+       -> personal-changed-scope-qa (best-effort gate, blocks once per new dirty
+       scope; Codex ignores a Stop matcher, so none is emitted). Both quality
+       hooks are silent no-ops until a repo is declared in the user-owned
+       ~/.config/agent-tools/checks.local.json. Codex-specific honest-label for
+       fast-edit-check: the documented apply_patch payload carries the patch in
+       tool_input.command and no file_path, so on Codex it degrades to a silent
+       no-op unless a future payload adds one (measured at #199 deploy).
 
        Why a SEPARATE file and not ~/.codex/config.toml's [hooks] table:
        config.toml is a codex-owned live file (codex writes [hooks.state] etc.),
@@ -14,12 +23,13 @@
        (registration = dotfiles / config.toml = codex; docs/config-ownership.md).
 
        registration = dotfiles, body = agent-tools: the hook body
-       (personal-safe-gh-hook) is deployed by agent-tools to a stable path
-       (agent-tools#146 contract); dotfiles only references it by absolute path —
-       no script body is distributed from here. The schema under "hooks" is
-       identical to Claude Code's (PreToolUse -> matcher -> command hooks); the
-       JSON body is shared with the Claude registration via
-       .chezmoitemplates/safe-gh-hook-json (#137/#181 parity — edit it once
+       bodies (personal-safe-gh-hook, personal-fast-edit-check, personal-
+       changed-scope-qa) are deployed by agent-tools to a stable path
+       (agent-tools#146 contract); dotfiles only references them by absolute
+       path — no script body is distributed from here. The schema under "hooks"
+       is identical to Claude Code's (event -> matcher -> command hooks); the
+       whole "hooks" object is shared with the Claude registration via
+       .chezmoitemplates/agent-hooks-json (#137/#181/#199 parity — edit it once
        there).
 
        Rendered JSON is the MINIMAL {"hooks": {...}} — no top-level "description"
@@ -41,16 +51,18 @@
        does not activate it.
 
        Gating (template self-gate, NOT a module `requires`): the file is managed
-       for profiles that list codex-settings (personal). The capability is gated
-       HERE — enableGitHubIsolatedReader=false renders EMPTY, and chezmoi removes a
-       managed target whose render is empty. A `requires:` on the module would
-       instead make .chezmoiignore drop the source, which leaves an already-applied
-       ~/.codex/hooks.json lingering (chezmoiignore does not prune existing
-       targets) — so disabling the capability would NOT remove a live hook. Doing
-       it in-template means flipping the capability off truly removes the file on
-       the next apply (Codex review #184; verified in test-codex-settings.sh). */ -}}
-{{- if index $caps "enableGitHubIsolatedReader" -}}
+       for profiles that list codex-settings (personal). The capabilities are
+       gated HERE — with BOTH hook capabilities false the file renders EMPTY, and
+       chezmoi removes a managed target whose render is empty; with one of them
+       false only that capability's events are dropped (agent-hooks-json). A
+       `requires:` on the module would instead make .chezmoiignore drop the
+       source, which leaves an already-applied ~/.codex/hooks.json lingering
+       (chezmoiignore does not prune existing targets) — so disabling the
+       capabilities would NOT remove a live hook. Doing it in-template means
+       flipping them off truly removes the file on the next apply (Codex review
+       #184; verified in test-codex-settings.sh). */ -}}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") -}}
 {
-{{ template "safe-gh-hook-json" (dict "homeDir" .chezmoi.homeDir "agentDir" ".codex" "timeout" 10) }}
+{{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".codex" "timeout" 10) }}
 }
 {{ end -}}

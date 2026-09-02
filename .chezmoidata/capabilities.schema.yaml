@@ -65,3 +65,6 @@ capabilities:
   enableGitHookGates:
     type: boolean
     implemented: true
+  enableQualityLoopHooks:
+    type: boolean
+    implemented: true

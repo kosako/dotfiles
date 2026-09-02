@@ -1,0 +1,75 @@
+{{- /* Shared "hooks" object for the two AI homes — the Claude (#137 / #199)
+       and Codex (#181 / #199) registrations rendered from ONE place so the two
+       cannot drift apart (fixing one side and forgetting the other was the
+       standing hazard). dict args: caps (the profile's capabilities map),
+       homeDir (.chezmoi.homeDir), agentDir (".claude" or ".codex"), optional
+       timeout (number; applied to the safe-gh hook only — Codex passes 10).
+
+       Two capabilities contribute events, each self-gated here:
+       - enableGitHubIsolatedReader: PreToolUse / matcher Bash ->
+         personal-safe-gh-hook (GitHub read steering, #137 / #181).
+       - enableQualityLoopHooks: PostToolUse / matcher Edit|Write ->
+         personal-fast-edit-check (steering, never blocks) and Stop ->
+         personal-changed-scope-qa (best-effort gate) — the quality loop of
+         agent-tools#203, wired by #199. Stop takes no matcher in either
+         harness (Claude Code: unsupported; Codex: ignored), so none is
+         emitted. No timeout is set on these two: both harnesses default to
+         600s and the declared checks' runtime is owned by the user's
+         checks.local.json (edit checks ~100s of ms, QA checks ~seconds per
+         the agent-tools contract), so no value is invented here.
+       Every body is agent-tools-deployed at the stable path
+       <home>/<agentDir>/agent-tools/scripts/<name> (agent-tools#146);
+       dotfiles references it by absolute path and distributes no script.
+       All three are fail-open at runtime when the body is missing (exit 127
+       is a non-blocking hook error in both harnesses), so rendering before
+       agent-tools has synced is a safe no-op.
+
+       Callers include this only when at least one of the two capabilities is
+       on (an empty "hooks": {} is never rendered). Renders at two-space
+       indent with NO trailing comma and NO trailing newline — the caller
+       owns both (Claude appends ",", Codex a bare newline). */ -}}
+{{- $scripts := printf "%s/%s/agent-tools/scripts" .homeDir .agentDir -}}
+{{- $sep := "" -}}
+{{ "" }}  "hooks": {
+{{- if index .caps "enableGitHubIsolatedReader" }}
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ $scripts }}/personal-safe-gh-hook"
+{{- if hasKey . "timeout" }},
+            "timeout": {{ .timeout }}
+{{- end }}
+          }
+        ]
+      }
+    ]
+{{- $sep = "," -}}
+{{- end }}
+{{- if index .caps "enableQualityLoopHooks" }}{{ $sep }}
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ $scripts }}/personal-fast-edit-check"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ $scripts }}/personal-changed-scope-qa"
+          }
+        ]
+      }
+    ]
+{{- end }}
+  }
+{{- /* no trailing newline: see the header comment */ -}}

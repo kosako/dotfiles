@@ -54,7 +54,7 @@ modules:
   ai-policy:
     description: AI agent 権限方針。
   claude-settings:
-    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。
+    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。hooks 登録は 2 capability が同じ hooks object(.chezmoitemplates/agent-hooks-json、Codex と共有)に出す — enableGitHubIsolatedReader(PreToolUse safe-gh 誘導・#137)と enableQualityLoopHooks(PostToolUse fast-edit-check + Stop changed-scope-qa・#199)。registration=dotfiles / body=agent-tools。
     paths:
       - .claude
       - .claude/settings.json
@@ -67,7 +67,7 @@ modules:
       - .config/git-hook-gates/hooks/pre-commit
       - .config/git-hook-gates/hooks/commit-msg
   codex-settings:
-    description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook を登録し(#181・#137 の Codex parity・gate=enableGitHubIsolatedReader)、~/.codex/rules/default.rules に承認 rules の read-only baseline を配る(#139・gate=enableAiPolicy。堆積 grant を drift 可視化し apply で棚卸し)。registration=dotfiles / body=agent-tools。config.toml は codex 所有の live ファイルなので管理しない(projects trust は doctor が report-only 監視)。cap gate はすべて module の requires ではなく template 自己 gate で行う(false は空 render → chezmoi が既存 target も削除)。requires を使うと chezmoiignore が既存 file を prune せず残置するため(Codex review #184)。
+    description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook(#181・#137 の Codex parity・gate=enableGitHubIsolatedReader)と品質ループの PostToolUse fast-edit-check + Stop changed-scope-qa(#199・gate=enableQualityLoopHooks)を登録し(hooks object は .chezmoitemplates/agent-hooks-json で Claude と共有)、~/.codex/rules/default.rules に承認 rules の read-only baseline を配る(#139・gate=enableAiPolicy。堆積 grant を drift 可視化し apply で棚卸し)。registration=dotfiles / body=agent-tools。config.toml は codex 所有の live ファイルなので管理しない(projects trust は doctor が report-only 監視)。cap gate はすべて module の requires ではなく template 自己 gate で行う(hooks.json は両 hook cap が false で空 render → chezmoi が既存 target も削除)。requires を使うと chezmoiignore が既存 file を prune せず残置するため(Codex review #184)。
     paths:
       - .codex
       - .codex/hooks.json

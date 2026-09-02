@@ -12,7 +12,8 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | 資産 | 正本 | 配布 | 変更フロー |
 | --- | --- | --- | --- |
 | ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録** / plugin / statusLine / tui 等の global preference) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
-| Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181) | dotfiles(`dot_codex/hooks.json.tmpl`) | `chezmoi apply`(+ Codex で一度 `/hooks` trust) | dotfiles の Issue + PR |
+| Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181、品質ループの PostToolUse / Stop hook・#199) | dotfiles(`dot_codex/hooks.json.tmpl`、hooks object は `.chezmoitemplates/agent-hooks-json` で Claude と共有) | `chezmoi apply`(+ Codex で一度 `/hooks` trust。hook 定義を変えるたびに再 trust) | dotfiles の Issue + PR |
+| 品質ループ hook の check **宣言** `~/.config/agent-tools/checks.local.json`(repo 実 path → `edit_checks` / `qa_checks`。#199 / agent-tools#203) | ユーザー手書き | なし(unmanaged・非 tracked) | 手動のみ(agent は read-only。doctor も presence しか見ない) |
 | git hook gates の**配線**(`~/.config/git-hook-gates/` の shim + `core.hooksPath` include・#196。gate/dispatcher **実体**は agent-tools) | dotfiles(`private_dot_config/git-hook-gates/`、[git-hook-gates](git-hook-gates.md)) | `chezmoi apply` | dotfiles の Issue + PR |
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
@@ -21,8 +22,10 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 
 補足:
 
-- **hooks は 2 管轄の合流点**(#137 / #181): hooks **登録**は dotfiles、スクリプト
+- **hooks は 2 管轄の合流点**(#137 / #181 / #199): hooks **登録**は dotfiles、スクリプト
   **実体**の配備と path の安定は agent-tools。どちらか一方だけでは活性化しない。
+  品質ループ hook(#199)はさらに **3 つ目の層**としてユーザー所有の check 宣言
+  (`checks.local.json`)が要り、宣言の無い repo では登録・配備済みでも無言 no-op。
   片方を変えるときはもう片方の Issue を確認する。登録先はハーネスごとに異なる:
   Claude は `~/.claude/settings.json` の `hooks` キー、Codex は **別ファイル**
   `~/.codex/hooks.json`(user 層)。Codex の `config.toml` は codex 自身が
