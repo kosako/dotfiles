@@ -709,6 +709,31 @@ else
   fail "test failed: doctor must stay exit 0 (quality loop hooks, capability off)"
   status=1
 fi
+#     QL-d2) capability off but a registration LINGERS in the live files (a
+#            home that applied personal, then switched to a profile without
+#            the settings modules — chezmoiignore never prunes the target):
+#            doctor must warn instead of the not-wired ok, naming the file,
+#            and must not echo the file's contents (canary). Codex review,
+#            PR #200.
+mkdir -p "$fixture_home/.claude" "$fixture_home/.codex"
+printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/.codex/agent-tools/scripts/personal-changed-scope-qa"}]}]},"CANARY_LINGER_LEAK_9c2d":true}\n' \
+  > "$fixture_home/.codex/hooks.json"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "CANARY_LINGER_LEAK_9c2d" <<< "$ql_out"; then
+    ok "test passed: enableQualityLoopHooks=false with a lingering registration warns (file named, contents never echoed)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: lingering quality-loop registration not warned, or the file was echoed"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks, lingering registration)"
+  status=1
+fi
+rm -f "$fixture_home/.codex/hooks.json"
 #     QL-e) capability on but the claude-settings module removed -> dangling
 #           warn for the Claude home (the Codex home still reports normally).
 set_capability_all "$ql_root" enableQualityLoopHooks true

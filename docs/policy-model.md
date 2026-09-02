@@ -174,6 +174,10 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
 - **doctor**: 両 home の登録 + body presence(contents-blind)、`checks.local.json` の presence
   (**中身は読まない** — hook が実行する command を列挙する file なので)、best-effort の
   但し書きを report する。module 非 active / body 不在は dangling / fail-open として warn。
+  capability=false でも live の settings.json / hooks.json に登録が残っていれば warn する
+  (同一 home で personal → 他 profile に切り替えると module 非 active の managed file は
+  prune されず hook が動き続けるため。git-hook-gates の lingering check と同型。残置の
+  cleanup path 自体は #201)。
 - **状態**: personal=true(#199 で両 home に登録)、work=false(agent-tools 未配備・
   claude-settings / codex-settings も非 active)。
 

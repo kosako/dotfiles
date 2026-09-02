@@ -804,7 +804,25 @@ if [[ "$(capability_value "$profile" enableQualityLoopHooks)" == "true" ]]; then
   fi
   item "best-effort: fast-edit-check never blocks; changed-scope-qa blocks once per new dirty scope and is bypassable (hook disabled, stop_hook_active) — not an enforcement boundary"
 else
-  ok "quality loop hooks not wired (enableQualityLoopHooks=false)"
+  # Disabled is only honest if no registration lingers from before the flip:
+  # a home that applied personal and then switched to a profile without the
+  # settings modules keeps its ~/.claude/settings.json / ~/.codex/hooks.json
+  # untouched (chezmoiignore drops the source, it never prunes the target),
+  # so the hooks keep running user-declared checks while this line says
+  # "not wired" (Codex review, PR #200 — same shape as the git-hook-gates
+  # lingering check). Probe the live files for the body path only, by
+  # fixed-string match; never echo their contents.
+  quality_hooks_lingering=()
+  for quality_hooks_live in "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json"; do
+    if [[ -f "$quality_hooks_live" ]] && grep -Fq "agent-tools/scripts/personal-changed-scope-qa" "$quality_hooks_live"; then
+      quality_hooks_lingering+=("$quality_hooks_live")
+    fi
+  done
+  if [[ "${#quality_hooks_lingering[@]}" -eq 0 ]]; then
+    ok "quality loop hooks not wired (enableQualityLoopHooks=false)"
+  else
+    warn "enableQualityLoopHooks=false but a quality-loop hook registration lingers in ${quality_hooks_lingering[*]} (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
+  fi
 fi
 
 section "agent-tools (report-only)"
