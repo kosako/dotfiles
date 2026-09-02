@@ -153,7 +153,14 @@ fi
 #     {PreToolUse} and the on-render minus PostToolUse/Stop (normalized JSON
 #     compare, so a gate that dropped the other capability's events or leaked
 #     anything else would fail).
-render_codex_hook_flip() { # $1=label  $2=cap -> prints the rendered hooks.json path
+# render_codex_hook_flip LABEL CAP
+# Flip CAP to false in a throwaway source copy, render personal, and set
+# hook_flip_file to the rendered hooks.json. Called as a plain statement and
+# returning through a variable ON PURPOSE: inside $(...) the function would
+# run in a subshell and its tmp_roots+= registrations would never reach the
+# parent's EXIT trap, leaking every source/render root (the #150 lesson in
+# test-lib.sh; Codex review on PR #200).
+render_codex_hook_flip() {
   local label="$1" cap="$2" src root
   src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-$label.XXXXXX")"
   tmp_roots+=("$src")
@@ -165,10 +172,12 @@ render_codex_hook_flip() { # $1=label  $2=cap -> prints the rendered hooks.json 
     fail "test failed: personal apply ($label) did not render"
     exit 1
   fi
-  printf '%s\n' "$root/home/.codex/hooks.json"
+  hook_flip_file="$root/home/.codex/hooks.json"
 }
-reader_off_hooks="$(render_codex_hook_flip reader-off enableGitHubIsolatedReader)"
-quality_off_hooks="$(render_codex_hook_flip quality-off enableQualityLoopHooks)"
+render_codex_hook_flip reader-off enableGitHubIsolatedReader
+reader_off_hooks="$hook_flip_file"
+render_codex_hook_flip quality-off enableQualityLoopHooks
+quality_off_hooks="$hook_flip_file"
 if [[ -f "$reader_off_hooks" ]] \
   && [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_hooks" | tr -d ' \n')" == '["PostToolUse","Stop"]' ]] \
   && [[ "$(yq -p json -o json 'del(.hooks.PreToolUse)' "$hooks_file")" == "$(yq -p json -o json '.' "$reader_off_hooks")" ]]; then

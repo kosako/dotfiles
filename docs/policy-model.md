@@ -165,8 +165,12 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   宣言できてしまうため)。
 - **honest-label**: enforcement boundary ではない(hook 無効化・`--no-verify` 相当の迂回・
   fail-open)。Codex は `apply_patch` の payload に `file_path` が無い(docs)ため
-  fast-edit-check は無言 no-op に倒れる。Codex は登録後に一度 `/hooks` trust が要る
-  (registration ≠ activation。hook 定義を変えると再 trust)。
+  fast-edit-check は無言 no-op に倒れる。changed-scope-qa の **block 経路**(exit 2 + stderr)は
+  schema 非依存だが、**非 block の警告経路**(exit 0 + stdout の
+  `hookSpecificOutput{hookEventName:"Stop"}`)は Claude Code の形で、Codex の Stop が受理するかは
+  配備時の実測に依る(受理しなければ警告が invalid hook output として落ちるだけで block には
+  ならない)。Codex は登録後に一度 `/hooks` trust が要る(registration ≠ activation。hook 定義を
+  変えると再 trust)。
 - **doctor**: 両 home の登録 + body presence(contents-blind)、`checks.local.json` の presence
   (**中身は読まない** — hook が実行する command を列挙する file なので)、best-effort の
   但し書きを report する。module 非 active / body 不在は dangling / fail-open として warn。

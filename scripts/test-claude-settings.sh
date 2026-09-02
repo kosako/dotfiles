@@ -323,7 +323,14 @@ fi
 #     test, without a fixture that drifts). Both false -> no hooks key at all
 #     (an empty "hooks": {} must never be emitted), and the both-off render
 #     is the both-on render minus the whole hooks key.
-render_hook_flip() { # $1=label  $2..=cap=false pairs   -> prints the rendered settings.json path
+# render_hook_flip LABEL CAP...
+# Flip every CAP to false in a throwaway source copy, render personal, and
+# set hook_flip_file to the rendered settings.json. Called as a plain
+# statement and returning through a variable ON PURPOSE: inside $(...) the
+# function would run in a subshell and its tmp_roots+= registrations would
+# never reach the parent's EXIT trap, leaking every source/render root (the
+# #150 lesson in test-lib.sh; Codex review on PR #200).
+render_hook_flip() {
   local label="$1" src root cap
   shift
   src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-$label.XXXXXX")"
@@ -338,11 +345,14 @@ render_hook_flip() { # $1=label  $2..=cap=false pairs   -> prints the rendered s
     fail "test failed: personal apply ($label) did not render"
     exit 1
   fi
-  printf '%s\n' "$root/home/.claude/settings.json"
+  hook_flip_file="$root/home/.claude/settings.json"
 }
-reader_off_file="$(render_hook_flip reader-off enableGitHubIsolatedReader)"
-quality_off_file="$(render_hook_flip quality-off enableQualityLoopHooks)"
-both_off_file="$(render_hook_flip hooks-off enableGitHubIsolatedReader enableQualityLoopHooks)"
+render_hook_flip reader-off enableGitHubIsolatedReader
+reader_off_file="$hook_flip_file"
+render_hook_flip quality-off enableQualityLoopHooks
+quality_off_file="$hook_flip_file"
+render_hook_flip hooks-off enableGitHubIsolatedReader enableQualityLoopHooks
+both_off_file="$hook_flip_file"
 on_minus_reader="$(yq -p json -o json 'del(.hooks.PreToolUse)' "$off_file")"
 reader_off_norm="$(yq -p json -o json '.' "$reader_off_file")"
 if [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_file" | tr -d ' \n')" == '["PostToolUse","Stop"]' ]] \

@@ -13,7 +13,13 @@
        ~/.config/agent-tools/checks.local.json. Codex-specific honest-label for
        fast-edit-check: the documented apply_patch payload carries the patch in
        tool_input.command and no file_path, so on Codex it degrades to a silent
-       no-op unless a future payload adds one (measured at #199 deploy).
+       no-op unless a future payload adds one (measured at #199 deploy). Second
+       honest-label for changed-scope-qa: its BLOCK path (exit 2 + stderr) is
+       schema-independent, but its non-blocking warn path (exit 0 + stdout
+       hookSpecificOutput{hookEventName:"Stop", additionalContext}) is the
+       Claude Code shape; whether Codex accepts it for Stop is measured at
+       #199 deploy (Codex review on PR #200) — worst case the warning is
+       dropped as invalid hook output, never a block (fail-open).
 
        Why a SEPARATE file and not ~/.codex/config.toml's [hooks] table:
        config.toml is a codex-owned live file (codex writes [hooks.state] etc.),
