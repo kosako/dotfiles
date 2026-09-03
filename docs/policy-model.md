@@ -164,13 +164,19 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   しても安全(fail-open)。repo 内の宣言 file は読まない(第三者 repo が任意 command を
   宣言できてしまうため)。
 - **honest-label**: enforcement boundary ではない(hook 無効化・`--no-verify` 相当の迂回・
-  fail-open)。Codex は `apply_patch` の payload に `file_path` が無い(docs)ため
-  fast-edit-check は無言 no-op に倒れる。changed-scope-qa の **block 経路**(exit 2 + stderr)は
-  schema 非依存だが、**非 block の警告経路**(exit 0 + stdout の
-  `hookSpecificOutput{hookEventName:"Stop"}`)は Claude Code の形で、Codex の Stop が受理するかは
-  配備時の実測に依る(受理しなければ警告が invalid hook output として落ちるだけで block には
-  ならない)。Codex は登録後に一度 `/hooks` trust が要る(registration ≠ activation。hook 定義を
-  変えると再 trust)。
+  fail-open)。#199 配備時の実測(Claude Code 2.1.258 / codex-cli 0.145.0):
+  - Claude Code: PostToolUse の失敗要約は `additionalContext` で届く。Stop は失敗 scope で 1 回
+    block(exit 2 + stderr がモデルに届く)、`stop_hook_active` の 2 回目は **Stop の
+    additional context として警告が届く**(hook error 扱いではない。2.1.163 で Stop の
+    `hookSpecificOutput.additionalContext` が公式対応)。稼働中 session も settings.json の変更を
+    file watcher で自動反映。
+  - Codex: `apply_patch` の payload に `file_path` が無く(docs)、宣言 edit check は**呼ばれない**
+    = fast-edit-check は無言 no-op(agent-tools#203 に報告)。Stop の **block 経路**は動く(理由が
+    モデルに届き続行)。**非 block の警告経路**(exit 0 + stdout の
+    `hookSpecificOutput{hookEventName:"Stop"}`)は `codex exec --json` に invalid hook output の
+    event は出なかったが、警告文がモデルに届くかは未検証(落ちても block にはならない)。
+  - Codex は登録後に一度 `/hooks` trust が要る(registration ≠ activation。hook 定義を変えると
+    再 trust。未 trust は silent skip)。
 - **doctor**: 両 home の登録 + body presence(contents-blind)、`checks.local.json` の presence
   (**中身は読まない** — hook が実行する command を列挙する file なので)、best-effort の
   但し書きを report する。module 非 active / body 不在は dangling / fail-open として warn。
