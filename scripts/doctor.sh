@@ -779,7 +779,10 @@ if [[ "$(capability_value "$profile" enableQualityLoopHooks)" == "true" ]]; then
       .codex)
         quality_hooks_module=codex-settings
         quality_hooks_target="managed ~/.codex/hooks.json"
-        quality_hooks_note=" (Codex: inert until a one-time /hooks trust)"
+        # Measured at the #199 deploy (codex-cli 0.145.0): apply_patch carries
+        # no file_path, so the declared edit check is never invoked on Codex —
+        # say so, or a green line reads as "edit steer active after trust".
+        quality_hooks_note=" (Codex: inert until a one-time /hooks trust; fast-edit-check stays a no-op on Codex — apply_patch carries no file_path, agent-tools#203)"
         ;;
     esac
     if module_active_for_profile "$profile" "$quality_hooks_module"; then
