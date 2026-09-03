@@ -756,6 +756,78 @@ fi
 # backup-paths.yaml). Absent ⇒ fail closed (only self is trusted).
 item "trust list: ~/.config/dotfiles/github-trust.local (#119; contents never read; absent ⇒ only self trusted)"
 
+section "quality loop hooks (report-only)"
+# enableQualityLoopHooks wires the two quality-loop lifecycle hooks of
+# agent-tools#203 (hook plan Phase 2; dotfiles #199) in BOTH AI homes, with the
+# same registration=dotfiles / body=agent-tools split as the safe-gh hook above:
+# PostToolUse (Edit|Write) -> personal-fast-edit-check (steering, never blocks)
+# and Stop -> personal-changed-scope-qa (best-effort gate: blocks once per new
+# dirty scope, never when stop_hook_active; bypassable). Both are silent no-ops
+# until the user declares a repo in the untracked ~/.config/agent-tools/
+# checks.local.json (contract: agent-tools docs/quality-loop-hooks.md). Report
+# registration + body presence contents-blind; the checks file names commands
+# the hooks will RUN, so doctor reports only its presence and never reads it.
+quality_hooks_bodies=(personal-fast-edit-check personal-changed-scope-qa)
+if [[ "$(capability_value "$profile" enableQualityLoopHooks)" == "true" ]]; then
+  for quality_hooks_home in .claude .codex; do
+    case "$quality_hooks_home" in
+      .claude)
+        quality_hooks_module=claude-settings
+        quality_hooks_target="managed ~/.claude/settings.json"
+        quality_hooks_note=""
+        ;;
+      .codex)
+        quality_hooks_module=codex-settings
+        quality_hooks_target="managed ~/.codex/hooks.json"
+        # Measured at the #199 deploy (codex-cli 0.145.0): apply_patch carries
+        # no file_path, so the declared edit check is never invoked on Codex —
+        # say so, or a green line reads as "edit steer active after trust".
+        quality_hooks_note=" (Codex: inert until a one-time /hooks trust; fast-edit-check stays a no-op on Codex — apply_patch carries no file_path, agent-tools#203)"
+        ;;
+    esac
+    if module_active_for_profile "$profile" "$quality_hooks_module"; then
+      quality_hooks_deploy_dir="$HOME/$quality_hooks_home/agent-tools/scripts"
+      quality_hooks_missing=()
+      for quality_hooks_body in "${quality_hooks_bodies[@]}"; do
+        [[ -x "$quality_hooks_deploy_dir/$quality_hooks_body" ]] || quality_hooks_missing+=("$quality_hooks_body")
+      done
+      if [[ "${#quality_hooks_missing[@]}" -eq 0 ]]; then
+        ok "enableQualityLoopHooks=true; $quality_hooks_target registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present$quality_hooks_note"
+      else
+        warn "enableQualityLoopHooks=true; $quality_hooks_target registers the quality-loop hooks but a body is absent or non-executable: ${quality_hooks_missing[*]} (in $quality_hooks_deploy_dir; agent-tools sync deploys them) — fail-open no-op until deployed$quality_hooks_note"
+      fi
+    else
+      warn "enableQualityLoopHooks=true but the $quality_hooks_module module is inactive for this profile; no $quality_hooks_target carries the hook registration (dangling capability)"
+    fi
+  done
+  if [[ -f "$HOME/.config/agent-tools/checks.local.json" ]]; then
+    item "check declarations: ~/.config/agent-tools/checks.local.json present (contents never read; the hooks act only in repos declared there)"
+  else
+    item "check declarations: ~/.config/agent-tools/checks.local.json absent — both hooks are silent no-ops in every repo until a repo is declared there (per-repo opt-in; agent-tools docs/quality-loop-hooks.md)"
+  fi
+  item "best-effort: fast-edit-check never blocks; changed-scope-qa blocks once per new dirty scope and is bypassable (hook disabled, stop_hook_active) — not an enforcement boundary"
+else
+  # Disabled is only honest if no registration lingers from before the flip:
+  # a home that applied personal and then switched to a profile without the
+  # settings modules keeps its ~/.claude/settings.json / ~/.codex/hooks.json
+  # untouched (chezmoiignore drops the source, it never prunes the target),
+  # so the hooks keep running user-declared checks while this line says
+  # "not wired" (Codex review, PR #200 — same shape as the git-hook-gates
+  # lingering check). Probe the live files for the body path only, by
+  # fixed-string match; never echo their contents.
+  quality_hooks_lingering=()
+  for quality_hooks_live in "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json"; do
+    if [[ -f "$quality_hooks_live" ]] && grep -Fq "agent-tools/scripts/personal-changed-scope-qa" "$quality_hooks_live"; then
+      quality_hooks_lingering+=("$quality_hooks_live")
+    fi
+  done
+  if [[ "${#quality_hooks_lingering[@]}" -eq 0 ]]; then
+    ok "quality loop hooks not wired (enableQualityLoopHooks=false)"
+  else
+    warn "enableQualityLoopHooks=false but a quality-loop hook registration lingers in ${quality_hooks_lingering[*]} (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
+  fi
+fi
+
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
 # agent-tools. Presence is always reported, but running its status.sh

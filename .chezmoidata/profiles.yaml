@@ -78,6 +78,19 @@ profiles:
       # (--no-verify / repo-local core.hooksPath bypass), not an enforcement
       # boundary. See docs/git-hook-gates.md.
       enableGitHookGates: true
+      # #199 (agent-tools#203, hook plan Phase 2): register the two quality-loop
+      # lifecycle hooks in BOTH AI homes — PostToolUse (Edit|Write) ->
+      # personal-fast-edit-check (steering, never blocks) and Stop ->
+      # personal-changed-scope-qa (best-effort gate: blocks once per new dirty
+      # scope, never when stop_hook_active). Same split as the safe-gh hook:
+      # registration=dotfiles (claude-settings emits it into ~/.claude/
+      # settings.json, codex-settings into ~/.codex/hooks.json), bodies=agent-
+      # tools. Both hooks are silent no-ops until a repo is declared in the
+      # user-owned, untracked ~/.config/agent-tools/checks.local.json (per-repo
+      # opt-in; contract: agent-tools docs/quality-loop-hooks.md), so registering
+      # before that declaration — or before agent-tools has synced — is safe.
+      # Codex: inert until a one-time `/hooks` trust, like the safe-gh hook.
+      enableQualityLoopHooks: true
 
   work:
     environmentKind: work
@@ -115,3 +128,6 @@ profiles:
       # deploy on work machines; the readiness key of the two-key gate would
       # stay unmet there anyway).
       enableGitHookGates: false
+      # #199: intent off — no agent-tools deploy on work machines, and the
+      # claude-settings / codex-settings modules are not part of work anyway.
+      enableQualityLoopHooks: false

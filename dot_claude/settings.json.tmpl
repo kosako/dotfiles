@@ -38,8 +38,19 @@
        non-2 non-zero exit, bad JSON, or a timeout all let the tool call
        continue (only exit 2 blocks), so registering before agent-tools has
        synced is a safe no-op. This is NOT the context-gated write hook above.
-       The JSON body is shared with the Codex registration via
-       .chezmoitemplates/safe-gh-hook-json (#181 parity — edit it once there). */ -}}
+
+       enableQualityLoopHooks (#199, agent-tools#203) registers the two
+       quality-loop lifecycle hooks the same way (registration here, bodies
+       agent-tools-deployed): PostToolUse / Edit|Write -> personal-fast-edit-
+       check (steering, never blocks) and Stop -> personal-changed-scope-qa
+       (best-effort gate: blocks once per new dirty scope, never when
+       stop_hook_active). Both are silent no-ops until a repo is declared in
+       the user-owned ~/.config/agent-tools/checks.local.json.
+
+       The whole "hooks" object is shared with the Codex registration via
+       .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
+       it is included only when at least one hook capability is on, so an
+       empty "hooks": {} is never emitted. */ -}}
 {{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list -}}
@@ -66,8 +77,8 @@
       "mcp__pencil"
     ]
   },
-{{- if index $caps "enableGitHubIsolatedReader" }}
-{{ template "safe-gh-hook-json" (dict "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") }}
+{{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
   "model": "opus[1m]",
   "statusLine": {

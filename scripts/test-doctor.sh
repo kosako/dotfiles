@@ -617,6 +617,142 @@ else
   status=1
 fi
 
+# QL) quality loop hooks (#199): enableQualityLoopHooks is ON for committed
+#     personal, so doctor reports the registration in BOTH AI homes plus the
+#     agent-tools-deployed bodies' presence (contents-blind), and the
+#     checks.local.json declaration presence (contents-blind — it names
+#     commands the hooks run). Own fixture copy so the flips here never
+#     couple to the injection-guard cases above. doctor stays exit 0
+#     throughout (report-only).
+ql_root="$fixture_home/.dotfiles-qlhooks"
+copy_repo_fixture "$ql_root"
+ql_claude="$fixture_home/.claude/agent-tools/scripts"
+ql_codex="$fixture_home/.codex/agent-tools/scripts"
+#     QL-a) no bodies deployed, no checks file -> both homes warn body-absent
+#           (fail-open no-op) and the checks-absent item shows.
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.claude/settings.json registers the quality-loop hooks but a body is absent or non-executable: personal-fast-edit-check personal-changed-scope-qa" <<< "$ql_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers the quality-loop hooks but a body is absent or non-executable: personal-fast-edit-check personal-changed-scope-qa" <<< "$ql_out" \
+    && grep -Fq "checks.local.json absent" <<< "$ql_out"; then
+    ok "test passed: quality-loop hooks registered in both homes with absent bodies warned (fail-open) and no check declaration reported"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: quality-loop hooks absent-body / absent-declaration state not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks, bodies absent)"
+  status=1
+fi
+#     QL-b) one body missing in one home -> that home warns naming ONLY the
+#           missing body; the fully deployed home reports ok. Plus a checks
+#           file whose content must never be echoed (canary).
+mkdir -p "$ql_claude" "$ql_codex" "$fixture_home/.config/agent-tools"
+for ql_body in personal-fast-edit-check personal-changed-scope-qa; do
+  printf '#!/bin/sh\nexit 0\n' > "$ql_claude/$ql_body"
+  chmod +x "$ql_claude/$ql_body"
+done
+printf '#!/bin/sh\nexit 0\n' > "$ql_codex/personal-fast-edit-check"
+chmod +x "$ql_codex/personal-fast-edit-check"
+printf '{"/canary/repo": {"qa_checks": [{"name": "CANARY_CHECK_LEAK_5b1e", "command": ["true"]}]}}\n' \
+  > "$fixture_home/.config/agent-tools/checks.local.json"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.claude/settings.json registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present" <<< "$ql_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers the quality-loop hooks but a body is absent or non-executable: personal-changed-scope-qa (" <<< "$ql_out" \
+    && grep -Fq "checks.local.json present (contents never read" <<< "$ql_out" \
+    && ! grep -Fq "CANARY_CHECK_LEAK_5b1e" <<< "$ql_out"; then
+    ok "test passed: Claude home wired ok, Codex home warns only the missing body, checks file present reported contents-blind"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: partial-deploy / checks-present state not reported, or the checks file was echoed"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks, partial deploy)"
+  status=1
+fi
+#     QL-c) both homes fully deployed -> both ok lines (Codex with its trust
+#           honest-label).
+printf '#!/bin/sh\nexit 0\n' > "$ql_codex/personal-changed-scope-qa"
+chmod +x "$ql_codex/personal-changed-scope-qa"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.claude/settings.json registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present" <<< "$ql_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present (Codex: inert until a one-time /hooks trust; fast-edit-check stays a no-op on Codex — apply_patch carries no file_path, agent-tools#203)" <<< "$ql_out"; then
+    ok "test passed: quality-loop hooks reported wired in both homes once every body is deployed (Codex line carries the trust + edit-check no-op caveats)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: fully deployed quality-loop hooks not reported as wired in both homes"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks, fully deployed)"
+  status=1
+fi
+rm -rf "$ql_claude" "$ql_codex" "$fixture_home/.config/agent-tools"
+#     QL-d) capability off -> the not-wired ok line and none of the wired /
+#           dangling lines (dead-capability guard in the other direction).
+set_capability_all "$ql_root" enableQualityLoopHooks false
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "enableQualityLoopHooks=true" <<< "$ql_out"; then
+    ok "test passed: enableQualityLoopHooks=false reports not wired and nothing else"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: enableQualityLoopHooks=false state not reported cleanly"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks, capability off)"
+  status=1
+fi
+#     QL-d2) capability off but a registration LINGERS in the live files (a
+#            home that applied personal, then switched to a profile without
+#            the settings modules — chezmoiignore never prunes the target):
+#            doctor must warn instead of the not-wired ok, naming the file,
+#            and must not echo the file's contents (canary). Codex review,
+#            PR #200.
+mkdir -p "$fixture_home/.claude" "$fixture_home/.codex"
+printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/.codex/agent-tools/scripts/personal-changed-scope-qa"}]}]},"CANARY_LINGER_LEAK_9c2d":true}\n' \
+  > "$fixture_home/.codex/hooks.json"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "CANARY_LINGER_LEAK_9c2d" <<< "$ql_out"; then
+    ok "test passed: enableQualityLoopHooks=false with a lingering registration warns (file named, contents never echoed)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: lingering quality-loop registration not warned, or the file was echoed"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks, lingering registration)"
+  status=1
+fi
+rm -f "$fixture_home/.codex/hooks.json"
+#     QL-e) capability on but the claude-settings module removed -> dangling
+#           warn for the Claude home (the Codex home still reports normally).
+set_capability_all "$ql_root" enableQualityLoopHooks true
+remove_module_all "$ql_root" claude-settings
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enableQualityLoopHooks=true but the claude-settings module is inactive for this profile" <<< "$ql_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers the quality-loop hooks but a body is absent" <<< "$ql_out"; then
+    ok "test passed: enableQualityLoopHooks=true with claude-settings inactive is reported as dangling (Codex side unaffected)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: dangling enableQualityLoopHooks not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (quality loop hooks dangling)"
+  status=1
+fi
+
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/
 #      escalation commands evaluated against the LIVE rules via `codex

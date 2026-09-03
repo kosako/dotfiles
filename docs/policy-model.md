@@ -137,6 +137,56 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   PreToolUse hook 登録を live 化。両 home 同一 body)、work=false。github MCP は現状未構成
   なので deny は実質 no-op = 将来 MCP を足したとき先回りで deny する defense-in-depth。
 
+## quality loop hooks(`enableQualityLoopHooks`)
+
+hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**する capability(#199)。
+契約の正本は agent-tools の `docs/quality-loop-hooks.md`、hook body も agent-tools が両 home
+へ配布する(登録=dotfiles・実体=agent-tools。`enableGitHubIsolatedReader` と同じ分界)。
+
+- **極性は安全強化型**(true ほど agent が締まる: lint の steer と Stop の 1 回 block)。
+  install / secret / network 権限を付与しないので `environment_kind_forbidden_capabilities`
+  には**入れない**(`test-policy.sh` が全 kind で true を許容することを pin)。
+- **1 capability が 2 つの AI home 両方**に登録を出す — Claude は managed
+  `~/.claude/settings.json` の `hooks`、Codex は user 層 `~/.codex/hooks.json`。hooks object は
+  `.chezmoitemplates/agent-hooks-json` で両 home 共有(`enableGitHubIsolatedReader` の
+  PreToolUse と同居。各 capability は自分の event だけを足し、両方 false で `hooks` キー自体を
+  出さない / Codex は file ごと消える)。
+  - `PostToolUse` / matcher `Edit|Write` → `personal-fast-edit-check`(steering。失敗要約を
+    `additionalContext` で返すだけで block しない・自動 fix しない)。
+  - `Stop`(matcher なし。Claude Code は非対応・Codex は無視)→ `personal-changed-scope-qa`
+    (best-effort gate。dirty scope に対し宣言 QA が未実行/失敗なら **新しい scope に 1 回だけ**
+    exit 2 で block。`stop_hook_active` では block しない。cache で同一 scope は再検査しない)。
+  - timeout は両 hook とも未指定(両 harness とも既定 600s)。check の実行時間は宣言側
+    (checks.local.json)の責務なので dotfiles で値を発明しない。
+- **repo 単位 opt-in**: 宣言の正本はユーザー所有・非 tracked の
+  `~/.config/agent-tools/checks.local.json`(repo 実 path をキーに `edit_checks` /
+  `qa_checks` を宣言)。宣言が無い repo では両 hook とも**無言 no-op**なので、登録だけ先行
+  しても安全(fail-open)。repo 内の宣言 file は読まない(第三者 repo が任意 command を
+  宣言できてしまうため)。
+- **honest-label**: enforcement boundary ではない(hook 無効化・`--no-verify` 相当の迂回・
+  fail-open)。#199 配備時の実測(Claude Code 2.1.258 / codex-cli 0.145.0):
+  - Claude Code: PostToolUse の失敗要約は `additionalContext` で届く。Stop は失敗 scope で 1 回
+    block(exit 2 + stderr がモデルに届く)、`stop_hook_active` の 2 回目は **Stop の
+    additional context として警告が届く**(hook error 扱いではない。2.1.163 で Stop の
+    `hookSpecificOutput.additionalContext` が公式対応)。稼働中 session も settings.json の変更を
+    file watcher で自動反映。
+  - Codex: `apply_patch` の payload に `file_path` が無く(docs)、宣言 edit check は**呼ばれない**
+    = fast-edit-check は無言 no-op(agent-tools#203 に報告)。Stop の **block 経路**は動く(理由が
+    モデルに届き続行)。**非 block の警告経路**(exit 0 + stdout の
+    `hookSpecificOutput{hookEventName:"Stop"}`)は `codex exec --json` に invalid hook output の
+    event は出なかったが、警告文がモデルに届くかは未検証(落ちても block にはならない)。
+  - Codex は登録後に一度 `/hooks` trust が要る(registration ≠ activation。hook 定義を変えると
+    再 trust。未 trust は silent skip)。
+- **doctor**: 両 home の登録 + body presence(contents-blind)、`checks.local.json` の presence
+  (**中身は読まない** — hook が実行する command を列挙する file なので)、best-effort の
+  但し書きを report する。module 非 active / body 不在は dangling / fail-open として warn。
+  capability=false でも live の settings.json / hooks.json に登録が残っていれば warn する
+  (同一 home で personal → 他 profile に切り替えると module 非 active の managed file は
+  prune されず hook が動き続けるため。git-hook-gates の lingering check と同型。残置の
+  cleanup path 自体は #201)。
+- **状態**: personal=true(#199 で両 home に登録)、work=false(agent-tools 未配備・
+  claude-settings / codex-settings も非 active)。
+
 ## dormant capability の扱い(残す基準)
 
 宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ
