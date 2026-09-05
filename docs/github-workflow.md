@@ -112,13 +112,16 @@ main 直 commit は例外扱いにする。
 ./scripts/test-install-packages.sh
 ./scripts/test-render.sh
 ./scripts/test-claude-settings.sh
+./scripts/test-codex-settings.sh
 ./scripts/test-git-signing.sh
+./scripts/test-git-hook-gates.sh
 ./scripts/test-starship.sh
 ./scripts/test-ssh.sh
 ./scripts/test-preflight.sh
 ./scripts/test-gclone.sh
-bash -n scripts/*.sh
-zsh -n dot_zshenv dot_zshrc dot_zprofile
+./scripts/test-shell-syntax.sh
+bash -ec 'for file in scripts/*.sh; do bash -n "$file"; done'
+bash -ec 'for file in dot_zshenv dot_zshrc dot_zprofile; do zsh -n "$file"; done'
 shellcheck -S warning scripts/*.sh
 git diff --check
 ```
