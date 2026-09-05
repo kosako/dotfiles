@@ -483,7 +483,7 @@ fi
 # report-only — every path ends in ok/item/warn (return 0), so the plain
 # calls below are set -e safe without || true.
 report_codex_rules_probes() {
-  local codex_rules outward_probes outward_allowed probe_failures probe verdict
+  local codex_rules outward_probes outward_allowed probe_failures probe verdict decision
   codex_rules="$HOME/.codex/rules/default.rules"
   if [[ -f "$codex_rules" ]]; then
     ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
@@ -536,9 +536,26 @@ report_codex_rules_probes() {
       for probe in "${outward_probes[@]}"; do
         # shellcheck disable=SC2086 # probes are fixed strings; word-splitting into tokens is intended
         if verdict="$(codex execpolicy check --rules "$codex_rules" $probe 2>/dev/null)"; then
-          if grep -Fq '"decision":"allow"' <<< "$verdict"; then
-            outward_allowed=$((outward_allowed + 1))
-            warn "outward/escalation probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
+          # Only the effective, top-level decision is authoritative. A
+          # matched allow rule can coexist with a stronger forbidden rule.
+          # The engine omits decision when no rules match; all other unknown
+          # or malformed output is an incomplete scan, never a clean result.
+          if decision="$(yq -p=json -r -e '
+            select(tag == "!!map") |
+            select(.decision == "allow" or .decision == "prompt" or .decision == "forbidden" or
+              ((has("decision") | not) and (.matchedRules | tag) == "!!seq" and (.matchedRules | length) == 0)) |
+            .decision // "no-match"
+          ' <<< "$verdict" 2>/dev/null)"; then
+            case "$decision" in
+              allow)
+                outward_allowed=$((outward_allowed + 1))
+                warn "outward/escalation probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
+                ;;
+              prompt|forbidden|no-match) ;;
+              *) probe_failures=$((probe_failures + 1)) ;;
+            esac
+          else
+            probe_failures=$((probe_failures + 1))
           fi
         else
           # rc!=0 = the engine could not evaluate (broken rules file, old
@@ -548,7 +565,7 @@ report_codex_rules_probes() {
         fi
       done
       if [[ "$probe_failures" -gt 0 ]]; then
-        warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error — broken rules file or incompatible codex?); do NOT read this as clean"
+        warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error or invalid result — broken rules file or incompatible codex?); do NOT read this as clean"
       elif [[ "$outward_allowed" -eq 0 ]]; then
         ok "no outward/escalation probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
       fi
