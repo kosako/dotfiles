@@ -785,6 +785,10 @@ shift 2
 probe="$*"
 [ -n "${CODEX_FAKE_LOG:-}" ] && printf '%s\n' "$probe" >> "$CODEX_FAKE_LOG"
 [ "${CODEX_FAKE_MODE:-}" = "fail" ] && exit 1
+if [ -n "${CODEX_FAKE_RESULT:-}" ]; then
+  cat "$CODEX_FAKE_RESULT"
+  exit 0
+fi
 case ",${CODEX_FAKE_ALLOWS:-}," in
   *",$probe,"*) printf '{"matchedRules":[{"x":1}],"decision":"allow"}\n' ;;
   *)            printf '{"matchedRules":[]}\n' ;;
@@ -901,6 +905,54 @@ else
   fail "test failed: doctor must stay exit 0 (probe-evaluation failure)"
   status=1
 fi
+# AIP-4) Interpret the effective decision, not a nested rule match (#210).
+# Invalid JSON and unknown result shapes must remain report-only INCOMPLETE.
+aip_result="$fixture_home/.codex-result"
+for aip_case in forbidden prompt pretty-allow malformed empty unknown missing null-decision non-object; do
+  case "$aip_case" in
+    forbidden|prompt)
+      printf '{"decision":"%s","matchedRules":[{"decision":"allow"}]}\n' "$aip_case" > "$aip_result"
+      aip_expected="clean"
+      ;;
+    pretty-allow)
+      printf '{\n  "decision": "allow",\n  "matchedRules": []\n}\n' > "$aip_result"
+      aip_expected="allow"
+      ;;
+    *)
+      case "$aip_case" in
+        malformed) printf '{CANARY_INVALID_RESULT' > "$aip_result" ;;
+        empty) : > "$aip_result" ;;
+        unknown) printf '{"decision":"CANARY_UNKNOWN_RESULT","matchedRules":[]}' > "$aip_result" ;;
+        missing) printf '{}' > "$aip_result" ;;
+        null-decision) printf '{"decision":null,"matchedRules":[]}' > "$aip_result" ;;
+        non-object) printf '[{"decision":"allow"}]' > "$aip_result" ;;
+      esac
+      aip_expected="incomplete"
+      ;;
+  esac
+  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+      CODEX_FAKE_RESULT="$aip_result" "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+    aip_actual="unexpected"
+    if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out"; then
+      aip_actual="incomplete"
+    elif grep -Fq "outward/escalation probe auto-allowed" <<< "$aip_out"; then
+      aip_actual="allow"
+    elif grep -Fq "no outward/escalation probe is auto-allowed" <<< "$aip_out"; then
+      aip_actual="clean"
+    fi
+    if [[ "$aip_actual" == "$aip_expected" ]] && ! grep -Fq "CANARY_" <<< "$aip_out" \
+      && { [[ "$aip_expected" == "clean" ]] || ! grep -Fq "no outward/escalation probe is auto-allowed" <<< "$aip_out"; }; then
+      ok "test passed: Codex result $aip_case reports $aip_expected without leaking output"
+    else
+      fail "test failed: Codex result $aip_case expected $aip_expected, got $aip_actual"
+      status=1
+    fi
+  else
+    fail "test failed: doctor must stay exit 0 (Codex result $aip_case)"
+    status=1
+  fi
+done
+rm -f "$aip_result"
 rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
   "$fixture_home/real-project" "$codex_fakebin" "$aip_probe_log"
 
