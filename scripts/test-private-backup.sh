@@ -489,22 +489,24 @@ else
   miss "backup/restore failed with a canonical baseline and alias supplement"
 fi
 
-# Hash the content, not shasum's escaped filename output (a backslash in a
-# filename prefixes the printed digest with a backslash unless stdin is used).
-printf 'odd name\n' > "$alias_home/space | back\\slash"
-cat > "$alias_home/.config/dotfiles/backup-paths.local" <<'YAML'
-backup_paths:
-  - { path: 'space | back\slash', type: file }
-YAML
-if HOME="$alias_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$alias_home/odd.age" --recipient "$recipient" --yes >/dev/null 2>&1 \
-  && run restore --in "$alias_home/odd.age" --identity "$fixture_home/keys/id.txt" \
-    --target-home "$alias_dst" --apply >/dev/null 2>&1 \
-  && cmp -s "$alias_home/space | back\\slash" "$alias_dst/space | back\\slash"; then
-  pass "canonical path with spaces, pipe and backslash round-trips"
-else
-  miss "canonical odd filename failed backup/restore"
-fi
+# Filename metacharacters must survive hashing and row serialization:
+# shasum escapes backslashes, while TSV array output quotes double quotes
+# and leading whitespace. All are valid canonical filename characters.
+for odd_name in 'space | back\slash' 'double"quote' ' leading-space'; do
+  printf 'odd name\n' > "$alias_home/$odd_name"
+  P="$odd_name" yq -n '{"backup_paths": [{"path": strenv(P), "type": "file"}]}' \
+    > "$alias_home/.config/dotfiles/backup-paths.local"
+  if HOME="$alias_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$alias_home/odd.age" --recipient "$recipient" --yes >/dev/null 2>&1 \
+    && run verify --in "$alias_home/odd.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
+    && run restore --in "$alias_home/odd.age" --identity "$fixture_home/keys/id.txt" \
+      --target-home "$alias_dst" --apply >/dev/null 2>&1 \
+    && cmp -s "$alias_home/$odd_name" "$alias_dst/$odd_name"; then
+    pass "canonical filename round-trips exactly: $odd_name"
+  else
+    miss "canonical filename failed backup/verify/restore: $odd_name"
+  fi
+done
 
 # Distinct canonical names can still collide on the restore filesystem.
 # Preserve the displaced original even when case folding makes the second
@@ -629,7 +631,7 @@ exit "$rc"
 SH
 chmod +x "$query_fakebin/yq"
 cp "$manifest_base/manifest.json" "$manifest_stage/manifest.json"
-for query in '.entries[].path' '.files[] | [.sha256, .mode, .size, .path]'; do
+for query in '.entries[].path' '.files[] | [.sha256, .mode, (.size | tostring), .path] | join("\t")'; do
   if [[ "$query" == '.entries[].path' ]]; then label="entry-query-failure"; else label="file-query-failure"; fi
   REAL_YQ="$real_yq" FAIL_YQ_QUERY="$query" PATH="$query_fakebin:$PATH" \
     assert_manifest_rejected "$label"
