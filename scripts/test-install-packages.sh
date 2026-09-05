@@ -198,6 +198,8 @@ else
   pass "is_installed still reports a genuinely absent cask as not installed"
 fi
 
+"$SCRIPT_DIR/test-inventory.sh" || status=1
+
 if [[ "$status" -eq 0 ]]; then
   ok "install-packages tests passed"
 fi

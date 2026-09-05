@@ -34,33 +34,24 @@ chezmoi apply.
 EOF
 }
 
-# Whether NAME is already installed for SOURCE. canonical = pkg|name,
-# bincmd = bin|name. Read-only; a present entry is left untouched (no upgrade).
-# Probes via lib-policy's installed_inventory (the same one the doctor drift
-# report reads) and matches against the full capture: the previous
-# `probe | grep -Fxq` shape died of SIGPIPE under pipefail once grep exited
-# on the first hit, so installed casks/apps randomly read as absent and
-# --apply re-ran their installers (#143).
+# Presence is tri-state: 0 installed, 1 confirmed absent, 2 unknown.
+# Inventory failures cannot authorize installation (#213). Capture before
+# matching to preserve the large-inventory/SIGPIPE guard (#143).
 is_installed() {
   local source="$1" canonical="$2" bincmd="$3" inv=""
+  inv="$(installed_inventory "$source")" || return 2
   case "$source" in
-    brew_formula)
-      inv="$(installed_inventory brew_formula)"
+    brew_formula | npm_global)
       grep -Fxq -- "$canonical" <<< "$inv" && return 0
       command -v "$bincmd" >/dev/null 2>&1 ;;
-    brew_cask)
-      inv="$(installed_inventory brew_cask)"
+    brew_cask | mas)
       grep -Fxq -- "$canonical" <<< "$inv" ;;
-    npm_global)
-      inv="$(installed_inventory npm_global)"
-      grep -Fxq -- "$canonical" <<< "$inv" && return 0
-      command -v "$bincmd" >/dev/null 2>&1 ;;
     go_install)
+      # An executable in GOBIN is installed even when GOBIN is outside PATH
+      # (#209). PATH remains a separate availability fallback.
+      grep -Fxq -- "$bincmd" <<< "$inv" && return 0
       command -v "$bincmd" >/dev/null 2>&1 ;;
-    mas)
-      inv="$(installed_inventory mas)"
-      grep -Fxq -- "$canonical" <<< "$inv" ;;
-    *) return 0 ;;
+    *) return 2 ;;
   esac
 }
 
@@ -118,7 +109,7 @@ main() {
   rows="$(catalog_packages)" || { fail "could not read catalog packages"; return 1; }
 
   local name source pkg bin track_only canonical bincmd cap
-  local planned=0 installed_now=0 skipped=0 failed=0
+  local planned=0 installed_now=0 skipped=0 failed=0 presence_status
   local INSTALL_CMD=()
   while IFS='|' read -r name source pkg bin track_only; do
     [[ -z "$name$source" ]] && continue
@@ -149,6 +140,12 @@ main() {
     if is_installed "$source" "$canonical" "$bincmd"; then
       ok "already installed: $name ($source)"
       skipped=$((skipped + 1)); continue
+    else
+      presence_status=$?
+    fi
+    if [[ "$presence_status" -ne 1 ]]; then
+      warn "skip $name: $source inventory unavailable; refusing to install an entry with unknown presence"
+      failed=$((failed + 1)); continue
     fi
 
     if ! build_install_cmd "$source" "$canonical"; then
@@ -175,7 +172,8 @@ main() {
     ok "done: $installed_now installed, $skipped skipped, $failed failed"
     [[ "$failed" -eq 0 ]]
   else
-    ok "dry-run: $planned would be installed, $skipped skipped (pass --apply to perform)"
+    ok "dry-run: $planned would be installed, $skipped skipped, $failed failed (pass --apply to perform)"
+    [[ "$failed" -eq 0 ]]
   fi
 }
 

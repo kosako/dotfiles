@@ -354,41 +354,55 @@ profile_installs_source() {
 # node/go/uv), and is skipped for mas (the App Store carries many apps
 # unrelated to the dev catalog; flagging them all would be noise).
 
-# The go bin directory: GOBIN, falling back to GOPATH/bin. mise points GOBIN
-# at GOROOT/bin, which is why the toolchain binaries live next to installed
-# packages (see the go|gofmt guard below).
+# Probe the selected local Go without accepting a toolchain request from the
+# caller's go.mod/go.work (#205). A failed query is unknown, never /bin.
 go_bin_dir() {
-  local gobin
-  gobin="$(go env GOBIN 2>/dev/null || true)"
-  [[ -z "$gobin" ]] && gobin="$(go env GOPATH 2>/dev/null || true)/bin"
+  local gobin gopath
+  gobin="$(GOTOOLCHAIN=local GO111MODULE=off GOWORK=off go env GOBIN 2>/dev/null)" || return 1
+  if [[ -z "$gobin" ]]; then
+    gopath="$(GOTOOLCHAIN=local GO111MODULE=off GOWORK=off go env GOPATH 2>/dev/null)" || return 1
+    # Go installs into the first entry when GOPATH is a path list.
+    gopath="${gopath%%:*}"
+    [[ -n "$gopath" ]] || return 1
+    gobin="${gopath%/}/bin"
+  fi
+  case "$gobin" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  [[ "$gobin" != *[[:cntrl:]]* ]] || return 1
   printf '%s' "$gobin"
 }
 
-# Full installed inventory for SOURCE, one id per line; empty when the
-# manager is absent or the probe fails (read-only, never errors). The single
-# probe implementation shared by the drift report below and the installer's
-# is_installed (#143) — before this they were duplicated and could disagree.
-#
-# Contract for callers: capture the WHOLE list (file or variable) and match
-# against the capture. Matching the producer directly (`probe | grep -q`)
-# dies of SIGPIPE under pipefail once grep exits on the first hit, so an
-# installed entry randomly reads as absent (#143).
+# Full installed inventory for SOURCE, one id per line. A successful empty
+# inventory means absent; any probe/read/parse failure returns nonzero and
+# callers must discard its output (#213). Report-only consumers warn and
+# continue; the installer must not turn an unknown inventory into installs.
+# Capture the WHOLE list before matching: `probe | grep -q` can lose an
+# installed entry to SIGPIPE under pipefail (#143).
 installed_inventory() {
-  local source="$1"
+  local source="$1" inventory dir
   case "$source" in
-    brew_formula) brew list --formula -1 2>/dev/null || true ;;
-    brew_leaves) brew leaves 2>/dev/null || true ;;
-    brew_cask) brew list --cask -1 2>/dev/null || true ;;
+    brew_formula) brew list --formula -1 2>/dev/null ;;
+    brew_leaves) brew leaves 2>/dev/null ;;
+    brew_cask) brew list --cask -1 2>/dev/null ;;
     npm_global)
-      npm ls -g --depth=0 --json 2>/dev/null \
-        | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null || true ;;
+      inventory="$(npm ls -g --depth=0 --json 2>/dev/null)" || return 1
+      [[ -n "$inventory" ]] || return 1
+      printf '%s\n' "$inventory" | yq -e -p json \
+        '(tag == "!!map") and ((.dependencies == null) or ((.dependencies | tag) == "!!map"))' >/dev/null 2>&1 || return 1
+      printf '%s\n' "$inventory" | yq -p json '.dependencies // {} | keys | .[]' 2>/dev/null ;;
     go_install)
-      local dir
-      dir="$(go_bin_dir)"
-      if [[ -n "$dir" && -d "$dir" ]]; then
-        find "$dir" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null || true
-      fi ;;
-    mas) mas list 2>/dev/null | awk '{print $1}' || true ;;
+      dir="$(go_bin_dir)" || return 1
+      if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+        return 0
+      fi
+      [[ -d "$dir" && -r "$dir" && -x "$dir" ]] || return 1
+      find -H "$dir" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null ;;
+    mas)
+      inventory="$(mas list 2>/dev/null)" || return 1
+      printf '%s\n' "$inventory" | awk '{print $1}' ;;
+    *) return 1 ;;
   esac
 }
 
@@ -420,35 +434,35 @@ report_catalog_drift() {
     "$decl_go_bins"
   )
 
-  # Inventories (read-only), one shared probe per source (installed_inventory
-  # above); a failing probe yields an empty list. Per-source availability
-  # flags gate whether absence means "not installed" or "manager not
-  # present, skip".
+  # A failed inventory is distinct from an absent manager. Keep successful
+  # sources inspectable, but never infer absence or sprawl from failed ones.
   local have_brew=0 have_npm=0 have_go=0 have_mas=0 gobin=""
+  local inventory_failures="" failed_source
   if manager_present brew_formula; then
     have_brew=1
-    installed_inventory brew_formula | sort > "$brew_formulae"
-    installed_inventory brew_leaves | sort > "$brew_leaves"
-    installed_inventory brew_cask | sort > "$brew_casks"
+    installed_inventory brew_formula > "$brew_formulae" || inventory_failures+=$'brew_formula\n'
+    installed_inventory brew_leaves > "$brew_leaves" || inventory_failures+=$'brew_leaves\n'
+    installed_inventory brew_cask > "$brew_casks" || inventory_failures+=$'brew_cask\n'
   fi
   if manager_present npm_global; then
     have_npm=1
-    installed_inventory npm_global \
-      | grep -vxE 'npm|corepack' | sort > "$npm_globals" || true
+    installed_inventory npm_global > "$npm_globals" || inventory_failures+=$'npm_global\n'
   fi
-  # A go-built binary persists in GOPATH/bin even if `go` is later removed,
-  # but treating go like the other managers (absent -> skip, not "not
-  # installed") keeps the contract uniform and avoids guessing GOPATH when
-  # go cannot tell us where it is.
+  # An absent manager is a skip; never guess GOPATH when go cannot answer.
   if manager_present go_install; then
     have_go=1
-    gobin="$(go_bin_dir)"
-    installed_inventory go_install | sort > "$go_bins"
+    if ! gobin="$(go_bin_dir)" || ! installed_inventory go_install > "$go_bins"; then
+      inventory_failures+=$'go_install\n'
+    fi
   fi
   if manager_present mas; then
     have_mas=1
-    installed_inventory mas | sort > "$mas_ids"
+    installed_inventory mas > "$mas_ids" || inventory_failures+=$'mas\n'
   fi
+  while IFS= read -r failed_source; do
+    [[ -z "$failed_source" ]] && continue
+    warn "catalog inventory INCOMPLETE: $failed_source probe failed; absence and sprawl checks skipped for this source"
+  done <<< "$inventory_failures"
 
   # Report which inventories were inspected. npm's global root differs by
   # active node (mise-managed vs system); naming it avoids misreading a
@@ -498,6 +512,11 @@ report_catalog_drift() {
       else
         item "track-only, not present: $name ($source)"
       fi
+      continue
+    fi
+
+    if grep -Fxq -- "$source" <<< "$inventory_failures"; then
+      item "skip $name: $source inventory unavailable"
       continue
     fi
 
@@ -569,7 +588,7 @@ report_catalog_drift() {
   done <<< "$rows"
 
   # Undeclared (sprawl): installed top-level items absent from the catalog.
-  if [[ "$have_brew" -eq 1 ]]; then
+  if [[ "$have_brew" -eq 1 ]] && ! grep -Eq '^(brew_formula|brew_leaves)$' <<< "$inventory_failures"; then
     while IFS= read -r f; do
       [[ -z "$f" ]] && continue
       grep -Fxq -- "$f" "$decl_brew_formula" || {
@@ -577,6 +596,8 @@ report_catalog_drift() {
         drift_count=$((drift_count + 1))
       }
     done < "$brew_leaves"
+  fi
+  if [[ "$have_brew" -eq 1 ]] && ! grep -Fxq brew_cask <<< "$inventory_failures"; then
     while IFS= read -r c; do
       [[ -z "$c" ]] && continue
       grep -Fxq -- "$c" "$decl_brew_cask" || {
@@ -585,16 +606,17 @@ report_catalog_drift() {
       }
     done < "$brew_casks"
   fi
-  if [[ "$have_npm" -eq 1 ]]; then
+  if [[ "$have_npm" -eq 1 ]] && ! grep -Fxq npm_global <<< "$inventory_failures"; then
     while IFS= read -r n; do
       [[ -z "$n" ]] && continue
+      case "$n" in npm|corepack) continue ;; esac
       grep -Fxq -- "$n" "$decl_npm" || {
         warn "undeclared: $n (npm global not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$npm_globals"
   fi
-  if [[ "$have_go" -eq 1 ]]; then
+  if [[ "$have_go" -eq 1 ]] && ! grep -Fxq go_install <<< "$inventory_failures"; then
     while IFS= read -r b; do
       [[ -z "$b" ]] && continue
       # `go` and `gofmt` are the Go distribution's own binaries, shipped in
@@ -613,7 +635,7 @@ report_catalog_drift() {
     done < "$go_bins"
   fi
 
-  if [[ "$drift_count" -eq 0 ]]; then
+  if [[ "$drift_count" -eq 0 && -z "$inventory_failures" ]]; then
     ok "no catalog drift"
   fi
 
