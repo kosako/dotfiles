@@ -116,7 +116,7 @@ printf 'real content\n' > "$bad/files/.zshrc.local"
 TS="2026-01-01T00:00:00Z" yq -n -o=json '{
   "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
   "created_at": strenv(TS), "entries": [],
-  "files": [{"path": ".zshrc.local", "mode": "600", "size": 13, "sha256": "deadbeef"}]
+  "files": [{"path": ".zshrc.local", "mode": "600", "size": 13, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}]
 }' > "$bad/manifest.json"
 make_archive "$bad" "$fixture_home/out/badsum.age"
 # Capture then grep: verify exits non-zero on these negative cases, which
@@ -456,6 +456,180 @@ else
   printf '%s\n' "$unr_out" >&2
   miss "unreadable files should be skipped without aborting, got rc=$unr_rc"
 fi
+
+# 23. Alias declarations must never make restore displace a target twice.
+alias_home="$fixture_home/alias-home"
+alias_dst="$fixture_home/alias-dst"
+mkdir -p "$alias_home/.config/dotfiles" "$alias_home/.ssh" "$alias_dst"
+printf 'restored\n' > "$alias_home/.zshrc.local"
+printf 'ssh restored\n' > "$alias_home/.ssh/config.local"
+printf 'original\n' > "$alias_dst/.zshrc.local"
+cat > "$alias_home/.config/dotfiles/backup-paths.local" <<'YAML'
+backup_paths:
+  - { path: ./.zshrc.local, type: file }
+  - { path: .ssh//config.local, type: file }
+  - { path: .ssh/, type: dir }
+YAML
+if HOME="$alias_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$alias_home/a.age" --recipient "$recipient" --yes >/dev/null 2>&1 \
+  && run restore --in "$alias_home/a.age" --identity "$fixture_home/keys/id.txt" \
+    --target-home "$alias_dst" --apply >/dev/null 2>&1; then
+  displaced="$(find "$alias_dst/.local/state/dotfiles" -name .zshrc.local -type f)"
+  if [[ -f "$displaced" ]] && [[ "$(cat "$displaced")" == "original" ]] \
+    && [[ "$(cat "$alias_dst/.zshrc.local")" == "restored" ]]; then
+    pass "alias declarations cannot overwrite the original displaced file"
+  else
+    miss "alias declarations lost the original displaced file"
+  fi
+else
+  miss "backup/restore failed with a canonical baseline and alias supplement"
+fi
+
+# Hash the content, not shasum's escaped filename output (a backslash in a
+# filename prefixes the printed digest with a backslash unless stdin is used).
+printf 'odd name\n' > "$alias_home/space | back\\slash"
+cat > "$alias_home/.config/dotfiles/backup-paths.local" <<'YAML'
+backup_paths:
+  - { path: 'space | back\slash', type: file }
+YAML
+if HOME="$alias_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$alias_home/odd.age" --recipient "$recipient" --yes >/dev/null 2>&1 \
+  && run restore --in "$alias_home/odd.age" --identity "$fixture_home/keys/id.txt" \
+    --target-home "$alias_dst" --apply >/dev/null 2>&1 \
+  && cmp -s "$alias_home/space | back\\slash" "$alias_dst/space | back\\slash"; then
+  pass "canonical path with spaces, pipe and backslash round-trips"
+else
+  miss "canonical odd filename failed backup/restore"
+fi
+
+# Distinct canonical names can still collide on the restore filesystem.
+# Preserve the displaced original even when case folding makes the second
+# target resolve to the first; case-sensitive filesystems restore both names.
+case_stage="$fixture_home/case-stage"
+case_dst="$fixture_home/case-dst"
+mkdir -p "$case_stage/files" "$case_dst"
+printf 'restored\n' > "$case_stage/files/lower"
+printf 'restored\n' > "$case_stage/files/LOWER"
+printf 'original\n' > "$case_dst/lower"
+case_folded=0
+[[ -e "$case_dst/LOWER" ]] && case_folded=1
+case_hash="$(shasum -a 256 "$case_stage/files/lower" | awk '{print $1}')"
+H="$case_hash" M="$(file_mode "$case_stage/files/lower")" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [
+    {"path": "lower", "mode": strenv(M), "size": 9, "sha256": strenv(H)},
+    {"path": "LOWER", "mode": strenv(M), "size": 9, "sha256": strenv(H)}
+  ]
+}' > "$case_stage/manifest.json"
+make_archive "$case_stage" "$fixture_home/out/case.age"
+case_rc=0
+run restore --in "$fixture_home/out/case.age" --identity "$fixture_home/keys/id.txt" \
+  --target-home "$case_dst" --apply >/dev/null 2>&1 || case_rc=$?
+case_displaced="$(find "$case_dst/.local/state/dotfiles" -name lower -type f)"
+if [[ -f "$case_displaced" && "$(cat "$case_displaced")" == "original" ]] \
+  && { [[ "$case_folded" -eq 1 && "$case_rc" -ne 0 ]] \
+    || [[ "$case_folded" -eq 0 && "$case_rc" -eq 0 && "$(cat "$case_dst/LOWER")" == "restored" ]]; }; then
+  pass "case-distinct restore paths preserve the displaced original on this filesystem"
+else
+  miss "case-distinct restore paths lost the original or returned the wrong status"
+fi
+
+# 24. Exercise all three consumers with a valid first payload followed by
+#     malformed metadata: no rejected archive may reach target mutations.
+manifest_base="$fixture_home/manifest-base"
+manifest_stage="$fixture_home/manifest-stage"
+manifest_dst="$fixture_home/manifest-dst"
+mkdir -p "$manifest_base" "$manifest_stage" "$manifest_dst"
+age -d -i "$fixture_home/keys/id.txt" "$archive" | tar -xpf - -C "$manifest_base"
+printf 'original\n' > "$manifest_dst/.zshrc.local"
+
+assert_manifest_rejected() {
+  local label="$1" bad_archive="$fixture_home/out/manifest-$1.age" rejected=1
+  make_archive "$manifest_stage" "$bad_archive"
+  if run verify --in "$bad_archive" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+    rejected=0
+  fi
+  if run restore --in "$bad_archive" --identity "$fixture_home/keys/id.txt" \
+    --target-home "$manifest_dst" >/dev/null 2>&1; then
+    rejected=0
+  fi
+  if run restore --in "$bad_archive" --identity "$fixture_home/keys/id.txt" \
+    --target-home "$manifest_dst" --apply >/dev/null 2>&1; then
+    rejected=0
+  fi
+  if [[ "$rejected" -eq 1 && "$(cat "$manifest_dst/.zshrc.local")" == "original" \
+    && ! -e "$manifest_dst/.ssh" && ! -e "$manifest_dst/.local" ]]; then
+    pass "manifest $label rejected by verify/dry-run/apply before any target write"
+  else
+    miss "manifest $label was accepted or changed the restore target"
+  fi
+}
+
+cp -R "$manifest_base/." "$manifest_stage/"
+printf '{invalid' > "$manifest_stage/manifest.json"
+assert_manifest_rejected malformed-json
+while IFS='|' read -r label mutation; do
+  yq -p=json -o=json "$mutation" "$manifest_base/manifest.json" > "$manifest_stage/manifest.json"
+  assert_manifest_rejected "$label"
+done <<'CASES'
+missing-schema|del(.schema_version)
+unknown-schema|.schema_version = 999
+string-schema|.schema_version = "1"
+wrong-tool-type|.tool = []
+wrong-version-type|.tool_version = 1
+wrong-date-type|.created_at = 1
+missing-entries|del(.entries)
+wrong-entries-type|.entries = {}
+wrong-entry-type|.entries[0].type = true
+wrong-category-type|.entries[0].category = []
+wrong-origin|.entries[0].origin = "unknown"
+entry-path-type|.entries[0].path = 5
+entry-path-control|.entries[0].path = "bad\npath"
+missing-files|del(.files)
+wrong-files-type|.files = {}
+empty-files|.files = []
+null-file|.files += [null]
+missing-last-path|del(.files[-1].path)
+empty-last-path|.files[-1].path = ""
+wrong-last-path-type|.files[-1].path = []
+path-control|.files[-1].path = "bad\tpath"
+missing-hash|del(.files[-1].sha256)
+wrong-hash-type|.files[-1].sha256 = []
+invalid-hash|.files[-1].sha256 = "bad"
+missing-mode|del(.files[-1].mode)
+numeric-mode|.files[-1].mode = 644
+invalid-mode|.files[-1].mode = "888"
+missing-size|del(.files[-1].size)
+string-size|.files[-1].size = "5"
+negative-size|.files[-1].size = -1
+fractional-size|.files[-1].size = 1.5
+size-mismatch|.files[-1].size += 1
+duplicate|.files += [.files[0]]
+path-alias|.files += [.files[0]] | .files[-1].path = "./.zshrc.local"
+CASES
+
+# A query process that emits valid rows but fails must not be trusted. These
+# failures happen after schema validation, covering both checked row queries.
+query_fakebin="$fixture_home/queryfake"
+mkdir -p "$query_fakebin"
+real_yq="$(command -v yq)"
+cat > "$query_fakebin/yq" <<'SH'
+#!/bin/sh
+"$REAL_YQ" "$@"
+rc=$?
+for arg in "$@"; do
+  if [ "$arg" = "$FAIL_YQ_QUERY" ]; then exit 7; fi
+done
+exit "$rc"
+SH
+chmod +x "$query_fakebin/yq"
+cp "$manifest_base/manifest.json" "$manifest_stage/manifest.json"
+for query in '.entries[].path' '.files[] | [.sha256, .mode, .size, .path]'; do
+  if [[ "$query" == '.entries[].path' ]]; then label="entry-query-failure"; else label="file-query-failure"; fi
+  REAL_YQ="$real_yq" FAIL_YQ_QUERY="$query" PATH="$query_fakebin:$PATH" \
+    assert_manifest_rejected "$label"
+done
 
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
