@@ -199,6 +199,8 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 `profile_installs_source` が personal のみ install を許し work 系は許さないこと、profile 未解決時の
 拒否、解決済み work profile の dry-run が 0 件を計画すること(副作用なし)を確認する。
 
+`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続を確認する。実 manager・実 install・実 home は使わない。
+
 ## private-backup.sh
 
 private な設定(`.local` 上書き + curated アプリ設定)を **age identity 鍵**で単一アーカイブに
