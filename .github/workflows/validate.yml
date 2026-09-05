@@ -47,7 +47,10 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: bash syntax check
-        run: bash -n scripts/*.sh
+        run: |
+          for file in scripts/*.sh; do
+            bash -n "$file"
+          done
 
       # The managed zsh layer had no syntax gate at all — the #96 compinit
       # glob bug lived exactly here (#150). ubuntu-latest (24.04) does not
@@ -56,7 +59,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y zsh
 
       - name: zsh syntax check (managed shell files)
-        run: zsh -n dot_zshenv dot_zshrc dot_zprofile
+        run: |
+          for file in dot_zshenv dot_zshrc dot_zprofile; do
+            zsh -n "$file"
+          done
+
+      - name: shell syntax gate regression tests
+        run: ./scripts/test-shell-syntax.sh
 
       - name: gclone helper tests
         run: ./scripts/test-gclone.sh

@@ -96,6 +96,12 @@ cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp す�
 限定 capability flip。boolean 専用)、`copy_repo_fixture`(scripts + .chezmoidata の最小
 repo copy)。
 
+## test-shell-syntax.sh
+
+CI の bash / zsh syntax check をそのまま取り出し、各入力ファイルへ構文エラーを
+順番に挿入して非 0 になることを検証する。先頭ファイルだけの検査や、後続ファイルの
+成功で途中の失敗が隠れる退行を防ぐ(#211)。
+
 ## test-policy.sh
 
 外部 test framework を使わずに policy validation の fail-closed 挙動を検証する。
