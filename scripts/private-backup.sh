@@ -444,6 +444,8 @@ decrypt_and_extract() {
 
 # Validate types before emitting TSV: missing/empty fields and embedded
 # separators must not make read collapse columns or silently skip entries.
+# Emit joined scalars: the TSV array encoder adds CSV quotes that Bash read
+# does not decode (e.g. filenames with double quotes or leading spaces).
 # Every query is checked explicitly because restore calls this under ||,
 # where Bash disables errexit throughout the function.
 check_manifest() {
@@ -481,7 +483,7 @@ check_manifest() {
   local manifest_paths="$workdir/manifest_paths" rows="$workdir/manifest_rows"
   local entry_paths="$workdir/entry_paths" archive_files="$workdir/archive_files"
   if ! yq -p=json -o=tsv '.entries[].path' "$manifest" > "$entry_paths" \
-    || ! yq -p=json -o=tsv '.files[] | [.sha256, .mode, .size, .path]' "$manifest" > "$rows"; then
+    || ! yq -p=json -o=tsv '.files[] | [.sha256, .mode, (.size | tostring), .path] | join("\t")' "$manifest" > "$rows"; then
     fail "could not read manifest entries"
     return 1
   fi
