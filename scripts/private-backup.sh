@@ -52,7 +52,7 @@ EOF
 }
 
 sha256_of() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  shasum -a 256 < "$1" | awk '{print $1}'
 }
 
 # Whether a single tar member NAME is allowed in a private-backup archive.
@@ -248,13 +248,6 @@ cmd_backup() {
       skipped=$((skipped + 1))
       continue
     fi
-    case "$path" in
-      *[[:cntrl:]]*)
-        warn "skip path with control characters (origin=$origin)"
-        skipped=$((skipped + 1))
-        continue
-        ;;
-    esac
     if grep -Fxq -- "$path" "$seen_paths"; then
       continue
     fi
@@ -295,13 +288,6 @@ cmd_backup() {
           skipped=$((skipped + 1))
           continue
         fi
-        case "$rel" in
-          *[[:cntrl:]]*)
-            warn "skip captured path with control characters under $path"
-            skipped=$((skipped + 1))
-            continue
-            ;;
-        esac
         # Deduplicate against paths already captured (a declared file inside
         # this dir, or an overlapping dir declaration) so the manifest never
         # lists the same file twice; restore would otherwise process it
@@ -456,71 +442,112 @@ decrypt_and_extract() {
   return 0
 }
 
-# Check the extracted archive against its manifest: every listed file is
-# present with a matching sha256 and mode, is a regular file (no symlink),
-# carries a safe home-relative path, and no file exists beyond the
-# manifest. Args: extract workdir. Returns 0 if the archive is intact.
-# Inspects only the extracted copy; never writes into $HOME.
+# Validate types before emitting TSV: missing/empty fields and embedded
+# separators must not make read collapse columns or silently skip entries.
+# Every query is checked explicitly because restore calls this under ||,
+# where Bash disables errexit throughout the function.
 check_manifest() {
   local extract="$1" workdir="$2"
   local manifest="$extract/manifest.json"
   [[ -f "$manifest" ]] || { fail "archive has no manifest.json"; return 1; }
-  local status=0
-  # Read sha256+mode+path as TSV in one pass: tab-delimited, so a tab in a
-  # path would split it, but tabs (control chars) are rejected below, and
-  # path is the last field so other content stays intact.
-  local manifest_paths="$workdir/manifest_paths"
-  yq -p=json -o=tsv '.files[].path' "$manifest" > "$manifest_paths"
-  local count=0 path sha mode actual actual_mode f
-  while IFS=$'\t' read -r sha mode path; do
-    [[ -z "$path" ]] && continue
-    count=$((count + 1))
+  if ! yq -e -p=json '
+    (tag == "!!map") and
+    ((.schema_version | tag) == "!!int") and (.schema_version == 1) and
+    ((.tool | tag) == "!!str") and (.tool == "private-backup.sh") and
+    ((.tool_version | tag) == "!!str") and (.tool_version != "") and
+    ((.created_at | tag) == "!!str") and (.created_at != "") and
+    ((.entries | tag) == "!!seq") and
+    ([.entries[] | ((tag == "!!map") and
+      ((.path | tag) == "!!str") and (.path != "") and
+      (.path | test("^[^\\x00-\\x1f\\x7f]+$")) and
+      ((.type | tag) == "!!str") and
+      (.type == "" or .type == "file" or .type == "dir") and
+      ((.category | tag) == "!!str") and
+      ((.origin | tag) == "!!str") and (.origin == "baseline" or .origin == "local")
+    )] | all) and
+    ((.files | tag) == "!!seq") and ((.files | length) > 0) and
+    ([.files[] | ((tag == "!!map") and
+      ((.path | tag) == "!!str") and (.path != "") and
+      (.path | test("^[^\\x00-\\x1f\\x7f]+$")) and
+      ((.sha256 | tag) == "!!str") and (.sha256 | test("^[0-9a-f]{64}$")) and
+      ((.mode | tag) == "!!str") and (.mode | test("^[0-7]{1,4}$")) and
+      ((.size | tag) == "!!int") and (.size >= 0)
+    )] | all)
+  ' "$manifest" >/dev/null 2>&1; then
+    fail "invalid manifest schema or file metadata"
+    return 1
+  fi
+
+  local manifest_paths="$workdir/manifest_paths" rows="$workdir/manifest_rows"
+  local entry_paths="$workdir/entry_paths" archive_files="$workdir/archive_files"
+  if ! yq -p=json -o=tsv '.entries[].path' "$manifest" > "$entry_paths" \
+    || ! yq -p=json -o=tsv '.files[] | [.sha256, .mode, .size, .path]' "$manifest" > "$rows"; then
+    fail "could not read manifest entries"
+    return 1
+  fi
+  : > "$manifest_paths" || return 1
+  local path sha mode size actual actual_mode actual_size f count=0 status=0
+  while IFS= read -r path; do
     if ! backup_path_is_safe "$path"; then
-      fail "manifest path is unsafe: $path"
-      status=1
-      continue
+      fail "manifest entry path is unsafe or non-canonical"
+      return 1
     fi
-    case "$path" in
-      *[[:cntrl:]]*) fail "manifest path has control characters"; status=1; continue ;;
-    esac
+  done < "$entry_paths"
+
+  while IFS=$'\t' read -r sha mode size path; do
+    if ! backup_path_is_safe "$path"; then
+      fail "manifest path is unsafe or non-canonical"
+      return 1
+    fi
+    if grep -Fxq -- "$path" "$manifest_paths"; then
+      fail "duplicate manifest path: $path"
+      return 1
+    fi
+    printf '%s\n' "$path" >> "$manifest_paths" || return 1
+    count=$((count + 1))
     f="$extract/files/$path"
-    if [[ -L "$f" ]]; then
-      fail "archived entry is a symlink (rejected): $path"
+    if [[ -L "$f" || ! -f "$f" ]]; then
+      fail "manifest file missing or not regular: $path"
       status=1
       continue
     fi
-    if [[ ! -f "$f" ]]; then
-      fail "manifest file missing from archive: $path"
-      status=1
-      continue
-    fi
-    actual="$(sha256_of "$f")"
+    actual="$(sha256_of "$f")" || return 1
     if [[ "$actual" != "$sha" ]]; then
       fail "checksum mismatch: $path"
       status=1
       continue
     fi
-    actual_mode="$(file_mode "$f")"
+    actual_mode="$(file_mode "$f")" || return 1
     if [[ "$actual_mode" != "$mode" ]]; then
       fail "mode mismatch: $path (manifest $mode, archive $actual_mode)"
       status=1
       continue
     fi
-  done < <(yq -p=json -o=tsv '.files[] | [.sha256, .mode, .path]' "$manifest")
-
-  # No extra files beyond the manifest's declared files (manifest.json and
-  # backup-paths.local live outside files/, so they are not flagged).
-  local extra=0 rel
-  while IFS= read -r rel; do
-    [[ -z "$rel" ]] && continue
-    if ! grep -Fxq -- "$rel" "$manifest_paths"; then
-      fail "archive file not in manifest: $rel"
-      extra=$((extra + 1))
+    actual_size="$(wc -c < "$f" | tr -d ' ')" || return 1
+    if [[ "$actual_size" != "$size" ]]; then
+      fail "size mismatch: $path"
       status=1
     fi
-  done < <(cd "$extract/files" 2>/dev/null && find . -type f 2>/dev/null | sed 's#^\./##')
+  done < "$rows"
+  if [[ "$count" -eq 0 ]]; then
+    fail "manifest contains no files"
+    return 1
+  fi
 
-  if [[ "$extra" -eq 0 && "$status" -eq 0 ]]; then
+  if ! (cd "$extract/files" && find . -type f -print0) > "$archive_files" 2>/dev/null; then
+    fail "could not enumerate archive files"
+    return 1
+  fi
+  local rel
+  while IFS= read -r -d '' rel; do
+    rel="${rel#./}"
+    if ! backup_path_is_safe "$rel" || ! grep -Fxq -- "$rel" "$manifest_paths"; then
+      fail "archive file not in manifest or unsafe"
+      status=1
+    fi
+  done < "$archive_files"
+
+  if [[ "$status" -eq 0 ]]; then
     ok "verified $count file(s); manifest and archive agree"
   else
     fail "verification failed"
@@ -642,7 +669,6 @@ cmd_restore() {
     return 1
   }
 
-  local manifest="$extract/manifest.json"
   local label="dry-run"
   [[ "$apply" -eq 1 ]] && label="apply"
   section "private-backup: restore ($label)"
@@ -673,9 +699,6 @@ cmd_restore() {
     if ! backup_path_is_safe "$path"; then
       warn "skip unsafe path: $path"; skipped=$((skipped + 1)); status=1; continue
     fi
-    case "$path" in
-      *[[:cntrl:]]*) warn "skip control-char path"; skipped=$((skipped + 1)); status=1; continue ;;
-    esac
     f="$extract/files/$path"
     target="$target_home/$path"
     # Refuse to write through a symlinked parent (escape prevention).
@@ -691,8 +714,17 @@ cmd_restore() {
       fi
       if [[ "$apply" -eq 1 ]]; then
         mkdir -p "$(dirname "$backup_dir/$path")"
-        # mv moves a symlink target as the link itself (does not follow).
-        mv "$target" "$backup_dir/$path"
+        if [[ -e "$backup_dir/$path" || -L "$backup_dir/$path" ]]; then
+          fail "refusing to overwrite a displaced file: $path"
+          return 1
+        fi
+        # -n preserves a displaced file even if another target aliases it on
+        # a case-insensitive filesystem; a skipped move must abort the copy.
+        mv -n "$target" "$backup_dir/$path"
+        if [[ -e "$target" || -L "$target" ]]; then
+          fail "could not displace existing target: $path"
+          return 1
+        fi
         mkdir -p "$(dirname "$target")"
         cp -p "$f" "$target"
       else
@@ -708,7 +740,7 @@ cmd_restore() {
       fi
       created=$((created + 1))
     fi
-  done < <(yq -p=json -o=tsv '.files[].path' "$manifest")
+  done < "$workdir/manifest_paths"
 
   if [[ "$apply" -eq 1 ]]; then
     ok "restored: $created created, $overwritten overwritten, $skipped skipped"

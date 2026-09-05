@@ -39,7 +39,7 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 
 | field | 必須 | 内容 |
 | --- | --- | --- |
-| `path` | ✓ | home-relative パス。先頭 `/`・`..`・glob メタ文字(`* ? [`)は禁止。`path` を最後に持つ行形式なので path 中の `|` も曖昧にならない |
+| `path` | ✓ | canonical な home-relative パス。先頭 `/`・`..`・`.` component・重複 `/`・末尾 `/`・制御文字・glob メタ文字(`* ? [`)は禁止。`path` を最後に持つ行形式なので path 中の `|` も曖昧にならない |
 | `type` | | `file` / `dir`(期待する種別)|
 | `category` | | public-safe な自由ラベル(例 `shell` / `ssh`)|
 
@@ -73,10 +73,14 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   TTY が無い(cron / CI など無人実行)場合は明示エラーで **exit 非 0**、対話で decline
   した場合も **exit 非 0**(アーカイブを書かなかった実行は成功を返さない。無人実行での
   バックアップ欠落が exit 0 で監視をすり抜けるのを防ぐ)。無人実行は `--yes` を明示する。
+- verify / restore は schema version 1 と metadata の型、非空の files 配列、各 path の安全性・一意性、
+  各 file の SHA-256・mode・size、archive 内 file 集合との一致を検証する。JSON parse や列挙 query が
+  失敗した場合も拒否し、restore は検証済みの path 一覧だけを使用する。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(`~/.local/state/dotfiles/
   restore-backup-<ts>/`)へ move。`--skip-existing` で既存は触らない。**symlink 化した親ディレクトリ
-  経由の書き込みを拒否**して HOME 外への escape を防ぐ。verify と同じ展開前 member 検証を共有。
+  経由の書き込みを拒否**して HOME 外への escape を防ぐ。退避先が既に存在する場合も上書きせず拒否する。
+  verify と同じ展開前 member 検証を共有。
 
 ## 段階
 

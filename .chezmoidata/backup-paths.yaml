@@ -11,7 +11,8 @@
 # Each entry:
 #   path      home-relative path (required). A leading "/" or any ".." is
 #             rejected, as are glob metacharacters (* ? [); the backup
-#             captures exactly these paths, never a pattern.
+#             captures exactly these paths, never a pattern. Paths must be
+#             canonical: no "." component, repeated/trailing "/", or control characters.
 #   type      file | dir (optional). Declares what the path is expected to
 #             be so the tooling can validate and restore it correctly.
 #   category  free-form public-safe label (optional), e.g. shell / ssh.
