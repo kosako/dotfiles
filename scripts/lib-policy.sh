@@ -381,13 +381,17 @@ go_bin_dir() {
 # Capture the WHOLE list before matching: `probe | grep -q` can lose an
 # installed entry to SIGPIPE under pipefail (#143).
 installed_inventory() {
-  local source="$1" inventory dir
+  local source="$1" inventory dir query_status
   case "$source" in
     brew_formula) brew list --formula -1 2>/dev/null ;;
     brew_leaves) brew leaves 2>/dev/null ;;
     brew_cask) brew list --cask -1 2>/dev/null ;;
     npm_global)
-      inventory="$(npm ls -g --depth=0 --json 2>/dev/null)" || return 1
+      inventory="$(npm ls -g --depth=0 --json 2>/dev/null)" || {
+        query_status=$?
+        warn "npm global inventory query failed (exit $query_status); run 'npm ls -g --depth=0' manually to inspect dependency-tree problems"
+        return 1
+      }
       [[ -n "$inventory" ]] || return 1
       printf '%s\n' "$inventory" | yq -e -p json \
         '(tag == "!!map") and ((.dependencies == null) or ((.dependencies | tag) == "!!map"))' >/dev/null 2>&1 || return 1
