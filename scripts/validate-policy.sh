@@ -75,7 +75,7 @@ validate_modules() {
       case "$type" in
         boolean)
           if m="$module" c="$capability" yq -e \
-            '.modules[strenv(m)].requires[strenv(c)] | tag == "!!bool"' \
+            '.modules[strenv(m)].requires[strenv(c)] | ((tag == "!!bool") and (. == true or . == false))' \
             "$MODULES_FILE" >/dev/null; then
             ok "module requires: $module: $capability=$value"
           else
@@ -134,7 +134,7 @@ validate_capability_registry() {
     [[ -z "$capability" ]] && continue
     impl="$(capability_implemented "$capability")"
     if ! c="$capability" yq -e \
-      '.capabilities[strenv(c)].implemented | tag == "!!bool"' \
+      '.capabilities[strenv(c)].implemented | ((tag == "!!bool") and (. == true or . == false))' \
       "$CAPABILITIES_FILE" >/dev/null; then
       fail "capability registry: $capability lacks implemented: true|false (must be a YAML boolean)"
       status=1
@@ -151,6 +151,10 @@ validate_capability_registry() {
           fail "capability registry: $capability is implemented=false but doctor.sh never mentions it (undisclosed dormant declaration)"
           status=1
         fi
+        ;;
+      *)
+        fail "capability registry: $capability lacks implemented: true|false"
+        status=1
         ;;
     esac
   done < "$known_caps_file"
@@ -379,7 +383,7 @@ validate_profile() {
     case "$type" in
       boolean)
         if p="$profile" c="$capability" yq -e \
-          '.profiles[strenv(p)].capabilities[strenv(c)] | tag == "!!bool"' \
+          '.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool") and (. == true or . == false))' \
           "$PROFILES_FILE" >/dev/null; then
           ok "capability value: $capability=$value"
         else

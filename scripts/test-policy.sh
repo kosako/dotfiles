@@ -213,9 +213,10 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
-# The YAML node type, not its printed text, is the boolean contract (#206).
-# Quoted values used to validate while Go templates treated "false" as truthy.
-for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
+# Require both the YAML boolean type and canonical lowercase spelling (#206).
+# Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
+# comparisons in registry disclosure and environmentKind checks.
+for invalid_bool in '"true"' '"false"' 0 null '[]' '{}' True TRUE False FALSE; do
   make_fixture
   V="$invalid_bool" yq -i '.profiles.personal.capabilities.enableQualityLoopHooks = env(V)' \
     "$fixture/.chezmoidata/profiles.yaml"
@@ -258,6 +259,16 @@ for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
         fail "invalid boolean granted secret access"; exit 1
       fi
     '
+done
+
+for invalid_true in True TRUE; do
+  make_fixture
+  V="$invalid_true" yq -i '.profiles.work.capabilities.enableAiTools = env(V)' \
+    "$fixture/.chezmoidata/profiles.yaml"
+  run_fail_contains \
+    "uppercase $invalid_true cannot bypass work environmentKind restrictions" \
+    "capability must be boolean: enableAiTools=$invalid_true" \
+    "$fixture/scripts/validate-policy.sh" work
 done
 
 make_fixture
