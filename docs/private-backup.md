@@ -30,7 +30,7 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 
 - **public baseline**(`.chezmoidata/backup-paths.yaml`、本 repo にコミット):
   誰の環境でも当たり障りない public-safe なパスのみ。「何を追っているか」を repo で
-  可視化する。
+  可視化する。shell の上書きファイル `.zshrc.local` / `.zprofile.local` も含む。
 - **local 補足**(`~/.config/dotfiles/backup-paths.local`、非コミット):
   client 固有・private なパスはここだけに書く。**暗号化アーカイブに同梱**され、
   復元時に参照される。public-safety を守りつつリストごと復元できる。

@@ -29,6 +29,8 @@ trap 'rm -rf "$fixture_home"' EXIT
 mkdir -p "$fixture_home/.ssh" "$fixture_home/fakebin" "$fixture_home/keys" "$fixture_home/out"
 # Baseline files declared in .chezmoidata/backup-paths.yaml.
 printf 'export SECRET_TOKEN=abc123\n' > "$fixture_home/.zshrc.local"
+printf 'export LOGIN_SETTING=fixture\n' > "$fixture_home/.zprofile.local"
+chmod 600 "$fixture_home/.zprofile.local"
 printf 'Host private\n  User me\n' > "$fixture_home/.ssh/config.local"
 
 # Fake chezmoi: prints a chosen profile so require_secrets_access resolves
@@ -274,6 +276,8 @@ fi
 # 13. restore --apply restores files with the original content.
 if run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply >/dev/null 2>&1 \
   && [[ "$(cat "$rdst/.zshrc.local" 2>/dev/null)" == "export SECRET_TOKEN=abc123" ]] \
+  && [[ "$(cat "$rdst/.zprofile.local" 2>/dev/null)" == "export LOGIN_SETTING=fixture" ]] \
+  && [[ "$(file_mode "$rdst/.zprofile.local")" == "600" ]] \
   && [[ -f "$rdst/.ssh/config.local" ]]; then
   pass "restore --apply restores files with original content"
 else

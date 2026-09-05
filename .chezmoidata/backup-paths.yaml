@@ -19,6 +19,7 @@
 # Read by scripts via mikefarah/yq v4; validated by validate-policy.sh.
 backup_paths:
   - { path: .zshrc.local, type: file, category: shell }
+  - { path: .zprofile.local, type: file, category: shell }
   - { path: .ssh/config.local, type: file, category: ssh }
   # Codex harness config. Contains a mix of public-safe settings and
   # machine/secret-bearing values (project paths incl. ~/work, status_line,
