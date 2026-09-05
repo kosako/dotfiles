@@ -162,9 +162,9 @@ mv "$fixture/saved-gobin" "$fixture/gobin"
 ok "GOPATH presence and uninspectable Go bin locations are handled safely"
 
 for mode in dry-run apply; do
-  args=()
+  args=("$installer")
   [[ "$mode" = apply ]] && args+=(--apply)
-  if output="$(INVENTORY_TEST_STATE=fail run_fixture "$installer" "${args[@]}" 2>&1)"; then
+  if output="$(INVENTORY_TEST_STATE=fail run_fixture "${args[@]}" 2>&1)"; then
     fail "inventory errors must fail the installer ($mode)"
     exit 1
   fi
