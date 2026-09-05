@@ -50,7 +50,11 @@ if [ "$1" = install ]; then
 fi
 if [ "${INVENTORY_TEST_STATE:-present}" = fail ]; then
   # A partially printed inventory with a failure is still unknown.
-  [ "$manager" = npm ] && printf '{"dependencies":{"partial-entry":{}}}\n'
+  if [ "$manager" = npm ]; then
+    printf '{"dependencies":{"partial-entry":{}}}\n'
+    printf 'FIXTURE_NPM_PRIVATE_DIAGNOSTIC\n' >&2
+    exit 42
+  fi
   exit 1
 fi
 case "${INVENTORY_TEST_STATE:-present}:$manager:$*" in
@@ -166,6 +170,14 @@ for mode in dry-run apply; do
   [[ "$mode" = apply ]] && args+=(--apply)
   if output="$(INVENTORY_TEST_STATE=fail run_fixture "${args[@]}" 2>&1)"; then
     fail "inventory errors must fail the installer ($mode)"
+    exit 1
+  else
+    inventory_exit=$?
+  fi
+  if [[ "$inventory_exit" -ne 1 ]] || ! grep -Fq 'query failed (exit 42)' <<< "$output" \
+    || ! grep -Fq "run 'npm ls -g --depth=0' manually" <<< "$output" \
+    || grep -Fq 'FIXTURE_NPM_PRIVATE_DIAGNOSTIC' <<< "$output"; then
+    fail "npm failure must report its exit code and fixed hint without raw diagnostics ($mode)"
     exit 1
   fi
   if [[ -s "$fixture/installs" ]] || ! grep -Fq '0 skipped, 5 failed' <<< "$output" \
