@@ -26,6 +26,8 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 
 `.chezmoidata/*.yaml`(profiles / modules / capabilities.schema / packages / backup-paths)の読み取りは shell script 側では mikefarah/yq v4 で行う(chezmoi template 側は Go template が読む)。yq が無い・別 variant の場合は `require_yq` が fail closed する。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない(injection 防止)。
 
+boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型のみを受理する。`true` / `false` は引用符を付けずに書く。文字列 `"true"` / `"false"`、数値、null は型エラーになる。`validate-policy.sh` に加え、直接の `chezmoi apply` / template 展開も共通 `require-profile` guard で検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の boolean `true` だけを許可する。enum の値は従来どおり文字列で指定する。
+
 `packages`(`.chezmoidata/packages.yaml`)は software catalog。各 entry の `source`(brew_formula / brew_cask / npm_global / go_install / mas / manual)と canonical id を宣言する。`validate-policy.sh` が source の妥当性・go_install/mas の pkg 必須・name 重複を fail closed で検査する。
 
 実機との drift は `doctor.sh` の `software catalog` section(`report_catalog_drift`)が **report-only**(常に exit 0、欠けている package manager は skip)で報告する。検出は 3 種:

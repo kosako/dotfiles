@@ -9,6 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
@@ -162,6 +164,62 @@ if output="$(env HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME=
 else
   ok "test passed: init without a profile answer fails"
 fi
+
+section "typed boolean guards (direct chezmoi, without validate-policy)"
+
+for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
+  for bool_input in profile requires implemented; do
+    make_root
+    make_flipped_source "$root"
+    write_config personal
+    case "$bool_input" in
+      profile)
+        V="$invalid_bool" yq -i '.profiles.personal.capabilities.enableQualityLoopHooks = env(V)' \
+          "$root/src/.chezmoidata/profiles.yaml"
+        expected_error="capability must be boolean: personal.enableQualityLoopHooks"
+        ;;
+      requires)
+        V="$invalid_bool" yq -i '.modules.runtime.requires.enableRuntimeManagement = env(V)' \
+          "$root/src/.chezmoidata/modules.yaml"
+        expected_error="module requires must be boolean: runtime.enableRuntimeManagement"
+        ;;
+      implemented)
+        V="$invalid_bool" yq -i '.capabilities.enableQualityLoopHooks.implemented = env(V)' \
+          "$root/src/.chezmoidata/capabilities.schema.yaml"
+        expected_error="capability registry: enableQualityLoopHooks implemented must be a YAML boolean"
+        ;;
+    esac
+    if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
+      --destination "$root/home" apply 2>&1)"; then
+      fail "test failed: apply accepted $bool_input YAML value $invalid_bool"
+      status=1
+    elif grep -Fq "$expected_error" <<< "$output"; then
+      ok "test passed: apply rejects $bool_input YAML value $invalid_bool"
+    else
+      printf '%s\n' "$output" >&2
+      fail "test failed: apply did not report the $bool_input type error"
+      status=1
+    fi
+    if [[ -e "$root/home/.claude/settings.json" || -e "$root/home/.codex/hooks.json" ]]; then
+      fail "test failed: invalid boolean created a live hook registration"
+      status=1
+    fi
+
+    # Each agent's template must guard itself as well as .chezmoiignore:
+    # execute-template bypasses the managed-set/apply path entirely.
+    for agent_template in dot_claude/settings.json.tmpl dot_codex/hooks.json.tmpl; do
+      if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
+        --destination "$root/home" execute-template < "$root/src/$agent_template" 2>&1)"; then
+        fail "test failed: $agent_template accepted $bool_input YAML value $invalid_bool"
+        status=1
+      elif ! grep -Fq "$expected_error" <<< "$output"; then
+        printf '%s\n' "$output" >&2
+        fail "test failed: $agent_template did not report the $bool_input type error"
+        status=1
+      fi
+    done
+  done
+done
 
 if [[ "$status" -eq 0 ]]; then
   ok "render tests passed"

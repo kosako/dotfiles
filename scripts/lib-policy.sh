@@ -140,6 +140,16 @@ capability_value() {
     yq '.profiles[strenv(p)].capabilities // {} | select(has(strenv(c))) | .[strenv(c)]' "$PROFILES_FILE"
 }
 
+# Runtime permission gates do not necessarily run validate-policy first.
+# Compare the YAML type and value together so a quoted "true" grants nothing.
+profile_capability_is_true() {
+  local profile="$1" capability="$2" granted
+  granted="$(p="$profile" c="$capability" yq \
+    '.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool") and (. == true))' \
+    "$PROFILES_FILE")" || return 1
+  [[ "$granted" == "true" ]]
+}
+
 known_modules() {
   yq '.modules // {} | keys | .[]' "$MODULES_FILE"
 }
@@ -329,7 +339,7 @@ profile_installs_source() {
   local profile="$1" source="$2" cap
   cap="$(source_install_capability "$source")" || return 1
   profile_exists "$profile" || return 1
-  [[ "$(capability_value "$profile" "$cap")" == "true" ]]
+  profile_capability_is_true "$profile" "$cap"
 }
 
 # Report drift between the declared catalog (packages.yaml) and what is
@@ -719,7 +729,7 @@ resolve_runtime_profile() {
 profile_allows_secrets_access() {
   local profile="$1"
   profile_exists "$profile" || return 1
-  [[ "$(capability_value "$profile" allowSecretsAccess)" == "true" ]]
+  profile_capability_is_true "$profile" allowSecretsAccess
 }
 
 # Runtime gate for the private-backup tooling (issue #60). The archive may
