@@ -213,6 +213,79 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# Require both the YAML boolean type and canonical lowercase spelling (#206).
+# Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
+# comparisons in registry disclosure and environmentKind checks.
+for invalid_bool in '"true"' '"false"' 0 null '[]' '{}' True TRUE False FALSE; do
+  make_fixture
+  V="$invalid_bool" yq -i '.profiles.personal.capabilities.enableQualityLoopHooks = env(V)' \
+    "$fixture/.chezmoidata/profiles.yaml"
+  run_fail_contains \
+    "rejects profile boolean with YAML value $invalid_bool" \
+    "capability must be boolean: enableQualityLoopHooks=" \
+    "$fixture/scripts/validate-policy.sh" personal
+
+  make_fixture
+  V="$invalid_bool" yq -i '.modules.runtime.requires.enableRuntimeManagement = env(V)' \
+    "$fixture/.chezmoidata/modules.yaml"
+  run_fail_contains \
+    "rejects module requirement with YAML value $invalid_bool" \
+    "module requires must be boolean: runtime: enableRuntimeManagement=" \
+    "$fixture/scripts/validate-policy.sh" personal
+
+  make_fixture
+  V="$invalid_bool" yq -i '.capabilities.enableQualityLoopHooks.implemented = env(V)' \
+    "$fixture/.chezmoidata/capabilities.schema.yaml"
+  run_fail_contains \
+    "rejects registry implemented with YAML value $invalid_bool" \
+    "enableQualityLoopHooks lacks implemented: true|false" \
+    "$fixture/scripts/validate-policy.sh" personal
+
+  make_fixture
+  V="$invalid_bool" yq -i '
+    .profiles.personal.capabilities.installPackages = env(V) |
+    .profiles.personal.capabilities.installGuiApps = env(V) |
+    .profiles.personal.capabilities.allowSecretsAccess = env(V)' \
+    "$fixture/.chezmoidata/profiles.yaml"
+  run_ok "runtime gates refuse YAML value $invalid_bool without prior validation" \
+    env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" bash -c '
+      source "$FIXTURE_LIB"
+      for source in brew_formula npm_global go_install brew_cask mas; do
+        if profile_installs_source personal "$source"; then
+          fail "invalid boolean granted $source install"; exit 1
+        fi
+      done
+      if profile_allows_secrets_access personal; then
+        fail "invalid boolean granted secret access"; exit 1
+      fi
+    '
+done
+
+for invalid_true in True TRUE; do
+  make_fixture
+  V="$invalid_true" yq -i '.profiles.work.capabilities.enableAiTools = env(V)' \
+    "$fixture/.chezmoidata/profiles.yaml"
+  run_fail_contains \
+    "uppercase $invalid_true cannot bypass work environmentKind restrictions" \
+    "capability must be boolean: enableAiTools=$invalid_true" \
+    "$fixture/scripts/validate-policy.sh" work
+done
+
+make_fixture
+run_ok "runtime gates grant boolean true and refuse boolean false" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" bash -c '
+    source "$FIXTURE_LIB"
+    for source in brew_formula npm_global go_install brew_cask mas; do
+      profile_installs_source personal "$source" || exit 1
+      if profile_installs_source work "$source"; then exit 1; fi
+    done
+    profile_allows_secrets_access personal || exit 1
+    ! profile_allows_secrets_access work
+  '
+yq -i '.modules.runtime.requires.enableRuntimeManagement = false' \
+  "$fixture/.chezmoidata/modules.yaml"
+run_ok "accepts a boolean false module requirement" "$fixture/scripts/validate-policy.sh" --all
+
 # Software catalog (packages.yaml) validation.
 make_fixture
 replace_once "$fixture/.chezmoidata/packages.yaml" \

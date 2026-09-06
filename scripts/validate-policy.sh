@@ -74,7 +74,9 @@ validate_modules() {
       type="$(capability_type "$capability")"
       case "$type" in
         boolean)
-          if [[ "$value" == "true" || "$value" == "false" ]]; then
+          if m="$module" c="$capability" yq -e \
+            '.modules[strenv(m)].requires[strenv(c)] | ((tag == "!!bool") and (. == true or . == false))' \
+            "$MODULES_FILE" >/dev/null; then
             ok "module requires: $module: $capability=$value"
           else
             fail "module requires must be boolean: $module: $capability=$value"
@@ -131,6 +133,13 @@ validate_capability_registry() {
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
     impl="$(capability_implemented "$capability")"
+    if ! c="$capability" yq -e \
+      '.capabilities[strenv(c)].implemented | ((tag == "!!bool") and (. == true or . == false))' \
+      "$CAPABILITIES_FILE" >/dev/null; then
+      fail "capability registry: $capability lacks implemented: true|false (must be a YAML boolean)"
+      status=1
+      continue
+    fi
     case "$impl" in
       true)
         ok "capability registry: $capability implemented=true"
@@ -373,7 +382,9 @@ validate_profile() {
     type="$(capability_type "$capability")"
     case "$type" in
       boolean)
-        if [[ "$value" == "true" || "$value" == "false" ]]; then
+        if p="$profile" c="$capability" yq -e \
+          '.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool") and (. == true or . == false))' \
+          "$PROFILES_FILE" >/dev/null; then
           ok "capability value: $capability=$value"
         else
           fail "capability must be boolean: $capability=$value"

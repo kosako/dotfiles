@@ -7,3 +7,30 @@
 {{- if not (hasKey .profiles .profile) -}}
 {{-   fail (printf "unknown profile %q (known: %s)" .profile (keys .profiles | sortAlpha | join ", ")) -}}
 {{- end -}}
+{{- /* yq text output cannot distinguish false from "false". Check the
+       decoded types here too: direct chezmoi apply does not run the shell
+       validator, and a non-empty string would arm boolean-gated hooks. */ -}}
+{{- $caps := index (index .profiles .profile) "capabilities" -}}
+{{- range $name, $definition := .capabilities -}}
+{{-   if not (kindIs "bool" $definition.implemented) -}}
+{{-     fail (printf "capability registry: %s implemented must be a YAML boolean" $name) -}}
+{{-   end -}}
+{{-   if eq $definition.type "boolean" -}}
+{{-     if not (kindIs "bool" (index $caps $name)) -}}
+{{-       fail (printf "capability must be boolean: %s.%s (use unquoted true or false)" $.profile $name) -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
+{{- range $moduleName, $module := .modules -}}
+{{-   if hasKey $module "requires" -}}
+{{-     range $name, $want := $module.requires -}}
+{{-       with index $.capabilities $name -}}
+{{-         if eq .type "boolean" -}}
+{{-           if not (kindIs "bool" $want) -}}
+{{-             fail (printf "module requires must be boolean: %s.%s (use unquoted true or false)" $moduleName $name) -}}
+{{-           end -}}
+{{-         end -}}
+{{-       end -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
