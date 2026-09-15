@@ -415,6 +415,34 @@ else
   status=1
 fi
 
+# 8d) Single-capability renders (the other two flipped false): each must be
+#     valid JSON with exactly its own events and equal the on-render minus
+#     the other capabilities' events. herdr-only is the path where
+#     SessionStart is the FIRST event emitted (empty separator), which no
+#     other combination exercises (Codex review, PR #226).
+render_hook_flip reader-only enableQualityLoopHooks enableHerdrIntegration
+reader_only_file="$hook_flip_file"
+render_hook_flip quality-only enableGitHubIsolatedReader enableHerdrIntegration
+quality_only_file="$hook_flip_file"
+render_hook_flip herdr-only enableGitHubIsolatedReader enableQualityLoopHooks
+herdr_only_file="$hook_flip_file"
+# check_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
+check_hook_single_on() {
+  local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
+  events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')"
+  norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
+  on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
+  if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
+    ok "test passed: $label keeps exactly $expected_events and differs from the on-render by exactly the other capabilities' events"
+  else
+    fail "test failed: $label render is not the on-render minus the other capabilities' events (events=$events; gate leaked, dropped its own event, or invalid JSON)"
+    status=1
+  fi
+}
+check_hook_single_on "only enableGitHubIsolatedReader" "$reader_only_file" '["PreToolUse"]' 'del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart)'
+check_hook_single_on "only enableQualityLoopHooks" "$quality_only_file" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.SessionStart)'
+check_hook_single_on "only enableHerdrIntegration" "$herdr_only_file" '["SessionStart"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop)'
+
 if [[ "$status" -eq 0 ]]; then
   ok "claude settings tests passed"
 fi

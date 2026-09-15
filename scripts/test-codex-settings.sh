@@ -177,19 +177,22 @@ fi
 #     Stop; herdr off -> exactly {PreToolUse, PostToolUse, Stop} and the
 #     on-render minus SessionStart (normalized JSON compare, so a gate that
 #     dropped another capability's events or leaked anything else would fail).
-# render_codex_hook_flip LABEL CAP
-# Flip CAP to false in a throwaway source copy, render personal, and set
+# render_codex_hook_flip LABEL CAP...
+# Flip every CAP to false in a throwaway source copy, render personal, and set
 # hook_flip_file to the rendered hooks.json. Called as a plain statement and
 # returning through a variable ON PURPOSE: inside $(...) the function would
 # run in a subshell and its tmp_roots+= registrations would never reach the
 # parent's EXIT trap, leaking every source/render root (the #150 lesson in
 # test-lib.sh; Codex review on PR #200).
 render_codex_hook_flip() {
-  local label="$1" cap="$2" src root
+  local label="$1" src root cap
+  shift
   src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-$label.XXXXXX")"
   tmp_roots+=("$src")
   make_flipped_source "$src"
-  flip_personal_capability "$src/src" "$cap" false
+  for cap in "$@"; do
+    flip_personal_capability "$src/src" "$cap" false
+  done
   root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
   tmp_roots+=("$root")
   if ! render_personal_into "$src/src" "$root"; then
@@ -228,6 +231,39 @@ else
   fail "test failed: enableHerdrIntegration=false render is not the on-render minus SessionStart (file missing, another hook dropped, or another change leaked)"
   status=1
 fi
+
+# 2c) Single-capability renders (the other two flipped false), parity with
+#     test-claude-settings.sh 8d: valid JSON with exactly its own events and
+#     equal to the on-render minus the other capabilities' events. herdr-only
+#     is the path where SessionStart is the FIRST event emitted (empty
+#     separator) (Codex review, PR #226).
+render_codex_hook_flip reader-only enableQualityLoopHooks enableHerdrIntegration
+reader_only_hooks="$hook_flip_file"
+render_codex_hook_flip quality-only enableGitHubIsolatedReader enableHerdrIntegration
+quality_only_hooks="$hook_flip_file"
+render_codex_hook_flip herdr-only enableGitHubIsolatedReader enableQualityLoopHooks
+herdr_only_hooks="$hook_flip_file"
+# check_codex_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
+check_codex_hook_single_on() {
+  local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
+  if [[ ! -f "$file" ]]; then
+    fail "test failed: $label did not render ~/.codex/hooks.json"
+    status=1
+    return
+  fi
+  events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')"
+  norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
+  on_minus="$(yq -p json -o json "$del_filter" "$hooks_file")"
+  if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
+    ok "test passed: $label keeps ~/.codex/hooks.json with exactly $expected_events (on-render minus the other capabilities' events)"
+  else
+    fail "test failed: $label render is not the on-render minus the other capabilities' events (events=$events; gate leaked, dropped its own event, or invalid JSON)"
+    status=1
+  fi
+}
+check_codex_hook_single_on "only enableGitHubIsolatedReader" "$reader_only_hooks" '["PreToolUse"]' 'del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart)'
+check_codex_hook_single_on "only enableQualityLoopHooks" "$quality_only_hooks" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.SessionStart)'
+check_codex_hook_single_on "only enableHerdrIntegration" "$herdr_only_hooks" '["SessionStart"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop)'
 
 # 3) ALL hook capabilities false REMOVES an ALREADY-APPLIED ~/.codex/hooks.json
 #    on the next apply — not just "does not newly create it". This is the exact

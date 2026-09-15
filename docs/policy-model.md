@@ -224,11 +224,17 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   持てない → capability は false。work 機では `herdr integration install` が unmanaged な
   両 file に登録と body の両方を持つ(managed-wins の衝突が無いので installer 任せでよい)。
   doctor は capability=false でも `herdr integration status` の見え方を info で出す。
-- **doctor**: 両 home の登録 + body presence(contents-blind)+ `herdr integration status` の
-  currency(current / outdated / needs repair。herdr は body header を読むだけで server 不要・
-  書き込み無し。herdr が PATH に無い/失敗時は presence のみと明示)を report-only で出す。
-  module 非 active は dangling として warn。capability=false で body が残っても害は無い
-  (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
+- **doctor**: 両 home の登録 + body presence(contents-blind。登録は `bash '<path>' session`
+  で起動するので実行ビットは見ず、読取可能な通常ファイルかで判定)+ `herdr integration
+  status` の currency(current / outdated / needs repair。herdr は body header を読むだけで
+  server 不要・書き込み無し。**5 秒の期限付きで実行し exit 0 のときだけ出力を採用** — herdr
+  不在・失敗・hang はいずれも「currency 未確認」の presence 表示に倒し、doctor を止めない)を
+  report-only で出す。module 非 active は dangling として warn。capability=false は宣言上の
+  状態として報告し(live 登録は probe しない)、herdr 自身の見え方を home ごとに info で
+  添える — settings module が active な home では「managed file なので installer が足した
+  登録は次の apply で消える drift」、非 active な home では「unmanaged なので登録も body も
+  installer 任せ」。capability=false で body が残っても害は無い(登録が無ければ呼ばれない。
+  `herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
 ## dormant capability の扱い(残す基準)
