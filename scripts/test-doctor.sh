@@ -761,11 +761,13 @@ fi
 #     the codex shim below — the real herdr may or may not be on PATH, and a
 #     fixture body would read as outdated/current at its whim), printing one
 #     line per agent in herdr's `<agent>: <state> (<path>)` format. MODE
-#     `ok` exits 0; `fail` prints the same lines but exits 1 (doctor must
-#     discard them); `hang` forks a `sleep 60` GRANDCHILD (pid recorded in
-#     sleep.pid) and waits on it, so the deadline must reap the whole
-#     process tree, not just the wrapper (Codex review, PR #226). Own
-#     fixture copy; doctor stays exit 0 throughout.
+#     `ok` exits 0; `ok-nonl` exits 0 without a trailing newline (the
+#     reader must still see the status line); `fail` prints the same lines
+#     but exits 1 (doctor must discard them); `hang` forks a `sleep 60`
+#     GRANDCHILD (pid recorded in sleep.pid) and waits on it, so the
+#     deadline must reap the whole process tree, not just the wrapper
+#     (Codex review, PR #226). Own fixture copy; doctor stays exit 0
+#     throughout.
 hi_root="$fixture_home/.dotfiles-herdr"
 copy_repo_fixture "$hi_root"
 hi_claude_body="$fixture_home/.claude/hooks/herdr-agent-state.sh"
@@ -778,6 +780,7 @@ write_fake_herdr_status() {
 #!/bin/sh
 [ "\$1" = integration ] && [ "\$2" = status ] || exit 2
 if [ "$3" = hang ]; then sleep 60 & printf '%s\\n' "\$!" > "$hi_fakebin/sleep.pid"; wait; fi
+if [ "$3" = ok-nonl ]; then printf '%s\\n%s' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"; exit 0; fi
 printf '%s\\n' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"
 [ "$3" = ok ]
 SH
@@ -827,6 +830,23 @@ if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doc
 else
   printf '%s\n' "$hi_out" >&2
   fail "test failed: doctor must stay exit 0 (herdr integration, current)"
+  status=1
+fi
+#     HI-b1) herdr answers without a trailing newline -> the status line must
+#            still be seen and the answer adopted (no "unchecked").
+write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out"; then
+    ok "test passed: a herdr answer without a trailing newline is still adopted as current"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: a herdr answer without a trailing newline was not adopted"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, no trailing newline)"
   status=1
 fi
 #     HI-b2) a directory at the body path must NOT count as present (a
@@ -920,7 +940,12 @@ fi
 #     HI-d3) doctor interrupted (SIGTERM) while the probe is running -> its
 #            trap must reap the probe tree: start doctor in the background,
 #            wait until the fake's grandchild exists, terminate doctor, and
-#            require the grandchild to be gone.
+#            require the grandchild to be gone. The interrupt itself must
+#            be proven: the TERM must be delivered and doctor must die BY
+#            that signal (exit 143 via the trap's re-raise) — a doctor that
+#            reaped the probe at its own deadline and ran on would exit 0
+#            and fail here, so the case cannot pass vacuously (Codex review,
+#            PR #226 round 3).
 rm -f "$hi_fakebin/sleep.pid"
 HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal > "$hi_fakebin/interrupt.out" 2>&1 &
 hi_doctor_pid=$!
@@ -931,13 +956,14 @@ while [[ ! -s "$hi_fakebin/sleep.pid" ]] && (( hi_polls < 300 )); do
 done
 if [[ -s "$hi_fakebin/sleep.pid" ]]; then
   hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid")"
-  kill -TERM "$hi_doctor_pid" 2>/dev/null || true
-  wait "$hi_doctor_pid" 2>/dev/null || true
+  hi_term_sent=0
+  kill -TERM "$hi_doctor_pid" 2>/dev/null && hi_term_sent=1
+  if wait "$hi_doctor_pid"; then hi_doctor_rc=0; else hi_doctor_rc=$?; fi
   sleep 0.5
-  if ! kill -0 "$hi_sleep_pid" 2>/dev/null; then
-    ok "test passed: a doctor interrupted mid-probe reaps the herdr probe tree (grandchild gone)"
+  if [[ "$hi_term_sent" == 1 && "$hi_doctor_rc" == 143 ]] && ! kill -0 "$hi_sleep_pid" 2>/dev/null; then
+    ok "test passed: a doctor interrupted mid-probe dies by SIGTERM (143) and reaps the herdr probe tree (grandchild gone)"
   else
-    fail "test failed: interrupted doctor left the herdr probe's grandchild alive (pid $hi_sleep_pid)"
+    fail "test failed: interrupted doctor did not die by the signal (term_sent=$hi_term_sent rc=$hi_doctor_rc) or left the probe's grandchild alive (pid $hi_sleep_pid)"
     status=1
     kill "$hi_sleep_pid" 2>/dev/null || true
   fi

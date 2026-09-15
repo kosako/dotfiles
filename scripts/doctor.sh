@@ -867,6 +867,7 @@ section "herdr integration (report-only)"
 herdr_status=""
 herdr_status_deadline=5
 herdr_status_pid=""
+herdr_status_fd_open=0
 # kill_process_tree PID — SIGTERM then SIGKILL PID and every descendant
 # (children first, via pgrep -P), so a wrapper on PATH that forked the real
 # work does not leave an orphan behind the deadline.
@@ -879,8 +880,19 @@ kill_process_tree() {
   kill -KILL "$pid" 2>/dev/null || true
 }
 # herdr_status_cleanup — reap a still-running probe; also the INT / TERM /
-# EXIT handler below, so an interrupted doctor leaves no herdr behind.
+# EXIT handler below, so an interrupted doctor leaves no herdr behind. An
+# interrupt can land before the reader has consumed the probe's pid line
+# (the subshell prints it right after forking); in that window the handler
+# drains that first line itself, briefly bounded, so the tree it must kill
+# is known before it gives up (Codex review, PR #226 round 3).
 herdr_status_cleanup() {
+  if [[ -z "$herdr_status_pid" && "$herdr_status_fd_open" == 1 ]]; then
+    if IFS= read -r -t 1 herdr_status_line <&3 2>/dev/null; then
+      case "$herdr_status_line" in
+        __pid=*) herdr_status_pid="${herdr_status_line#__pid=}" ;;
+      esac
+    fi
+  fi
   if [[ -n "$herdr_status_pid" ]] && kill -0 "$herdr_status_pid" 2>/dev/null; then
     kill_process_tree "$herdr_status_pid"
   fi
@@ -894,16 +906,19 @@ if command -v herdr >/dev/null 2>&1; then
   # Bounded run WITHOUT a temp file (a failing mktemp must not break the
   # report-only contract — Codex review, PR #226): the probe's stdout comes
   # through a process substitution whose subshell prints the probe's pid
-  # first and its exit status as the last line; each read carries the
-  # remaining deadline. A read that fails while the probe is still alive is
-  # the deadline (bash 3.2 returns 1 there, 4+ returns >128, so liveness is
-  # the portable signal): the tree is killed and nothing is adopted. Only a
-  # clean exit 0 with its status line seen is adopted.
+  # first and its exit status as the last line (preceded by a newline of its
+  # own, so an output that ends without one cannot swallow the status line);
+  # each read carries the remaining deadline. A read that fails while the
+  # probe is still alive is the deadline (bash 3.2 returns 1 there, 4+
+  # returns >128, so liveness is the portable signal): the tree is killed
+  # and nothing is adopted. Only a clean exit 0 with its status line seen is
+  # adopted; the blank line that separator adds is dropped.
   herdr_status_rc=""
   herdr_status_lines=""
   herdr_status_line=""
   herdr_status_started=$SECONDS
-  exec 3< <({ herdr integration status 2>/dev/null & printf '__pid=%s\n' "$!"; if wait "$!"; then printf '__rc=0\n'; else printf '__rc=%s\n' "$?"; fi; } 2>/dev/null)
+  exec 3< <({ herdr integration status 2>/dev/null & printf '__pid=%s\n' "$!"; if wait "$!"; then printf '\n__rc=0\n'; else printf '\n__rc=%s\n' "$?"; fi; } 2>/dev/null)
+  herdr_status_fd_open=1
   while :; do
     herdr_status_remaining=$(( herdr_status_deadline - (SECONDS - herdr_status_started) ))
     (( herdr_status_remaining > 0 )) || break
@@ -911,11 +926,13 @@ if command -v herdr >/dev/null 2>&1; then
     case "$herdr_status_line" in
       __pid=*) herdr_status_pid="${herdr_status_line#__pid=}" ;;
       __rc=*) herdr_status_rc="${herdr_status_line#__rc=}"; break ;;
+      "") ;;
       *) herdr_status_lines+="$herdr_status_line"$'\n' ;;
     esac
   done
-  exec 3<&-
   herdr_status_cleanup
+  exec 3<&-
+  herdr_status_fd_open=0
   if [[ "$herdr_status_rc" == "0" ]]; then
     herdr_status="$herdr_status_lines"
   fi
