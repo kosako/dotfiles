@@ -951,11 +951,16 @@ fi
 #            (exit 143 via the trap's re-raise), the grandchild is gone, and
 #            the captured output shows the herdr section started but never
 #            printed a result line (the deadline path would have).
+#            doctor.pid is written by the launching shell itself (its $$
+#            survives the exec into doctor), so the file exists before
+#            doctor runs a single line — no parent-side write can race the
+#            probe (Codex review, PR #226 round 5).
 rm -f "$hi_fakebin/sleep.pid" "$hi_fakebin/doctor.pid"
 write_fake_herdr_status "current (v9)" "current (v8)" interrupt
-HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal > "$hi_fakebin/interrupt.out" 2>&1 &
+HOME="$fixture_home" PATH="$hi_fakebin:$PATH" \
+  sh -c 'printf "%s\n" "$$" > "$1"; shift; exec "$@"' _ "$hi_fakebin/doctor.pid" "$hi_root/scripts/doctor.sh" personal \
+  > "$hi_fakebin/interrupt.out" 2>&1 &
 hi_doctor_pid=$!
-printf '%s\n' "$hi_doctor_pid" > "$hi_fakebin/doctor.pid"
 if wait "$hi_doctor_pid"; then hi_doctor_rc=0; else hi_doctor_rc=$?; fi
 sleep 0.5
 hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid" 2>/dev/null || true)"
