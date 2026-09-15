@@ -47,6 +47,15 @@
        stop_hook_active). Both are silent no-ops until a repo is declared in
        the user-owned ~/.config/agent-tools/checks.local.json.
 
+       enableHerdrIntegration (#225, agent-tools#252 hand-off) registers
+       herdr's SessionStart hook (matcher "*") the same way, with the body
+       owned by herdr instead of agent-tools: `herdr integration install
+       claude` writes ~/.claude/hooks/herdr-agent-state.sh, and the entry is
+       rendered in exactly the shape that installer emits, so it recognizes
+       the managed registration and leaves settings.json untouched (measured
+       byte-identical). Session-id report only, from inside a herdr pane;
+       exits 0 elsewhere.
+
        The whole "hooks" object is shared with the Codex registration via
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
        it is included only when at least one hook capability is on, so an
@@ -77,7 +86,7 @@
       "mcp__pencil"
     ]
   },
-{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") }}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") }}
 {{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
   "model": "opus[1m]",

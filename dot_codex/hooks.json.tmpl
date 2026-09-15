@@ -23,6 +23,14 @@
        context) produced no invalid-hook-output event in `codex exec --json`,
        but whether the warning text reaches the Codex model is unverified —
        worst case it is dropped, never a block (fail-open).
+       enableHerdrIntegration (#225) registers herdr's SessionStart hook
+       (matcher-less on Codex) the same way; the body is herdr's, written by
+       `herdr integration install codex` to ~/.codex/herdr-agent-state.sh.
+       The entry is rendered in exactly the shape that installer emits, so it
+       recognizes the managed registration; it still re-serializes hooks.json
+       (same content, sorted keys) and sets [features] hooks = true in the
+       codex-owned config.toml — the next `chezmoi apply` restores this
+       rendering, and config.toml stays unmanaged (below).
 
        Why a SEPARATE file and not ~/.codex/config.toml's [hooks] table:
        config.toml is a codex-owned live file (codex writes [hooks.state] etc.),
@@ -61,7 +69,7 @@
 
        Gating (template self-gate, NOT a module `requires`): the file is managed
        for profiles that list codex-settings (personal). The capabilities are
-       gated HERE — with BOTH hook capabilities false the file renders EMPTY, and
+       gated HERE — with ALL hook capabilities false the file renders EMPTY, and
        chezmoi removes a managed target whose render is empty; with one of them
        false only that capability's events are dropped (agent-hooks-json). A
        `requires:` on the module would instead make .chezmoiignore drop the
@@ -70,7 +78,7 @@
        capabilities would NOT remove a live hook. Doing it in-template means
        flipping them off truly removes the file on the next apply (Codex review
        #184; verified in test-codex-settings.sh). */ -}}
-{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") -}}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") -}}
 {
 {{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".codex" "timeout" 10) }}
 }

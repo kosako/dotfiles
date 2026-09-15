@@ -21,8 +21,11 @@ set -euo pipefail
 # (ON for personal) -> exactly one PreToolUse/Bash command hook pointing at the
 # agent-tools-deployed personal-safe-gh-hook; enableQualityLoopHooks (ON for
 # personal) -> exactly one PostToolUse/Edit|Write hook (personal-fast-edit-check)
-# and one matcher-less Stop hook (personal-changed-scope-qa); each capability
-# adds exactly its own events, and both false -> no hooks key at all.
+# and one matcher-less Stop hook (personal-changed-scope-qa); enableHerdrIntegration
+# (ON for personal, #225) -> exactly one SessionStart/* command hook in the
+# shape herdr's installer emits (bash '<home>/.claude/hooks/herdr-agent-state.sh'
+# session, timeout 10); each capability adds exactly its own events, and all
+# three false -> no hooks key at all.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -246,33 +249,39 @@ if [[ "$bypass_hit" -eq 0 ]]; then
   ok "test passed: known equivalent read/exfil paths are NOT covered (matchers are steering, not a boundary)"
 fi
 
-section "claude settings hook registration (#137 / #199)"
+section "claude settings hook registration (#137 / #199 / #225)"
 
-# 8a) Committed personal: enableGitHubIsolatedReader AND enableQualityLoopHooks
-#     are ON, so the managed settings.json registers EXACTLY three events:
+# 8a) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks
+#     AND enableHerdrIntegration are ON, so the managed settings.json registers
+#     EXACTLY four events:
 #     PreToolUse / matcher Bash / one command hook -> personal-safe-gh-hook
 #     (#137); PostToolUse / matcher Edit|Write / one command hook ->
 #     personal-fast-edit-check and a matcher-less Stop / one command hook ->
-#     personal-changed-scope-qa (#199; Stop takes no matcher in Claude Code).
-#     Every body is the agent-tools-deployed absolute path (agent-tools#146
-#     stable-path contract). Pinned as an exact set (event set, matcher,
-#     hook count, type, full command path, no timeout on the quality pair),
-#     not just "a hooks key exists": this is security / gate wiring, so a
-#     swapped matcher or an extra registered event must fail the test (#129
-#     lesson).
+#     personal-changed-scope-qa (#199; Stop takes no matcher in Claude Code);
+#     SessionStart / matcher "*" / one command hook in the exact shape herdr's
+#     installer emits — `bash '<home>/.claude/hooks/herdr-agent-state.sh'
+#     session`, timeout 10 (#225; herdr matches an existing hook by the
+#     command string, so any deviation would make `herdr integration install
+#     claude` add a duplicate entry).
+#     Every agent-tools body is the agent-tools-deployed absolute path
+#     (agent-tools#146 stable-path contract). Pinned as an exact set (event
+#     set, matcher, hook count, type, full command path, timeouts), not just
+#     "a hooks key exists": this is security / gate wiring, so a swapped
+#     matcher or an extra registered event must fail the test (#129 lesson).
 expected_hook_cmd="$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook"
 expected_edit_cmd="$HOME/.claude/agent-tools/scripts/personal-fast-edit-check"
 expected_stop_cmd="$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa"
+expected_session_cmd="bash '$HOME/.claude/hooks/herdr-agent-state.sh' session"
 hook_events="$(yq -p json -o json '.hooks | keys | sort' "$off_file" | tr -d ' \n')"
 pre_len="$(yq -p json '.hooks.PreToolUse | length' "$off_file")"
 pre_matcher="$(yq -p json '.hooks.PreToolUse[0].matcher' "$off_file")"
 inner_len="$(yq -p json '.hooks.PreToolUse[0].hooks | length' "$off_file")"
 inner_type="$(yq -p json '.hooks.PreToolUse[0].hooks[0].type' "$off_file")"
 inner_cmd="$(yq -p json '.hooks.PreToolUse[0].hooks[0].command' "$off_file")"
-if [[ "$hook_events" == '["PostToolUse","PreToolUse","Stop"]' && "$pre_len" == "1" && "$pre_matcher" == "Bash" \
+if [[ "$hook_events" == '["PostToolUse","PreToolUse","SessionStart","Stop"]' && "$pre_len" == "1" && "$pre_matcher" == "Bash" \
   && "$inner_len" == "1" && "$inner_type" == "command" \
   && "$inner_cmd" == "$expected_hook_cmd" ]]; then
-  ok "test passed: committed personal registers exactly {PreToolUse, PostToolUse, Stop}, with one PreToolUse/Bash command hook -> personal-safe-gh-hook (absolute path)"
+  ok "test passed: committed personal registers exactly {PreToolUse, PostToolUse, Stop, SessionStart}, with one PreToolUse/Bash command hook -> personal-safe-gh-hook (absolute path)"
 else
   fail "test failed: hook registration wrong (events=$hook_events pre_len=$pre_len matcher=$pre_matcher inner_len=$inner_len type=$inner_type cmd=$inner_cmd)"
   status=1
@@ -298,6 +307,19 @@ else
   fail "test failed: quality-loop hook registration wrong (post_len=$post_len matcher=$post_matcher inner=$post_inner_len type=$post_type cmd=$post_cmd timeout=$post_timeout | stop_len=$stop_len matcher=$stop_matcher inner=$stop_inner_len type=$stop_type cmd=$stop_cmd timeout=$stop_timeout)"
   status=1
 fi
+session_len="$(yq -p json '.hooks.SessionStart | length' "$off_file")"
+session_matcher="$(yq -p json '.hooks.SessionStart[0].matcher // "absent"' "$off_file")"
+session_inner_len="$(yq -p json '.hooks.SessionStart[0].hooks | length' "$off_file")"
+session_type="$(yq -p json '.hooks.SessionStart[0].hooks[0].type' "$off_file")"
+session_cmd="$(yq -p json '.hooks.SessionStart[0].hooks[0].command' "$off_file")"
+session_timeout="$(yq -p json '.hooks.SessionStart[0].hooks[0].timeout // "absent"' "$off_file")"
+if [[ "$session_len" == "1" && "$session_matcher" == "*" && "$session_inner_len" == "1" \
+  && "$session_type" == "command" && "$session_cmd" == "$expected_session_cmd" && "$session_timeout" == "10" ]]; then
+  ok "test passed: committed personal registers one SessionStart/* hook in herdr's installer shape (bash '<home>/.claude/hooks/herdr-agent-state.sh' session, timeout 10)"
+else
+  fail "test failed: herdr SessionStart registration wrong (len=$session_len matcher=$session_matcher inner=$session_inner_len type=$session_type cmd=$session_cmd timeout=$session_timeout)"
+  status=1
+fi
 
 # 8b) Bootstrap order is safe: the throwaway render home has NO agent-tools
 #     scripts, yet the apply succeeded and rendered the registration. The
@@ -308,8 +330,9 @@ fi
 off_home="$(dirname "$(dirname "$off_file")")"
 if [[ ! -e "$off_home/.claude/agent-tools/scripts/personal-safe-gh-hook" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-fast-edit-check" \
-  && ! -e "$off_home/.claude/agent-tools/scripts/personal-changed-scope-qa" ]]; then
-  ok "test passed: registration renders without any hook body present (agent-tools sync can come later; runtime is fail-open)"
+  && ! -e "$off_home/.claude/agent-tools/scripts/personal-changed-scope-qa" \
+  && ! -e "$off_home/.claude/hooks/herdr-agent-state.sh" ]]; then
+  ok "test passed: registration renders without any hook body present (agent-tools sync / herdr integration install can come later; runtime is fail-open)"
 else
   fail "test failed: throwaway render home unexpectedly contains a hook body (fixture assumption broken)"
   status=1
@@ -320,9 +343,9 @@ fi
 #     with only that capability flipped false (normalized JSON compare, so a
 #     gate that leaked any other key/content — or dropped the other
 #     capability's events — would fail; the same exact-set spirit as the deny
-#     test, without a fixture that drifts). Both false -> no hooks key at all
-#     (an empty "hooks": {} must never be emitted), and the both-off render
-#     is the both-on render minus the whole hooks key.
+#     test, without a fixture that drifts). All three false -> no hooks key at
+#     all (an empty "hooks": {} must never be emitted), and the all-off render
+#     is the all-on render minus the whole hooks key.
 # render_hook_flip LABEL CAP...
 # Flip every CAP to false in a throwaway source copy, render personal, and
 # set hook_flip_file to the rendered settings.json. Called as a plain
@@ -351,33 +374,44 @@ render_hook_flip reader-off enableGitHubIsolatedReader
 reader_off_file="$hook_flip_file"
 render_hook_flip quality-off enableQualityLoopHooks
 quality_off_file="$hook_flip_file"
-render_hook_flip hooks-off enableGitHubIsolatedReader enableQualityLoopHooks
+render_hook_flip herdr-off enableHerdrIntegration
+herdr_off_file="$hook_flip_file"
+render_hook_flip hooks-off enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration
 both_off_file="$hook_flip_file"
 on_minus_reader="$(yq -p json -o json 'del(.hooks.PreToolUse)' "$off_file")"
 reader_off_norm="$(yq -p json -o json '.' "$reader_off_file")"
-if [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_file" | tr -d ' \n')" == '["PostToolUse","Stop"]' ]] \
+if [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_file" | tr -d ' \n')" == '["PostToolUse","SessionStart","Stop"]' ]] \
   && [[ -n "$reader_off_norm" && "$on_minus_reader" == "$reader_off_norm" ]]; then
-  ok "test passed: enableGitHubIsolatedReader=false keeps exactly {PostToolUse, Stop} and differs from the on-render by exactly the PreToolUse event"
+  ok "test passed: enableGitHubIsolatedReader=false keeps exactly {PostToolUse, Stop, SessionStart} and differs from the on-render by exactly the PreToolUse event"
 else
   fail "test failed: enableGitHubIsolatedReader=false render is not the on-render minus PreToolUse (gate leaked another change, dropped the quality pair, or invalid JSON)"
   status=1
 fi
 on_minus_quality="$(yq -p json -o json 'del(.hooks.PostToolUse) | del(.hooks.Stop)' "$off_file")"
 quality_off_norm="$(yq -p json -o json '.' "$quality_off_file")"
-if [[ "$(yq -p json -o json '.hooks | keys | sort' "$quality_off_file" | tr -d ' \n')" == '["PreToolUse"]' ]] \
+if [[ "$(yq -p json -o json '.hooks | keys | sort' "$quality_off_file" | tr -d ' \n')" == '["PreToolUse","SessionStart"]' ]] \
   && [[ -n "$quality_off_norm" && "$on_minus_quality" == "$quality_off_norm" ]]; then
-  ok "test passed: enableQualityLoopHooks=false keeps exactly {PreToolUse} and differs from the on-render by exactly the PostToolUse + Stop events"
+  ok "test passed: enableQualityLoopHooks=false keeps exactly {PreToolUse, SessionStart} and differs from the on-render by exactly the PostToolUse + Stop events"
 else
   fail "test failed: enableQualityLoopHooks=false render is not the on-render minus PostToolUse/Stop (gate leaked another change, dropped the safe-gh hook, or invalid JSON)"
+  status=1
+fi
+on_minus_herdr="$(yq -p json -o json 'del(.hooks.SessionStart)' "$off_file")"
+herdr_off_norm="$(yq -p json -o json '.' "$herdr_off_file")"
+if [[ "$(yq -p json -o json '.hooks | keys | sort' "$herdr_off_file" | tr -d ' \n')" == '["PostToolUse","PreToolUse","Stop"]' ]] \
+  && [[ -n "$herdr_off_norm" && "$on_minus_herdr" == "$herdr_off_norm" ]]; then
+  ok "test passed: enableHerdrIntegration=false keeps exactly {PreToolUse, PostToolUse, Stop} and differs from the on-render by exactly the SessionStart event"
+else
+  fail "test failed: enableHerdrIntegration=false render is not the on-render minus SessionStart (gate leaked another change, dropped another hook, or invalid JSON)"
   status=1
 fi
 on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
 both_off_norm="$(yq -p json -o json '.' "$both_off_file")"
 if [[ "$(yq -p json '.hooks // "absent"' "$both_off_file")" == "absent" ]] \
   && [[ -n "$both_off_norm" && "$on_minus_hooks" == "$both_off_norm" ]]; then
-  ok "test passed: both hook capabilities false emits no hooks key (no empty object) and differs from the on-render by exactly the hooks key"
+  ok "test passed: all three hook capabilities false emits no hooks key (no empty object) and differs from the on-render by exactly the hooks key"
 else
-  fail "test failed: both-off render is not the on-render minus the hooks key (gate leaked another change, emitted an empty hooks object, or invalid JSON)"
+  fail "test failed: all-off render is not the on-render minus the hooks key (gate leaked another change, emitted an empty hooks object, or invalid JSON)"
   status=1
 fi
 

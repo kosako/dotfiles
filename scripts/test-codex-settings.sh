@@ -13,7 +13,10 @@ set -euo pipefail
 #     command hook -> personal-fast-edit-check and one matcher-less Stop command
 #     hook -> personal-changed-scope-qa (absolute paths, no timeout; Codex
 #     ignores a Stop matcher, so none is emitted).
-#   - each capability false drops exactly its own events; BOTH false: no
+#   - enableHerdrIntegration=true (personal, #225): EXACTLY one matcher-less
+#     SessionStart command hook in the shape herdr's installer emits
+#     (bash '<home>/.codex/herdr-agent-state.sh' session, timeout 10).
+#   - each capability false drops exactly its own events; ALL false: no
 #     ~/.codex/hooks.json at all, AND an already-applied file is REMOVED on the
 #     next apply (template self-gate renders empty -> chezmoi prunes the managed
 #     target). This is why the module uses a template self-gate instead of a
@@ -54,15 +57,20 @@ trap cleanup EXIT
 # root and registers it in tmp_roots, then inspects ROOT/home
 # (caller-creates-root contract; see the #150 leak note in test-lib.sh).
 
-section "codex settings hook registration (#181 / #199)"
+section "codex settings hook registration (#181 / #199 / #225)"
 
-# 1) Committed personal: enableGitHubIsolatedReader and enableQualityLoopHooks
-#    are ON, so ~/.codex/hooks.json exists and registers EXACTLY three events:
+# 1) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks and
+#    enableHerdrIntegration are ON, so ~/.codex/hooks.json exists and registers
+#    EXACTLY four events:
 #    PreToolUse / matcher Bash / one command hook pointing at the agent-tools-
 #    deployed safe-gh body (absolute path per the agent-tools#146 stable-path
 #    contract), timeout 10; PostToolUse / matcher Edit|Write / one command hook
 #    -> personal-fast-edit-check; matcher-less Stop / one command hook ->
-#    personal-changed-scope-qa (no timeout on the quality pair). Pinned as an
+#    personal-changed-scope-qa (no timeout on the quality pair); matcher-less
+#    SessionStart / one command hook in the exact shape herdr's installer emits
+#    (`bash '<home>/.codex/herdr-agent-state.sh' session`, timeout 10 — #225;
+#    herdr matches an existing hook by the command string, so a deviation would
+#    make `herdr integration install codex` add a duplicate). Pinned as an
 #    exact set (event set, matcher, hook count, type, command, timeout), not
 #    just "a hook exists": this is security / gate wiring, so a swapped matcher /
 #    extra event / wrong path must fail the test.
@@ -77,6 +85,7 @@ hooks_file="$home/.codex/hooks.json"
 expected_hook_cmd="$HOME/.codex/agent-tools/scripts/personal-safe-gh-hook"
 expected_edit_cmd="$HOME/.codex/agent-tools/scripts/personal-fast-edit-check"
 expected_stop_cmd="$HOME/.codex/agent-tools/scripts/personal-changed-scope-qa"
+expected_session_cmd="bash '$HOME/.codex/herdr-agent-state.sh' session"
 if [[ ! -f "$hooks_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/hooks.json (enableGitHubIsolatedReader is ON)"
   status=1
@@ -102,10 +111,10 @@ else
   inner_type="$(yq -p json '.hooks.PreToolUse[0].hooks[0].type' "$hooks_file")"
   inner_cmd="$(yq -p json '.hooks.PreToolUse[0].hooks[0].command' "$hooks_file")"
   inner_timeout="$(yq -p json '.hooks.PreToolUse[0].hooks[0].timeout' "$hooks_file")"
-  if [[ "$events" == '["PostToolUse","PreToolUse","Stop"]' && "$pre_len" == "1" && "$matcher" == "Bash" \
+  if [[ "$events" == '["PostToolUse","PreToolUse","SessionStart","Stop"]' && "$pre_len" == "1" && "$matcher" == "Bash" \
     && "$inner_len" == "1" && "$inner_type" == "command" \
     && "$inner_cmd" == "$expected_hook_cmd" && "$inner_timeout" == "10" ]]; then
-    ok "test passed: committed personal registers exactly {PreToolUse, PostToolUse, Stop}, with one PreToolUse/Bash command hook -> personal-safe-gh-hook (absolute path, timeout 10)"
+    ok "test passed: committed personal registers exactly {PreToolUse, PostToolUse, Stop, SessionStart}, with one PreToolUse/Bash command hook -> personal-safe-gh-hook (absolute path, timeout 10)"
   else
     fail "test failed: codex hook registration wrong (events=$events pre_len=$pre_len matcher=$matcher inner_len=$inner_len type=$inner_type cmd=$inner_cmd timeout=$inner_timeout)"
     status=1
@@ -131,6 +140,19 @@ else
     fail "test failed: codex quality-loop hook registration wrong (post_len=$post_len matcher=$post_matcher inner=$post_inner_len type=$post_type cmd=$post_cmd timeout=$post_timeout | stop_len=$stop_len matcher=$stop_matcher inner=$stop_inner_len type=$stop_type cmd=$stop_cmd timeout=$stop_timeout)"
     status=1
   fi
+  session_len="$(yq -p json '.hooks.SessionStart | length' "$hooks_file")"
+  session_matcher="$(yq -p json '.hooks.SessionStart[0].matcher // "absent"' "$hooks_file")"
+  session_inner_len="$(yq -p json '.hooks.SessionStart[0].hooks | length' "$hooks_file")"
+  session_type="$(yq -p json '.hooks.SessionStart[0].hooks[0].type' "$hooks_file")"
+  session_cmd="$(yq -p json '.hooks.SessionStart[0].hooks[0].command' "$hooks_file")"
+  session_timeout="$(yq -p json '.hooks.SessionStart[0].hooks[0].timeout // "absent"' "$hooks_file")"
+  if [[ "$session_len" == "1" && "$session_matcher" == "absent" && "$session_inner_len" == "1" \
+    && "$session_type" == "command" && "$session_cmd" == "$expected_session_cmd" && "$session_timeout" == "10" ]]; then
+    ok "test passed: committed personal registers one matcher-less SessionStart hook in herdr's installer shape (bash '<home>/.codex/herdr-agent-state.sh' session, timeout 10)"
+  else
+    fail "test failed: codex herdr SessionStart registration wrong (len=$session_len matcher=$session_matcher inner=$session_inner_len type=$session_type cmd=$session_cmd timeout=$session_timeout)"
+    status=1
+  fi
 fi
 
 # 2) Bootstrap order is safe: the throwaway render home has NO agent-tools scripts,
@@ -140,8 +162,9 @@ fi
 #    /hooks trust requirement).
 if [[ -n "${home:-}" && ! -e "$home/.codex/agent-tools/scripts/personal-safe-gh-hook" \
   && ! -e "$home/.codex/agent-tools/scripts/personal-fast-edit-check" \
-  && ! -e "$home/.codex/agent-tools/scripts/personal-changed-scope-qa" ]]; then
-  ok "test passed: registration renders without any hook body present (agent-tools sync can come later; runtime is fail-open)"
+  && ! -e "$home/.codex/agent-tools/scripts/personal-changed-scope-qa" \
+  && ! -e "$home/.codex/herdr-agent-state.sh" ]]; then
+  ok "test passed: registration renders without any hook body present (agent-tools sync / herdr integration install can come later; runtime is fail-open)"
 else
   fail "test failed: throwaway render home unexpectedly contains a codex hook body (fixture assumption broken)"
   status=1
@@ -149,10 +172,11 @@ fi
 
 # 2b) Each capability drops exactly its own events (parity with the Claude
 #     side, test-claude-settings.sh 8c): reader off -> exactly {PostToolUse,
-#     Stop} and the on-render minus PreToolUse; quality off -> exactly
-#     {PreToolUse} and the on-render minus PostToolUse/Stop (normalized JSON
-#     compare, so a gate that dropped the other capability's events or leaked
-#     anything else would fail).
+#     Stop, SessionStart} and the on-render minus PreToolUse; quality off ->
+#     exactly {PreToolUse, SessionStart} and the on-render minus PostToolUse/
+#     Stop; herdr off -> exactly {PreToolUse, PostToolUse, Stop} and the
+#     on-render minus SessionStart (normalized JSON compare, so a gate that
+#     dropped another capability's events or leaked anything else would fail).
 # render_codex_hook_flip LABEL CAP
 # Flip CAP to false in a throwaway source copy, render personal, and set
 # hook_flip_file to the rendered hooks.json. Called as a plain statement and
@@ -178,24 +202,34 @@ render_codex_hook_flip reader-off enableGitHubIsolatedReader
 reader_off_hooks="$hook_flip_file"
 render_codex_hook_flip quality-off enableQualityLoopHooks
 quality_off_hooks="$hook_flip_file"
+render_codex_hook_flip herdr-off enableHerdrIntegration
+herdr_off_hooks="$hook_flip_file"
 if [[ -f "$reader_off_hooks" ]] \
-  && [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_hooks" | tr -d ' \n')" == '["PostToolUse","Stop"]' ]] \
+  && [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_hooks" | tr -d ' \n')" == '["PostToolUse","SessionStart","Stop"]' ]] \
   && [[ "$(yq -p json -o json 'del(.hooks.PreToolUse)' "$hooks_file")" == "$(yq -p json -o json '.' "$reader_off_hooks")" ]]; then
-  ok "test passed: enableGitHubIsolatedReader=false keeps ~/.codex/hooks.json with exactly {PostToolUse, Stop} (on-render minus PreToolUse)"
+  ok "test passed: enableGitHubIsolatedReader=false keeps ~/.codex/hooks.json with exactly {PostToolUse, Stop, SessionStart} (on-render minus PreToolUse)"
 else
   fail "test failed: enableGitHubIsolatedReader=false render is not the on-render minus PreToolUse (file missing, quality pair dropped, or another change leaked)"
   status=1
 fi
 if [[ -f "$quality_off_hooks" ]] \
-  && [[ "$(yq -p json -o json '.hooks | keys | sort' "$quality_off_hooks" | tr -d ' \n')" == '["PreToolUse"]' ]] \
+  && [[ "$(yq -p json -o json '.hooks | keys | sort' "$quality_off_hooks" | tr -d ' \n')" == '["PreToolUse","SessionStart"]' ]] \
   && [[ "$(yq -p json -o json 'del(.hooks.PostToolUse) | del(.hooks.Stop)' "$hooks_file")" == "$(yq -p json -o json '.' "$quality_off_hooks")" ]]; then
-  ok "test passed: enableQualityLoopHooks=false keeps ~/.codex/hooks.json with exactly {PreToolUse} (on-render minus PostToolUse/Stop)"
+  ok "test passed: enableQualityLoopHooks=false keeps ~/.codex/hooks.json with exactly {PreToolUse, SessionStart} (on-render minus PostToolUse/Stop)"
 else
   fail "test failed: enableQualityLoopHooks=false render is not the on-render minus PostToolUse/Stop (file missing, safe-gh hook dropped, or another change leaked)"
   status=1
 fi
+if [[ -f "$herdr_off_hooks" ]] \
+  && [[ "$(yq -p json -o json '.hooks | keys | sort' "$herdr_off_hooks" | tr -d ' \n')" == '["PostToolUse","PreToolUse","Stop"]' ]] \
+  && [[ "$(yq -p json -o json 'del(.hooks.SessionStart)' "$hooks_file")" == "$(yq -p json -o json '.' "$herdr_off_hooks")" ]]; then
+  ok "test passed: enableHerdrIntegration=false keeps ~/.codex/hooks.json with exactly {PreToolUse, PostToolUse, Stop} (on-render minus SessionStart)"
+else
+  fail "test failed: enableHerdrIntegration=false render is not the on-render minus SessionStart (file missing, another hook dropped, or another change leaked)"
+  status=1
+fi
 
-# 3) BOTH hook capabilities false REMOVES an ALREADY-APPLIED ~/.codex/hooks.json
+# 3) ALL hook capabilities false REMOVES an ALREADY-APPLIED ~/.codex/hooks.json
 #    on the next apply — not just "does not newly create it". This is the exact
 #    lingering scenario a `requires:` module gate would miss (chezmoiignore drops
 #    the source but never prunes an existing target), so we drive both applies into
@@ -206,6 +240,7 @@ tmp_roots+=("$off_src")
 make_flipped_source "$off_src"
 flip_personal_capability "$off_src/src" enableGitHubIsolatedReader false
 flip_personal_capability "$off_src/src" enableQualityLoopHooks false
+flip_personal_capability "$off_src/src" enableHerdrIntegration false
 
 removal_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-removal.XXXXXX")"
 tmp_roots+=("$removal_root")
@@ -225,9 +260,9 @@ elif ! apply_into_removal_home "$off_src/src"; then
   fail "test failed: cap-off apply into removal home did not run"
   status=1
 elif [[ ! -e "$removal_root/home/.codex/hooks.json" ]]; then
-  ok "test passed: both hook capabilities false removes an already-applied ~/.codex/hooks.json (template self-gate prunes the target — no lingering hook)"
+  ok "test passed: all hook capabilities false removes an already-applied ~/.codex/hooks.json (template self-gate prunes the target — no lingering hook)"
 else
-  fail "test failed: both hook capabilities false left a lingering ~/.codex/hooks.json (a requires: gate regression?)"
+  fail "test failed: all hook capabilities false left a lingering ~/.codex/hooks.json (a requires: gate regression?)"
   status=1
 fi
 
@@ -285,11 +320,11 @@ else
   status=1
 fi
 
-#    5b) The case-3 hooks-off render (same home, both hook capabilities
+#    5b) The case-3 hooks-off render (same home, all hook capabilities
 #        already flipped false there) must still carry the rules baseline:
 #        hooks gone, rules present.
 if [[ -f "$removal_root/home/.codex/rules/default.rules" ]]; then
-  ok "test passed: both hook capabilities false keeps the rules baseline (independent gates, other direction)"
+  ok "test passed: all hook capabilities false keeps the rules baseline (independent gates, other direction)"
 else
   fail "test failed: hook capabilities false unexpectedly removed the rules baseline"
   status=1

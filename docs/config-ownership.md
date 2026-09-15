@@ -12,18 +12,21 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | 資産 | 正本 | 配布 | 変更フロー |
 | --- | --- | --- | --- |
 | ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録** / plugin / statusLine / tui 等の global preference) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
-| Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181、品質ループの PostToolUse / Stop hook・#199) | dotfiles(`dot_codex/hooks.json.tmpl`、hooks object は `.chezmoitemplates/agent-hooks-json` で Claude と共有) | `chezmoi apply`(+ Codex で一度 `/hooks` trust。hook 定義を変えるたびに再 trust) | dotfiles の Issue + PR |
+| Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181、品質ループの PostToolUse / Stop hook・#199、herdr integration の SessionStart hook・#225) | dotfiles(`dot_codex/hooks.json.tmpl`、hooks object は `.chezmoitemplates/agent-hooks-json` で Claude と共有) | `chezmoi apply`(+ Codex で一度 `/hooks` trust。hook 定義を変えるたびに再 trust) | dotfiles の Issue + PR |
 | 品質ループ hook の check **宣言** `~/.config/agent-tools/checks.local.json`(repo 実 path → `edit_checks` / `qa_checks`。#199 / agent-tools#203) | ユーザー手書き | なし(unmanaged・非 tracked) | 手動のみ(agent は read-only。doctor も presence しか見ない) |
 | git hook gates の**配線**(`~/.config/git-hook-gates/` の shim + `core.hooksPath` include・#196。gate/dispatcher **実体**は agent-tools) | dotfiles(`private_dot_config/git-hook-gates/`、[git-hook-gates](git-hook-gates.md)) | `chezmoi apply` | dotfiles の Issue + PR |
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
+| herdr integration hook **実体**(`~/.claude/hooks/herdr-agent-state.sh`、`~/.codex/herdr-agent-state.sh`。#225) | herdr(`herdr integration install claude\|codex` が配置し、`HERDR_INTEGRATION_VERSION` header で版管理) | herdr の installer(登録は dotfiles が installer と同一形で render。work 機のように settings module が無い profile では installer が登録も持つ) | 手で編集しない(再 install で上書きされる)。herdr 更新後に `herdr integration status` が outdated を出したら再 install |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
 | マシン固有・動的値(`~/.claude/settings.local.json`、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
 | repo 固有の作業ルール(各 repo の `AGENTS.md`) | 各 repo | — | 各 repo の PR |
 
 補足:
 
-- **hooks は 2 管轄の合流点**(#137 / #181 / #199): hooks **登録**は dotfiles、スクリプト
-  **実体**の配備と path の安定は agent-tools。どちらか一方だけでは活性化しない。
+- **hooks は 2 管轄の合流点**(#137 / #181 / #199 / #225): hooks **登録**は dotfiles、スクリプト
+  **実体**の配備と path の安定は agent-tools(herdr integration の hook は herdr の installer。
+  Codex 側は installer が codex 所有の `config.toml` に `[features] hooks = true` も書く —
+  dotfiles 管理外)。どちらか一方だけでは活性化しない。
   品質ループ hook(#199)はさらに **3 つ目の層**としてユーザー所有の check 宣言
   (`checks.local.json`)が要り、宣言の無い repo では登録・配備済みでも無言 no-op。
   片方を変えるときはもう片方の Issue を確認する。登録先はハーネスごとに異なる:
@@ -44,7 +47,8 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
    statusLine 等の global preference)を変えたい →
    dotfiles の template を変更して PR。live の `~/.claude/settings.json` を直接編集
    しない(managed-wins。`chezmoi apply` で戻る)。
-2. skill / 指示文 / hook スクリプトの中身を変えたい → agent-tools。
+2. skill / 指示文 / hook スクリプトの中身を変えたい → agent-tools(herdr hook の body は herdr の
+   release。手で編集しない — `herdr integration install` で上書きされる)。
 3. 参照先・個人 context を変えたい → ユーザー手書きファイル(agent は書き換えず、
    必要なら更新をサジェストするに留める)。
 4. マシン固有・一時的な調整をしたい → `.local` 系に直接書く。

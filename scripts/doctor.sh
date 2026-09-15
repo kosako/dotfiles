@@ -845,6 +845,85 @@ else
   fi
 fi
 
+section "herdr integration (report-only)"
+# enableHerdrIntegration (#225, agent-tools#252 hand-off) registers herdr's
+# SessionStart integration hook in BOTH AI homes so an agent started inside a
+# herdr pane reports its session id to herdr (native session restore). Same
+# registration=dotfiles split as the hooks above, with the body owned by
+# herdr instead of agent-tools: `herdr integration install <agent>` writes
+# the versioned body and dotfiles renders exactly the entry shape that
+# installer emits. The body exits 0 outside a herdr pane and a missing body
+# is a non-blocking hook error (fail-open), so the registration is safe
+# before the install. Body presence is checked contents-blind; version
+# currency comes from `herdr integration status`, which only reads the body
+# header under $HOME (no server, no writes — herdr v0.9.0 src/integration)
+# and is skipped when herdr is not on PATH.
+herdr_status=""
+if command -v herdr >/dev/null 2>&1; then
+  herdr_status="$(herdr integration status 2>/dev/null || true)"
+fi
+# herdr_integration_state AGENT
+# Print the state herdr reports for AGENT ("current", "outdated", "needs
+# repair", "not installed"), or nothing when herdr gave no line for it.
+herdr_integration_state() {
+  local line
+  line="$(grep -E "^$1: " <<< "$herdr_status" | head -n 1 || true)"
+  [[ -n "$line" ]] || return 0
+  line="${line#"$1: "}"
+  printf '%s\n' "${line%% (*}"
+}
+if [[ "$(capability_value "$profile" enableHerdrIntegration)" == "true" ]]; then
+  for herdr_home in .claude .codex; do
+    case "$herdr_home" in
+      .claude)
+        herdr_agent=claude
+        herdr_module=claude-settings
+        herdr_body="$HOME/.claude/hooks/herdr-agent-state.sh"
+        herdr_target="managed ~/.claude/settings.json"
+        herdr_note=""
+        ;;
+      .codex)
+        herdr_agent=codex
+        herdr_module=codex-settings
+        herdr_body="$HOME/.codex/herdr-agent-state.sh"
+        herdr_target="managed ~/.codex/hooks.json"
+        herdr_note=" (Codex: inert until a one-time /hooks trust; the installer also sets [features] hooks = true in codex-owned ~/.codex/config.toml, which dotfiles does not manage)"
+        ;;
+    esac
+    if module_active_for_profile "$profile" "$herdr_module"; then
+      if [[ -x "$herdr_body" ]]; then
+        herdr_state="$(herdr_integration_state "$herdr_agent")"
+        case "$herdr_state" in
+          current)
+            ok "enableHerdrIntegration=true; $herdr_target registers SessionStart -> herdr-agent-state.sh session; body present and current per herdr integration status$herdr_note"
+            ;;
+          "")
+            ok "enableHerdrIntegration=true; $herdr_target registers SessionStart -> herdr-agent-state.sh session; body present (version currency not checked: herdr integration status unavailable)$herdr_note"
+            ;;
+          *)
+            warn "enableHerdrIntegration=true; $herdr_target registers the SessionStart hook and the body is present, but herdr integration status reports it '$herdr_state' — re-run: herdr integration install $herdr_agent$herdr_note"
+            ;;
+        esac
+      else
+        warn "enableHerdrIntegration=true; $herdr_target registers the SessionStart hook but the body is absent or non-executable ($herdr_body; run: herdr integration install $herdr_agent) — fail-open no-op until installed$herdr_note"
+      fi
+    else
+      warn "enableHerdrIntegration=true but the $herdr_module module is inactive for this profile; no $herdr_target carries the hook registration (dangling capability)"
+    fi
+  done
+  item "scope: the hook reports the agent session id to the herdr server only from inside a herdr pane (HERDR_ENV / HERDR_SOCKET_PATH / HERDR_PANE_ID set) and exits 0 elsewhere — session restore only, not a boundary; agent state stays screen-detected"
+else
+  ok "herdr integration not wired by dotfiles (enableHerdrIntegration=false)"
+  # A profile without the settings modules leaves both registration and body
+  # to `herdr integration install` in the unmanaged files; show herdr's own
+  # view so a work machine still sees whether it is installed.
+  for herdr_agent in claude codex; do
+    herdr_state="$(herdr_integration_state "$herdr_agent")"
+    [[ -n "$herdr_state" ]] || continue
+    item "herdr's own view: $herdr_agent integration $herdr_state (registration and body both owned by herdr integration install on this profile)"
+  done
+fi
+
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
 # agent-tools. Presence is always reported, but running its status.sh

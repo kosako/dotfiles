@@ -1,11 +1,12 @@
-{{- /* Shared "hooks" object for the two AI homes — the Claude (#137 / #199)
-       and Codex (#181 / #199) registrations rendered from ONE place so the two
-       cannot drift apart (fixing one side and forgetting the other was the
-       standing hazard). dict args: caps (the profile's capabilities map),
-       homeDir (.chezmoi.homeDir), agentDir (".claude" or ".codex"), optional
-       timeout (number; applied to the safe-gh hook only — Codex passes 10).
+{{- /* Shared "hooks" object for the two AI homes — the Claude (#137 / #199 /
+       #225) and Codex (#181 / #199 / #225) registrations rendered from ONE
+       place so the two cannot drift apart (fixing one side and forgetting the
+       other was the standing hazard). dict args: caps (the profile's
+       capabilities map), homeDir (.chezmoi.homeDir), agentDir (".claude" or
+       ".codex"), optional timeout (number; applied to the safe-gh hook only —
+       Codex passes 10).
 
-       Two capabilities contribute events, each self-gated here:
+       Three capabilities contribute events, each self-gated here:
        - enableGitHubIsolatedReader: PreToolUse / matcher Bash ->
          personal-safe-gh-hook (GitHub read steering, #137 / #181).
        - enableQualityLoopHooks: PostToolUse / matcher Edit|Write ->
@@ -17,18 +18,36 @@
          600s and the declared checks' runtime is owned by the user's
          checks.local.json (edit checks ~100s of ms, QA checks ~seconds per
          the agent-tools contract), so no value is invented here.
-       Every body is agent-tools-deployed at the stable path
+       - enableHerdrIntegration: SessionStart -> herdr's own
+         herdr-agent-state.sh (#225, agent-tools#252 hand-off): reports the
+         agent session id to the herdr server from inside a herdr pane
+         (native session restore); exits 0 elsewhere. Body = herdr, not
+         agent-tools: `herdr integration install <agent>` writes and versions
+         it, at herdr's per-agent location (<home>/.claude/hooks/ for Claude,
+         <home>/.codex/ flat for Codex — herdr v0.9.0 `integration status`).
+         The entry is rendered in EXACTLY the shape that installer emits —
+         command `bash '<path>' session`, timeout 10, matcher "*" on Claude
+         and none on Codex (herdr matches an existing hook by type=command +
+         the command string, src/integration/config_edit.rs
+         ensure_command_hook) — so the installer recognizes the managed
+         registration and adds no duplicate (measured: settings.json stays
+         byte-identical; Codex re-serializes hooks.json with the same
+         content, which the next apply restores).
+       Every agent-tools body is deployed at the stable path
        <home>/<agentDir>/agent-tools/scripts/<name> (agent-tools#146);
        dotfiles references it by absolute path and distributes no script.
-       All three are fail-open at runtime when the body is missing (exit 127
+       All hooks are fail-open at runtime when the body is missing (exit 127
        is a non-blocking hook error in both harnesses), so rendering before
-       agent-tools has synced is a safe no-op.
+       agent-tools has synced or herdr has installed is a safe no-op.
 
-       Callers include this only when at least one of the two capabilities is
-       on (an empty "hooks": {} is never rendered). Renders at two-space
+       Callers include this only when at least one of the three capabilities
+       is on (an empty "hooks": {} is never rendered). Renders at two-space
        indent with NO trailing comma and NO trailing newline — the caller
        owns both (Claude appends ",", Codex a bare newline). */ -}}
 {{- $scripts := printf "%s/%s/agent-tools/scripts" .homeDir .agentDir -}}
+{{- $herdrClaude := eq .agentDir ".claude" -}}
+{{- $herdrHook := printf "%s/%s/herdr-agent-state.sh" .homeDir .agentDir -}}
+{{- if $herdrClaude -}}{{- $herdrHook = printf "%s/%s/hooks/herdr-agent-state.sh" .homeDir .agentDir -}}{{- end -}}
 {{- $sep := "" -}}
 {{ "" }}  "hooks": {
 {{- if index .caps "enableGitHubIsolatedReader" }}
@@ -66,6 +85,23 @@
           {
             "type": "command",
             "command": "{{ $scripts }}/personal-changed-scope-qa"
+          }
+        ]
+      }
+    ]
+{{- $sep = "," -}}
+{{- end }}
+{{- if index .caps "enableHerdrIntegration" }}{{ $sep }}
+    "SessionStart": [
+      {
+{{- if $herdrClaude }}
+        "matcher": "*",
+{{- end }}
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '{{ $herdrHook }}' session",
+            "timeout": 10
           }
         ]
       }

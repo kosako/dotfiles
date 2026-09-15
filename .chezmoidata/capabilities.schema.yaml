@@ -68,3 +68,6 @@ capabilities:
   enableQualityLoopHooks:
     type: boolean
     implemented: true
+  enableHerdrIntegration:
+    type: boolean
+    implemented: true
