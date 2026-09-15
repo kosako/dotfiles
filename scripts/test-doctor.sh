@@ -765,9 +765,12 @@ fi
 #     reader must still see the status line); `fail` prints the same lines
 #     but exits 1 (doctor must discard them); `hang` forks a `sleep 60`
 #     GRANDCHILD (pid recorded in sleep.pid) and waits on it, so the
-#     deadline must reap the whole process tree, not just the wrapper
-#     (Codex review, PR #226). Own fixture copy; doctor stays exit 0
-#     throughout.
+#     deadline must reap the whole process tree, not just the wrapper;
+#     `interrupt` does the same and then, from inside the running probe,
+#     sends SIGTERM to the doctor whose pid the test left in doctor.pid —
+#     the only way to deliver the interrupt while the probe is provably
+#     running, with no timing window (Codex review, PR #226). Own fixture
+#     copy; doctor stays exit 0 throughout.
 hi_root="$fixture_home/.dotfiles-herdr"
 copy_repo_fixture "$hi_root"
 hi_claude_body="$fixture_home/.claude/hooks/herdr-agent-state.sh"
@@ -780,6 +783,7 @@ write_fake_herdr_status() {
 #!/bin/sh
 [ "\$1" = integration ] && [ "\$2" = status ] || exit 2
 if [ "$3" = hang ]; then sleep 60 & printf '%s\\n' "\$!" > "$hi_fakebin/sleep.pid"; wait; fi
+if [ "$3" = interrupt ]; then sleep 60 & printf '%s\\n' "\$!" > "$hi_fakebin/sleep.pid"; kill -TERM "\$(cat "$hi_fakebin/doctor.pid")"; wait; fi
 if [ "$3" = ok-nonl ]; then printf '%s\\n%s' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"; exit 0; fi
 printf '%s\\n' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"
 [ "$3" = ok ]
@@ -938,40 +942,32 @@ else
   status=1
 fi
 #     HI-d3) doctor interrupted (SIGTERM) while the probe is running -> its
-#            trap must reap the probe tree: start doctor in the background,
-#            wait until the fake's grandchild exists, terminate doctor, and
-#            require the grandchild to be gone. The interrupt itself must
-#            be proven: the TERM must be delivered and doctor must die BY
-#            that signal (exit 143 via the trap's re-raise) — a doctor that
-#            reaped the probe at its own deadline and ran on would exit 0
-#            and fail here, so the case cannot pass vacuously (Codex review,
-#            PR #226 round 3).
-rm -f "$hi_fakebin/sleep.pid"
+#            trap must reap the probe tree. The TERM is sent BY THE PROBE
+#            ITSELF (fake mode `interrupt`, reading doctor.pid), so it is
+#            delivered while the probe is provably running — a test-side
+#            timer could otherwise fire after doctor's own 5s deadline had
+#            already reaped the probe and pass vacuously (Codex review, PR
+#            #226 rounds 3-4). Proven three ways: doctor dies BY the signal
+#            (exit 143 via the trap's re-raise), the grandchild is gone, and
+#            the captured output shows the herdr section started but never
+#            printed a result line (the deadline path would have).
+rm -f "$hi_fakebin/sleep.pid" "$hi_fakebin/doctor.pid"
+write_fake_herdr_status "current (v9)" "current (v8)" interrupt
 HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal > "$hi_fakebin/interrupt.out" 2>&1 &
 hi_doctor_pid=$!
-hi_polls=0
-while [[ ! -s "$hi_fakebin/sleep.pid" ]] && (( hi_polls < 300 )); do
-  sleep 0.1
-  hi_polls=$((hi_polls + 1))
-done
-if [[ -s "$hi_fakebin/sleep.pid" ]]; then
-  hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid")"
-  hi_term_sent=0
-  kill -TERM "$hi_doctor_pid" 2>/dev/null && hi_term_sent=1
-  if wait "$hi_doctor_pid"; then hi_doctor_rc=0; else hi_doctor_rc=$?; fi
-  sleep 0.5
-  if [[ "$hi_term_sent" == 1 && "$hi_doctor_rc" == 143 ]] && ! kill -0 "$hi_sleep_pid" 2>/dev/null; then
-    ok "test passed: a doctor interrupted mid-probe dies by SIGTERM (143) and reaps the herdr probe tree (grandchild gone)"
-  else
-    fail "test failed: interrupted doctor did not die by the signal (term_sent=$hi_term_sent rc=$hi_doctor_rc) or left the probe's grandchild alive (pid $hi_sleep_pid)"
-    status=1
-    kill "$hi_sleep_pid" 2>/dev/null || true
-  fi
+printf '%s\n' "$hi_doctor_pid" > "$hi_fakebin/doctor.pid"
+if wait "$hi_doctor_pid"; then hi_doctor_rc=0; else hi_doctor_rc=$?; fi
+sleep 0.5
+hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid" 2>/dev/null || true)"
+if [[ "$hi_doctor_rc" == 143 && -n "$hi_sleep_pid" ]] && ! kill -0 "$hi_sleep_pid" 2>/dev/null \
+  && grep -Fq "== herdr integration (report-only) ==" "$hi_fakebin/interrupt.out" \
+  && ! grep -Fq "herdr-agent-state.sh session; body present" "$hi_fakebin/interrupt.out"; then
+  ok "test passed: a doctor interrupted mid-probe dies by SIGTERM (143), reaps the herdr probe tree (grandchild gone) and never reached the section's result lines"
 else
-  kill -TERM "$hi_doctor_pid" 2>/dev/null || true
-  wait "$hi_doctor_pid" 2>/dev/null || true
-  fail "test failed: the hung herdr probe never started within 30s (interrupt fixture assumption broken)"
+  cat "$hi_fakebin/interrupt.out" >&2
+  fail "test failed: interrupted doctor did not die by the signal (rc=$hi_doctor_rc), left the probe's grandchild alive (pid ${hi_sleep_pid:-none}), or had already passed the probe"
   status=1
+  [[ -n "$hi_sleep_pid" ]] && kill "$hi_sleep_pid" 2>/dev/null || true
 fi
 #     HI-e) capability off with the settings modules ACTIVE (personal as
 #           committed) -> the not-wired ok line labelled as declared state,

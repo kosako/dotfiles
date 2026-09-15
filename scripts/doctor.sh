@@ -866,8 +866,8 @@ section "herdr integration (report-only)"
 # review, PR #226).
 herdr_status=""
 herdr_status_deadline=5
-herdr_status_pid=""
-herdr_status_fd_open=0
+herdr_status_job=""
+herdr_status_launching=0
 # kill_process_tree PID — SIGTERM then SIGKILL PID and every descendant
 # (children first, via pgrep -P), so a wrapper on PATH that forked the real
 # work does not leave an orphan behind the deadline.
@@ -879,24 +879,30 @@ kill_process_tree() {
   kill -TERM "$pid" 2>/dev/null || true
   kill -KILL "$pid" 2>/dev/null || true
 }
-# herdr_status_cleanup — reap a still-running probe; also the INT / TERM /
-# EXIT handler below, so an interrupted doctor leaves no herdr behind. An
-# interrupt can land before the reader has consumed the probe's pid line
-# (the subshell prints it right after forking); in that window the handler
-# drains that first line itself, briefly bounded, so the tree it must kill
-# is known before it gives up (Codex review, PR #226 round 3).
+# herdr_status_cleanup — reap the probe's process substitution (and thus the
+# probe and anything it forked) if it is still alive; also the INT / TERM /
+# EXIT handler below, so an interrupted doctor leaves no herdr behind. The
+# probe is identified by the substitution's pid, which bash exposes as $!
+# the moment `exec 3< <(...)` returns, so there is no window in which the
+# probe exists but is unknown: an interrupt landing before `herdr_status_job`
+# is assigned finds it through $! — trusted only while the launch is in
+# flight AND it is a live child of this doctor, because a stale $! from an
+# earlier process substitution could have been reused by an unrelated
+# process. bash 3.2 errors on an unset $! under set -u, so it is read in a
+# subshell with -u off (Codex review, PR #226 rounds 3-4).
 herdr_status_cleanup() {
-  if [[ -z "$herdr_status_pid" && "$herdr_status_fd_open" == 1 ]]; then
-    if IFS= read -r -t 1 herdr_status_line <&3 2>/dev/null; then
-      case "$herdr_status_line" in
-        __pid=*) herdr_status_pid="${herdr_status_line#__pid=}" ;;
-      esac
+  local job
+  job="$herdr_status_job"
+  if [[ -z "$job" && "$herdr_status_launching" == 1 ]]; then
+    job="$( ( set +u; printf '%s' "$!" ) 2>/dev/null || true)"
+    if [[ -n "$job" ]] && ! pgrep -P $$ 2>/dev/null | grep -qx "$job"; then
+      job=""
     fi
   fi
-  if [[ -n "$herdr_status_pid" ]] && kill -0 "$herdr_status_pid" 2>/dev/null; then
-    kill_process_tree "$herdr_status_pid"
+  if [[ -n "$job" ]] && kill -0 "$job" 2>/dev/null; then
+    kill_process_tree "$job"
   fi
-  herdr_status_pid=""
+  herdr_status_job=""
   return 0
 }
 if command -v herdr >/dev/null 2>&1; then
@@ -905,26 +911,27 @@ if command -v herdr >/dev/null 2>&1; then
   trap 'herdr_status_cleanup; trap - TERM; kill -TERM $$' TERM
   # Bounded run WITHOUT a temp file (a failing mktemp must not break the
   # report-only contract — Codex review, PR #226): the probe's stdout comes
-  # through a process substitution whose subshell prints the probe's pid
-  # first and its exit status as the last line (preceded by a newline of its
-  # own, so an output that ends without one cannot swallow the status line);
-  # each read carries the remaining deadline. A read that fails while the
-  # probe is still alive is the deadline (bash 3.2 returns 1 there, 4+
-  # returns >128, so liveness is the portable signal): the tree is killed
-  # and nothing is adopted. Only a clean exit 0 with its status line seen is
-  # adopted; the blank line that separator adds is dropped.
+  # through a process substitution whose subshell appends the probe's exit
+  # status as a `__rc=` line, preceded by a newline of its own so an output
+  # that ends without one cannot swallow it (the blank line that adds is
+  # dropped); each read carries the remaining deadline. A read that fails
+  # while the deadline has not produced the status line is the deadline
+  # (bash 3.2's read -t returns 1 there, 4+ returns >128, so neither status
+  # is relied on): the tree is killed and nothing is adopted. Only a clean
+  # exit 0 with its status line seen is adopted.
   herdr_status_rc=""
   herdr_status_lines=""
   herdr_status_line=""
   herdr_status_started=$SECONDS
-  exec 3< <({ herdr integration status 2>/dev/null & printf '__pid=%s\n' "$!"; if wait "$!"; then printf '\n__rc=0\n'; else printf '\n__rc=%s\n' "$?"; fi; } 2>/dev/null)
-  herdr_status_fd_open=1
+  herdr_status_launching=1
+  exec 3< <({ if herdr integration status 2>/dev/null; then printf '\n__rc=0\n'; else printf '\n__rc=%s\n' "$?"; fi; } 2>/dev/null)
+  herdr_status_job=$!
+  herdr_status_launching=0
   while :; do
     herdr_status_remaining=$(( herdr_status_deadline - (SECONDS - herdr_status_started) ))
     (( herdr_status_remaining > 0 )) || break
     IFS= read -r -t "$herdr_status_remaining" herdr_status_line <&3 || break
     case "$herdr_status_line" in
-      __pid=*) herdr_status_pid="${herdr_status_line#__pid=}" ;;
       __rc=*) herdr_status_rc="${herdr_status_line#__rc=}"; break ;;
       "") ;;
       *) herdr_status_lines+="$herdr_status_line"$'\n' ;;
@@ -932,7 +939,6 @@ if command -v herdr >/dev/null 2>&1; then
   done
   herdr_status_cleanup
   exec 3<&-
-  herdr_status_fd_open=0
   if [[ "$herdr_status_rc" == "0" ]]; then
     herdr_status="$herdr_status_lines"
   fi
