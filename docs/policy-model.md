@@ -193,6 +193,52 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
 - **状態**: personal=true(#199 で両 home に登録)、work=false(agent-tools 未配備・
   claude-settings / codex-settings も非 active)。
 
+## herdr integration(`enableHerdrIntegration`)
+
+herdr 0.9.0 の agent integration(`herdr integration install claude|codex`)が両 AI home に
+置く **SessionStart hook を登録**する capability(#225、agent-tools#252 からの hand-off)。
+hook は herdr の pane 内で起動した agent の session id を herdr server に報告する(native
+session restore 用。Claude の lifecycle state は引き続き画面検出)。
+
+- **決定: 登録=dotfiles / 実体=herdr**。managed な `~/.claude/settings.json` /
+  `~/.codex/hooks.json` は managed-wins なので、installer が live file に書いた登録は
+  `chezmoi apply` で消える。逆に body(`~/.claude/hooks/herdr-agent-state.sh` /
+  `~/.codex/herdr-agent-state.sh`)は herdr が `HERDR_INTEGRATION_VERSION` header で版管理し
+  `herdr integration status` が current / outdated を判定するので、dotfiles は配布しない
+  (agent-tools の hook と同じ分界。[config-ownership](config-ownership.md))。
+- **installer と同一形で render する**: `bash '<abs path>' session`・`timeout: 10`・Claude は
+  matcher `*`・Codex は matcher なし(herdr v0.9.0 `src/integration/config_edit.rs` の
+  `ensure_command_hook` は `type=command` と `command` 文字列の一致で「登録済み」と判定する)。
+  これにより `herdr integration install claude` は managed settings.json を **byte 不変**で
+  通し(実測)、`install codex` は hooks.json を同内容で整形し直すだけ(次の `chezmoi apply`
+  が managed の整形に戻す)。apply → install でも install → apply でも最終状態は同じ。
+- **極性**: 安全強化型ではないが権限も付与しない(install / secret / network 系ではない)
+  ので `environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。
+- **fail-open**: body は `HERDR_ENV` / `HERDR_SOCKET_PATH` / `HERDR_PANE_ID` が無ければ exit 0
+  (herdr pane 外では無言 no-op)、body 不在は non-blocking な hook error。登録を先行させて
+  よい。**enforcement boundary ではない**(session identity の報告のみ)。
+- **Codex 固有**: `herdr integration install codex` は codex 所有の `~/.codex/config.toml` に
+  `[features] hooks = true` を書く(dotfiles 管理外・doctor も読まない)。hook 定義が増える
+  ので一度 `/hooks` で再 trust するまで silent skip(registration ≠ activation)。
+- **work profile**: `claude-settings` / `codex-settings` が非 active なので dotfiles は登録を
+  持てない → capability は false。work 機では `herdr integration install` が unmanaged な
+  両 file に登録と body の両方を持つ(managed-wins の衝突が無いので installer 任せでよい)。
+  doctor は capability=false でも `herdr integration status` の見え方を info で出す。
+- **doctor**: 両 home の登録 + body presence(contents-blind。登録は `bash '<path>' session`
+  で起動するので実行ビットは見ず、読取可能な通常ファイルかで判定)+ `herdr integration
+  status` の currency(current / outdated / needs repair。herdr は body header を読むだけで
+  server 不要・書き込み無し。**5 秒の期限付きで実行し exit 0 のときだけ出力を採用** — herdr
+  不在・失敗・hang はいずれも「currency 未確認」の presence 表示に倒し、doctor を止めない。
+  一時ファイルは使わず(mktemp 失敗で report-only 契約を破らない)、期限到達時は probe の
+  process tree ごと回収し、doctor が INT / TERM で中断されても trap で回収する)を
+  report-only で出す。module 非 active は dangling として warn。capability=false は宣言上の
+  状態として報告し(live 登録は probe しない)、herdr 自身の見え方を home ごとに info で
+  添える — settings module が active な home では「managed file なので installer が足した
+  登録は次の apply で消える drift」、非 active な home では「unmanaged なので登録も body も
+  installer 任せ」。capability=false で body が残っても害は無い(登録が無ければ呼ばれない。
+  `herdr integration uninstall` が両方を消す)。
+- **状態**: personal=true(#225)、work=false。
+
 ## dormant capability の扱い(残す基準)
 
 宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ

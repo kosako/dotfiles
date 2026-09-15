@@ -91,6 +91,20 @@ profiles:
       # before that declaration — or before agent-tools has synced — is safe.
       # Codex: inert until a one-time `/hooks` trust, like the safe-gh hook.
       enableQualityLoopHooks: true
+      # #225 (agent-tools#252 hand-off): register herdr 0.9.0's SessionStart
+      # integration hook in BOTH AI homes so an agent started inside a herdr
+      # pane reports its session id to herdr (native session restore). Same
+      # split as the hooks above — registration=dotfiles (claude-settings
+      # emits it into ~/.claude/settings.json, codex-settings into
+      # ~/.codex/hooks.json), body=herdr: `herdr integration install
+      # claude|codex` writes and versions the body (~/.claude/hooks/
+      # herdr-agent-state.sh / ~/.codex/herdr-agent-state.sh). dotfiles
+      # renders exactly the entry shape that installer emits, so it
+      # recognizes the managed registration and adds no duplicate. Outside a
+      # herdr pane the body exits 0 and a missing body is a non-blocking
+      # hook error, so registering first is safe. Codex: inert until a
+      # one-time `/hooks` trust, like the other hooks.
+      enableHerdrIntegration: true
 
   work:
     environmentKind: work
@@ -131,3 +145,9 @@ profiles:
       # #199: intent off — no agent-tools deploy on work machines, and the
       # claude-settings / codex-settings modules are not part of work anyway.
       enableQualityLoopHooks: false
+      # #225: intent off — claude-settings / codex-settings are not part of
+      # work, so no managed file could carry the registration. On a work
+      # machine `herdr integration install` owns registration AND body in the
+      # unmanaged ~/.claude/settings.json / ~/.codex/hooks.json (doctor shows
+      # herdr's own view there).
+      enableHerdrIntegration: false

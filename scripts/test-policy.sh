@@ -513,6 +513,15 @@ run_ok \
   "enableQualityLoopHooks=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
+# enableHerdrIntegration (#225) only registers herdr's session-report hook and
+# grants no install / secret / network privilege, so it must NOT be in the
+# forbidden table either.
+make_fixture
+set_capability_all "$fixture" enableHerdrIntegration true
+run_ok \
+  "enableHerdrIntegration=true is allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 # The fixture helpers themselves must fail closed: a typo'd capability or
 # module silently no-oped in the old awk shape, leaving the following
 # assertion to pass against an unflipped fixture (#149).
@@ -561,7 +570,7 @@ run_fail_contains \
 # Anchor on the LAST capability line so the bogus section lands after the whole
 # capabilities block (update this if a later capability is added below).
 make_fixture
-insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableQualityLoopHooks: false" "    extraSection:"
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      enableHerdrIntegration: false" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
 run_ok \
   "ignores sections after capabilities" \

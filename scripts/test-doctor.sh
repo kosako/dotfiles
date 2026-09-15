@@ -753,6 +753,293 @@ else
   status=1
 fi
 
+# HI) herdr integration (#225): enableHerdrIntegration is ON for committed
+#     personal, so doctor reports the SessionStart registration in BOTH AI
+#     homes plus the herdr-installed bodies' presence (contents-blind) and
+#     their version currency per `herdr integration status`. The status
+#     engine is a PATH-front fake herdr (fake-driven fixture, same pattern as
+#     the codex shim below — the real herdr may or may not be on PATH, and a
+#     fixture body would read as outdated/current at its whim), printing one
+#     line per agent in herdr's `<agent>: <state> (<path>)` format. MODE
+#     `ok` exits 0; `ok-nonl` exits 0 without a trailing newline (the
+#     reader must still see the status line); `fail` prints the same lines
+#     but exits 1 (doctor must discard them); `hang` forks a `sleep 60`
+#     GRANDCHILD (pid recorded in sleep.pid) and waits on it, so the
+#     deadline must reap the whole process tree, not just the wrapper;
+#     `interrupt` does the same and then, from inside the running probe,
+#     sends SIGTERM to the doctor whose pid the test left in doctor.pid —
+#     the only way to deliver the interrupt while the probe is provably
+#     running, with no timing window (Codex review, PR #226). Own fixture
+#     copy; doctor stays exit 0 throughout.
+hi_root="$fixture_home/.dotfiles-herdr"
+copy_repo_fixture "$hi_root"
+hi_claude_body="$fixture_home/.claude/hooks/herdr-agent-state.sh"
+hi_codex_body="$fixture_home/.codex/herdr-agent-state.sh"
+hi_fakebin="$fixture_home/herdrfake"
+mkdir -p "$hi_fakebin"
+# write_fake_herdr_status CLAUDE_STATE CODEX_STATE MODE
+write_fake_herdr_status() {
+  cat > "$hi_fakebin/herdr" <<SH
+#!/bin/sh
+[ "\$1" = integration ] && [ "\$2" = status ] || exit 2
+if [ "$3" = hang ]; then sleep 60 & printf '%s\\n' "\$!" > "$hi_fakebin/sleep.pid"; wait; fi
+if [ "$3" = interrupt ]; then sleep 60 & printf '%s\\n' "\$!" > "$hi_fakebin/sleep.pid"; kill -TERM "\$(cat "$hi_fakebin/doctor.pid")"; wait; fi
+if [ "$3" = ok-nonl ]; then printf '%s\\n%s' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"; exit 0; fi
+printf '%s\\n' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"
+[ "$3" = ok ]
+SH
+  chmod +x "$hi_fakebin/herdr"
+}
+hi_claude_ok="managed ~/.claude/settings.json registers SessionStart -> herdr-agent-state.sh session; body present"
+hi_codex_ok="managed ~/.codex/hooks.json registers SessionStart -> herdr-agent-state.sh session; body present"
+hi_codex_note="(Codex: inert until a one-time /hooks trust; the installer also sets [features] hooks = true in codex-owned ~/.codex/config.toml, which dotfiles does not manage)"
+hi_unchecked="(version currency not checked: herdr integration status unavailable)"
+#     HI-a) no bodies installed -> both homes warn body-absent naming the
+#           install command (fail-open no-op); the scope item shows. Real
+#           PATH: the body-absent branch does not depend on herdr's answer.
+if hi_out="$(HOME="$fixture_home" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body; run: herdr integration install claude) — fail-open no-op until installed" <<< "$hi_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers the SessionStart hook but the body is absent or unreadable ($hi_codex_body; run: herdr integration install codex) — fail-open no-op until installed $hi_codex_note" <<< "$hi_out" \
+    && grep -Fq "scope: the hook reports the agent session id to the herdr server only from inside a herdr pane" <<< "$hi_out"; then
+    ok "test passed: herdr integration registered in both homes with absent bodies warned (fail-open, install command named) and the scope item shown"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: herdr integration absent-body state not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, bodies absent)"
+  status=1
+fi
+#     HI-b) both bodies present WITHOUT an exec bit (the registration runs
+#           them via bash, so a readable regular file is what counts) and
+#           herdr reports current -> both ok lines (Codex with its trust /
+#           config.toml honest-label).
+mkdir -p "$(dirname "$hi_claude_body")" "$(dirname "$hi_codex_body")"
+printf '#!/bin/sh\nexit 0\n' > "$hi_claude_body"
+printf '#!/bin/sh\nexit 0\n' > "$hi_codex_body"
+chmod 0644 "$hi_claude_body" "$hi_codex_body"
+write_fake_herdr_status "current (v9)" "current (v8)" ok
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out" \
+    && ! grep -Fq "re-run: herdr integration install" <<< "$hi_out"; then
+    ok "test passed: herdr integration reported wired and current in both homes with non-executable bodies (Codex line carries the trust + config.toml caveats)"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: current herdr integration not reported as wired in both homes"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, current)"
+  status=1
+fi
+#     HI-b1) herdr answers without a trailing newline -> the status line must
+#            still be seen and the answer adopted (no "unchecked").
+write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out"; then
+    ok "test passed: a herdr answer without a trailing newline is still adopted as current"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: a herdr answer without a trailing newline was not adopted"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, no trailing newline)"
+  status=1
+fi
+#     HI-b2) a directory at the body path must NOT count as present (a
+#            bare -x/-e probe would pass it).
+rm -f "$hi_claude_body"
+mkdir -p "$hi_claude_body"
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body;" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
+    ok "test passed: a directory at the herdr body path is reported absent (regular-file check), Codex home unaffected"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: a directory at the herdr body path passed the presence check"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, directory body)"
+  status=1
+fi
+rmdir "$hi_claude_body"
+printf '#!/bin/sh\nexit 0\n' > "$hi_claude_body"
+chmod 0644 "$hi_claude_body"
+#     HI-c) bodies present but herdr reports outdated / needs repair -> warn
+#           per home naming the state and the re-install command.
+write_fake_herdr_status "outdated (v1 < v9)" "needs repair (v8)" ok
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook and the body is present, but herdr integration status reports it 'outdated' — re-run: herdr integration install claude" <<< "$hi_out" \
+    && grep -Fq "managed ~/.codex/hooks.json registers the SessionStart hook and the body is present, but herdr integration status reports it 'needs repair' — re-run: herdr integration install codex $hi_codex_note" <<< "$hi_out" \
+    && ! grep -Fq "and current per herdr integration status" <<< "$hi_out"; then
+    ok "test passed: outdated / needs-repair herdr bodies warned per home with the re-install command"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: outdated herdr integration state not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, outdated)"
+  status=1
+fi
+#     HI-d) herdr prints "current" lines but exits non-zero -> the output
+#           must be discarded: presence-only ok lines saying currency was
+#           not checked, never a "current". herdr absent from PATH (CI)
+#           takes the same branch by construction.
+write_fake_herdr_status "current (v9)" "current (v8)" fail
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "$hi_claude_ok $hi_unchecked" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok $hi_unchecked $hi_codex_note" <<< "$hi_out" \
+    && ! grep -Fq "current per herdr integration status" <<< "$hi_out"; then
+    ok "test passed: a failing herdr status (even with output) -> body presence reported with currency explicitly unchecked (no false current)"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: failing herdr status output was adopted or the unchecked state was not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, status failing)"
+  status=1
+fi
+#     HI-d2) herdr hangs -> doctor must kill it at the deadline, finish, and
+#            report the same unchecked state (a stuck herdr must not stall
+#            the whole diagnosis). The fake's grandchild sleeps 60s; the run
+#            must return well before that AND the grandchild must be dead
+#            afterwards (tree reap, not just the wrapper).
+write_fake_herdr_status "current (v9)" "current (v8)" hang
+rm -f "$hi_fakebin/sleep.pid"
+hi_started=$SECONDS
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  hi_elapsed=$((SECONDS - hi_started))
+  sleep 0.5
+  hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid" 2>/dev/null || true)"
+  if (( hi_elapsed < 45 )) \
+    && [[ -n "$hi_sleep_pid" ]] && ! kill -0 "$hi_sleep_pid" 2>/dev/null \
+    && grep -Fq "$hi_claude_ok $hi_unchecked" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok $hi_unchecked $hi_codex_note" <<< "$hi_out" \
+    && grep -Fq "== agent-tools (report-only) ==" <<< "$hi_out"; then
+    ok "test passed: a hung herdr status is killed at the deadline (${hi_elapsed}s) with its grandchild reaped, doctor continues and reports currency unchecked"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: hung herdr status stalled doctor (${hi_elapsed}s), left its grandchild alive (pid ${hi_sleep_pid:-none}), or the unchecked state was not reported"
+    status=1
+    [[ -n "$hi_sleep_pid" ]] && kill "$hi_sleep_pid" 2>/dev/null || true
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, status hung)"
+  status=1
+fi
+#     HI-d3) doctor interrupted (SIGTERM) while the probe is running -> its
+#            trap must reap the probe tree. The TERM is sent BY THE PROBE
+#            ITSELF (fake mode `interrupt`, reading doctor.pid), so it is
+#            delivered while the probe is provably running — a test-side
+#            timer could otherwise fire after doctor's own 5s deadline had
+#            already reaped the probe and pass vacuously (Codex review, PR
+#            #226 rounds 3-4). Proven three ways: doctor dies BY the signal
+#            (exit 143 via the trap's re-raise), the grandchild is gone, and
+#            the captured output shows the herdr section started but never
+#            printed a result line (the deadline path would have).
+#            doctor.pid is written by the launching shell itself (its $$
+#            survives the exec into doctor), so the file exists before
+#            doctor runs a single line — no parent-side write can race the
+#            probe (Codex review, PR #226 round 5).
+rm -f "$hi_fakebin/sleep.pid" "$hi_fakebin/doctor.pid"
+write_fake_herdr_status "current (v9)" "current (v8)" interrupt
+HOME="$fixture_home" PATH="$hi_fakebin:$PATH" \
+  sh -c 'printf "%s\n" "$$" > "$1"; shift; exec "$@"' _ "$hi_fakebin/doctor.pid" "$hi_root/scripts/doctor.sh" personal \
+  > "$hi_fakebin/interrupt.out" 2>&1 &
+hi_doctor_pid=$!
+if wait "$hi_doctor_pid"; then hi_doctor_rc=0; else hi_doctor_rc=$?; fi
+sleep 0.5
+hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid" 2>/dev/null || true)"
+if [[ "$hi_doctor_rc" == 143 && -n "$hi_sleep_pid" ]] && ! kill -0 "$hi_sleep_pid" 2>/dev/null \
+  && grep -Fq "== herdr integration (report-only) ==" "$hi_fakebin/interrupt.out" \
+  && ! grep -Fq "herdr-agent-state.sh session; body present" "$hi_fakebin/interrupt.out"; then
+  ok "test passed: a doctor interrupted mid-probe dies by SIGTERM (143), reaps the herdr probe tree (grandchild gone) and never reached the section's result lines"
+else
+  cat "$hi_fakebin/interrupt.out" >&2
+  fail "test failed: interrupted doctor did not die by the signal (rc=$hi_doctor_rc), left the probe's grandchild alive (pid ${hi_sleep_pid:-none}), or had already passed the probe"
+  status=1
+  [[ -n "$hi_sleep_pid" ]] && kill "$hi_sleep_pid" 2>/dev/null || true
+fi
+#     HI-e) capability off with the settings modules ACTIVE (personal as
+#           committed) -> the not-wired ok line labelled as declared state,
+#           none of the wired / dangling lines, and herdr's own per-agent
+#           view telling that the managed file drops an installer-added
+#           registration (it is not herdr-owned there).
+set_capability_all "$hi_root" enableHerdrIntegration false
+write_fake_herdr_status "current (v9)" "not installed" ok
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "herdr integration not wired by dotfiles (enableHerdrIntegration=false; declared state — live registrations are not probed here)" <<< "$hi_out" \
+    && grep -Fq "herdr's own view: claude integration current — managed ~/.claude/settings.json carries no registration while the capability is false; one added by herdr integration install is drift that the next apply removes" <<< "$hi_out" \
+    && grep -Fq "herdr's own view: codex integration not installed — managed ~/.codex/hooks.json carries no registration while the capability is false" <<< "$hi_out" \
+    && ! grep -Fq "left to herdr integration install" <<< "$hi_out" \
+    && ! grep -Fq "enableHerdrIntegration=true" <<< "$hi_out"; then
+    ok "test passed: enableHerdrIntegration=false with active settings modules reports not wired (declared) plus herdr's view with managed-file ownership, nothing else"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: enableHerdrIntegration=false (modules active) state not reported cleanly"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, capability off)"
+  status=1
+fi
+#     HI-f) capability on but the claude-settings module removed -> dangling
+#           warn for the Claude home while the Codex home reports normally.
+set_capability_all "$hi_root" enableHerdrIntegration true
+remove_module_all "$hi_root" claude-settings
+write_fake_herdr_status "current (v9)" "current (v8)" ok
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enableHerdrIntegration=true but the claude-settings module is inactive for this profile; no managed ~/.claude/settings.json carries the hook registration (dangling capability)" <<< "$hi_out" \
+    && grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
+    ok "test passed: enableHerdrIntegration=true with claude-settings inactive is reported as dangling (Codex side unaffected)"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: dangling enableHerdrIntegration not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration dangling)"
+  status=1
+fi
+#     HI-e2) capability off with BOTH settings modules inactive (a work
+#            machine) -> herdr's own view says the unmanaged files are left
+#            to herdr integration install for registration and body.
+set_capability_all "$hi_root" enableHerdrIntegration false
+remove_module_all "$hi_root" codex-settings
+write_fake_herdr_status "current (v9)" "current (v8)" ok
+if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "herdr's own view: claude integration current — ~/.claude/settings.json is unmanaged for this profile, so registration and body are both left to herdr integration install" <<< "$hi_out" \
+    && grep -Fq "herdr's own view: codex integration current — ~/.codex/hooks.json is unmanaged for this profile, so registration and body are both left to herdr integration install" <<< "$hi_out" \
+    && ! grep -Fq "drift that the next apply removes" <<< "$hi_out"; then
+    ok "test passed: enableHerdrIntegration=false with inactive settings modules leaves both files to herdr's installer in the report"
+  else
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: enableHerdrIntegration=false (modules inactive) ownership not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: doctor must stay exit 0 (herdr integration, capability off, modules inactive)"
+  status=1
+fi
+rm -rf "$hi_fakebin" "$hi_claude_body" "$hi_codex_body"
+
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/
 #      escalation commands evaluated against the LIVE rules via `codex
