@@ -762,8 +762,10 @@ fi
 #     fixture body would read as outdated/current at its whim), printing one
 #     line per agent in herdr's `<agent>: <state> (<path>)` format. MODE
 #     `ok` exits 0; `fail` prints the same lines but exits 1 (doctor must
-#     discard them); `hang` never answers (doctor must kill it at its
-#     deadline). Own fixture copy; doctor stays exit 0 throughout.
+#     discard them); `hang` forks a `sleep 60` GRANDCHILD (pid recorded in
+#     sleep.pid) and waits on it, so the deadline must reap the whole
+#     process tree, not just the wrapper (Codex review, PR #226). Own
+#     fixture copy; doctor stays exit 0 throughout.
 hi_root="$fixture_home/.dotfiles-herdr"
 copy_repo_fixture "$hi_root"
 hi_claude_body="$fixture_home/.claude/hooks/herdr-agent-state.sh"
@@ -775,7 +777,7 @@ write_fake_herdr_status() {
   cat > "$hi_fakebin/herdr" <<SH
 #!/bin/sh
 [ "\$1" = integration ] && [ "\$2" = status ] || exit 2
-[ "$3" = hang ] && exec sleep 60
+if [ "$3" = hang ]; then sleep 60 & printf '%s\\n' "\$!" > "$hi_fakebin/sleep.pid"; wait; fi
 printf '%s\\n' "claude: $1 ($hi_claude_body)" "codex: $2 ($hi_codex_body)"
 [ "$3" = ok ]
 SH
@@ -888,25 +890,61 @@ else
 fi
 #     HI-d2) herdr hangs -> doctor must kill it at the deadline, finish, and
 #            report the same unchecked state (a stuck herdr must not stall
-#            the whole diagnosis). The fake sleeps 60s; the run must return
-#            well before that.
+#            the whole diagnosis). The fake's grandchild sleeps 60s; the run
+#            must return well before that AND the grandchild must be dead
+#            afterwards (tree reap, not just the wrapper).
 write_fake_herdr_status "current (v9)" "current (v8)" hang
+rm -f "$hi_fakebin/sleep.pid"
 hi_started=$SECONDS
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   hi_elapsed=$((SECONDS - hi_started))
+  sleep 0.5
+  hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid" 2>/dev/null || true)"
   if (( hi_elapsed < 45 )) \
+    && [[ -n "$hi_sleep_pid" ]] && ! kill -0 "$hi_sleep_pid" 2>/dev/null \
     && grep -Fq "$hi_claude_ok $hi_unchecked" <<< "$hi_out" \
     && grep -Fq "$hi_codex_ok $hi_unchecked $hi_codex_note" <<< "$hi_out" \
     && grep -Fq "== agent-tools (report-only) ==" <<< "$hi_out"; then
-    ok "test passed: a hung herdr status is killed at the deadline (${hi_elapsed}s), doctor continues and reports currency unchecked"
+    ok "test passed: a hung herdr status is killed at the deadline (${hi_elapsed}s) with its grandchild reaped, doctor continues and reports currency unchecked"
   else
     printf '%s\n' "$hi_out" >&2
-    fail "test failed: hung herdr status stalled doctor (${hi_elapsed}s) or the unchecked state was not reported"
+    fail "test failed: hung herdr status stalled doctor (${hi_elapsed}s), left its grandchild alive (pid ${hi_sleep_pid:-none}), or the unchecked state was not reported"
     status=1
+    [[ -n "$hi_sleep_pid" ]] && kill "$hi_sleep_pid" 2>/dev/null || true
   fi
 else
   printf '%s\n' "$hi_out" >&2
   fail "test failed: doctor must stay exit 0 (herdr integration, status hung)"
+  status=1
+fi
+#     HI-d3) doctor interrupted (SIGTERM) while the probe is running -> its
+#            trap must reap the probe tree: start doctor in the background,
+#            wait until the fake's grandchild exists, terminate doctor, and
+#            require the grandchild to be gone.
+rm -f "$hi_fakebin/sleep.pid"
+HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal > "$hi_fakebin/interrupt.out" 2>&1 &
+hi_doctor_pid=$!
+hi_polls=0
+while [[ ! -s "$hi_fakebin/sleep.pid" ]] && (( hi_polls < 300 )); do
+  sleep 0.1
+  hi_polls=$((hi_polls + 1))
+done
+if [[ -s "$hi_fakebin/sleep.pid" ]]; then
+  hi_sleep_pid="$(cat "$hi_fakebin/sleep.pid")"
+  kill -TERM "$hi_doctor_pid" 2>/dev/null || true
+  wait "$hi_doctor_pid" 2>/dev/null || true
+  sleep 0.5
+  if ! kill -0 "$hi_sleep_pid" 2>/dev/null; then
+    ok "test passed: a doctor interrupted mid-probe reaps the herdr probe tree (grandchild gone)"
+  else
+    fail "test failed: interrupted doctor left the herdr probe's grandchild alive (pid $hi_sleep_pid)"
+    status=1
+    kill "$hi_sleep_pid" 2>/dev/null || true
+  fi
+else
+  kill -TERM "$hi_doctor_pid" 2>/dev/null || true
+  wait "$hi_doctor_pid" 2>/dev/null || true
+  fail "test failed: the hung herdr probe never started within 30s (interrupt fixture assumption broken)"
   status=1
 fi
 #     HI-e) capability off with the settings modules ACTIVE (personal as

@@ -859,39 +859,66 @@ section "herdr integration (report-only)"
 # file is what matters, not an exec bit. Version currency comes from `herdr
 # integration status`, which only reads the body header under $HOME (no
 # server, no writes — herdr v0.9.0 src/integration). It runs under a
-# deadline and its output is adopted only on exit 0, so an absent, failing
-# or hung herdr all collapse to "currency not checked": doctor neither
-# stalls nor reports a partial answer as current (Codex review, PR #226).
+# deadline (no temp file; the probe's process tree is reaped at the
+# deadline and on interrupt) and its output is adopted only on exit 0, so
+# an absent, failing or hung herdr all collapse to "currency not checked":
+# doctor neither stalls nor reports a partial answer as current (Codex
+# review, PR #226).
 herdr_status=""
 herdr_status_deadline=5
+herdr_status_pid=""
+# kill_process_tree PID — SIGTERM then SIGKILL PID and every descendant
+# (children first, via pgrep -P), so a wrapper on PATH that forked the real
+# work does not leave an orphan behind the deadline.
+kill_process_tree() {
+  local pid="$1" child
+  while IFS= read -r child; do
+    [[ -n "$child" ]] && kill_process_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill -TERM "$pid" 2>/dev/null || true
+  kill -KILL "$pid" 2>/dev/null || true
+}
+# herdr_status_cleanup — reap a still-running probe; also the INT / TERM /
+# EXIT handler below, so an interrupted doctor leaves no herdr behind.
+herdr_status_cleanup() {
+  if [[ -n "$herdr_status_pid" ]] && kill -0 "$herdr_status_pid" 2>/dev/null; then
+    kill_process_tree "$herdr_status_pid"
+  fi
+  herdr_status_pid=""
+  return 0
+}
 if command -v herdr >/dev/null 2>&1; then
-  # Bounded run: stock macOS has no `timeout`, so poll the child against the
-  # deadline and kill it. `wait` sits inside `if` so a non-zero child exit
-  # (or the signal after a kill) does not trip errexit.
-  herdr_status_file="$(mktemp "${TMPDIR:-/tmp}/dotfiles-doctor-herdr.XXXXXX")"
-  herdr integration status > "$herdr_status_file" 2>/dev/null &
-  herdr_status_pid=$!
+  trap herdr_status_cleanup EXIT
+  trap 'herdr_status_cleanup; trap - INT; kill -INT $$' INT
+  trap 'herdr_status_cleanup; trap - TERM; kill -TERM $$' TERM
+  # Bounded run WITHOUT a temp file (a failing mktemp must not break the
+  # report-only contract — Codex review, PR #226): the probe's stdout comes
+  # through a process substitution whose subshell prints the probe's pid
+  # first and its exit status as the last line; each read carries the
+  # remaining deadline. A read that fails while the probe is still alive is
+  # the deadline (bash 3.2 returns 1 there, 4+ returns >128, so liveness is
+  # the portable signal): the tree is killed and nothing is adopted. Only a
+  # clean exit 0 with its status line seen is adopted.
   herdr_status_rc=""
+  herdr_status_lines=""
+  herdr_status_line=""
   herdr_status_started=$SECONDS
-  while kill -0 "$herdr_status_pid" 2>/dev/null; do
-    if (( SECONDS - herdr_status_started >= herdr_status_deadline )); then
-      kill "$herdr_status_pid" 2>/dev/null || true
-      sleep 0.2
-      kill -KILL "$herdr_status_pid" 2>/dev/null || true
-      herdr_status_rc=timeout
-      break
-    fi
-    sleep 0.2
+  exec 3< <({ herdr integration status 2>/dev/null & printf '__pid=%s\n' "$!"; if wait "$!"; then printf '__rc=0\n'; else printf '__rc=%s\n' "$?"; fi; } 2>/dev/null)
+  while :; do
+    herdr_status_remaining=$(( herdr_status_deadline - (SECONDS - herdr_status_started) ))
+    (( herdr_status_remaining > 0 )) || break
+    IFS= read -r -t "$herdr_status_remaining" herdr_status_line <&3 || break
+    case "$herdr_status_line" in
+      __pid=*) herdr_status_pid="${herdr_status_line#__pid=}" ;;
+      __rc=*) herdr_status_rc="${herdr_status_line#__rc=}"; break ;;
+      *) herdr_status_lines+="$herdr_status_line"$'\n' ;;
+    esac
   done
-  if [[ -z "$herdr_status_rc" ]]; then
-    if wait "$herdr_status_pid"; then herdr_status_rc=0; else herdr_status_rc=$?; fi
-  else
-    wait "$herdr_status_pid" 2>/dev/null || true
-  fi
+  exec 3<&-
+  herdr_status_cleanup
   if [[ "$herdr_status_rc" == "0" ]]; then
-    herdr_status="$(cat "$herdr_status_file")"
+    herdr_status="$herdr_status_lines"
   fi
-  rm -f "$herdr_status_file"
 fi
 # herdr_integration_state AGENT
 # Print the state herdr reports for AGENT ("current", "outdated", "needs
