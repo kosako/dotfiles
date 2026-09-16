@@ -1040,6 +1040,220 @@ else
 fi
 rm -rf "$hi_fakebin" "$hi_claude_body" "$hi_codex_body"
 
+# NA) next-actions summary (#227): every warning reported through `action`
+#     is repeated once, numbered, at the end of the run with its steps, and
+#     `--actions-only` prints just that list. doctor stays exit 0 (report-
+#     only) and writes no file. Fixture: a fresh empty HOME with the
+#     committed repo (personal) — it always yields a few actions (identity
+#     files, drift is skipped without chezmoi state, ...); the assertions
+#     are structural (count = numbered lines, each with >= 1 step line, the
+#     same list in both modes), so they do not pin which host-side warnings
+#     a given environment produces.
+na_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na.XXXXXX")"
+mkdir -p "$na_home/src/personal"
+#     NA-a) full run: summary section is last, count matches, steps present.
+if na_out="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  na_count="$(printf '%s\n' "$na_out" | sed -n 's/^\[info\] == next actions (\([0-9][0-9]*\)) ==$/\1/p')"
+  na_numbered="$(printf '%s\n' "$na_out" | grep -c -E '^\[info\] [0-9]+\. ')"
+  na_steps="$(printf '%s\n' "$na_out" | grep -c -E '^        [^ ]')"
+  na_last_section="$(printf '%s\n' "$na_out" | grep -E '^\[info\] == ' | tail -n 1)"
+  # Every numbered reason must also be an inline [warn] line, in the SAME
+  # relative order (the summary is the warn stream filtered to actions —
+  # a dropped or reordered action would break the monotonic index walk).
+  na_order_ok=1
+  na_prev=0
+  while IFS= read -r na_reason; do
+    [[ -n "$na_reason" ]] || continue
+    na_idx="$(printf '%s\n' "$na_out" | grep -n -F -x -- "[warn] $na_reason" | head -n 1 | cut -d: -f1)"
+    if [[ -z "$na_idx" || "$na_idx" -le "$na_prev" ]]; then
+      na_order_ok=0
+      break
+    fi
+    na_prev="$na_idx"
+  done <<< "$(printf '%s\n' "$na_out" | sed -n 's/^\[info\] [0-9][0-9]*\. //p')"
+  # The deterministic actions of this fixture carry exact step lines: the
+  # identity file (prose step) and the two herdr bodies (command steps).
+  na_identity_step="        create $na_home/.config/git/personal.gitconfig with the [user] name/email for the personal context (local-only, never managed; docs/git-identity.md) — commits under $na_home/src/personal are refused until then"
+  if [[ -n "$na_count" && "$na_count" -gt 0 && "$na_count" == "$na_numbered" && "$na_steps" -ge "$na_count" \
+    && "$na_last_section" == "[info] == next actions ($na_count) ==" && "$na_order_ok" == 1 ]] \
+    && grep -Eq "^\[info\] [0-9]+\. project root exists but identity file missing: $na_home/.config/git/personal.gitconfig" <<< "$na_out" \
+    && grep -F -x -q -- "$na_identity_step" <<< "$na_out" \
+    && grep -F -x -q -- '        $ herdr integration install claude' <<< "$na_out" \
+    && grep -F -x -q -- '        $ herdr integration install codex' <<< "$na_out"; then
+    ok "test passed: next-actions summary closes the report with $na_count numbered actions in warn order, each with its exact step line"
+  else
+    printf '%s\n' "$na_out" >&2
+    fail "test failed: next-actions summary malformed (count=$na_count numbered=$na_numbered steps=$na_steps order_ok=$na_order_ok last=$na_last_section)"
+    status=1
+  fi
+else
+  printf '%s\n' "$na_out" >&2
+  fail "test failed: doctor must stay exit 0 (next actions, full run)"
+  status=1
+fi
+#     NA-b) --actions-only: only the summary (plus nothing else) and the
+#           same numbered list as the full run. (doctor itself writes no
+#           file; the tools it probes — npm, brew — keep their own caches
+#           under HOME, so "no file written" is not asserted on a fixture.)
+if na_only="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
+  na_full_list="$(printf '%s\n' "$na_out" | sed -n '/^\[info\] == next actions (/,$p')"
+  if [[ "$na_only" == "$na_full_list" ]] \
+    && ! grep -q -E '^\[(ok|warn)\]' <<< "$na_only" \
+    && ! grep -q -E '^\[info\] (- |== [^n])' <<< "$na_only"; then
+    ok "test passed: --actions-only prints exactly the summary of the full run (no other report lines)"
+  else
+    printf '%s\n' "$na_only" >&2
+    fail "test failed: --actions-only output differs from the full run's summary or leaked other lines"
+    status=1
+  fi
+else
+  printf '%s\n' "$na_only" >&2
+  fail "test failed: doctor must stay exit 0 (--actions-only)"
+  status=1
+fi
+#     NA-c) any unknown dash-word is a usage error (exit 2, no report), so a
+#           typo never silently runs the full report as personal — including
+#           short ones: `-h` would otherwise reach the validator's help
+#           branch and the report would run against a profile named "-h"
+#           (Codex review, PR #228).
+for na_opt in --actions-onyl -h -x; do
+  if na_bad="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" --actions-only "$na_opt" 2>&1)"; then
+    fail "test failed: unknown option $na_opt must not run doctor"
+    status=1
+  elif [[ $? -eq 2 ]] && grep -Fq "unknown option: $na_opt" <<< "$na_bad" && ! grep -Fq "== policy ==" <<< "$na_bad" && ! grep -Fq "next actions" <<< "$na_bad"; then
+    ok "test passed: unknown option $na_opt -> usage error (exit 2) without running the report"
+  else
+    printf '%s\n' "$na_bad" >&2
+    fail "test failed: unknown option $na_opt handling wrong"
+    status=1
+  fi
+done
+#     NA-d) helper-level exact pins (deterministic, no host state): zero
+#           actions -> "none"; then two actions where the steps carry a
+#           printf directive (%), a leading dash and a shell-quoted path
+#           with a space — the summary must print them verbatim, in order,
+#           with the [warn] lines emitted first (Codex review, PR #228).
+na_zero="$(bash -c 'set -euo pipefail; source "$1"; report_actions' _ "$SCRIPT_DIR/lib-policy.sh" 2>&1)"
+if [[ "$na_zero" == $'[info] == next actions (0) ==\n[ok] next actions: none' ]]; then
+  ok "test passed: zero actions -> 'next actions: none'"
+else
+  printf '%s\n' "$na_zero" >&2
+  fail "test failed: zero-actions summary wrong"
+  status=1
+fi
+na_two="$(bash -c 'set -euo pipefail; source "$1"
+action "first reason 100%" "\$ step one" "-n second step"
+action "second reason" "\$ rm -i $(printf "%q" "/tmp/a b/c")"
+report_actions' _ "$SCRIPT_DIR/lib-policy.sh" 2>&1)"
+na_two_expected="$(cat <<'TXT'
+[warn] first reason 100%
+[warn] second reason
+[info] == next actions (2) ==
+[info] 1. first reason 100%
+        $ step one
+        -n second step
+[info] 2. second reason
+        $ rm -i /tmp/a\ b/c
+TXT
+)"
+if [[ "$na_two" == "$na_two_expected" ]]; then
+  ok "test passed: action/report_actions print reasons and multi-line steps verbatim (%, leading dash, quoted path) in order"
+else
+  diff <(printf '%s\n' "$na_two_expected") <(printf '%s\n' "$na_two") >&2 || true
+  fail "test failed: helper-level next-actions output differs from the expected block"
+  status=1
+fi
+#     NA-d2) drift step path: a chezmoi status line with a single-column
+#            status (" M x") must yield "~/x", not "~/M x" (the path starts
+#            after the fixed two status columns + space). Fake chezmoi on
+#            PATH so the drift section is deterministic.
+na_fakebin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na-fake.XXXXXX")"
+cat > "$na_fakebin/chezmoi" <<'SH'
+#!/bin/sh
+case "$1" in
+  --version) echo "chezmoi version v0.0.0-fake" ;;
+  status) printf '%s\n' " M .gitconfig" "MM .npmrc" ;;
+  *) exit 0 ;;
+esac
+SH
+chmod +x "$na_fakebin/chezmoi"
+if na_drift="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
+  if grep -F -q -- "        \$ chezmoi diff $na_home/.gitconfig   #" <<< "$na_drift" \
+    && grep -F -q -- "        \$ chezmoi diff $na_home/.npmrc   #" <<< "$na_drift" \
+    && ! grep -F -q -- "/M .gitconfig" <<< "$na_drift"; then
+    ok "test passed: drift steps point at the path after the two status columns (' M x' -> ~/x)"
+  else
+    printf '%s\n' "$na_drift" >&2
+    fail "test failed: drift step path extraction wrong"
+    status=1
+  fi
+else
+  printf '%s\n' "$na_drift" >&2
+  fail "test failed: doctor must stay exit 0 (drift steps)"
+  status=1
+fi
+rm -rf "$na_fakebin"
+#     NA-e) work machine (settings modules inactive) with herdr on PATH but
+#           its integrations not installed -> an action per agent naming the
+#           installer; installed -> informational only; herdr absent -> a
+#           pointer to the catalog section, no action. Reuses the herdr
+#           fake from the HI block (rebuilt here; HI removed it).
+mkdir -p "$hi_fakebin" "$na_home/.claude" "$na_home/.codex"
+hi_claude_body="$na_home/.claude/hooks/herdr-agent-state.sh"
+hi_codex_body="$na_home/.codex/herdr-agent-state.sh"
+write_fake_herdr_status "not installed" "outdated (v1 < v8)" ok
+if na_work="$(HOME="$na_home" PATH="$hi_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" work --actions-only 2>&1)"; then
+  if grep -Fq "herdr integration for claude is not installed — ~/.claude/settings.json is unmanaged for this profile, so herdr integration install owns both the registration and the body here" <<< "$na_work" \
+    && grep -Fq '        $ herdr integration install claude' <<< "$na_work" \
+    && grep -Fq "herdr integration for codex is outdated — ~/.codex/hooks.json is unmanaged for this profile" <<< "$na_work" \
+    && grep -Fq '        $ herdr integration install codex' <<< "$na_work"; then
+    ok "test passed: work profile with herdr present but not installed/outdated -> next actions name herdr integration install per agent"
+  else
+    printf '%s\n' "$na_work" >&2
+    fail "test failed: work-profile herdr install actions missing"
+    status=1
+  fi
+else
+  printf '%s\n' "$na_work" >&2
+  fail "test failed: doctor must stay exit 0 (work, herdr not installed)"
+  status=1
+fi
+write_fake_herdr_status "current (v9)" "current (v8)" ok
+if na_work="$(HOME="$na_home" PATH="$hi_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fq "herdr's own view: claude integration current — ~/.claude/settings.json is unmanaged for this profile" <<< "$na_work" \
+    && ! grep -Fq "herdr integration install" <<< "$(printf '%s\n' "$na_work" | sed -n '/^\[info\] == next actions (/,$p')"; then
+    ok "test passed: work profile with both integrations current -> informational only, no herdr action"
+  else
+    printf '%s\n' "$na_work" >&2
+    fail "test failed: current integrations on work produced an action or lost the info line"
+    status=1
+  fi
+else
+  printf '%s\n' "$na_work" >&2
+  fail "test failed: doctor must stay exit 0 (work, herdr current)"
+  status=1
+fi
+#           herdr absent: a PATH of the system dirs plus a private bin
+#           holding only a yq symlink — the real yq's directory (homebrew
+#           bin) is NOT on it, because that is where a real herdr lives.
+rm -f "$hi_fakebin/herdr"
+ln -sf "$(command -v yq)" "$hi_fakebin/yq"
+if na_work="$(HOME="$na_home" PATH="$hi_fakebin:/usr/bin:/bin" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fq "herdr not on PATH: nothing to check (the software catalog section reports it as declared-missing" <<< "$na_work" \
+    && ! grep -Fq "herdr integration install" <<< "$(printf '%s\n' "$na_work" | sed -n '/^\[info\] == next actions (/,$p')"; then
+    ok "test passed: work profile without herdr on PATH -> pointer to the catalog section, no herdr action"
+  else
+    printf '%s\n' "$na_work" >&2
+    fail "test failed: herdr-absent state on work not reported as a pointer"
+    status=1
+  fi
+else
+  printf '%s\n' "$na_work" >&2
+  fail "test failed: doctor must stay exit 0 (work, herdr absent)"
+  status=1
+fi
+rm -rf "$na_home" "$hi_fakebin"
+
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/
 #      escalation commands evaluated against the LIVE rules via `codex

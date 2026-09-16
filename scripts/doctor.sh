@@ -5,12 +5,42 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
-profile="${1:-personal}"
+# Arguments: [PROFILE] [--actions-only]. --actions-only mutes every report
+# line except [fail] and the closing next-actions summary (#227), so the
+# list of things to run can be read (or redirected) without scanning the
+# full report. doctor writes no file itself: it stays report-only.
+profile=""
+actions_only=0
+for doctor_arg in "$@"; do
+  case "$doctor_arg" in
+    --actions-only) actions_only=1 ;;
+    -*)
+      # Any other dash-word is rejected HERE, before the validator sees it:
+      # a `-h` would otherwise reach validate-policy's help branch, skip the
+      # validation and run the report against a profile named "-h" (Codex
+      # review, PR #228).
+      fail "unknown option: $doctor_arg (usage: doctor.sh [PROFILE] [--actions-only])"
+      exit 2
+      ;;
+    *) profile="$doctor_arg" ;;
+  esac
+done
+profile="${profile:-personal}"
+if [[ "$actions_only" -eq 1 ]]; then
+  # Read by the report helpers in lib-policy.sh (ok / item / warn ...).
+  export POLICY_REPORT_QUIET=1
+fi
 
 section "doctor profile: $profile"
 
 section "policy"
-run_policy_validation "$profile" || exit 1
+# Under --actions-only the validator's own [ok] lines are muted too; its
+# [fail] lines go to stderr and stay visible, and a failure still exits 1.
+if [[ "$actions_only" -eq 1 ]]; then
+  run_policy_validation "$profile" >/dev/null || exit 1
+else
+  run_policy_validation "$profile" || exit 1
+fi
 
 environment_kind="$(profile_environment_kind "$profile")"
 ok "environmentKind: $environment_kind"
@@ -112,7 +142,8 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
           ok "global core.hooksPath -> managed shim directory"
           ;;
         "")
-          warn "global core.hooksPath is not set (chezmoi apply arms it via the ~/.gitconfig include once the agent-tools deploy is complete)"
+          action "global core.hooksPath is not set (chezmoi apply arms it via the ~/.gitconfig include once the agent-tools deploy is complete)" \
+            "\$ chezmoi apply   # after agent-tools has deployed the dispatcher + gates (docs/git-hook-gates.md)"
           hook_gates_wired=0
           ;;
         *)
@@ -152,7 +183,8 @@ else
     esac
   fi
   if [[ "$hook_gates_lingering" -eq 1 ]]; then
-    warn "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present) — run chezmoi apply to prune it"
+    action "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present) — run chezmoi apply to prune it" \
+      "\$ chezmoi apply"
   else
     ok "git hook gates not wired (enableGitHookGates=false)"
   fi
@@ -165,7 +197,8 @@ for context in personal work client sandbox agent; do
   if [[ -f "$identity_file" ]]; then
     ok "identity file exists: $identity_file"
   elif [[ -d "$project_root" ]]; then
-    warn "project root exists but identity file missing: $identity_file"
+    action "project root exists but identity file missing: $identity_file" \
+      "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) — commits under $project_root are refused until then"
   else
     item "context unused, identity file not configured: $context"
   fi
@@ -424,7 +457,8 @@ while IFS= read -r module; do
       item "managed and active: $target"
     else
       orphan_count=$((orphan_count + 1))
-      warn "managed-by header but not managed for profile $profile: $target (orphan from another profile?)"
+      action "managed-by header but not managed for profile $profile: $target (orphan from another profile?)" \
+        "\$ rm -i $(printf '%q' "$target")   # if it is a leftover from another profile; keep it if this profile should manage it (then fix the module list)"
     fi
   done < <(module_paths "$module")
 done < <(known_modules)
@@ -449,7 +483,11 @@ else
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     drift_lines=$((drift_lines + 1))
-    warn "drift: $line (inspect with: chezmoi diff)"
+    # `chezmoi status` lines are two status columns, a space, then the path
+    # (" M x" / "MM x"), so the path starts at offset 3 — a split on the
+    # first space would keep the second column (Codex review, PR #228).
+    action "drift: $line (inspect with: chezmoi diff)" \
+      "\$ chezmoi diff $(printf '%q' "$HOME/${line:3}")   # then chezmoi apply that target, or absorb the live key into the template (docs/claude-settings.md)"
   done <<< "$drift_status"
   if [[ "$drift_lines" -eq 0 ]]; then
     ok "no drift: managed files match the source state"
@@ -609,9 +647,11 @@ report_codex_projects_trust() {
         [[ -z "$trusted_path" ]] && continue
         trusted_total=$((trusted_total + 1))
         if [[ "$trusted_path" == "$HOME" ]]; then
-          warn "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)"
+          action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
+            "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section (or set trust_level to untrusted)"
         elif [[ ! -d "$trusted_path" ]]; then
-          warn "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex"
+          action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
+            "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section"
         fi
       done <<< "$trusted_paths"
       item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, project headers + trust_level scanned only)"
@@ -990,11 +1030,13 @@ if [[ "$(capability_value "$profile" enableHerdrIntegration)" == "true" ]]; then
             ok "enableHerdrIntegration=true; $herdr_target registers SessionStart -> herdr-agent-state.sh session; body present (version currency not checked: herdr integration status unavailable)$herdr_note"
             ;;
           *)
-            warn "enableHerdrIntegration=true; $herdr_target registers the SessionStart hook and the body is present, but herdr integration status reports it '$herdr_state' — re-run: herdr integration install $herdr_agent$herdr_note"
+            action "enableHerdrIntegration=true; $herdr_target registers the SessionStart hook and the body is present, but herdr integration status reports it '$herdr_state' — re-run: herdr integration install $herdr_agent$herdr_note" \
+              "\$ herdr integration install $herdr_agent"
             ;;
         esac
       else
-        warn "enableHerdrIntegration=true; $herdr_target registers the SessionStart hook but the body is absent or unreadable ($herdr_body; run: herdr integration install $herdr_agent) — fail-open no-op until installed$herdr_note"
+        action "enableHerdrIntegration=true; $herdr_target registers the SessionStart hook but the body is absent or unreadable ($herdr_body; run: herdr integration install $herdr_agent) — fail-open no-op until installed$herdr_note" \
+          "\$ herdr integration install $herdr_agent"
       fi
     else
       warn "enableHerdrIntegration=true but the $herdr_module module is inactive for this profile; no $herdr_target carries the hook registration (dangling capability)"
@@ -1009,16 +1051,27 @@ else
   # it); where it is inactive the file is unmanaged and both registration and
   # body are left to `herdr integration install` (a work machine). Show
   # herdr's own per-agent view either way, contents-blind.
+  # Where dotfiles does not manage the file (a work machine) the installer is
+  # the whole story, so "not installed" or "outdated" there is the one thing
+  # a fresh machine would otherwise never be told (#227): report it as an
+  # action naming the command. Where the file IS managed the capability is
+  # simply off by choice, so herdr's view stays informational.
   for herdr_home in .claude .codex; do
     herdr_integration_home "$herdr_home"
     herdr_state="$(herdr_integration_state "$herdr_agent")"
     [[ -n "$herdr_state" ]] || continue
     if module_active_for_profile "$profile" "$herdr_module"; then
       item "herdr's own view: $herdr_agent integration $herdr_state — $herdr_target carries no registration while the capability is false; one added by herdr integration install is drift that the next apply removes"
+    elif [[ "$herdr_state" == "current" ]]; then
+      item "herdr's own view: $herdr_agent integration current — $herdr_file is unmanaged for this profile, so registration and body are both left to herdr integration install"
     else
-      item "herdr's own view: $herdr_agent integration $herdr_state — $herdr_file is unmanaged for this profile, so registration and body are both left to herdr integration install"
+      action "herdr integration for $herdr_agent is $herdr_state — $herdr_file is unmanaged for this profile, so herdr integration install owns both the registration and the body here (dotfiles does nothing on this profile)$herdr_note" \
+        "\$ herdr integration install $herdr_agent"
     fi
   done
+  if ! command -v herdr >/dev/null 2>&1; then
+    item "herdr not on PATH: nothing to check (the software catalog section reports it as declared-missing; this profile does not auto-install)"
+  fi
 fi
 
 section "agent-tools (report-only)"
@@ -1060,7 +1113,8 @@ else
       if [[ "$(sj '.repo.clean // false')" == "true" ]]; then
         ok "agent-tools working tree clean"
       else
-        warn "agent-tools working tree not clean"
+        action "agent-tools working tree not clean" \
+          "\$ git -C $(printf '%q' "$agent_tools_dir") status   # commit or discard, then re-run its sync"
       fi
 
       item "assets: $(sj '.assets.total // 0') (manifest errors: $(sj '.assets.manifest_errors // 0'))"
@@ -1079,7 +1133,8 @@ else
 
       item "generated: $(sj '.generated.total // 0') (stale: $(sj '.generated.stale // 0'))"
       if [[ "$(sj '.generated.stale // 0')" != "0" ]]; then
-        warn "agent-tools has stale generated artifacts"
+        action "agent-tools has stale generated artifacts" \
+          "regenerate in $agent_tools_dir (its build / sync; see the agent-tools README)"
       fi
 
       if [[ "$(sj '.register.catalog_present // false')" == "true" ]]; then
@@ -1096,7 +1151,8 @@ else
         warn "agent-tools sync conflicts (unmanaged same-name targets); sync must not change them"
       fi
       if [[ "$(sj '[.sync_targets[]? | select(.state == "stale")] | length')" != "0" ]]; then
-        warn "agent-tools has stale sync targets (generated artifact newer than target)"
+        action "agent-tools has stale sync targets (generated artifact newer than target)" \
+          "re-run the agent-tools sync from $agent_tools_dir (see its README) so the deployed copies match"
       fi
       # v3 (#194): gated-but-still-deployed leftovers are cleanup candidates.
       if [[ "$(sj '[.sync_targets[]? | select(.state == "deployed_but_inactive")] | length')" != "0" ]]; then
@@ -1126,6 +1182,11 @@ fi
 
 section "project roots"
 report_standard_project_roots
+
+# Close with the numbered list of everything reported through `action`
+# (#227): what to run, and why, without re-reading the report. Printed even
+# under --actions-only.
+report_actions
 
 # doctor is report-only: warnings never change the exit code.
 # The only non-zero path is the policy validation at the top.

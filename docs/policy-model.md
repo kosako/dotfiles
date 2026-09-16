@@ -235,8 +235,11 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   状態として報告し(live 登録は probe しない)、herdr 自身の見え方を home ごとに info で
   添える — settings module が active な home では「managed file なので installer が足した
   登録は次の apply で消える drift」、非 active な home では「unmanaged なので登録も body も
-  installer 任せ」。capability=false で body が残っても害は無い(登録が無ければ呼ばれない。
-  `herdr integration uninstall` が両方を消す)。
+  installer 任せ」。後者(work 機)で herdr が PATH にあるのに not installed / outdated なら
+  **action として warn し、末尾の next actions に `herdr integration install <agent>` を出す**
+  (#227 — 新マシンで手動の installer 実行に気づける唯一の経路)。herdr 不在なら catalog section の
+  declared-missing に委ねて pointer だけ出す。capability=false で body が残っても害は無い
+  (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
 ## dormant capability の扱い(残す基準)
