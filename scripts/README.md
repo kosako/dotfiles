@@ -76,7 +76,7 @@ remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検�
 ./scripts/doctor.sh personal --actions-only   # 末尾の next actions 一覧だけ
 ```
 
-policy validation が失敗した場合は exit 1。未知の option は usage error で exit 2。
+policy validation が失敗した場合は exit 1。`--actions-only` 以外の `-` 始まりの引数は usage error で exit 2(validator に渡さない)。
 
 **next actions**(#227): 具体的な command / 手順を言える warning は `action`(`lib-policy.sh`)経由で
 報告され、inline の `[warn]` 行はそのままに、末尾の `== next actions (N) ==` に理由と手順が番号つきで

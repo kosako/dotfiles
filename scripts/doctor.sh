@@ -14,7 +14,11 @@ actions_only=0
 for doctor_arg in "$@"; do
   case "$doctor_arg" in
     --actions-only) actions_only=1 ;;
-    --*)
+    -*)
+      # Any other dash-word is rejected HERE, before the validator sees it:
+      # a `-h` would otherwise reach validate-policy's help branch, skip the
+      # validation and run the report against a profile named "-h" (Codex
+      # review, PR #228).
       fail "unknown option: $doctor_arg (usage: doctor.sh [PROFILE] [--actions-only])"
       exit 2
       ;;
@@ -454,7 +458,7 @@ while IFS= read -r module; do
     else
       orphan_count=$((orphan_count + 1))
       action "managed-by header but not managed for profile $profile: $target (orphan from another profile?)" \
-        "\$ rm -i $target   # if it is a leftover from another profile; keep it if this profile should manage it (then fix the module list)"
+        "\$ rm -i $(printf '%q' "$target")   # if it is a leftover from another profile; keep it if this profile should manage it (then fix the module list)"
     fi
   done < <(module_paths "$module")
 done < <(known_modules)
@@ -479,8 +483,11 @@ else
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     drift_lines=$((drift_lines + 1))
+    # `chezmoi status` lines are two status columns, a space, then the path
+    # (" M x" / "MM x"), so the path starts at offset 3 — a split on the
+    # first space would keep the second column (Codex review, PR #228).
     action "drift: $line (inspect with: chezmoi diff)" \
-      "\$ chezmoi diff ~/${line#* }   # then chezmoi apply that target, or absorb the live key into the template (docs/claude-settings.md)"
+      "\$ chezmoi diff $(printf '%q' "$HOME/${line:3}")   # then chezmoi apply that target, or absorb the live key into the template (docs/claude-settings.md)"
   done <<< "$drift_status"
   if [[ "$drift_lines" -eq 0 ]]; then
     ok "no drift: managed files match the source state"
@@ -1107,7 +1114,7 @@ else
         ok "agent-tools working tree clean"
       else
         action "agent-tools working tree not clean" \
-          "\$ git -C $agent_tools_dir status   # commit or discard, then re-run its sync"
+          "\$ git -C $(printf '%q' "$agent_tools_dir") status   # commit or discard, then re-run its sync"
       fi
 
       item "assets: $(sj '.assets.total // 0') (manifest errors: $(sj '.assets.manifest_errors // 0'))"
