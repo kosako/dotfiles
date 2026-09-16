@@ -118,6 +118,17 @@ cat > ~/.config/git/personal.gitconfig <<'EOF'
 EOF
 ```
 
+herdr(agent multiplexer)を使うマシンでは、herdr 側の installer で Claude Code / Codex の
+integration hook を入れる(#225)。personal は hook の**登録**を dotfiles が持つので installer は
+本体を置くだけ、work のように settings module を持たない profile では installer が登録と本体の
+両方を持つ。どちらも叩くコマンドは同じ。
+
+```sh
+herdr integration install claude
+herdr integration install codex   # 加えて Codex TUI の /hooks で一度 trust する
+herdr integration status          # claude / codex とも current になれば完了
+```
+
 ### 日常
 
 普段はほとんど意識しない。`~/src/<context>/` 配下に project を置いて commit すれば、その context の identity が自動で使われる。状態を確認したいときは次を実行する(どちらも何も変更しない)。
@@ -125,6 +136,13 @@ EOF
 ```sh
 ./scripts/doctor.sh personal    # 導入後の健康診断
 ./scripts/preflight.sh personal # 新マシン適用前の危険検知
+```
+
+`doctor` は最後に **next actions**(具体的に叩くべきコマンドと理由の番号つき一覧)を出す。
+一覧だけ見たいときは `--actions-only`(ファイルは書かない。残したければ redirect する)。
+
+```sh
+./scripts/doctor.sh personal --actions-only
 ```
 
 ### 更新を反映する

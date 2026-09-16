@@ -73,9 +73,18 @@ remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検�
 
 ```sh
 ./scripts/doctor.sh personal
+./scripts/doctor.sh personal --actions-only   # 末尾の next actions 一覧だけ
 ```
 
-policy validation が失敗した場合は exit 1。
+policy validation が失敗した場合は exit 1。未知の option は usage error で exit 2。
+
+**next actions**(#227): 具体的な command / 手順を言える warning は `action`(`lib-policy.sh`)経由で
+報告され、inline の `[warn]` 行はそのままに、末尾の `== next actions (N) ==` に理由と手順が番号つきで
+まとまる(git hook gates の hooksPath 未設定 / lingering、identity file 不在、managed-path orphan、
+managed drift、Codex projects trust の stale / home 全体、herdr integration の body 不在 / outdated / work
+機での未導入、agent-tools の dirty / stale)。判断が要る warning(catalog 外 package 等)は warn のまま。
+`--actions-only` は `[fail]` と summary 以外を mute するだけで、doctor はファイルを書かない(report-only)。
+手順行も key-name-only / secret を出さない規律の対象。
 
 ## test-preflight.sh
 

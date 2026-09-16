@@ -8,28 +8,80 @@ CAPABILITIES_FILE="$DOTFILES_ROOT/.chezmoidata/capabilities.schema.yaml"
 PACKAGES_FILE="$DOTFILES_ROOT/.chezmoidata/packages.yaml"
 BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 
+# Report line helpers. POLICY_REPORT_QUIET=1 (doctor --actions-only) mutes
+# every informational line so only the next-actions summary and any [fail]
+# reach the terminal; [fail] is never muted (it is the policy exit path).
 ok() {
+  [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   printf '[ok] %s\n' "$*"
 }
 
 info() {
+  [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   printf '[info] %s\n' "$*"
 }
 
 section() {
+  [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   printf '[info] == %s ==\n' "$*"
 }
 
 item() {
+  [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   printf '[info] - %s\n' "$*"
 }
 
 warn() {
+  [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   printf '[warn] %s\n' "$*" >&2
 }
 
 fail() {
   printf '[fail] %s\n' "$*" >&2
+}
+
+# Next-actions register (#227). A warning that comes with a concrete remedy
+# is reported through `action` instead of `warn`: the [warn] line is emitted
+# unchanged (so the inline reading and the tests keep working) AND the reason
+# plus its steps are recorded, so doctor can close with one numbered list of
+# what to run. Only warnings whose remedy can be stated as a command or a
+# short instruction belong here; judgement calls stay plain warnings. Steps
+# are printed verbatim, so the key-name-only / no-secret discipline of every
+# other line applies to them too.
+ACTION_REASONS=()
+ACTION_STEPS=()
+
+# action REASON STEP...
+action() {
+  local reason="$1" step steps=""
+  shift
+  warn "$reason"
+  for step in "$@"; do
+    if [[ -n "$steps" ]]; then
+      steps+=$'\n'
+    fi
+    steps+="$step"
+  done
+  ACTION_REASONS+=("$reason")
+  ACTION_STEPS+=("$steps")
+}
+
+# report_actions — print the numbered summary of everything `action`
+# recorded (always printed, even under POLICY_REPORT_QUIET).
+report_actions() {
+  local total i step
+  total="${#ACTION_REASONS[@]}"
+  printf '[info] == next actions (%s) ==\n' "$total"
+  if [[ "$total" -eq 0 ]]; then
+    printf '[ok] next actions: none\n'
+    return 0
+  fi
+  for ((i = 0; i < total; i++)); do
+    printf '[info] %s. %s\n' "$((i + 1))" "${ACTION_REASONS[$i]}"
+    while IFS= read -r step; do
+      [[ -n "$step" ]] && printf '        %s\n' "$step"
+    done <<< "${ACTION_STEPS[$i]}"
+  done
 }
 
 # The policy parsers below require mikefarah/yq v4. Fail closed and
