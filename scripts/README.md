@@ -20,7 +20,7 @@ CLI usage error: exit 2
 
 `[warn]` は現状報告または注意喚起であり、それだけでは失敗扱いにしない。
 unknown profile / module / capability や capability enum の不正値は policy violation として fail closed する。
-`doctor.sh` / `preflight.sh` は冒頭の policy validation が失敗した場合のみ exit 1 で、それ以外は warning があっても常に exit 0(report-only)。
+`doctor.sh` / `preflight.sh` は冒頭の policy validation が失敗した場合のみ exit 1 で、それ以外は warning があっても常に exit 0(report-only)。`doctor.sh` の未知 option(`--actions-only` 以外の `-` 始まり)だけは usage error として exit 2 で report を走らせない(#227)。
 
 ## validate-policy.sh
 
@@ -124,10 +124,19 @@ CI の bash / zsh syntax check をそのまま取り出し、各入力ファイ�
 
 - `validate-policy.sh --all` が全 profile を検証すること。
 - enum capability の許可値を正しく受け入れること。
-- unknown profile を拒否すること。
-- unknown module を拒否すること。
-- unknown capability を拒否すること。
-- capability enum の不正値を拒否すること。
+- unknown profile / module / capability(module の `requires:` 内も)、重複 capability、enum の不正値を拒否すること。
+- boolean capability・`requires:`・`implemented:` は YAML boolean の小文字 `true` / `false` だけを受け入れ、
+  文字列 / 数値 / null / 大文字綴りを拒否すること(#206)。
+- 同一 path を複数 module が宣言したら fail、`requires:` を持つ module は `paths:` 必須。
+- software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
+- backup-paths(#60): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog を拒否。
+- environmentKind 制約: work / client / agent で権限付与型 capability の true、sandbox の
+  allowSecretsAccess、`npmHardeningMode=off` を hard fail。安全強化型(`enforceAiSandbox` /
+  GitHub guard 2 本 / `enableQualityLoopHooks` / `enableHerdrIntegration`)は全 kind で true を許容
+  (forbidden 表に入っていないことの pin)。forbidden-enum 表の不正行は fail closed。
+- capability registry(#151): `implemented:` 欠落は fail、`implemented: false` は doctor.sh がその名前に
+  言及していなければ fail(undisclosed dormant)。
+- 単一 dash の option は usage error、非 mikefarah yq / v4 未満は fail closed、空の profiles / schema は fail closed。
 
 ## test-gitconfig.sh
 
@@ -173,24 +182,41 @@ chezmoi が未導入でも実行できるよう、render はせず静的検査�
 
 ## test-doctor.sh
 
-fixture HOME で doctor の managed-path orphan 検出を検証する。実 home には触れない。
+fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で doctor の各 section を
+検証する。実 home・実 manager・実 codex / herdr には触れない。
 
 ```sh
 ./scripts/test-doctor.sh
 ```
 
-検証内容:
+検証内容(section ごと):
 
-- managed-by header があり現 profile で管理対象でない file が warning になること(profile 切替の残骸)。
-- 同じ file でも管理対象の profile では orphan にならないこと。
-- header のない file は orphan 扱いしないこと。
-- dir 宣言の中の無関係 file(header を引用するセッションログ等)を報告しないこと(#174)。
-- backup 未実行 warn は allowSecretsAccess=true の profile に限られること(false は中立表示、#174)。
-- agent-tools の status.sh 実行が opt-in であること(`enableAgentToolsStatus=false` では実行マーカーが作られない)。
-- opt-in 時は status を summary し `conflict` を warning にすること。
-- contract version 不一致 / status.sh 欠如 / agent-tools 不在でも warning のみで exit 0 になること。
-- private-backup section: marker 不在で「no backup recorded」、marker ありで最終成功時刻 /
-  archive / 件数を表示すること。local 補足は **存在のみ**で中身(secret らしき行)を漏らさないこと。
+- managed-path orphan: header があり現 profile で管理対象でない file が warning / 管理対象の
+  profile では orphan にならない / header 無しは対象外 / dir 宣言の中身に再帰しない(#174)。
+- managed drift: fake chezmoi の status 行ごとに warn、空なら ok、失敗は INCOMPLETE(#148)。
+- agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
+  warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ /
+  `AGENT_TOOLS` override(#71 / #73)。
+- private-backup: marker 不在は allowSecretsAccess=true の profile だけ warn(false は中立)、marker
+  ありで最終成功時刻 / archive / 件数、不正 marker は unreadable、local 補足は**存在のみ**(#174)。
+- git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling。
+- GitHub injection guard(#119 / #137): secret floor 常時 deny、`gateGitHubMcp` / `enableGitHubIsolatedReader`
+  の wired 状態、hook body の presence(contents-blind)、`enforceAiSandbox` の human-legit gate 開示。
+- quality loop hooks(#199): 両 home の登録 + body presence、`checks.local.json` は presence のみ(canary で
+  中身を漏らさない)、cap off の not-wired、live file に残置した登録の lingering warn、module 除去の dangling。
+- herdr integration(#225): body 不在 / exec bit なし body / dir body / 末尾改行なしの status 応答 /
+  outdated・needs repair / status が非ゼロ exit(出力を採用しない)/ hang(期限で process tree ごと回収)/
+  probe 稼働中に doctor を SIGTERM(trap で回収・rc 143)/ cap off の module active・inactive 別の表示 /
+  module 除去の dangling。fake herdr は ok・fail・hang・interrupt・ok-nonl の mode を持つ。
+- next actions(#227): summary が最後の section で件数 = 番号行数・inline `[warn]` と同順・各項目に手順行 /
+  `--actions-only` が full run の summary と一致し他の行を含まない / 未知 option(`--actions-onyl` / `-h` /
+  `-x`)は exit 2 で report を走らせない / 0 件は none / helper 単体の exact pin(複数 step・`%`・先頭 `-`・
+  空白 path)/ drift 手順の path が ` M x` でも `~/x` / work 機(module 非 active)で fake herdr が
+  not installed・outdated なら `herdr integration install <agent>` の action、current なら info、herdr 不在
+  は catalog section への pointer。
+- AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
+  engine 失敗は INCOMPLETE、`config.toml` の projects trust は header + trust_level のみ scan。
+- npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
 ## install-packages.sh

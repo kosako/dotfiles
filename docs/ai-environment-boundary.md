@@ -194,6 +194,9 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
   sync の新規マシンでも登録は安全な no-op。**Codex はさらに inert stage**: 登録済みでも一度
   `/hooks` で trust するまで無警告で silent skip される(registration ≠ activation)。
   dangling(claude-settings / codex-settings 非 active、body 不在)は doctor が report。
+  同じ partial(`agent-hooks-json`)は品質ループ(#199 `enableQualityLoopHooks`)と herdr
+  integration(#225 `enableHerdrIntegration`)の登録も出すが、どちらも GitHub 防御の層ではない
+  (正本は [policy-model](policy-model.md))。
 - GitHub 由来の deny は **3 tier**(#119 Phase 2 task B。専用 capability は作らない):
   - **(1) never-legit secret floor は無条件**(常時 render)。SSH 秘密鍵読取(`~/.ssh`)・
     credential-store 読取(`~/.aws` / `~/.config/gh` の OAuth token / `~/.netrc` /
