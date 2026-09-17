@@ -155,8 +155,9 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
 - **1 capability が 2 つの AI home 両方**に登録を出す — Claude は managed
   `~/.claude/settings.json` の `hooks`、Codex は user 層 `~/.codex/hooks.json`。hooks object は
   `.chezmoitemplates/agent-hooks-json` で両 home 共有(`enableGitHubIsolatedReader` の
-  PreToolUse と同居。各 capability は自分の event だけを足し、両方 false で `hooks` キー自体を
-  出さない / Codex は file ごと消える)。
+  PreToolUse・`enableHerdrIntegration` の SessionStart と同居。各 capability は自分の event だけを
+  足し、3 つの hook capability が全部 false で `hooks` キー自体を出さない / Codex は file ごと
+  消える)。
   - `PostToolUse` / matcher `Edit|Write` → `personal-fast-edit-check`(steering。失敗要約を
     `additionalContext` で返すだけで block しない・自動 fix しない)。
   - `Stop`(matcher なし。Claude Code は非対応・Codex は無視)→ `personal-changed-scope-qa`
@@ -275,7 +276,9 @@ capability を 1 つ追加するときに触る場所(fail-closed の意図的�
 4. 実装の配線 — 原則 requires 方式(上の規範)。`implemented: false` で land する場合は
    doctor に未実装/未配線の warn を出す section を追加(AGENTS.md 規約 + #151 検査)。
 5. テスト — render 影響があれば `test-render.sh` の期待 managed set、settings 影響が
-   あれば `test-claude-settings.sh`、極性は `test-policy.sh`。
+   あれば `test-claude-settings.sh` / `test-codex-settings.sh`(hook 登録なら両方)、極性は
+   `test-policy.sh`(forbidden 表に入れない capability は「全 kind で true を許容」を pin し、
+   最終行 anchor の `insert_once` も新 capability に更新)、doctor section は `test-doctor.sh`。
 6. docs — 対応する docs の節(このファイル・関連 doc)。
 
 ## capability → 実装の gating 方式(規範)

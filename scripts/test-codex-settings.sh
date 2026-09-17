@@ -5,7 +5,7 @@ set -euo pipefail
 # the Codex parity of the Claude side in #137 / test-claude-settings.sh section
 # 8; #199 adds the quality-loop pair). test-render.sh fixes the managed *set*
 # per profile (that personal manages .codex/hooks.json and work does not); this
-# fixes the *content* the two hook capabilities drive on the Codex side:
+# fixes the *content* the three hook capabilities drive on the Codex side:
 #   - enableGitHubIsolatedReader=true (personal): EXACTLY one PreToolUse/Bash
 #     command hook pointing at the agent-tools-deployed
 #     ~/.codex/agent-tools/scripts/personal-safe-gh-hook (absolute path), timeout 10.
