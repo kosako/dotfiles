@@ -1147,6 +1147,51 @@ else
 fi
 rm -rf "$op_fakebin"
 
+# ID) Git identity contexts (#202): an existing identity file is checked for
+#     completeness, presence-only. Fixture: ~/src/work exists and the work
+#     identity file cycles through missing / empty / name-only / email-only /
+#     complete / unparsable. The fixture name and email are canaries that
+#     must never appear in the output (doctor reports key names only).
+#     doctor stays exit 0 throughout.
+id_root="$fixture_home/src/work"
+id_file="$fixture_home/.config/git/work.gitconfig"
+id_canary_email="canary-identity-9f2b@example.invalid"
+id_canary_name="Canary Identity Name"
+mkdir -p "$id_root" "$fixture_home/.config/git"
+# id_check STATE EXPECT_LINE LABEL
+id_check() {
+  local state="$1" expect="$2" label="$3" out
+  case "$state" in
+    missing) rm -f "$id_file" ;;
+    empty) : > "$id_file" ;;
+    name-only) printf '[user]\n\tname = %s\n' "$id_canary_name" > "$id_file" ;;
+    email-only) printf '[user]\n\temail = %s\n' "$id_canary_email" > "$id_file" ;;
+    complete) printf '[user]\n\tname = %s\n\temail = %s\n' "$id_canary_name" "$id_canary_email" > "$id_file" ;;
+    unparsable) printf '[user\n\tname = %s\n' "$id_canary_name" > "$id_file" ;;
+  esac
+  if out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+    if grep -Fxq "$expect" <<< "$out" \
+      && ! grep -Fq "$id_canary_email" <<< "$out" && ! grep -Fq "$id_canary_name" <<< "$out"; then
+      ok "test passed: identity file $state -> $label"
+    else
+      printf '%s\n' "$out" >&2
+      fail "test failed: identity file $state: expected the exact line '$expect' and no identity value in the output"
+      status=1
+    fi
+  else
+    printf '%s\n' "$out" >&2
+    fail "test failed: doctor must stay exit 0 (identity file $state)"
+    status=1
+  fi
+}
+id_check missing "[warn] project root exists but identity file missing: $id_file" "missing-file action (unchanged)"
+id_check empty "[warn] identity file is partial: $id_file has no user.name user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming both keys"
+id_check name-only "[warn] identity file is partial: $id_file has no user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming user.email"
+id_check email-only "[warn] identity file is partial: $id_file has no user.name — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming user.name"
+id_check complete "[ok] identity file exists: $id_file" "ok"
+id_check unparsable "[warn] identity file exists but git cannot parse it: $id_file (syntax error?) — commits under $id_root fail until it is fixed" "unparsable warn"
+rm -rf "$id_root" "$id_file"
+
 # NA) next-actions summary (#227): every warning reported through `action`
 #     is repeated once, numbered, at the end of the run with its steps, and
 #     `--actions-only` prints just that list. doctor stays exit 0 (report-

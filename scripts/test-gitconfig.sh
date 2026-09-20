@@ -46,6 +46,45 @@ for context in personal work client sandbox agent; do
   check_contains "includeIf for $context" "[includeIf \"gitdir:~/src/$context/\"]"
   check_contains "include path for $context" "path = ~/.config/git/$context.gitconfig"
 done
+check_contains "identity reset include path (#202)" "path = ~/.config/git-profile/identity-reset.gitconfig"
+
+# The include ORDER is the contract (#202): includeIf is last-match-wins, so
+# the three personal hasconfig rules come first, then the personal gitdir
+# rule, then for EACH non-personal context the managed identity reset
+# immediately followed by that context's local file, then the unconditional
+# mechanism includes. Presence checks cannot catch a reordering or a reset
+# that drifted away from its context, so the exact sequence is pinned:
+# "<condition>|<path>" per include, in source order.
+expected_include_order="$(printf '%s\n' \
+  'hasconfig:remote.*.url:https://github.com/kosako/**|~/.config/git/personal.gitconfig' \
+  'hasconfig:remote.*.url:git@github.com:kosako/**|~/.config/git/personal.gitconfig' \
+  'hasconfig:remote.*.url:ssh://git@github.com/kosako/**|~/.config/git/personal.gitconfig' \
+  'gitdir:~/src/personal/|~/.config/git/personal.gitconfig' \
+  'gitdir:~/src/work/|~/.config/git-profile/identity-reset.gitconfig' \
+  'gitdir:~/src/work/|~/.config/git/work.gitconfig' \
+  'gitdir:~/src/client/|~/.config/git-profile/identity-reset.gitconfig' \
+  'gitdir:~/src/client/|~/.config/git/client.gitconfig' \
+  'gitdir:~/src/sandbox/|~/.config/git-profile/identity-reset.gitconfig' \
+  'gitdir:~/src/sandbox/|~/.config/git/sandbox.gitconfig' \
+  'gitdir:~/src/agent/|~/.config/git-profile/identity-reset.gitconfig' \
+  'gitdir:~/src/agent/|~/.config/git/agent.gitconfig' \
+  'include|~/.config/git/signing.gitconfig' \
+  'include|~/.config/git-hook-gates/hooks.gitconfig')"
+actual_include_order="$(awk '
+  /^\[includeIf "/ { cond = $0; sub(/^\[includeIf "/, "", cond); sub(/"\]$/, "", cond); next }
+  /^\[include\]/   { cond = "include"; next }
+  /^\[/            { cond = "" }
+  cond != "" && /^[[:space:]]*path[[:space:]]*=/ {
+    p = $0; sub(/^[[:space:]]*path[[:space:]]*=[[:space:]]*/, "", p); print cond "|" p; cond = ""
+  }
+' "$GITCONFIG_SOURCE")"
+if [[ "$actual_include_order" == "$expected_include_order" ]]; then
+  ok "test passed: include order pinned (hasconfig x3, personal, then reset+context per non-personal context, then mechanism includes)"
+else
+  fail "test failed: include order drifted from the pinned sequence"
+  diff <(printf '%s\n' "$expected_include_order") <(printf '%s\n' "$actual_include_order") >&2 || true
+  status=1
+fi
 
 # Personal also has remote-URL (hasconfig) rules covering all three URL
 # spellings; work/client must never (their org URLs are confidential).
@@ -336,6 +375,140 @@ if [[ "$flagged" == "origin" ]]; then
   ok "test passed: url+pushurl credentials report the remote once"
 else
   fail "test failed: expected single 'origin', got: ${flagged:-<none>}"
+  status=1
+fi
+
+section "fixture checks: identity reset per non-personal context (#202)"
+
+# The managed reset file has to exist in the fixture HOME: GIT_CONFIG_GLOBAL is
+# the source ~/.gitconfig, but its include paths resolve under HOME=$fixture.
+mkdir -p "$fixture/.config/git-profile"
+cp "$DOTFILES_ROOT/private_dot_config/git-profile/identity-reset.gitconfig" \
+  "$fixture/.config/git-profile/identity-reset.gitconfig"
+
+# write_identity FILE STATE CTX — put the context identity file into one of
+# the states the reset has to handle: absent, empty (0 bytes), name-only,
+# email-only, complete.
+write_identity() {
+  local file="$1" state="$2" ctx="$3"
+  case "$state" in
+    absent) rm -f "$file" ;;
+    empty) : > "$file" ;;
+    name-only) printf '[user]\n\tname = Dotfiles %s Test\n' "$ctx" > "$file" ;;
+    email-only) printf '[user]\n\temail = dotfiles-%s@example.invalid\n' "$ctx" > "$file" ;;
+    complete) printf '[user]\n\tname = Dotfiles %s Test\n\temail = dotfiles-%s@example.invalid\n' "$ctx" "$ctx" > "$file" ;;
+  esac
+}
+
+# expect_ident REPO EXPECT LABEL — EXPECT is `refused` (the commit must fail on
+# the empty / unresolved ident), or `NAME|EMAIL` that BOTH author and committer
+# of the real commit object must carry (EMAIL may be empty: the visibly broken
+# name-only case). In every outcome the personal test identity must be absent
+# from the result — that inheritance is the bug. Prints only on failure.
+expect_ident() {
+  local repo="$1" expect="$2" label="$3" output ident
+  if output="$(run_git "$repo" commit --allow-empty -m test 2>&1)"; then
+    ident="$(run_git "$repo" log -1 --format='%an|%ae|%cn|%ce')"
+    if [[ "$expect" == refused ]]; then
+      fail "test failed: $label: commit succeeded ($ident), expected refusal"
+      return 1
+    fi
+    if [[ "$ident" != "$expect|$expect" ]]; then
+      fail "test failed: $label: author|committer = $ident, expected $expect|$expect"
+      return 1
+    fi
+    # Belt and braces for the non-personal contexts: even a matching-looking
+    # result must not carry the personal test identity anywhere.
+    if [[ "$expect" != "Dotfiles Test|dotfiles-test@example.invalid" ]] \
+      && [[ "$ident" == *dotfiles-test@example.invalid* || "$ident" == *"Dotfiles Test"* ]]; then
+      fail "test failed: $label: personal identity leaked into the commit ($ident)"
+      return 1
+    fi
+    return 0
+  fi
+  if [[ "$expect" != refused ]]; then
+    printf '%s\n' "$output" >&2
+    fail "test failed: $label: commit refused, expected $expect"
+    return 1
+  fi
+  if grep -Eqi 'empty ident name|no (email|name) was given|user\.useConfigOnly' <<< "$output"; then
+    return 0
+  fi
+  printf '%s\n' "$output" >&2
+  fail "test failed: $label: commit failed for another reason"
+  return 1
+}
+
+# Matrix: context x identity-file state x remote shape. The remotes are the
+# three public personal URL spellings (each one is a hasconfig hit) plus a
+# multi-remote repo whose origin is foreign and whose upstream is personal
+# (hasconfig fires on ANY remote, not just origin). Expected: absent / empty /
+# email-only -> refused (blank name); name-only -> the context name with an
+# EMPTY email (Git accepts it; visibly broken, never personal); complete ->
+# the context identity. One report line per context x state.
+personal_remotes=(
+  "https://github.com/kosako/x.git"
+  "git@github.com:kosako/x.git"
+  "ssh://git@github.com/kosako/x.git"
+)
+for ctx in work client sandbox agent; do
+  for state in absent empty name-only email-only complete; do
+    write_identity "$fixture/.config/git/$ctx.gitconfig" "$state" "$ctx"
+    case "$state" in
+      absent|empty|email-only) expect=refused; expect_desc="commit refused (blank name)" ;;
+      name-only) expect="Dotfiles $ctx Test|"; expect_desc="context name with an EMPTY email (visibly broken, not personal)" ;;
+      complete) expect="Dotfiles $ctx Test|dotfiles-$ctx@example.invalid"; expect_desc="the $ctx identity" ;;
+    esac
+    matrix_ok=1
+    remote_i=0
+    for remote in "${personal_remotes[@]}" multi; do
+      remote_i=$((remote_i + 1))
+      repo="$fixture/src/$ctx/reset-$state-$remote_i"
+      mkdir -p "$repo"
+      run_git "$repo" init --quiet --initial-branch=main
+      if [[ "$remote" == multi ]]; then
+        run_git "$repo" config remote.origin.url "https://github.com/someorg/x.git"
+        run_git "$repo" config remote.upstream.url "https://github.com/kosako/x.git"
+      else
+        run_git "$repo" config remote.origin.url "$remote"
+      fi
+      expect_ident "$repo" "$expect" "$ctx / $state / $remote" || matrix_ok=0
+    done
+    if [[ "$matrix_ok" -eq 1 ]]; then
+      ok "test passed: $ctx dir + personal remote (3 spellings + multi-remote) with $state identity file -> $expect_desc"
+    else
+      status=1
+    fi
+  done
+done
+
+# Outside ~/src/ the reset never applies (it is gitdir-keyed), so the personal
+# fallback still resolves for a personal remote and a foreign remote stays
+# fail-closed — asserted above in the hasconfig section; re-checked here after
+# the matrix touched the context files, with the real commit object.
+repo="$fixture/outside/after-reset"
+mkdir -p "$repo"
+run_git "$repo" init --quiet --initial-branch=main
+run_git "$repo" config remote.origin.url "https://github.com/kosako/x.git"
+if expect_ident "$repo" "Dotfiles Test|dotfiles-test@example.invalid" "outside / personal remote"; then
+  ok "test passed: outside ~/src/ the personal remote fallback is untouched by the reset"
+else
+  status=1
+fi
+
+# Linked worktrees follow the .git directory of their MAIN repo: includeIf
+# gitdir matches the resolved .git location, not the checkout path. Placement
+# cannot re-context a worktree and neither can the reset — a personal repo's
+# worktree under ~/src/work/ still commits as personal. Documented limitation
+# (docs/git-identity.md), pinned so a change in Git or in the rules is noticed.
+wt_main="$fixture/src/personal/wt-main"
+mkdir -p "$wt_main"
+run_git "$wt_main" init --quiet --initial-branch=main
+run_git "$wt_main" commit --quiet --allow-empty -m base
+run_git "$wt_main" worktree add --quiet "$fixture/src/work/wt-linked" -b linked
+if expect_ident "$fixture/src/work/wt-linked" "Dotfiles Test|dotfiles-test@example.invalid" "linked worktree under work dir"; then
+  ok "test passed: a linked worktree keeps its main repo's context (documented: placement and reset do not apply)"
+else
   status=1
 fi
 

@@ -45,15 +45,35 @@
 [includeIf "gitdir:~/src/personal/"]
 	path = ~/.config/git/personal.gitconfig
 
+# Each NON-personal context first includes the managed identity reset (blank
+# user.name / user.email, no values) and only then its local identity file.
+# Without the reset, a repo under ~/src/work/ whose remote matches the
+# personal URL above would keep the personal identity whenever the work file
+# is missing (last-match-wins has nothing to overwrite it with) — the
+# fallback leaked across contexts (#202). Reset first, the missing (or empty)
+# context file leaves the identity blank and useConfigOnly refuses to commit:
+# fail-closed, no inheritance. A PARTIAL file (name only) still commits with
+# an empty email — Git only rejects an empty name — so that case is not
+# closed here but is visibly broken (prompt shows no-identity, doctor reports
+# the partial file); a commit-hook gate for it is a separate issue. The two
+# entries per context MUST stay adjacent and in this order.
+[includeIf "gitdir:~/src/work/"]
+	path = ~/.config/git-profile/identity-reset.gitconfig
 [includeIf "gitdir:~/src/work/"]
 	path = ~/.config/git/work.gitconfig
 
 [includeIf "gitdir:~/src/client/"]
+	path = ~/.config/git-profile/identity-reset.gitconfig
+[includeIf "gitdir:~/src/client/"]
 	path = ~/.config/git/client.gitconfig
 
 [includeIf "gitdir:~/src/sandbox/"]
+	path = ~/.config/git-profile/identity-reset.gitconfig
+[includeIf "gitdir:~/src/sandbox/"]
 	path = ~/.config/git/sandbox.gitconfig
 
+[includeIf "gitdir:~/src/agent/"]
+	path = ~/.config/git-profile/identity-reset.gitconfig
 [includeIf "gitdir:~/src/agent/"]
 	path = ~/.config/git/agent.gitconfig
 
