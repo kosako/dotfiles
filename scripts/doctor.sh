@@ -338,14 +338,114 @@ for command_name in zsh starship; do
   command_status "$command_name" || true
 done
 
+# ---- bounded external-command probe ----
+# doctor asks a few external commands for an answer it wants but must not
+# wait for forever: a signed-out `op whoami` blocks on the 1Password app's
+# unlock prompt (#231), a broken herdr could block likewise (#225). The
+# rule, set by the herdr section under Codex review (PR #226) and shared
+# here since #231: every such probe runs under one deadline, reads no
+# terminal input, uses no temp file (a failing mktemp must not break the
+# report-only contract), and its output is adopted only on a clean exit 0 —
+# an absent, failing or hung command all collapse to "not checked", never
+# to a partial answer read as a definite one. At the deadline, and when
+# doctor itself is interrupted, the probe's whole process tree is reaped.
+#
+# bounded_probe CMD [ARG...]
+# Run CMD with stdin from /dev/null and stderr discarded for at most
+# $probe_deadline seconds. On return, probe_rc holds CMD's exit status ("" when
+# none arrived in time: killed at the deadline) and probe_lines its stdout
+# (newline-terminated lines, blank lines dropped) — meaningful only when
+# probe_rc is 0.
+probe_deadline=5
+probe_job=""
+probe_launching=0
+probe_rc=""
+probe_lines=""
+# kill_process_tree PID — SIGTERM then SIGKILL PID and every descendant
+# (children first, via pgrep -P), so a wrapper on PATH that forked the real
+# work does not leave an orphan behind the deadline.
+kill_process_tree() {
+  local pid="$1" child
+  while IFS= read -r child; do
+    [[ -n "$child" ]] && kill_process_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill -TERM "$pid" 2>/dev/null || true
+  kill -KILL "$pid" 2>/dev/null || true
+}
+# probe_cleanup — reap the probe's process substitution (and thus the probe
+# and anything it forked) if it is still alive; also the INT / TERM / EXIT
+# handler below, so an interrupted doctor leaves no probe behind. The probe
+# is identified by the substitution's pid, which bash exposes as $! the
+# moment `exec 3< <(...)` returns, so there is no window in which the probe
+# exists but is unknown: an interrupt landing before `probe_job` is
+# assigned finds it through $! — trusted only while the launch is in flight
+# AND it is a live child of this doctor, because a stale $! from an earlier
+# process substitution could have been reused by an unrelated process. bash
+# 3.2 errors on an unset $! under set -u, so it is read in a subshell with
+# -u off (Codex review, PR #226 rounds 3-4).
+probe_cleanup() {
+  local job
+  job="$probe_job"
+  if [[ -z "$job" && "$probe_launching" == 1 ]]; then
+    job="$( ( set +u; printf '%s' "$!" ) 2>/dev/null || true)"
+    if [[ -n "$job" ]] && ! pgrep -P $$ 2>/dev/null | grep -qx "$job"; then
+      job=""
+    fi
+  fi
+  if [[ -n "$job" ]] && kill -0 "$job" 2>/dev/null; then
+    kill_process_tree "$job"
+  fi
+  probe_job=""
+  return 0
+}
+trap probe_cleanup EXIT
+trap 'probe_cleanup; trap - INT; kill -INT $$' INT
+trap 'probe_cleanup; trap - TERM; kill -TERM $$' TERM
+# Bounded run WITHOUT a temp file: the probe's stdout comes through a
+# process substitution whose subshell appends the probe's exit status as a
+# `__rc=` line, preceded by a newline of its own so an output that ends
+# without one cannot swallow it (the blank line that adds is dropped); each
+# read carries the remaining deadline. A read that fails while the deadline
+# has not produced the status line is the deadline (bash 3.2's read -t
+# returns 1 there, 4+ returns >128, so neither status is relied on): the
+# tree is killed and nothing is adopted. Only a clean exit 0 with its status
+# line seen is adopted.
+bounded_probe() {
+  local started remaining line
+  probe_rc=""
+  probe_lines=""
+  started=$SECONDS
+  probe_launching=1
+  exec 3< <({ if "$@" 2>/dev/null </dev/null; then printf '\n__rc=0\n'; else printf '\n__rc=%s\n' "$?"; fi; } 2>/dev/null)
+  probe_job=$!
+  probe_launching=0
+  while :; do
+    remaining=$(( probe_deadline - (SECONDS - started) ))
+    (( remaining > 0 )) || break
+    IFS= read -r -t "$remaining" line <&3 || break
+    case "$line" in
+      __rc=*) probe_rc="${line#__rc=}"; break ;;
+      "") ;;
+      *) probe_lines+="$line"$'\n' ;;
+    esac
+  done
+  probe_cleanup
+  exec 3<&-
+}
+
 section "1Password"
 if [[ "$(capability_value "$profile" allowSecretsAccess)" == "true" ]]; then
   if command -v op >/dev/null 2>&1; then
-    if op whoami >/dev/null 2>&1; then
-      ok "op signed in"
-    else
-      warn "op available but not signed in"
-    fi
+    # A signed-out op (or one waiting on the 1Password app's unlock prompt)
+    # gives `op whoami` no answer; unbounded, it stalled the whole doctor
+    # here (#231). The deadline is reported as exactly that — unknown — not
+    # as "not signed in".
+    bounded_probe op whoami
+    case "$probe_rc" in
+      0) ok "op signed in" ;;
+      "") warn "op sign-in state not checked: op whoami gave no answer within ${probe_deadline}s (waiting on an unlock / sign-in prompt, or stuck; the probe was killed) — unlock or sign in to 1Password, then re-run doctor" ;;
+      *) warn "op available but not signed in" ;;
+    esac
   else
     warn "op not found"
   fi
@@ -898,89 +998,17 @@ section "herdr integration (report-only)"
 # registration runs it as `bash '<path>' session`, so a readable regular
 # file is what matters, not an exec bit. Version currency comes from `herdr
 # integration status`, which only reads the body header under $HOME (no
-# server, no writes — herdr v0.9.0 src/integration). It runs under a
-# deadline (no temp file; the probe's process tree is reaped at the
-# deadline and on interrupt) and its output is adopted only on exit 0, so
-# an absent, failing or hung herdr all collapse to "currency not checked":
-# doctor neither stalls nor reports a partial answer as current (Codex
-# review, PR #226).
+# server, no writes — herdr v0.9.0 src/integration). It runs through
+# bounded_probe (the shared deadline / no-temp-file / tree-reaping helper
+# defined before the 1Password section) and its output is adopted only on
+# exit 0, so an absent, failing or hung herdr all collapse to "currency not
+# checked": doctor neither stalls nor reports a partial answer as current
+# (Codex review, PR #226).
 herdr_status=""
-herdr_status_deadline=5
-herdr_status_job=""
-herdr_status_launching=0
-# kill_process_tree PID — SIGTERM then SIGKILL PID and every descendant
-# (children first, via pgrep -P), so a wrapper on PATH that forked the real
-# work does not leave an orphan behind the deadline.
-kill_process_tree() {
-  local pid="$1" child
-  while IFS= read -r child; do
-    [[ -n "$child" ]] && kill_process_tree "$child"
-  done < <(pgrep -P "$pid" 2>/dev/null || true)
-  kill -TERM "$pid" 2>/dev/null || true
-  kill -KILL "$pid" 2>/dev/null || true
-}
-# herdr_status_cleanup — reap the probe's process substitution (and thus the
-# probe and anything it forked) if it is still alive; also the INT / TERM /
-# EXIT handler below, so an interrupted doctor leaves no herdr behind. The
-# probe is identified by the substitution's pid, which bash exposes as $!
-# the moment `exec 3< <(...)` returns, so there is no window in which the
-# probe exists but is unknown: an interrupt landing before `herdr_status_job`
-# is assigned finds it through $! — trusted only while the launch is in
-# flight AND it is a live child of this doctor, because a stale $! from an
-# earlier process substitution could have been reused by an unrelated
-# process. bash 3.2 errors on an unset $! under set -u, so it is read in a
-# subshell with -u off (Codex review, PR #226 rounds 3-4).
-herdr_status_cleanup() {
-  local job
-  job="$herdr_status_job"
-  if [[ -z "$job" && "$herdr_status_launching" == 1 ]]; then
-    job="$( ( set +u; printf '%s' "$!" ) 2>/dev/null || true)"
-    if [[ -n "$job" ]] && ! pgrep -P $$ 2>/dev/null | grep -qx "$job"; then
-      job=""
-    fi
-  fi
-  if [[ -n "$job" ]] && kill -0 "$job" 2>/dev/null; then
-    kill_process_tree "$job"
-  fi
-  herdr_status_job=""
-  return 0
-}
 if command -v herdr >/dev/null 2>&1; then
-  trap herdr_status_cleanup EXIT
-  trap 'herdr_status_cleanup; trap - INT; kill -INT $$' INT
-  trap 'herdr_status_cleanup; trap - TERM; kill -TERM $$' TERM
-  # Bounded run WITHOUT a temp file (a failing mktemp must not break the
-  # report-only contract — Codex review, PR #226): the probe's stdout comes
-  # through a process substitution whose subshell appends the probe's exit
-  # status as a `__rc=` line, preceded by a newline of its own so an output
-  # that ends without one cannot swallow it (the blank line that adds is
-  # dropped); each read carries the remaining deadline. A read that fails
-  # while the deadline has not produced the status line is the deadline
-  # (bash 3.2's read -t returns 1 there, 4+ returns >128, so neither status
-  # is relied on): the tree is killed and nothing is adopted. Only a clean
-  # exit 0 with its status line seen is adopted.
-  herdr_status_rc=""
-  herdr_status_lines=""
-  herdr_status_line=""
-  herdr_status_started=$SECONDS
-  herdr_status_launching=1
-  exec 3< <({ if herdr integration status 2>/dev/null; then printf '\n__rc=0\n'; else printf '\n__rc=%s\n' "$?"; fi; } 2>/dev/null)
-  herdr_status_job=$!
-  herdr_status_launching=0
-  while :; do
-    herdr_status_remaining=$(( herdr_status_deadline - (SECONDS - herdr_status_started) ))
-    (( herdr_status_remaining > 0 )) || break
-    IFS= read -r -t "$herdr_status_remaining" herdr_status_line <&3 || break
-    case "$herdr_status_line" in
-      __rc=*) herdr_status_rc="${herdr_status_line#__rc=}"; break ;;
-      "") ;;
-      *) herdr_status_lines+="$herdr_status_line"$'\n' ;;
-    esac
-  done
-  herdr_status_cleanup
-  exec 3<&-
-  if [[ "$herdr_status_rc" == "0" ]]; then
-    herdr_status="$herdr_status_lines"
+  bounded_probe herdr integration status
+  if [[ "$probe_rc" == "0" ]]; then
+    herdr_status="$probe_lines"
   fi
 fi
 # herdr_integration_state AGENT

@@ -46,7 +46,7 @@ op run --env-file=.env.tmpl -- <command>
 secret 供給が有効になるのは `allowSecretsAccess=true` の profile に限る。
 
 - `allowSecretsAccess` は [policy-model](policy-model.md) の environmentKind 不変条件により、**work / client / sandbox / agent では `false` 必須**(`validate-policy.sh` が hard fail で強制)。供給規約が効くのは `personal` 等に限られる。
-- `doctor` の `1Password` section は `allowSecretsAccess=true` のときだけ `op` の存在と sign-in を report-only で確認する。secret 値そのものは読まない。`false` の profile では「secret access disabled」と報告して終わる。
+- `doctor` の `1Password` section は `allowSecretsAccess=true` のときだけ `op` の存在と sign-in を report-only で確認する。secret 値そのものは読まない。`false` の profile では「secret access disabled」と報告して終わる。sign-in 確認の `op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し(未ログインの `op` は対話 unlock を待って応答しないことがある、#231)、期限内に答えが無ければ「sign-in 未確認」と warn して次の section へ進む(「not signed in」とは断定しない)。
 
 この gate は **secret 供給という用途だけ**を縛る。direnv 一般の利用(後述)は別 capability で、ここでは縛らない。
 
@@ -75,7 +75,7 @@ direnv には 2 つの用途がある。本 doc が扱うのは後者(secret 供
 
 ## 検査
 
-- `doctor`(report-only、副作用なし): `allowSecretsAccess=true` のとき `1Password` section が `op` の存在と sign-in を確認する。`enableDirenv=true` のとき `runtime and shell` section が `direnv` の存在を確認する。いずれも secret 値は読まない。
+- `doctor`(report-only、副作用なし): `allowSecretsAccess=true` のとき `1Password` section が `op` の存在と sign-in を確認する(`op whoami` は 5 秒の期限付き。応答なしは「未確認」の warn で doctor は止まらない、#231)。`enableDirenv=true` のとき `runtime and shell` section が `direnv` の存在を確認する。いずれも secret 値は読まない。
 
 ## 対象外
 
