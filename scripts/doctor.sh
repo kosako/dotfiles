@@ -345,10 +345,13 @@ done
 # rule, set by the herdr section under Codex review (PR #226) and shared
 # here since #231: every such probe runs under one deadline, reads no
 # terminal input, uses no temp file (a failing mktemp must not break the
-# report-only contract), and its output is adopted only on a clean exit 0 —
-# an absent, failing or hung command all collapse to "not checked", never
-# to a partial answer read as a definite one. At the deadline, and when
-# doctor itself is interrupted, the probe's whole process tree is reaped.
+# report-only contract), and its output is adopted only on a clean exit 0.
+# A command that gives no exit status in time (hung, so killed at the
+# deadline) is reported as "not checked", never as a partial answer read as
+# a definite one; what a prompt non-zero exit means is the caller's call
+# (herdr: currency not checked; op: not signed in). At the deadline, and
+# when doctor itself is interrupted, the probe's whole process tree is
+# reaped.
 #
 # bounded_probe CMD [ARG...]
 # Run CMD with stdin from /dev/null and stderr discarded for at most
