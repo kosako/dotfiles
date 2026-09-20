@@ -230,9 +230,13 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   status` の currency(current / outdated / needs repair。herdr は body header を読むだけで
   server 不要・書き込み無し。**5 秒の期限付きで実行し exit 0 のときだけ出力を採用** — herdr
   不在・失敗・hang はいずれも「currency 未確認」の presence 表示に倒し、doctor を止めない。
-  一時ファイルは使わず(mktemp 失敗で report-only 契約を破らない)、期限到達時は probe の
-  process tree ごと回収し、doctor が INT / TERM で中断されても trap で回収する)を
-  report-only で出す。module 非 active は dangling として warn。capability=false は宣言上の
+  一時ファイルは使わず(mktemp 失敗で report-only 契約を破らない)、stdin は `/dev/null`
+  (対話 prompt で待たない)、期限到達時は probe の process tree ごと回収し、doctor が
+  INT / TERM で中断されても trap で回収する)を report-only で出す。この期限付き実行は
+  doctor 共通の `bounded_probe` helper に置き、`1Password` section の `op whoami` も同じ
+  helper で回す(#231。未ログインで応答しない `op whoami` が doctor 全体を止めていた。期限
+  到達は「sign-in 未確認」の warn であって「not signed in」とは断定しない)。module 非
+  active は dangling として warn。capability=false は宣言上の
   状態として報告し(live 登録は probe しない)、herdr 自身の見え方を home ごとに info で
   添える — settings module が active な home では「managed file なので installer が足した
   登録は次の apply で消える drift」、非 active な home では「unmanaged なので登録も body も

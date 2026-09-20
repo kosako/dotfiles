@@ -1040,6 +1040,113 @@ else
 fi
 rm -rf "$hi_fakebin" "$hi_claude_body" "$hi_codex_body"
 
+# OP) 1Password sign-in probe (#231): `op whoami` runs through the shared
+#     bounded_probe, so a signed-out op blocking on the app's unlock prompt
+#     cannot stall doctor. PATH-front fake op (same pattern as the fake herdr
+#     above). MODE `ok` answers exit 0; `fail` exits 1 (signed out); `hang`
+#     forks a `sleep 60` GRANDCHILD (pid in sleep.pid) and waits on it, so
+#     the deadline must reap the whole tree; `stdin` exits 0 only when its
+#     stdin IS /dev/null (test -ef), proving the probe reads no terminal
+#     input even though doctor's own stdin carries a line. Committed
+#     personal has allowSecretsAccess=true; doctor stays exit 0 throughout.
+op_fakebin="$fixture_home/opfake"
+mkdir -p "$op_fakebin"
+# write_fake_op MODE
+write_fake_op() {
+  cat > "$op_fakebin/op" <<SH
+#!/bin/sh
+[ "\$1" = whoami ] || exit 2
+if [ "$1" = hang ]; then sleep 60 & printf '%s\\n' "\$!" > "$op_fakebin/sleep.pid"; wait; fi
+if [ "$1" = stdin ]; then [ /dev/fd/0 -ef /dev/null ]; exit; fi
+printf 'URL: https://example.1password.com\\n'
+[ "$1" = ok ]
+SH
+  chmod +x "$op_fakebin/op"
+}
+op_signed_in="[ok] op signed in"
+op_signed_out="[warn] op available but not signed in"
+op_unchecked="[warn] op sign-in state not checked: op whoami gave no answer within 5s (waiting on an unlock / sign-in prompt, or stuck; the probe was killed) — unlock or sign in to 1Password, then re-run doctor"
+#     OP-a) signed in -> ok, and no other verdict on the same run.
+write_fake_op ok
+if op_out="$(HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "$op_signed_in" <<< "$op_out" \
+    && ! grep -Fq "$op_signed_out" <<< "$op_out" && ! grep -Fq "$op_unchecked" <<< "$op_out"; then
+    ok "test passed: a signed-in op is reported ok"
+  else
+    printf '%s\n' "$op_out" >&2
+    fail "test failed: signed-in op not reported as the single ok line"
+    status=1
+  fi
+else
+  printf '%s\n' "$op_out" >&2
+  fail "test failed: doctor must stay exit 0 (1Password, op signed in)"
+  status=1
+fi
+#     OP-b) signed out (op whoami answers exit 1) -> the existing warn, not
+#           the deadline one.
+write_fake_op fail
+if op_out="$(HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "$op_signed_out" <<< "$op_out" \
+    && ! grep -Fq "$op_signed_in" <<< "$op_out" && ! grep -Fq "$op_unchecked" <<< "$op_out"; then
+    ok "test passed: a signed-out op is reported as not signed in"
+  else
+    printf '%s\n' "$op_out" >&2
+    fail "test failed: signed-out op not reported as the single not-signed-in line"
+    status=1
+  fi
+else
+  printf '%s\n' "$op_out" >&2
+  fail "test failed: doctor must stay exit 0 (1Password, op signed out)"
+  status=1
+fi
+#     OP-c) op hangs -> killed at the deadline with its grandchild reaped,
+#           the state reported as NOT CHECKED (never as signed in / out),
+#           and doctor goes on to the next section. The grandchild sleeps
+#           60s; the run must return well before that.
+write_fake_op hang
+rm -f "$op_fakebin/sleep.pid"
+op_started=$SECONDS
+if op_out="$(HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  op_elapsed=$((SECONDS - op_started))
+  sleep 0.5
+  op_sleep_pid="$(cat "$op_fakebin/sleep.pid" 2>/dev/null || true)"
+  if (( op_elapsed < 45 )) \
+    && [[ -n "$op_sleep_pid" ]] && ! kill -0 "$op_sleep_pid" 2>/dev/null \
+    && grep -Fxq "$op_unchecked" <<< "$op_out" \
+    && ! grep -Fq "$op_signed_in" <<< "$op_out" && ! grep -Fq "$op_signed_out" <<< "$op_out" \
+    && grep -Fq "== SSH (1Password agent) ==" <<< "$op_out"; then
+    ok "test passed: a hung op whoami is killed at the deadline (${op_elapsed}s) with its grandchild reaped, reported as not checked, and doctor continues"
+  else
+    printf '%s\n' "$op_out" >&2
+    fail "test failed: hung op whoami stalled doctor (${op_elapsed}s), left its grandchild alive (pid ${op_sleep_pid:-none}), or was reported as a definite state"
+    status=1
+    [[ -n "$op_sleep_pid" ]] && kill "$op_sleep_pid" 2>/dev/null || true
+  fi
+else
+  printf '%s\n' "$op_out" >&2
+  fail "test failed: doctor must stay exit 0 (1Password, op hung)"
+  status=1
+fi
+#     OP-d) the probe reads no terminal input: doctor's stdin is a pipe with
+#           a line in it, and the fake answers "signed in" only if its own
+#           stdin is /dev/null — a probe inheriting doctor's stdin would
+#           read as signed out.
+write_fake_op stdin
+if op_out="$(printf 'typed input\n' | HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "$op_signed_in" <<< "$op_out"; then
+    ok "test passed: the op probe reads /dev/null, not doctor's stdin"
+  else
+    printf '%s\n' "$op_out" >&2
+    fail "test failed: the op probe did not run with stdin from /dev/null"
+    status=1
+  fi
+else
+  printf '%s\n' "$op_out" >&2
+  fail "test failed: doctor must stay exit 0 (1Password, stdin isolation)"
+  status=1
+fi
+rm -rf "$op_fakebin"
+
 # NA) next-actions summary (#227): every warning reported through `action`
 #     is repeated once, numbered, at the end of the run with its steps, and
 #     `--actions-only` prints just that list. doctor stays exit 0 (report-
