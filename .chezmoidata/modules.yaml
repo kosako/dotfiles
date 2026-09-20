@@ -2,9 +2,11 @@ modules:
   base:
     description: 全環境共通の最小設定。
   git-profile:
-    description: directory convention に基づく Git identity 分離。
+    description: directory convention に基づく Git identity 分離。非 personal context は managed な identity reset(~/.config/git-profile/identity-reset.gitconfig、値なし)を context file の直前に include し、personal の remote fallback が context をまたいで流入しない(#202)。
     paths:
       - .gitconfig
+      - .config/git-profile
+      - .config/git-profile/identity-reset.gitconfig
   supply-chain-git:
     description: Git credential 漏洩防止と remote URL 検査。
   supply-chain-npm:

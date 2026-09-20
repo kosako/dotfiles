@@ -191,11 +191,36 @@ else
 fi
 
 section "Git identity contexts"
+# An existing identity file is also checked for COMPLETENESS, presence-only:
+# `git config --file` tells whether user.name / user.email are set and
+# non-empty; the values are never printed. A partial file is the one state the
+# managed identity reset (#202) cannot fail close — Git refuses an empty name
+# but accepts an empty email — so doctor is its main detector: commits under
+# that root carry an empty ident, visibly broken rather than another
+# context's identity. A file git cannot parse is reported as such, not as
+# partial.
 for context in personal work client sandbox agent; do
   identity_file="$HOME/.config/git/$context.gitconfig"
   project_root="$HOME/src/$context"
   if [[ -f "$identity_file" ]]; then
-    ok "identity file exists: $identity_file"
+    if ! command -v git >/dev/null 2>&1; then
+      ok "identity file exists: $identity_file (completeness not checked: git not found)"
+    elif ! git config --file "$identity_file" --list >/dev/null 2>&1; then
+      warn "identity file exists but git cannot parse it: $identity_file (syntax error?) — commits under $project_root fail until it is fixed"
+    else
+      identity_missing=""
+      for identity_key in name email; do
+        if [[ -z "$(git config --file "$identity_file" --get "user.$identity_key" 2>/dev/null || true)" ]]; then
+          identity_missing+="${identity_missing:+ }user.$identity_key"
+        fi
+      done
+      if [[ -z "$identity_missing" ]]; then
+        ok "identity file exists: $identity_file"
+      else
+        action "identity file is partial: $identity_file has no $identity_missing — commits under $project_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" \
+          "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md)"
+      fi
+    fi
   elif [[ -d "$project_root" ]]; then
     action "project root exists but identity file missing: $identity_file" \
       "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) — commits under $project_root are refused until then"

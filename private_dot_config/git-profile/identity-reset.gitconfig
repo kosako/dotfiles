@@ -1,0 +1,11 @@
+# Managed by chezmoi from kosako/dotfiles (git-profile module).
+# Identity RESET for the non-personal directory contexts (#202). ~/.gitconfig
+# includes this file immediately before each context's local identity file
+# (~/.config/git/<context>.gitconfig), so whatever an earlier rule resolved —
+# in particular the personal remote-URL fallback — is blanked first. With
+# user.useConfigOnly, a missing or empty context file then refuses to commit
+# ("empty ident name") instead of inheriting another context's identity.
+# Contains no identity values by design. See docs/git-identity.md.
+[user]
+	name =
+	email =

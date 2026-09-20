@@ -45,6 +45,9 @@ identity の判定は「置き場所(gitdir)」が一次。加えて、**persona
 - **gitdir が authoritative**: hasconfig ルールは gitdir ルールより **前**に置く。includeIf は
   後勝ちなので、置き場所(gitdir)が当たればそちらが優先される(例: `~/src/work/` に置いた
   `github.com/kosako` remote のリポは work identity)。hasconfig は gitdir が当たらないときだけ効く。
+  ただし「後勝ち」は context file が**値を持っているとき**しか効かない — context file が無い /
+  空だと hasconfig が入れた personal identity がそのまま残る。これを塞ぐのが次節の identity
+  reset(#202)。
 - **personal に限る(public 制約)**: `dot_gitconfig` は public repo に入るため、会社・クライアントの
   org 名 / URL は書けない。公開可能な personal(`github.com/kosako`)だけを二次判定し、work / client は
   gitdir のみ + org 名は local identity file 側に留める。
@@ -52,6 +55,47 @@ identity の判定は「置き場所(gitdir)」が一次。加えて、**persona
   `ssh://` 形(`ssh://git@github.com/kosako/**`)はそれぞれ別文字列として literal にマッチするため、
   3 つとも宣言する(1 つでも欠けるとその clone 形では取りこぼす)。
 - work / client を `~/src/` の外に clone した場合は二次判定が無いので commit は fail-closed(安全側)。
+
+## 非 personal context の identity reset(Issue #202)
+
+`~/src/work/` 等の非 personal context に置いた repo でも、remote が `github.com/kosako/**` に
+一致し、その context の identity file が**無い / 空**だと、上の二次判定が入れた personal
+identity がそのまま commit に使われていた(後勝ちで上書きする値が無いため)。name だけの
+部分設定では context の name + personal email が混在した。directory による分離と
+「未設定なら commit 拒否」の契約違反。
+
+対策として、managed な **identity reset file**(`~/.config/git-profile/identity-reset.gitconfig`、
+`git-profile` module。`[user] name =` / `email =` の空値だけで identity 値は持たない)を、非 personal
+4 context それぞれの gitdir include の**直前**に include する:
+
+```ini
+[includeIf "gitdir:~/src/work/"]
+	path = ~/.config/git-profile/identity-reset.gitconfig
+[includeIf "gitdir:~/src/work/"]
+	path = ~/.config/git/work.gitconfig
+```
+
+reset が先に identity を空にするので、それまでに何が当たっていても(personal fallback を含む)
+context file の値だけが残る。include 順は契約なので `scripts/test-gitconfig.sh` が exact pin する。
+`~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
+では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
+
+context file の状態ごとの結果(`scripts/test-gitconfig.sh` の matrix が固定):
+
+| context file | 結果 |
+| --- | --- |
+| 無い / 空 / email だけ | commit 拒否(`fatal: empty ident name (for <>) not allowed`) — fail-closed |
+| name だけ | context の name + **空 email** で commit が通る(Git は空 name は拒否するが空 email は受理する)。personal ではないが壊れた identity。prompt は赤(no-identity)、`doctor` が partial として action、`git log` で `<>` が見える |
+| 完全 | その context の identity |
+
+- **部分設定は config 層では塞げない**。可視化(prompt / doctor / log)で検知し、commit hook で
+  止める gate は別 issue(agent-tools の dispatcher 側)。
+- **`~/src/` の外**には reset は当たらない(gitdir 条件)。personal remote なら二次判定で personal、
+  それ以外は従来どおり fail-closed。
+- **linked worktree / submodule は主 repo の `.git` の場所で判定される**(includeIf の gitdir は
+  `.git` file の先の実体 directory を見る)。personal repo の worktree を `~/src/work/` に置いても
+  personal のまま(reset も当たらない)。置き場所による分離が効かない既知の制約で、test が
+  特性として固定している。
 
 ## 管理方式の決定(2026-06-11、Issue #19)
 
@@ -90,10 +134,14 @@ fatal: no email was given and auto-detection is disabled
 
 - `scripts/doctor.sh` は report-only で以下を確認する。
   - `user.useConfigOnly=true` / `transfer.credentialsInUrl=die`
-  - 各 context の identity file が存在するか、意図的に未設定か。
+  - 各 context の identity file が存在するか、意図的に未設定か。存在する file は `user.name` /
+    `user.email` の**有無だけ**(値は出さない)を見て、片方が欠ける partial を action として出す
+    (#202。git が parse できない file はその旨を warn)。
 - `scripts/preflight.sh` は apply 前に既存の home Git config(`~/.gitconfig`、`~/.config/git/config`)と
   global identity の設定有無を検知する。値そのものは表示しない。
-- `scripts/test-gitconfig.sh` は `dot_gitconfig` の安全設定と includeIf の挙動を local fixture で検証する。
+- `scripts/test-gitconfig.sh` は `dot_gitconfig` の安全設定と includeIf の挙動を local fixture で検証する
+  (include 順の exact pin、非 personal context × identity file 状態 × personal remote 表記 / multi-remote
+  の matrix を実 commit の author / committer で検証、linked worktree の特性)。
 
 ## SSH 署名(git-signing module、Issue #85 / 既定 off は Issue #97)
 
