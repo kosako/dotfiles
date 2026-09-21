@@ -85,6 +85,12 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
 - verify / restore は schema version 1 と metadata の型、非空の files 配列、各 path の安全性・一意性、
   各 file の SHA-256・mode・size、archive 内 file 集合との一致を検証する。JSON parse や列挙 query が
   失敗した場合も拒否し、restore は検証済みの path 一覧だけを使用する。
+- **backup の自己検証(#224、採用・常時 on)**: 暗号化の直前に、verify / restore と**同じ検査関数**を
+  staging(manifest + files/)に当てる。不合格なら `--out` を作らず(古い `.partial` も残さず)marker も
+  更新せず exit 非 0。保証範囲は **staging / manifest の整合**まで(producer / consumer のズレを作成時に
+  検出する)。暗号化後の復号 round-trip は identity が要るため backup では行わない(`verify` の契約)。
+  受理条件は 3 コマンドで共有し、backup 独自の緩い検査は持たない。off にする flag は無い(対象は小さな
+  private path 集合で再 hash のコストは無視できる)。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(`~/.local/state/dotfiles/
   restore-backup-<ts>/`)へ move。`--skip-existing` で既存は触らない。**symlink 化した親ディレクトリ

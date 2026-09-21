@@ -772,6 +772,53 @@ else
   miss "verify accepted a tampered supplement payload"
 fi
 
+# 26. backup self-checks its staging with the verify/restore manifest test
+#     before encrypting (issue #224): a good run reports it, and a staging
+#     that no longer matches the manifest is refused before any output.
+sc_home="$fixture_home/sc-home"
+mkdir -p "$sc_home/.ssh"
+printf 'a\n' > "$sc_home/.zshrc.local"
+printf 'b\n' > "$sc_home/.ssh/config.local"
+sc_out="$(HOME="$sc_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sc_home/ok.age" --recipient "$recipient" --yes 2>&1)" || true
+if grep -Fq "self-check manifest" <<< "$sc_out" && grep -Eq '^\[ok\] verified [0-9]+ file\(s\)' <<< "$sc_out" \
+  && [[ -f "$sc_home/ok.age" ]]; then
+  pass "backup self-checks the staging before writing"
+else
+  printf '%s\n' "$sc_out" >&2
+  miss "backup did not report a staging self-check"
+fi
+# Fault injection at the tool boundary, not a backdoor in the script: a
+# fake cp copies for real, then corrupts the staged copy under files/ — the
+# manifest (hashed from the source) no longer matches the staging, exactly
+# the producer/consumer drift the self-check exists to catch.
+sc_fakebin="$fixture_home/cpfake"
+mkdir -p "$sc_fakebin"
+real_cp="$(command -v cp)"
+cat > "$sc_fakebin/cp" <<'SH'
+#!/bin/sh
+"$REAL_CP" "$@"
+rc=$?
+for last; do :; done
+case "$last" in
+  */files/*) printf 'x' >> "$last" ;;
+esac
+exit "$rc"
+SH
+chmod +x "$sc_fakebin/cp"
+sc_rc=0
+sc_out="$(HOME="$sc_home" REAL_CP="$real_cp" PATH="$sc_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sc_home/bad.age" --recipient "$recipient" --yes 2>&1)" || sc_rc=$?
+if [[ "$sc_rc" -ne 0 ]] && grep -Fq "checksum mismatch" <<< "$sc_out" \
+  && grep -Fq "staging failed self-check; no archive written" <<< "$sc_out" \
+  && [[ ! -e "$sc_home/bad.age" && ! -e "$sc_home/bad.age.partial" ]] \
+  && [[ "$(yq -p=json -o=tsv '.archive' "$sc_home/.local/state/dotfiles/private-backup.json")" == "ok.age" ]]; then
+  pass "a staging that no longer matches its manifest is refused: no archive, no partial, marker unchanged"
+else
+  printf '%s\n' "$sc_out" >&2
+  miss "self-check did not refuse a corrupted staging (rc=$sc_rc)"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi

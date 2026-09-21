@@ -327,6 +327,10 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `--local-supplement` の source path は manifest に載らず、復元先も canonical path であること。
   既存の補足は退避 / `--skip-existing` の規則に従うこと。補足が自身の path を宣言しても entry / file が
   重複しないこと。改竄された補足 payload を verify が拒否すること。
+- backup が暗号化前に staging を自己検証すること(#224): 正常 run で self-check の section と
+  `verified N file(s)` が出ること。PATH 先頭の fake `cp`(実 cp の後に staging 側の copy だけを改竄)で
+  manifest と staging がずれると、`checksum mismatch` で拒否し、`--out` も `.partial` も作らず marker が
+  前回のまま・exit 非 0 であること(script に test 用 backdoor は無い)。
 
 ## test-secrets-gate.sh
 
