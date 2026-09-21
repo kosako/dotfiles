@@ -14,7 +14,12 @@
          gh-secret entries; outward and escalation commands (push, PR / issue /
          release / repo mutation, auth, sudo, clone, curl) are ask, per
          docs/ai-policy.md (read-only local work needs no approval; leaving
-         the machine or escalating does). Rules are last-match-wins.
+         the machine or escalating does). Rules are last-match-wins. The ask
+         patterns end in a bare `*` with no space before it on purpose: `*`
+         matches zero or more characters, so `git push*` covers both the
+         argument-less `git push` (upstream set) and `git push origin main`,
+         whereas `git push *` would miss the bare form and fall through to
+         the allow-all base (Codex review, PR #235).
        - autoupdate off: update-policy (no self-updating tools; updates are
          deliberate, via the catalog source).
        - share disabled: no session upload surface (public safety).
@@ -54,20 +59,20 @@
       "env *": "deny",
       "printenv": "deny",
       "printenv *": "deny",
-      "git push *": "ask",
-      "git clone *": "ask",
-      "gh pr create *": "ask",
-      "gh pr merge *": "ask",
-      "gh pr comment *": "ask",
-      "gh pr review *": "ask",
-      "gh issue create *": "ask",
-      "gh issue comment *": "ask",
-      "gh release *": "ask",
-      "gh repo *": "ask",
-      "gh auth *": "ask",
-      "sudo *": "ask",
-      "curl *": "ask",
-      "wget *": "ask"
+      "git push*": "ask",
+      "git clone*": "ask",
+      "gh pr create*": "ask",
+      "gh pr merge*": "ask",
+      "gh pr comment*": "ask",
+      "gh pr review*": "ask",
+      "gh issue create*": "ask",
+      "gh issue comment*": "ask",
+      "gh release*": "ask",
+      "gh repo*": "ask",
+      "gh auth*": "ask",
+      "sudo*": "ask",
+      "curl*": "ask",
+      "wget*": "ask"
     }
   }
 }

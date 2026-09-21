@@ -90,8 +90,11 @@ fi
 
 # 4) The bash floor, EXACT and ordered: allow-all base, env-dump / gh-secret /
 #    ssh-key deny, outward + escalation ask (docs/ai-policy.md: local read-only
-#    work needs no approval, leaving the machine or escalating does).
-expected_bash=$'*=allow\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\ngit push *=ask\ngit clone *=ask\ngh pr create *=ask\ngh pr merge *=ask\ngh pr comment *=ask\ngh pr review *=ask\ngh issue create *=ask\ngh issue comment *=ask\ngh release *=ask\ngh repo *=ask\ngh auth *=ask\nsudo *=ask\ncurl *=ask\nwget *=ask'
+#    work needs no approval, leaving the machine or escalating does). The ask
+#    patterns end in `*` WITHOUT a space so the argument-less forms (`git
+#    push`, `gh pr create`) match too; a `git push *` spelling would let the
+#    bare command fall through to the allow-all base (Codex review, PR #235).
+expected_bash=$'*=allow\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\ngit push*=ask\ngit clone*=ask\ngh pr create*=ask\ngh pr merge*=ask\ngh pr comment*=ask\ngh pr review*=ask\ngh issue create*=ask\ngh issue comment*=ask\ngh release*=ask\ngh repo*=ask\ngh auth*=ask\nsudo*=ask\ncurl*=ask\nwget*=ask'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
   ok "test passed: permission.bash is exactly the pinned floor (8 deny, 14 ask, ordered)"
