@@ -321,6 +321,12 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - restore の上書きで既存ファイルを timestamp 退避すること。`--skip-existing` で既存を触らないこと。
 - restore が **symlink 化した親ディレクトリ経由の書き込みを拒否**し escape しないこと。
 - restore が verify 不合格アーカイブ / 拒否 profile では復元を拒否すること。
+- local 補足リスト自体が payload として canonical path(`.config/dotfiles/backup-paths.local`)に
+  捕捉され、restore が dry-run で計画し `--apply` で内容と mode ごと復元し、復元した home からの
+  再 backup が local 対象と補足を 1 回ずつ含むこと(#208。archive 最上位の旧形式 copy は作らない)。
+  `--local-supplement` の source path は manifest に載らず、復元先も canonical path であること。
+  既存の補足は退避 / `--skip-existing` の規則に従うこと。補足が自身の path を宣言しても entry / file が
+  重複しないこと。改竄された補足 payload を verify が拒否すること。
 
 ## test-secrets-gate.sh
 

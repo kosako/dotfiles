@@ -637,6 +637,141 @@ for query in '.entries[].path' '.files[] | [.sha256, .mode, (.size | tostring), 
     assert_manifest_rejected "$label"
 done
 
+# 25. The local supplement round-trips as payload at its canonical path
+#     (issue #208): restore lands it in the target home under the same rules
+#     as every other file, and the next backup from that home reads it.
+sup_rel=".config/dotfiles/backup-paths.local"
+sup_home="$fixture_home/sup-home"
+sup_dst="$fixture_home/sup-dst"
+mkdir -p "$sup_home/.ssh" "$sup_home/.config/dotfiles" "$sup_home/private" "$sup_dst"
+printf 'a\n' > "$sup_home/.zshrc.local"
+printf 'b\n' > "$sup_home/.ssh/config.local"
+printf 'client secret\n' > "$sup_home/private/extra"
+printf 'backup_paths:\n  - { path: "private/extra", type: file }\n' > "$sup_home/$sup_rel"
+chmod 600 "$sup_home/$sup_rel"
+sup_ok=1
+HOME="$sup_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sup_home/s.age" --recipient "$recipient" --yes >/dev/null 2>&1 || sup_ok=0
+sup_out="$(run restore --in "$sup_home/s.age" --identity "$fixture_home/keys/id.txt" --target-home "$sup_dst" 2>&1)" || sup_ok=0
+if [[ "$sup_ok" -eq 1 ]] && grep -Fq "would create: $sup_rel" <<< "$sup_out" && [[ ! -e "$sup_dst/$sup_rel" ]]; then
+  pass "restore dry-run plans the supplement at its canonical path and writes nothing"
+else
+  printf '%s\n' "$sup_out" >&2
+  miss "restore dry-run did not plan the supplement (or wrote it)"
+fi
+if run restore --in "$sup_home/s.age" --identity "$fixture_home/keys/id.txt" --target-home "$sup_dst" --apply >/dev/null 2>&1 \
+  && cmp -s "$sup_home/$sup_rel" "$sup_dst/$sup_rel" \
+  && [[ "$(file_mode "$sup_dst/$sup_rel")" == "600" ]] \
+  && [[ "$(cat "$sup_dst/private/extra")" == "client secret" ]]; then
+  pass "restore --apply lands the supplement at its canonical path with content and mode"
+else
+  miss "restore --apply did not land the supplement correctly"
+fi
+# Re-backup from the restored home, with no flag: the local target must still
+# be captured, and the supplement must appear exactly once (entry + file),
+# with no pre-#208 top-level copy in the archive.
+sup_extract="$fixture_home/sup-extract"
+mkdir -p "$sup_extract"
+if HOME="$sup_dst" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sup_dst/again.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  age -d -i "$fixture_home/keys/id.txt" "$sup_dst/again.age" | tar -xpf - -C "$sup_extract"
+  sup_files_extra="$(yq -p=json -o=tsv '[.files[].path | select(. == "private/extra")] | length' "$sup_extract/manifest.json")"
+  sup_files_list="$(R="$sup_rel" yq -p=json -o=tsv '[.files[].path | select(. == strenv(R))] | length' "$sup_extract/manifest.json")"
+  sup_entries_list="$(R="$sup_rel" yq -p=json -o=tsv '[.entries[] | select(.path == strenv(R) and .origin == "supplement")] | length' "$sup_extract/manifest.json")"
+  if [[ "$sup_files_extra" == "1" && "$sup_files_list" == "1" && "$sup_entries_list" == "1" ]] \
+    && [[ ! -e "$sup_extract/backup-paths.local" ]]; then
+    pass "re-backup from the restored home captures the local target and the supplement once (no top-level copy)"
+  else
+    miss "re-backup manifest unexpected (private/extra x$sup_files_extra, supplement file x$sup_files_list, supplement entry x$sup_entries_list)"
+  fi
+else
+  miss "re-backup from the restored home failed"
+fi
+
+# The --local-supplement source path is backup-time input only: the list is
+# captured at the canonical path, the source path is recorded nowhere, and
+# restore lands it at the canonical path regardless.
+cus_home="$fixture_home/cus-home"
+cus_dst="$fixture_home/cus-dst"
+cus_extract="$fixture_home/cus-extract"
+cus_list="$cus_home/lists/custom-name.local"
+mkdir -p "$cus_home/.ssh" "$cus_home/lists" "$cus_dst" "$cus_extract"
+printf 'a\n' > "$cus_home/.zshrc.local"
+printf 'b\n' > "$cus_home/.ssh/config.local"
+printf 'note\n' > "$cus_home/lists/note"
+printf 'backup_paths:\n  - { path: "lists/note", type: file }\n' > "$cus_list"
+if HOME="$cus_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$cus_home/c.age" --recipient "$recipient" --yes --local-supplement "$cus_list" >/dev/null 2>&1; then
+  age -d -i "$fixture_home/keys/id.txt" "$cus_home/c.age" | tar -xpf - -C "$cus_extract"
+  if cmp -s "$cus_list" "$cus_extract/files/$sup_rel" \
+    && ! grep -Fq "custom-name" "$cus_extract/manifest.json" \
+    && [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "lists/note")] | length' "$cus_extract/manifest.json")" == "1" ]] \
+    && run restore --in "$cus_home/c.age" --identity "$fixture_home/keys/id.txt" --target-home "$cus_dst" --apply >/dev/null 2>&1 \
+    && cmp -s "$cus_list" "$cus_dst/$sup_rel" && [[ ! -e "$cus_dst/lists/custom-name.local" ]]; then
+    pass "--local-supplement source path is not recorded; the list restores to the canonical path"
+  else
+    miss "--local-supplement list was recorded by source path or restored elsewhere"
+  fi
+else
+  miss "backup with --local-supplement failed"
+fi
+
+# An existing supplement in the target home follows the payload rules:
+# displaced on --apply, left alone with --skip-existing.
+printf 'OLD LIST\n' > "$cus_dst/$sup_rel"
+run restore --in "$cus_home/c.age" --identity "$fixture_home/keys/id.txt" --target-home "$cus_dst" --apply >/dev/null 2>&1 || true
+cus_displaced="$(find "$cus_dst/.local/state/dotfiles" -path '*/.config/dotfiles/backup-paths.local' -type f 2>/dev/null | head -n1)"
+if [[ -n "$cus_displaced" && "$(cat "$cus_displaced")" == "OLD LIST" ]] && cmp -s "$cus_list" "$cus_dst/$sup_rel"; then
+  pass "restore displaces an existing supplement before overwriting it"
+else
+  miss "restore did not displace the existing supplement"
+fi
+printf 'KEEP LIST\n' > "$cus_dst/$sup_rel"
+run restore --in "$cus_home/c.age" --identity "$fixture_home/keys/id.txt" --target-home "$cus_dst" --apply --skip-existing >/dev/null 2>&1 || true
+if [[ "$(cat "$cus_dst/$sup_rel")" == "KEEP LIST" ]]; then
+  pass "restore --skip-existing leaves an existing supplement untouched"
+else
+  miss "restore --skip-existing overwrote the existing supplement"
+fi
+
+# A supplement that declares its own path is captured once: the canonical
+# copy staged first wins, and the declaration is deduplicated.
+ded_home="$fixture_home/ded-home"
+ded_extract="$fixture_home/ded-extract"
+mkdir -p "$ded_home/.ssh" "$ded_home/.config/dotfiles" "$ded_extract"
+printf 'a\n' > "$ded_home/.zshrc.local"
+printf 'b\n' > "$ded_home/.ssh/config.local"
+printf 'backup_paths:\n  - { path: "%s", type: file }\n' "$sup_rel" > "$ded_home/$sup_rel"
+if HOME="$ded_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$ded_home/d.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  age -d -i "$fixture_home/keys/id.txt" "$ded_home/d.age" | tar -xpf - -C "$ded_extract"
+  ded_files="$(R="$sup_rel" yq -p=json -o=tsv '[.files[].path | select(. == strenv(R))] | length' "$ded_extract/manifest.json")"
+  ded_entries="$(R="$sup_rel" yq -p=json -o=tsv '[.entries[] | select(.path == strenv(R))] | length' "$ded_extract/manifest.json")"
+  ded_origin="$(R="$sup_rel" yq -p=json -o=tsv '.entries[] | select(.path == strenv(R)) | .origin' "$ded_extract/manifest.json")"
+  if [[ "$ded_files" == "1" && "$ded_entries" == "1" && "$ded_origin" == "supplement" ]]; then
+    pass "a supplement declaring its own path yields one entry (origin supplement) and one file"
+  else
+    miss "self-declared supplement duplicated (files x$ded_files, entries x$ded_entries, origin $ded_origin)"
+  fi
+else
+  miss "backup with a self-declaring supplement failed"
+fi
+
+# The supplement payload is hashed like every other file: tampering with it
+# inside the archive is rejected by verify.
+tam_stage="$fixture_home/tam-stage"
+mkdir -p "$tam_stage"
+age -d -i "$fixture_home/keys/id.txt" "$sup_home/s.age" | tar -xpf - -C "$tam_stage"
+printf '  - { path: "injected", type: file }\n' >> "$tam_stage/files/$sup_rel"
+make_archive "$tam_stage" "$fixture_home/out/tampered-supplement.age"
+out="$(run verify --in "$fixture_home/out/tampered-supplement.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
+if grep -Fq "checksum mismatch: $sup_rel" <<< "$out"; then
+  pass "verify rejects a tampered supplement payload"
+else
+  printf '%s\n' "$out" >&2
+  miss "verify accepted a tampered supplement payload"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi

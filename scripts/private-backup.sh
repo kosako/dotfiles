@@ -22,7 +22,12 @@ source "$SCRIPT_DIR/lib-policy.sh"
 TOOL_NAME="private-backup.sh"
 TOOL_VERSION="1"
 MANIFEST_SCHEMA_VERSION="1"
-DEFAULT_LOCAL_SUPPLEMENT="$HOME/.config/dotfiles/backup-paths.local"
+# Canonical home-relative location of the local supplement. backup captures
+# the supplement itself as ordinary payload at this path (whatever path
+# --local-supplement named), so restore lands it here and the next backup
+# from the restored home reads it without any flag (#208).
+SUPPLEMENT_HOME_PATH=".config/dotfiles/backup-paths.local"
+DEFAULT_LOCAL_SUPPLEMENT="$HOME/$SUPPLEMENT_HOME_PATH"
 DEFAULT_RECIPIENT_FILE="$HOME/.config/dotfiles/private-backup.recipient"
 MARKER_FILE="$HOME/.local/state/dotfiles/private-backup.json"
 
@@ -39,6 +44,9 @@ backup: resolve the public baseline (.chezmoidata/backup-paths.yaml) plus the
   local supplement, capture the files into a machine-neutral, age-encrypted
   archive at --out, and update the state marker. Recipient defaults to
   $DEFAULT_RECIPIENT_FILE when no flag is given.
+  The supplement itself is captured as $SUPPLEMENT_HOME_PATH (its
+  --local-supplement path is backup-time input only, never recorded), so
+  restore lands it there.
 verify: decrypt --in into a 0700 temp dir and check it against its manifest
   (checksums, modes, no extra files, safe home-relative paths). Read-only;
   never writes into \$HOME.
@@ -55,12 +63,31 @@ sha256_of() {
   shasum -a 256 < "$1" | awk '{print $1}'
 }
 
+# stage_file SRC REL MANIFEST STAGING
+# Copy the regular file SRC into STAGING/files/REL (mode preserved) and
+# append its {path, mode, size, sha256} row to MANIFEST's files[]. REL is
+# the home-relative manifest path; the caller has already safety-checked it
+# and deduplicated it against seen_paths.
+stage_file() {
+  local src="$1" rel="$2" manifest="$3" staging="$4" mode size hash
+  mode="$(file_mode "$src")"
+  size="$(wc -c < "$src" | tr -d ' ')"
+  hash="$(sha256_of "$src")"
+  mkdir -p "$staging/files/$(dirname "$rel")"
+  cp -p "$src" "$staging/files/$rel"
+  P="$rel" M="$mode" SZ="$size" H="$hash" \
+    yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
+}
+
 # Whether a single tar member NAME is allowed in a private-backup archive.
 # Members carry a leading "./"; after stripping it (and any trailing "/"
 # on directory entries) only manifest.json, backup-paths.local, the files/
 # tree, and the implied directories are permitted. Rejects absolute paths,
 # "..", control characters, and anything outside that set. Returns 0/1;
-# prints nothing.
+# prints nothing. A top-level backup-paths.local is the pre-#208 archive
+# layout: still accepted so old archives verify and restore, but it is
+# neither verified nor restored (the supplement now travels inside files/);
+# new archives do not emit it.
 member_name_is_allowed() {
   local n="${1#./}"
   n="${n%/}"
@@ -220,7 +247,7 @@ cmd_backup() {
   collect_declared "$BACKUP_PATHS_FILE" baseline "$declared" || return 1
   if [[ -f "$local_supplement" ]]; then
     collect_declared "$local_supplement" local "$declared" || return 1
-    item "local supplement present (entries not listed)"
+    item "local supplement present (captured as $SUPPLEMENT_HOME_PATH; entries not listed)"
   else
     item "no local supplement at $local_supplement"
   fi
@@ -238,7 +265,23 @@ cmd_backup() {
       "files": []
     }' > "$manifest"
 
-  local origin type category path target captured=0 skipped=0
+  local origin type category path target captured=0 skipped=0 supplement_captured=0
+  # The supplement itself goes in first, as ordinary payload at its canonical
+  # path (#208): restore then lands it with the same dry-run / skip-existing /
+  # displace / symlink rules as every other file, verify hashes it, and the
+  # next backup from the restored home finds it at the default location.
+  # Recording the canonical path in seen_paths first means a baseline / local
+  # declaration of that same path is deduplicated below (this copy wins; no
+  # second entry or file). The --local-supplement source path is never
+  # recorded.
+  if [[ -f "$local_supplement" ]]; then
+    printf '%s\n' "$SUPPLEMENT_HOME_PATH" >> "$seen_paths"
+    P="$SUPPLEMENT_HOME_PATH" \
+      yq -i -p=json -o=json '.entries += [{"path": strenv(P), "type": "file", "category": "supplement", "origin": "supplement"}]' "$manifest"
+    stage_file "$local_supplement" "$SUPPLEMENT_HOME_PATH" "$manifest" "$staging"
+    captured=$((captured + 1))
+    supplement_captured=1
+  fi
   while IFS='|' read -r origin type category path; do
     [[ -z "$path" ]] && continue
     # Defence in depth: the catalog is validated, but the (non-committed)
@@ -280,7 +323,7 @@ cmd_backup() {
       # delimiting tolerates odd names; each captured path still gets the
       # same safety checks as a declared entry (a control character or a
       # ".." segment would otherwise corrupt the manifest or trip verify).
-      local f rel mode size hash
+      local f rel
       while IFS= read -r -d '' f; do
         rel="${f#"$HOME"/}"
         if ! backup_path_is_safe "$rel"; then
@@ -301,13 +344,7 @@ cmd_backup() {
           skipped=$((skipped + 1))
           continue
         fi
-        mode="$(file_mode "$f")"
-        size="$(wc -c < "$f" | tr -d ' ')"
-        hash="$(sha256_of "$f")"
-        mkdir -p "$staging/files/$(dirname "$rel")"
-        cp -p "$f" "$staging/files/$rel"
-        P="$rel" M="$mode" SZ="$size" H="$hash" \
-          yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
+        stage_file "$f" "$rel" "$manifest" "$staging"
         captured=$((captured + 1))
       done < <(find "$target" -type f -print0 2>/dev/null)
     else
@@ -321,27 +358,16 @@ cmd_backup() {
         skipped=$((skipped + 1))
         continue
       fi
-      local mode size hash
-      mode="$(file_mode "$target")"
-      size="$(wc -c < "$target" | tr -d ' ')"
-      hash="$(sha256_of "$target")"
-      mkdir -p "$staging/files/$(dirname "$path")"
-      cp -p "$target" "$staging/files/$path"
-      P="$path" M="$mode" SZ="$size" H="$hash" \
-        yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
+      stage_file "$target" "$path" "$manifest" "$staging"
       captured=$((captured + 1))
     fi
   done < "$declared"
 
-  if [[ "$captured" -eq 0 ]]; then
+  # The supplement alone is not a backup: an archive that carries the list
+  # but none of the files it lists is as empty as before #208.
+  if [[ "$captured" -le "$supplement_captured" ]]; then
     fail "no files captured; refusing to write an empty archive"
     return 1
-  fi
-
-  # Bundle the local supplement itself so restore can resolve the same
-  # private list. It lives only inside the encrypted archive.
-  if [[ -f "$local_supplement" ]]; then
-    cp -p "$local_supplement" "$staging/backup-paths.local"
   fi
 
   section "private-backup: confirm"
@@ -465,7 +491,7 @@ check_manifest() {
       ((.type | tag) == "!!str") and
       (.type == "" or .type == "file" or .type == "dir") and
       ((.category | tag) == "!!str") and
-      ((.origin | tag) == "!!str") and (.origin == "baseline" or .origin == "local")
+      ((.origin | tag) == "!!str") and (.origin == "baseline" or .origin == "local" or .origin == "supplement")
     )] | all) and
     ((.files | tag) == "!!seq") and ((.files | length) > 0) and
     ([.files[] | ((tag == "!!map") and
