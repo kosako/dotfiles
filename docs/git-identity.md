@@ -90,7 +90,9 @@ mkdir + apply を next action に出す。欠損時は非 personal context の�
 remote が personal の hasconfig pattern に一致し、personal identity が設定されている repo に限る。それ以外は
 `useConfigOnly` で従来どおり拒否): identity file が無ければ「commit 拒否」ではなく「personal identity を
 継承しうる」、partial なら「**未指定**の key は personal identity を継承する(混在 identity)。明示的な空値
-(`name =`)は上書きするので空のまま」。未指定と空値の区別は `git config --get` の exit code で見る。
+(`name =`、`=` 無しの boolean 省略記法も同じ)は上書きするので空のまま」。継承と commit 可否は別で、name が
+明示的に空なら email を継承しても commit は拒否される(Git は空 name を拒否)。未指定と空値の区別は
+`git config --get` の exit code で見る(未指定 = 1、空値 = 0 で空出力)。
 `~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
 では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
 

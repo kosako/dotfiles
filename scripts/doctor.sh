@@ -256,7 +256,19 @@ for context in personal work client sandbox agent; do
         action "identity file is partial: $identity_file has no $identity_missing — commits under $project_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" \
           "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md)"
       else
-        action "identity file is partial: $identity_file has no $identity_missing (and the identity reset is missing: the unset $identity_unset inherits the personal identity in a repo under $project_root whose remote matches the personal patterns — a mixed identity that is not refused; an explicitly empty key stays empty)" \
+        # Inheritance and the commit outcome are separate facts: an unset
+        # key inherits, but an explicitly empty NAME still refuses the commit
+        # (Git rejects an empty name; an empty email is accepted as <>).
+        identity_outcome="a mixed identity that is not refused"
+        case " $identity_missing " in
+          *" user.name "*)
+            case " $identity_unset " in
+              *" user.name "*) ;;
+              *) identity_outcome="but the commit is still refused because user.name is explicitly empty" ;;
+            esac
+            ;;
+        esac
+        action "identity file is partial: $identity_file has no $identity_missing (and the identity reset is missing: the unset $identity_unset inherits the personal identity in a repo under $project_root whose remote matches the personal patterns — $identity_outcome; an explicitly empty key stays empty)" \
           "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md) and apply the identity reset (see above)"
       fi
     fi
