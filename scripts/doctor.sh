@@ -98,23 +98,27 @@ fi
 
 # enableGitHookGates wires the commit-boundary git hook gates (#196): thin
 # shims in ~/.config/git-hook-gates/hooks exec agent-tools'
-# personal-git-hook-dispatcher (pre-commit -> public-safety gate, commit-msg ->
-# AI trailer gate, then chain to the repo's own .git/hooks), and global
+# personal-git-hook-dispatcher (pre-commit -> public-safety gate then
+# git-identity gate, commit-msg -> AI trailer gate, then chain to the repo's
+# own .git/hooks), and global
 # core.hooksPath points at the shim directory via the unconditional include in
 # the managed ~/.gitconfig. The wiring is a TWO-KEY gate: the capability
 # (intent) AND a complete agent-tools deploy in the destination (readiness;
 # the templates render empty otherwise). Report the whole chain honestly:
-# shims + hooksPath are dotfiles' side, the three gate scripts are
+# shims + hooksPath are dotfiles' side, the four gate scripts are
 # agent-tools'. The dispatcher is FAIL-CLOSED (exit 2) when a gate NEXT TO IT
-# is missing — the readiness check must cover all three scripts, not just the
+# is missing — the readiness check must cover all four scripts, not just the
 # dispatcher, or a partial deploy shows green while commits are blocked
-# (Codex review, PR #197). Best-effort guardrail, NOT an enforcement
-# boundary: --no-verify and a repo-local core.hooksPath (husky etc.) bypass
-# it (docs/git-hook-gates.md).
+# (Codex review, PR #197; the pre-commit stage gained personal-git-identity-
+# gate in agent-tools#281, so the list grew from three to four in #239 —
+# keep it identical to .chezmoitemplates/git-hook-gates-armed and
+# preflight.sh). Best-effort guardrail, NOT an enforcement boundary:
+# --no-verify and a repo-local core.hooksPath (husky etc.) bypass it
+# (docs/git-hook-gates.md).
 section "git hook gates (report-only)"
 hook_gates_dir="$HOME/.config/git-hook-gates"
 hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
-hook_gates_scripts=(personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate)
+hook_gates_scripts=(personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate)
 hook_gates_deploy_complete=1
 for hook_gates_script in "${hook_gates_scripts[@]}"; do
   [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
@@ -156,9 +160,9 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       hook_gates_wired=0
     fi
     if [[ "$hook_gates_deploy_complete" -eq 1 ]]; then
-      ok "agent-tools deploy complete: dispatcher + both gates executable in $hook_gates_deploy_dir (bodies owned by agent-tools sync)"
+      ok "agent-tools deploy complete: dispatcher + all three gates executable in $hook_gates_deploy_dir (bodies owned by agent-tools sync)"
     elif [[ "$hook_gates_wired" -eq 1 ]]; then
-      warn "agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and both gates in $hook_gates_deploy_dir — or set enableGitHookGates=false and apply"
+      warn "agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and all three gates in $hook_gates_deploy_dir — or set enableGitHookGates=false and apply"
     else
       warn "agent-tools deploy incomplete (dispatcher and/or a gate missing in $hook_gates_deploy_dir; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
     fi

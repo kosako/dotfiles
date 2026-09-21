@@ -131,15 +131,18 @@ fi
 # personal-git-hook-dispatcher. The templates only render when the
 # agent-tools deploy is COMPLETE in the destination (two-key gate), so a
 # fresh machine does not get bricked — but readiness must be judged on ALL
-# THREE scripts: the dispatcher is FAIL-CLOSED (exit 2) when a gate next to
-# it is missing, so "dispatcher present, gate missing" would arm the wiring
-# and then block every commit (Codex review, PR #197). Report-only, like
+# FOUR scripts (dispatcher + public-safety / git-identity / ai-trailer gates;
+# the identity gate joined the pre-commit stage in agent-tools#281, #239):
+# the dispatcher is FAIL-CLOSED (exit 2) when a gate next to it is missing,
+# so "dispatcher present, gate missing" would arm the wiring and then block
+# every commit (Codex review, PR #197). This list must stay identical to
+# .chezmoitemplates/git-hook-gates-armed and doctor.sh. Report-only, like
 # everything here.
 section "git hook gates (apply impact)"
 if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
   hook_gates_missing=0
-  for hook_gates_script in personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate; do
+  for hook_gates_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
     if [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]]; then
       ok "deployed: $hook_gates_deploy_dir/$hook_gates_script"
     else

@@ -7,12 +7,13 @@
        the dotfiles pick of record (docs/git-hook-gates.md). $HOME is expanded
        by sh at runtime, so no literal home path is baked into the render.
 
-       The dispatcher runs the pre-commit gate (personal-public-safety-gate)
-       and then chains to the repo's own $GIT_DIR/hooks/pre-commit. It is
-       FAIL-CLOSED (exit 2) when its gates are missing, so this shim must only
-       render where the agent-tools deploy is COMPLETE — a two-key gate:
-       enableGitHookGates (intent) AND the armed probe (readiness, all three
-       gate scripts present in the destination; .chezmoitemplates/
+       The dispatcher runs the pre-commit gates in order (public-safety, then
+       git-identity — agent-tools#281 / #239) and then chains to the repo's
+       own $GIT_DIR/hooks/pre-commit. It is FAIL-CLOSED (exit 2) when its
+       gates are missing, so this shim must only render where the agent-tools
+       deploy is COMPLETE — a two-key gate: enableGitHookGates (intent) AND
+       the armed probe (readiness, all four scripts — dispatcher + three
+       gates — present in the destination; .chezmoitemplates/
        git-hook-gates-armed). A fresh machine applies cleanly before
        agent-tools exists; re-apply after sync arms the gates.
 
