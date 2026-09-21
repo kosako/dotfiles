@@ -51,8 +51,8 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
    presence だけでは判定しない — gate 欠け・非実行の部分配備でも dispatcher は
    fail-closed なので、4 本が実行可能にそろって初めて安全に武装(arm)できる。
    本数は agent-tools 側の gate 追加に**追随が必須**(#239: identity gate 追加時、
-   3 本固定のままだと「dispatcher + 旧 3 本」の部分配備で武装し、dispatcher は 4 本目の
-   欠損で fail-closed → commit が止まるのに doctor / preflight は green、という
+   3 本固定のままだと「dispatcher + 旧 2 gate(計 3 本)」の部分配備で武装し、dispatcher は
+   4 本目の欠損で fail-closed → commit が止まるのに doctor / preflight は green、という
    PR #197 と同型の穴になる)。probe list は armed template / doctor / preflight /
    `test-git-hook-gates.sh` の 4 箇所で同一に保つ。
 
