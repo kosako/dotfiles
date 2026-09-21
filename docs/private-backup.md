@@ -76,6 +76,13 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   home 相対(`-C` で絶対パスを含めない)。
 - backup は捕捉 0 件なら空アーカイブを書かず fail(補足リストだけの archive も空扱い)。symlink /
   不在 / 非正規 / 読取不可のファイルは skip(warn)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+- **directory 列挙の途中失敗(#242)**: 宣言 directory の `find` が途中で失敗(読めない subdirectory 等・
+  exit 非 0)した場合、列挙できた file は捕捉して**継続**する(読取不能 file と同じ warn + skip の契約。
+  abort はしない)が、その directory を skip 1 件として数え、`capture INCOMPLETE` を warn し、marker に
+  `capture_incomplete: true` を記録する。通常の skip(任意の baseline file が不在)とは区別する。
+  self-check / verify は staging と manifest の整合を証明するだけで、**元 directory の完全取得は証明しない**
+  (完全性は marker が持つ)。doctor は `capture_incomplete` を読み、true なら再 backup を next action に
+  出す。field の無い旧 marker は unknown(完全と推定しない)。
   補足リスト自身は宣言より先に canonical path で捕捉するので、baseline / 補足が同じ path を宣言して
   いても entry / file は重複しない(補足の copy が優先)。
 - 書き込み前の確認は `--yes` で省略できる。`--yes` なしでは TTY での対話確認が必須:

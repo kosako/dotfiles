@@ -334,6 +334,11 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `verified N file(s)` が出ること。PATH 先頭の fake `cp`(実 cp の後に staging 側の copy だけを改竄)で
   manifest と staging がずれると、`checksum mismatch` で拒否し、`--out` も `.partial` も作らず marker が
   前回のまま・exit 非 0 であること(script に test 用 backdoor は無い)。
+- directory 列挙の途中失敗を無警告の成功にしないこと(#242): PATH 先頭の fake `find`(fixture の directory
+  にだけ部分 NUL 一覧を出して exit 1、他は実 find に委譲)で、列挙できた file は捕捉しつつ
+  `directory enumeration incomplete` と `capture INCOMPLETE` を warn し、skip 1 件を計上し、marker の
+  `capture_incomplete` が true になること。正常 run では false。その archive の verify は通ること
+  (整合と完全性は別)。
 
 ## test-secrets-gate.sh
 

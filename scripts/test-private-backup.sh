@@ -819,6 +819,78 @@ else
   miss "self-check did not refuse a corrupted staging (rc=$sc_rc)"
 fi
 
+# 27. A declared directory whose enumeration fails part-way (issue #242):
+#     find lists what it can and exits non-zero. backup must not report a
+#     complete success: the listed files are still captured (continue, like
+#     the unreadable-file contract), but the run warns, counts the
+#     directory as skipped, and records capture_incomplete=true in the
+#     marker; a clean run records false. Fault injection at the tool
+#     boundary: a fake find that, for the fixture directory ONLY, prints a
+#     partial NUL listing and exits 1 (root-run CI cannot rely on mode 000
+#     to make the real find fail); every other invocation (the self-check's
+#     `find . -type f`) goes to the real find.
+en_home="$fixture_home/en-home"
+mkdir -p "$en_home/.ssh" "$en_home/.config/dotfiles" "$en_home/box/deep"
+printf 'a\n' > "$en_home/.zshrc.local"
+printf 'b\n' > "$en_home/.ssh/config.local"
+printf 'listed\n' > "$en_home/box/listed"
+printf 'unlisted\n' > "$en_home/box/deep/unlisted"
+printf 'backup_paths:\n  - { path: "box", type: dir }\n' > "$en_home/.config/dotfiles/backup-paths.local"
+# Clean run first: the marker must say capture_incomplete=false. Its skipped
+# count (absent optional baseline files) is the baseline for the partial run,
+# which must report exactly one more: the directory whose enumeration failed.
+en_clean_out="$(HOME="$en_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$en_home/clean.age" --recipient "$recipient" --yes 2>&1)" || true
+en_clean_skipped="$(sed -n 's/^\[warn\] skipped entries: \([0-9][0-9]*\)$/\1/p' <<< "$en_clean_out")"
+en_clean_skipped="${en_clean_skipped:-0}"
+if [[ -f "$en_home/clean.age" ]] \
+  && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$en_home/.local/state/dotfiles/private-backup.json")" == "false" ]]; then
+  pass "a clean backup records capture_incomplete=false in the marker"
+else
+  printf '%s\n' "$en_clean_out" >&2
+  miss "clean backup did not record capture_incomplete=false"
+fi
+en_fakebin="$fixture_home/findfake"
+mkdir -p "$en_fakebin"
+real_find="$(command -v find)"
+cat > "$en_fakebin/find" <<'SH'
+#!/bin/sh
+if [ "$1" = "$FAKE_FIND_DIR" ]; then
+  printf '%s\0' "$FAKE_FIND_DIR/listed"
+  exit 1
+fi
+exec "$REAL_FIND" "$@"
+SH
+chmod +x "$en_fakebin/find"
+en_rc=0
+en_out="$(HOME="$en_home" REAL_FIND="$real_find" FAKE_FIND_DIR="$en_home/box" PATH="$en_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$en_home/partial.age" --recipient "$recipient" --yes 2>&1)" || en_rc=$?
+en_extract="$fixture_home/en-extract"
+mkdir -p "$en_extract"
+if [[ "$en_rc" -eq 0 && -f "$en_home/partial.age" ]] \
+  && grep -Fq "directory enumeration incomplete (find exit 1; entries under it could not all be listed): box" <<< "$en_out" \
+  && grep -Fq "capture INCOMPLETE: enumeration failed for 1 declared director(y/ies)" <<< "$en_out" \
+  && grep -Fxq "[warn] skipped entries: $((en_clean_skipped + 1))" <<< "$en_out" \
+  && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$en_home/.local/state/dotfiles/private-backup.json")" == "true" ]]; then
+  age -d -i "$fixture_home/keys/id.txt" "$en_home/partial.age" | tar -xpf - -C "$en_extract"
+  if [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "box/listed")] | length' "$en_extract/manifest.json")" == "1" ]] \
+    && [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "box/deep/unlisted")] | length' "$en_extract/manifest.json")" == "0" ]]; then
+    pass "a partial enumeration still captures the listed files, warns, counts the directory as skipped, and marks the marker incomplete"
+  else
+    miss "partial enumeration archive content unexpected"
+  fi
+else
+  printf '%s\n' "$en_out" >&2
+  miss "partial enumeration was not reported as incomplete (rc=$en_rc)"
+fi
+# verify of that archive still passes: staging/manifest agree — completeness
+# of the capture is a different fact, carried by the marker, not the archive.
+if run verify --in "$en_home/partial.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  pass "verify accepts an incomplete-capture archive (integrity, not completeness)"
+else
+  miss "verify rejected an archive whose staging and manifest agree"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi
