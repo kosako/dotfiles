@@ -139,21 +139,29 @@ _ai_clip_copy() {
 # file synchronously, so there is no concurrent tee to race against the read, nor
 # one that would block when the command backgrounds a job holding the pipe.
 # Output therefore appears after the command finishes rather than streaming.
-# Temp file is mktemp 0600, removed after. Copy failure is reported on stderr but
-# does not change the exit status: callers and the prompt expect the command's.
+# Temp file is mktemp 0600 and holds the plain-text output, so it is removed in
+# an `always` block: on a normal exit, a non-zero exit, AND when the command is
+# interrupted (Ctrl-C) — a trailing `rm` alone never ran on SIGINT and left the
+# output in TMPDIR (#243). `always` keeps eval in the current shell (no
+# subshell), so cd / export still persist. Copy failure is reported on stderr
+# but does not change the exit status: callers and the prompt expect the
+# command's. scripts/test-ai-clip.sh drives all of this in an isolated zsh.
 _ai_clip_run() {
-  local cmd="$1" raw rc
+  local cmd="$1" raw rc=1
   raw="$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" || return 1
-  eval "$cmd" > "$raw" 2>&1
-  rc=$?
-  cat -- "$raw"
   {
-    print -r -- "\$ $cmd"
-    _ai_clip_strip_ansi < "$raw"
-    print -r -- "[exit status: $rc]"
-  } | _ai_clip_copy || print -u2 -- \
-    "ai-clip: no clipboard target (set AI_CLIPBOARD_OSC52=1 for remote sessions)"
-  rm -f -- "$raw"
+    eval "$cmd" > "$raw" 2>&1
+    rc=$?
+    cat -- "$raw"
+    {
+      print -r -- "\$ $cmd"
+      _ai_clip_strip_ansi < "$raw"
+      print -r -- "[exit status: $rc]"
+    } | _ai_clip_copy || print -u2 -- \
+      "ai-clip: no clipboard target (set AI_CLIPBOARD_OSC52=1 for remote sessions)"
+  } always {
+    rm -f -- "$raw"
+  }
   return "$rc"
 }
 
