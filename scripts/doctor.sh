@@ -208,7 +208,7 @@ if module_active_for_profile "$profile" git-profile; then
     # Two steps: chezmoi does not create ancestors outside the target set, so
     # on a home without ~/.config the apply alone fails (README Quickstart
     # step 3 has the same mkdir for the same reason).
-    action "identity reset file missing: $identity_reset_file — the fail-closed boundary of #202 is NOT in place: a non-personal repo without its context file falls back to the personal identity instead of refusing to commit" \
+    action "identity reset file missing: $identity_reset_file — the fail-closed boundary of #202 is NOT in place: in a non-personal repo without its context file, a remote matching the personal patterns (hasconfig in ~/.gitconfig) inherits the personal identity instead of refusing to commit (other repos are still refused by useConfigOnly)" \
       "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
       "\$ chezmoi apply $(printf '%q' "${identity_reset_file%/*}") $(printf '%q' "$identity_reset_file")"
   fi
@@ -232,23 +232,31 @@ for context in personal work client sandbox agent; do
     elif ! git config --file "$identity_file" --list >/dev/null 2>&1; then
       warn "identity file exists but git cannot parse it: $identity_file (syntax error?) — commits under $project_root fail until it is fixed"
     else
+      # Two kinds of "no value": a key that is UNSET (git config --get exits
+      # 1) and a key set to an explicit EMPTY value (exits 0, prints nothing).
+      # With the reset in place both yield an empty ident. Without it they
+      # differ: an explicit empty value still overrides whatever applied
+      # before, but an unset key keeps it — the personal identity, in a repo
+      # whose remote matches the personal patterns. The value itself is never
+      # printed (key names only).
       identity_missing=""
+      identity_unset=""
       for identity_key in name email; do
-        if [[ -z "$(git config --file "$identity_file" --get "user.$identity_key" 2>/dev/null || true)" ]]; then
+        if identity_value="$(git config --file "$identity_file" --get "user.$identity_key" 2>/dev/null)"; then
+          [[ -n "$identity_value" ]] || identity_missing+="${identity_missing:+ }user.$identity_key"
+        else
           identity_missing+="${identity_missing:+ }user.$identity_key"
+          identity_unset+="${identity_unset:+ }user.$identity_key"
         fi
       done
+      identity_value=""
       if [[ -z "$identity_missing" ]]; then
         ok "identity file exists: $identity_file"
-      elif [[ "$identity_reset_present" -eq 1 || "$context" == "personal" ]]; then
+      elif [[ "$identity_reset_present" -eq 1 || "$context" == "personal" || -z "$identity_unset" ]]; then
         action "identity file is partial: $identity_file has no $identity_missing — commits under $project_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" \
           "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md)"
       else
-        # Without the reset nothing blanks the identity first, so the keys
-        # this file leaves out keep whatever applied before it — the personal
-        # remote fallback — and a name-only file commits with a MIXED
-        # identity (context name, personal email), not an empty one.
-        action "identity file is partial: $identity_file has no $identity_missing (and the identity reset is missing too: under $project_root the missing key(s) inherit the personal fallback instead of being empty — a mixed identity, not refused)" \
+        action "identity file is partial: $identity_file has no $identity_missing (and the identity reset is missing: the unset $identity_unset inherits the personal identity in a repo under $project_root whose remote matches the personal patterns — a mixed identity that is not refused; an explicitly empty key stays empty)" \
           "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md) and apply the identity reset (see above)"
       fi
     fi
@@ -257,7 +265,7 @@ for context in personal work client sandbox agent; do
       action "project root exists but identity file missing: $identity_file" \
         "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) — commits under $project_root are refused until then"
     else
-      action "project root exists but identity file missing: $identity_file (and the identity reset is missing too: commits under $project_root currently use the personal fallback, not refused)" \
+      action "project root exists but identity file missing: $identity_file (and the identity reset is missing too: a repo under $project_root whose remote matches the personal patterns inherits the personal identity instead of being refused; other repos are still refused)" \
         "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) and apply the identity reset (see above)"
     fi
   else

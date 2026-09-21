@@ -86,9 +86,11 @@ context file の値だけが残る。include 順は契約なので `scripts/test
 祖先なので chezmoi が作らず、target にすると subtree ごと apply されて最小にならない)、`scripts/test-render.sh`
 がその command 行と「その 3 target だけの apply で `.gitconfig` と reset の 2 file だけが配備されること」を
 pin する。`doctor.sh` は reset の presence を検査し(値は持たない file なので中身は見ない)、欠損なら
-mkdir + apply を next action に出す。欠損時は非 personal context の案内も変わる: identity file が無ければ
-「commit 拒否」ではなく「personal fallback が使われている」、partial(name だけ等)なら「欠けた key は
-空ではなく personal fallback を継承する(混在 identity)」。
+mkdir + apply を next action に出す。欠損時は非 personal context の案内も変わる(流入は**条件付き**:
+remote が personal の hasconfig pattern に一致し、personal identity が設定されている repo に限る。それ以外は
+`useConfigOnly` で従来どおり拒否): identity file が無ければ「commit 拒否」ではなく「personal identity を
+継承しうる」、partial なら「**未指定**の key は personal identity を継承する(混在 identity)。明示的な空値
+(`name =`)は上書きするので空のまま」。未指定と空値の区別は `git config --get` の exit code で見る。
 `~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
 では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
 
