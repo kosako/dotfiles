@@ -283,8 +283,8 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
   絶対 home path・host 名は入れない)生成 → **self-check**(verify / restore と同じ `check_manifest`
   を staging に当てる。不合格なら `--out` も `.partial` も書かず marker も更新せず exit 非 0、#224)
   → 確認 → `tar | age -r recipient` を pipe(平文 tar をディスクに残さない)→ `--out` へ書き出し →
-  marker(`~/.local/state/dotfiles/private-backup.json`、最終成功時刻 / archive basename / 件数のみ)
-  更新。捕捉 0 件(補足リストだけも含む)は空アーカイブを書かず fail。
+  marker(`~/.local/state/dotfiles/private-backup.json`、最終成功時刻 / archive basename / 件数 /
+  `capture_incomplete` のみ。#242)更新。捕捉 0 件(補足リストだけも含む)は空アーカイブを書かず fail。
 - **verify**: `--identity` / `--identity-command`(op seam)で 0700 temp に**復号**し、
   **展開前に全 tar member を検査**(非正規 member = symlink/hardlink/special を拒否、
   絶対パス・`..`・制御文字・台帳外 member 名を拒否)してから展開。recipient は公開鍵なので
