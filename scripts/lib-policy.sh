@@ -735,6 +735,9 @@ known_backup_path_types() {
 # two plausible rows), and type / category, when present, must be strings
 # without "|" (a "|" in category shifts the fields and corrupts the path)
 # or control characters. Fails closed (non-zero, no rows) with one message.
+# `backup_paths` itself may be absent or null (no entries) but must otherwise
+# be a sequence — checked explicitly, because yq's `// []` would also turn a
+# scalar `false` into an empty list and let it pass (Codex review, PR #254).
 #
 # Shape of the expression: one boolean per rule, collected into an array and
 # folded with `all`. In yq, `and` / `or` bind LOOSER than `|`, so a predicate
@@ -744,7 +747,7 @@ known_backup_path_types() {
 backup_paths_in() {
   local file="$1"
   if ! yq -e '[
-      (((.backup_paths // []) | tag) == "!!seq"),
+      ((.backup_paths == null) or ((.backup_paths | tag) == "!!seq")),
       ([.backup_paths[]? | (tag == "!!map")] | all),
       ([.backup_paths[]? | (((.path | tag) == "!!str") and (.path != ""))] | all),
       ([.backup_paths[]? | (((.path | tag) == "!!str") and ((.path | test("[\\x00-\\x1f\\x7f]")) | not))] | all),

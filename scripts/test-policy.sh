@@ -435,6 +435,16 @@ run_fail_contains \
   "backup-paths entry invalid in" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# A scalar in place of the list: yq's `// []` would turn `false` into an
+# empty list and every per-entry rule would pass vacuously, so the sequence
+# check must not go through `//` (Codex review, PR #254).
+make_fixture
+printf 'backup_paths: false\n' > "$fixture/.chezmoidata/backup-paths.yaml"
+run_fail_contains \
+  "rejects a scalar false in place of the backup path list" \
+  "backup-paths entry invalid in" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 make_fixture
 : > "$fixture/.chezmoidata/backup-paths.yaml"
 run_fail_contains \

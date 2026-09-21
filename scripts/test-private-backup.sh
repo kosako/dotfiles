@@ -919,6 +919,24 @@ sv_case() {
 sv_case missing-path '  - { type: file, category: fixture }'
 sv_case pipe-in-category '  - { path: only-in-supplement, type: file, category: "shell|override" }'
 sv_case newline-in-path '  - { path: "one\nfile|other|two", type: file }'
+# A scalar in place of the list (`backup_paths: false`): must be rejected
+# too — `// []` would have read it as "no entries" and let the baseline-only
+# backup succeed silently (Codex review, PR #254).
+sv_scalar="$fixture_home/sv-scalar-list"
+mkdir -p "$sv_scalar/.ssh" "$sv_scalar/.config/dotfiles"
+printf 'a\n' > "$sv_scalar/.zshrc.local"
+printf 'b\n' > "$sv_scalar/.ssh/config.local"
+printf 'backup_paths: false\n' > "$sv_scalar/.config/dotfiles/backup-paths.local"
+sv_scalar_rc=0
+sv_scalar_out="$(HOME="$sv_scalar" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sv_scalar/s.age" --recipient "$recipient" --yes 2>&1)" || sv_scalar_rc=$?
+if [[ "$sv_scalar_rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $sv_scalar/.config/dotfiles/backup-paths.local" <<< "$sv_scalar_out" \
+  && [[ ! -e "$sv_scalar/s.age" && ! -e "$sv_scalar/.local/state/dotfiles/private-backup.json" ]]; then
+  pass "invalid supplement (scalar in place of the list) is rejected before capture: no archive, no marker"
+else
+  printf '%s\n' "$sv_scalar_out" >&2
+  miss "a scalar backup_paths in the supplement was accepted (rc=$sv_scalar_rc)"
+fi
 # Control: a free-form label without the delimiter is fine and the declared
 # file is captured under its own path.
 sv_ok="$fixture_home/sv-ok"
