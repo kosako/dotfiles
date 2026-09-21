@@ -249,8 +249,13 @@ for context in personal work client sandbox agent; do
       identity_missing=""
       identity_unset=""
       identity_bare=""
+      # Capture the listing once, then grep the variable: a `git | grep -q`
+      # pipe would let grep exit on the first match and leave git to die of
+      # SIGPIPE on a large file, and under pipefail that reads as "no match"
+      # (Codex review, PR #250 — same trap as module_active_for_profile).
+      identity_listing="$(git config --file "$identity_file" --list 2>/dev/null || true)"
       for identity_key in name email; do
-        if git config --file "$identity_file" --list 2>/dev/null | grep -Fxq -- "user.$identity_key"; then
+        if grep -Fxq -- "user.$identity_key" <<< "$identity_listing"; then
           identity_bare+="${identity_bare:+ }user.$identity_key"
         elif identity_value="$(git config --file "$identity_file" --get "user.$identity_key" 2>/dev/null)"; then
           [[ -n "$identity_value" ]] || identity_missing+="${identity_missing:+ }user.$identity_key"
@@ -260,6 +265,7 @@ for context in personal work client sandbox agent; do
         fi
       done
       identity_value=""
+      identity_listing=""
       if [[ -n "$identity_bare" ]]; then
         action "identity file has a key without a value: $identity_file ($identity_bare) — git rejects the whole identity (fatal: missing value), so commits under $project_root fail until it is fixed" \
           "give $identity_bare a value in $identity_file, or remove the line (local-only, never managed; docs/git-identity.md)"

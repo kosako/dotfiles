@@ -1179,6 +1179,16 @@ id_check() {
     # diagnose them as their own state (#241 review F8 / F9).
     bare-keys) printf '[user]\n\tname\n\temail\n' > "$id_file" ;;
     email-bare) printf '[user]\n\tname = %s\n\temail\n' "$id_canary_name" > "$id_file" ;;
+    # A large file with the bare key LAST: a `git config --list | grep -q`
+    # pipe would stop reading at the first match and could lose the rest to
+    # SIGPIPE under pipefail; doctor must read the whole listing.
+    bare-large)
+      {
+        printf '[user]\n\tname = %s\n' "$id_canary_name"
+        awk 'BEGIN { for (i = 1; i <= 20000; i++) printf "[alias]\n\tpadding%d = value%d\n", i, i }'
+        printf '[user]\n\temail\n'
+      } > "$id_file"
+      ;;
   esac
   if out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     if grep -Fxq "$expect" <<< "$out" \
@@ -1231,6 +1241,7 @@ id_check empty-values "[warn] identity file is partial: $id_file has no user.nam
 # be wrong for them.
 id_check bare-keys "[warn] identity file has a key without a value: $id_file (user.name user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "bare keys (no =) -> own action: git rejects the identity"
 id_check email-bare "[warn] identity file has a key without a value: $id_file (user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "name set + bare email -> action names user.email only, no value shown"
+id_check bare-large "[warn] identity file has a key without a value: $id_file (user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "bare key at the end of a 40k-line file is still found (whole listing read)"
 # Inheritance and commit outcome are separate: with the name explicitly
 # empty the email still inherits, but the commit is refused (empty name).
 id_check name-empty-email-unset "[warn] identity file is partial: $id_file has no user.name user.email (and the identity reset is missing: the unset user.email inherits the personal identity in a repo under $id_root whose remote matches the personal patterns — but the commit is still refused because user.name is explicitly empty; an explicitly empty key stays empty)" "reset absent -> empty name + unset email: email inherits, commit still refused"
