@@ -380,8 +380,9 @@ cmd_backup() {
   # consistency only — a decrypt round-trip needs the identity, which backup
   # does not hold (that stays `verify`'s contract). A stale partial output
   # from an earlier failed run is removed first, so a failed self-check
-  # leaves nothing at --out either; the marker is only written after a
-  # successful write below.
+  # leaves no partial behind and writes no new archive (an existing --out
+  # is kept untouched); the marker is only written after a successful
+  # write below.
   local partial="$out.partial"
   rm -f "$partial"
   # Script-global for the EXIT trap, like staging.
