@@ -205,7 +205,11 @@ if module_active_for_profile "$profile" git-profile; then
     ok "identity reset file present: $identity_reset_file (non-personal contexts fail closed without a context file)"
   else
     identity_reset_present=0
+    # Two steps: chezmoi does not create ancestors outside the target set, so
+    # on a home without ~/.config the apply alone fails (README Quickstart
+    # step 3 has the same mkdir for the same reason).
     action "identity reset file missing: $identity_reset_file — the fail-closed boundary of #202 is NOT in place: a non-personal repo without its context file falls back to the personal identity instead of refusing to commit" \
+      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
       "\$ chezmoi apply $(printf '%q' "${identity_reset_file%/*}") $(printf '%q' "$identity_reset_file")"
   fi
 else
@@ -236,9 +240,16 @@ for context in personal work client sandbox agent; do
       done
       if [[ -z "$identity_missing" ]]; then
         ok "identity file exists: $identity_file"
-      else
+      elif [[ "$identity_reset_present" -eq 1 || "$context" == "personal" ]]; then
         action "identity file is partial: $identity_file has no $identity_missing — commits under $project_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" \
           "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md)"
+      else
+        # Without the reset nothing blanks the identity first, so the keys
+        # this file leaves out keep whatever applied before it — the personal
+        # remote fallback — and a name-only file commits with a MIXED
+        # identity (context name, personal email), not an empty one.
+        action "identity file is partial: $identity_file has no $identity_missing (and the identity reset is missing too: under $project_root the missing key(s) inherit the personal fallback instead of being empty — a mixed identity, not refused)" \
+          "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md) and apply the identity reset (see above)"
       fi
     fi
   elif [[ -d "$project_root" ]]; then

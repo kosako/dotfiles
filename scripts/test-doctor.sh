@@ -1207,14 +1207,38 @@ id_check missing "[ok] identity reset file present: $id_reset (non-personal cont
 rm -f "$id_reset"
 id_check missing "[warn] identity reset file missing: $id_reset — the fail-closed boundary of #202 is NOT in place: a non-personal repo without its context file falls back to the personal identity instead of refusing to commit" "reset absent -> action naming the apply"
 id_check missing "[warn] project root exists but identity file missing: $id_file (and the identity reset is missing too: commits under $id_root currently use the personal fallback, not refused)" "reset absent -> missing-identity action says fallback, not refused"
+# Partial files too: without the reset the omitted keys inherit the personal
+# fallback (a MIXED identity), so the "empty ident" wording would be wrong.
+id_check empty "[warn] identity file is partial: $id_file has no user.name user.email (and the identity reset is missing too: under $id_root the missing key(s) inherit the personal fallback instead of being empty — a mixed identity, not refused)" "reset absent -> empty file says fallback"
+id_check name-only "[warn] identity file is partial: $id_file has no user.email (and the identity reset is missing too: under $id_root the missing key(s) inherit the personal fallback instead of being empty — a mixed identity, not refused)" "reset absent -> name-only says mixed identity"
+id_check email-only "[warn] identity file is partial: $id_file has no user.name (and the identity reset is missing too: under $id_root the missing key(s) inherit the personal fallback instead of being empty — a mixed identity, not refused)" "reset absent -> email-only says mixed identity"
+# The next-actions steps are printf %q-escaped by doctor, so the expected
+# lines are built the same way (a TMPDIR with a space would otherwise fail a
+# correct output). Two steps: mkdir of the ancestor, then the apply.
 id_reset_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || true
-if grep -Fxq "        \$ chezmoi apply ${id_reset%/*} $id_reset" <<< "$id_reset_out"; then
-  ok "test passed: reset absent -> next-actions step names the directory and file apply"
+id_step_mkdir="        \$ mkdir -p $(printf '%q' "$fixture_home/.config")"
+id_step_apply="        \$ chezmoi apply $(printf '%q' "${id_reset%/*}") $(printf '%q' "$id_reset")"
+if grep -Fxq -- "$id_step_mkdir" <<< "$id_reset_out" && grep -Fxq -- "$id_step_apply" <<< "$id_reset_out"; then
+  ok "test passed: reset absent -> next-actions steps: mkdir of ~/.config, then the directory + file apply (%q-escaped)"
 else
   printf '%s\n' "$id_reset_out" >&2
-  fail "test failed: reset absent: expected the exact apply step for the directory and the file"
+  fail "test failed: reset absent: expected the exact mkdir and apply steps"
   status=1
 fi
+# The same on a fixture whose path contains a space: %q must make both the
+# expectation and the output agree.
+id_space_home="$fixture_home/id space home"
+mkdir -p "$id_space_home/src/work" "$id_space_home/.config/git"
+id_space_out="$(HOME="$id_space_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || true
+if grep -Fxq -- "        \$ mkdir -p $(printf '%q' "$id_space_home/.config")" <<< "$id_space_out" \
+  && grep -Fxq -- "        \$ chezmoi apply $(printf '%q' "$id_space_home/.config/git-profile") $(printf '%q' "$id_space_home/.config/git-profile/identity-reset.gitconfig")" <<< "$id_space_out"; then
+  ok "test passed: reset absent on a home path with a space -> steps are shell-escaped"
+else
+  printf '%s\n' "$id_space_out" >&2
+  fail "test failed: reset-absent steps are not escaped for a home path with a space"
+  status=1
+fi
+rm -rf "$id_space_home"
 rm -rf "$id_root" "$id_file"
 
 # OC) OpenCode (#234): presence-level report of the third harness. A fake
