@@ -73,9 +73,24 @@ managed な `~/.claude/settings.json` は、dotfiles が書く key(model / plugi
 ついて **managed-wins**(source が正)。Claude が動的に足す permission や、`/sandbox` による
 per-project の sandbox 調整は **project の `.claude/settings.local.json`**(chezmoi 管理外。
 `.chezmoiignore` は allowlist で宣言外を通さない、#207)に書かれるため、managed な user
-設定とは衝突しない。host 固有・機密の
-settings は user 級 `~/.claude/settings.local.json`(管理外)に置く。`enforceAiSandbox` で出す
-sandbox ブロックの射程は [ai-environment-boundary](ai-environment-boundary.md)、Issue #50。
+設定とは衝突しない。
+
+host 固有・機密の settings(env / permissions / model 等を、この machine の全 project に効かせたいもの)の
+置き場所は、Claude Code が**実際に読む経路**から選ぶ(#245)。user 級の `~/.claude/settings.local.json` は
+Claude Code の設定 scope に**存在せず自動では読まれない**(公式の scope は managed → `--settings` →
+project local `.claude/settings.local.json` → project `.claude/settings.json` → user `~/.claude/settings.json`。
+`settings.local.json` は project scope のみ)。かつてここで案内していたが、置いても効かない。
+
+| 効かせたい範囲 | 経路 | 備考 |
+| --- | --- | --- |
+| project ごと | その repo の `.claude/settings.local.json` | Claude 自身も動的許可をここに書く(git 除外は自動)。chezmoi 管理外 |
+| この machine の全 project(永続) | `CLAUDE_CONFIG_DIR` で config dir ごと別 path に切り替える | `settings.json` / session / plugin も丸ごと別 dir になるので、managed な `~/.claude/settings.json` とは独立。`~/.zshrc.local` で export する |
+| 1 session だけ | `claude --settings <file または JSON>` | managed より弱く project 設定より強い。永続しない |
+| 個別の値 | 環境変数(`ANTHROPIC_MODEL` 等) | key ごとに対応が異なる(公式の env-vars 一覧を参照) |
+
+managed template には private 値を入れず、`chezmoi apply` はこれらの経路に触れない(いずれも管理対象外の path)。
+`enforceAiSandbox` で出す sandbox ブロックの射程は [ai-environment-boundary](ai-environment-boundary.md)、
+Issue #50。
 
 ## GitHub trust list(#119)
 

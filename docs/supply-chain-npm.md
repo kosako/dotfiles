@@ -48,12 +48,22 @@ NPM_TOKEN="$(op read 'op://<vault>/<item>/credential')" npm publish
 
 ## `ignore-scripts=true` の逃げ道
 
-build script が必要な package(esbuild、sharp など)は install 後に明示的に実行する。
+build script が必要な package(esbuild、sharp など)は、global の `ignore-scripts=true` を維持したまま、
+出所と script の内容を確認した **その package だけ**に、その 1 回の command だけ script を許可して
+rebuild する(#244)。
 
 ```sh
-npm install
-npm rebuild <package> --foreground-scripts
+npm install                                                          # lifecycle script は動かない(hardening のまま)
+npm rebuild <package> --ignore-scripts=false --foreground-scripts    # 指定 package の script だけを、この 1 回だけ実行
 ```
+
+- `--ignore-scripts=false` がこの command 限りで禁止を解除する。`~/.npmrc` の `ignore-scripts=true` は
+  変わらないので、次の `npm install` から通常の hardening に戻る。
+- `--foreground-scripts` は script の入出力を前面に出す**表示**設定で、禁止の解除ではない。
+  `--foreground-scripts` だけでは install script は走らずに exit 0 で終わる(npm 11.13 で確認。
+  `--ignore-scripts=false` を添えると走る)。
+- `npm rebuild <package>` は名前を指定した package だけを対象にする。依存 tree 全体の script を
+  まとめて許可する `npm install --ignore-scripts=false` は使わない。
 
 または、信頼できる project に限り project local で override する。
 
