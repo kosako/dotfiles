@@ -327,6 +327,40 @@ else
   done
 fi
 
+section "Quickstart minimal Git apply deploys the identity reset (#241)"
+
+# README Quickstart step 3 applies a minimal Git set on a fresh machine. It
+# must carry the managed identity reset (#202) along with ~/.gitconfig: Git
+# silently ignores a missing include, so ~/.gitconfig alone leaks the personal
+# fallback into non-personal contexts. Pin the exact command line the README
+# shows, then prove that applying exactly those targets (and nothing else)
+# lands both files. The parent directory target is part of the command on
+# purpose (chezmoi cannot apply a file whose parent is not also a target),
+# and ~/.config is created beforehand because chezmoi does not create
+# ancestors outside the target set — and ~/.config as a TARGET would apply
+# its whole subtree, which is not minimal (probed on chezmoi 2.70.5).
+quickstart_mkdir='mkdir -p ~/.config'
+quickstart_cmd='chezmoi apply --source ~/dotfiles ~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig'
+if grep -Fxq -- "$quickstart_mkdir" "$DOTFILES_ROOT/README.md" && grep -Fxq -- "$quickstart_cmd" "$DOTFILES_ROOT/README.md"; then
+  ok "test passed: README Quickstart creates ~/.config and applies ~/.gitconfig together with the identity reset"
+else
+  fail "test failed: README Quickstart must contain (exact lines): $quickstart_mkdir / $quickstart_cmd"
+  status=1
+fi
+make_root
+write_config personal
+mkdir -p "$root/home/.config"
+if output="$(throwaway_chezmoi apply "$root/home/.gitconfig" "$root/home/.config/git-profile" \
+    "$root/home/.config/git-profile/identity-reset.gitconfig" 2>&1)" \
+  && [[ -f "$root/home/.gitconfig" && -f "$root/home/.config/git-profile/identity-reset.gitconfig" ]] \
+  && [[ "$(find "$root/home" -type f | wc -l | tr -d ' ')" -eq 2 ]]; then
+  ok "test passed: applying exactly the Quickstart targets lands ~/.gitconfig and the identity reset (2 files, nothing else)"
+else
+  printf '%s\n' "$output" >&2
+  fail "test failed: the Quickstart target set did not deploy ~/.gitconfig plus the identity reset"
+  status=1
+fi
+
 section "fail-closed render guards"
 
 make_root

@@ -77,6 +77,25 @@ identity がそのまま commit に使われていた(後勝ちで上書きす�
 
 reset が先に identity を空にするので、それまでに何が当たっていても(personal fallback を含む)
 context file の値だけが残る。include 順は契約なので `scripts/test-gitconfig.sh` が exact pin する。
+
+**reset file は `.gitconfig` と必ず一緒に配備する(#241)。** Git は欠損 include を黙って無視するため、
+`.gitconfig` だけを apply した home(README Quickstart の初回 apply がかつてそうだった)では、この節の
+契約は成立せず #202 以前の挙動(personal fallback の流入)に戻る。README の Quickstart は
+`mkdir -p ~/.config` の後に `~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig`
+を 1 回で apply し(親 directory の target を省くと chezmoi が stat error になる。`~/.config` は target 外の
+祖先なので chezmoi が作らず、target にすると subtree ごと apply されて最小にならない)、`scripts/test-render.sh`
+がその command 行と「その 3 target だけの apply で `.gitconfig` と reset の 2 file だけが配備されること」を
+pin する。`doctor.sh` は reset の presence を検査し(値は持たない file なので中身は見ない)、欠損なら
+mkdir + apply を next action に出す。欠損時は非 personal context の案内も変わる(流入は**条件付き**:
+remote が personal の hasconfig pattern に一致し、personal identity が設定されている repo に限る。それ以外は
+`useConfigOnly` で従来どおり拒否): identity file が無ければ「commit 拒否」ではなく「personal identity を
+継承しうる」、partial なら「**未指定**の key は personal identity を継承する(混在 identity)。明示的な空値
+(`name =`)は上書きするので空のまま」。継承と commit 可否は別で、name が明示的に空なら email を継承しても
+commit は拒否される(Git は空 name を拒否)。未指定と空値の区別は `git config --get` の exit code で見る
+(未指定 = 1、空値 = 0 で空出力)。`=` 無しの key(`email` だけの行、boolean 省略記法)は第 3 の状態で、
+`--get` は空値と同じに見えるが Git の identity 読み込みは `fatal: missing value for 'user.email'` で
+拒否する(git 2.50.1 実測)。doctor は `--list` に `=` 無しで現れることで判別し、reset の有無に関わらず
+「値なし key・commit 不能」として別に報告する。
 `~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
 では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
 
