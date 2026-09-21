@@ -389,13 +389,50 @@ run_fail_contains \
   "duplicate backup path: .zshrc.local" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# Structural validation happens in the shared parser before any row is
+# emitted (#246): a missing path, a "|" in a free-form label (which would
+# shift the fields and corrupt the path), or a control character in any
+# field (a newline in a path would split into two plausible rows) are all
+# rejected with one message — for the baseline here and, through the same
+# function, for the local supplement at backup time.
 make_fixture
 insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
   "  - { path: .zshrc.local, type: file, category: shell }" \
   "  - {}"
 run_fail_contains \
   "rejects an empty backup path entry (no vacuous pass)" \
-  "backup path entry missing path" \
+  "backup-paths entry invalid in" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  '  - { path: only-in-supplement, type: file, category: "shell|override" }'
+run_fail_contains \
+  "rejects a backup path category containing the field delimiter |" \
+  "backup-paths entry invalid in" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+# awk -v (insert_once) processes backslash escapes, so the YAML escape must
+# arrive as the two characters \n (hence \\n here), not as a real newline —
+# a real newline inside a double-quoted YAML scalar folds into a space and
+# the entry would be valid.
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  '  - { path: "one\\nfile|other|two", type: file }'
+run_fail_contains \
+  "rejects a backup path containing a newline (would split into two rows)" \
+  "backup-paths entry invalid in" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+  "  - { path: .zshrc.local, type: file, category: shell }" \
+  "  - { path: somefile, type: 1 }"
+run_fail_contains \
+  "rejects a non-string backup path type" \
+  "backup-paths entry invalid in" \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture

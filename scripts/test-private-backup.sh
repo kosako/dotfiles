@@ -891,6 +891,58 @@ else
   miss "verify rejected an archive whose staging and manifest agree"
 fi
 
+# 28. The local supplement is user input: a structurally invalid entry must
+#     not be dropped silently or mangled (issue #246). The shared parser
+#     rejects the whole file before any row is used, so backup fails with the
+#     message, writes no archive and no marker. Three shapes: an entry
+#     without a path, a "|" in category (would shift fields into the path),
+#     and a newline inside a path (would split into two rows). A normal free
+#     label still passes, and a "|" INSIDE a path stays allowed (the
+#     odd-filename round-trip above already pins that).
+sv_case() {
+  local label="$1" entry="$2" rc=0 out home
+  home="$fixture_home/sv-$label"
+  mkdir -p "$home/.ssh" "$home/.config/dotfiles"
+  printf 'a\n' > "$home/.zshrc.local"
+  printf 'b\n' > "$home/.ssh/config.local"
+  printf 'backup_paths:\n%s\n' "$entry" > "$home/.config/dotfiles/backup-paths.local"
+  out="$(HOME="$home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$home/s.age" --recipient "$recipient" --yes 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $home/.config/dotfiles/backup-paths.local" <<< "$out" \
+    && [[ ! -e "$home/s.age" && ! -e "$home/s.age.partial" && ! -e "$home/.local/state/dotfiles/private-backup.json" ]]; then
+    pass "invalid supplement ($label) is rejected before capture: no archive, no marker"
+  else
+    printf '%s\n' "$out" >&2
+    miss "invalid supplement ($label) was accepted or mis-reported (rc=$rc)"
+  fi
+}
+sv_case missing-path '  - { type: file, category: fixture }'
+sv_case pipe-in-category '  - { path: only-in-supplement, type: file, category: "shell|override" }'
+sv_case newline-in-path '  - { path: "one\nfile|other|two", type: file }'
+# Control: a free-form label without the delimiter is fine and the declared
+# file is captured under its own path.
+sv_ok="$fixture_home/sv-ok"
+mkdir -p "$sv_ok/.ssh" "$sv_ok/.config/dotfiles"
+printf 'a\n' > "$sv_ok/.zshrc.local"
+printf 'b\n' > "$sv_ok/.ssh/config.local"
+printf 'labelled\n' > "$sv_ok/only-in-supplement"
+printf 'backup_paths:\n  - { path: only-in-supplement, type: file, category: "shell/override label" }\n' \
+  > "$sv_ok/.config/dotfiles/backup-paths.local"
+sv_extract="$fixture_home/sv-extract"
+mkdir -p "$sv_extract"
+if HOME="$sv_ok" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sv_ok/s.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  age -d -i "$fixture_home/keys/id.txt" "$sv_ok/s.age" | tar -xpf - -C "$sv_extract"
+  if [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "only-in-supplement")] | length' "$sv_extract/manifest.json")" == "1" ]] \
+    && [[ "$(yq -p=json -o=tsv '.entries[] | select(.path == "only-in-supplement") | .category' "$sv_extract/manifest.json")" == "shell/override label" ]]; then
+    pass "a free-form category label without | is accepted and recorded as declared"
+  else
+    miss "valid supplement label was not captured / recorded as declared"
+  fi
+else
+  miss "backup with a valid free-form category label failed"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi
