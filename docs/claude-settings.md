@@ -39,7 +39,8 @@ work / client は別系統(上表)。
 ## 2 層(`settings.json` / `settings.local.json`)
 
 Claude Code は `settings.json`(共有)と `settings.local.json`(ローカル)の 2 ファイルを
-持つ。dotfiles は **前者だけ**を管理し、後者は常に管理外(`.chezmoiignore` で明示)。
+持つ。dotfiles は **前者だけ**を管理し、後者は常に管理外(`.chezmoiignore` は allowlist で、
+宣言した file 以外は隣の file でも通さない。#207)。
 
 Claude Code は書き先を 2 つに分ける: **動的に承認した permission** は
 `settings.local.json`(machine / context 固有・絶対 path を含むので非 public-safe)へ、
@@ -62,11 +63,11 @@ permission 承認は対象外。
 
 ## gate の仕組み
 
-`claude-settings` module(`.chezmoidata/modules.yaml`)が `.claude` /
-`.claude/settings.json` を宣言し、`personal` profile にのみ登録する。`.chezmoiignore` の
-module loop が、module を持たない profile(work)では `.claude` を
-**ディレクトリごと** ignore する。`scripts/test-render.sh` が profile 別の managed set で
-この gate を回帰固定している。
+`claude-settings` module(`.chezmoidata/modules.yaml`)が `.claude/settings.json` を
+宣言し、`personal` profile にのみ登録する。`.chezmoiignore`(allowlist)は活性 module の
+宣言 path とその祖先 `.claude` だけを通すので、module を持たない profile(work)では
+`.claude` が**ディレクトリごと**管理外になる。`scripts/test-render.sh` が profile 別の
+managed set でこの gate を回帰固定している。
 
 ## permissions(#119: secret floor / GitHub guard)
 

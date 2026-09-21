@@ -66,8 +66,9 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
 
 ## 置き場所が `~/.config/git/` 配下でない理由
 
-`~/.config/git` は git-signing module の宣言 path で、`enableGitSigning=false` の
-profile では chezmoiignore が **directory subtree ごと**管理から外す(実測)。gate を
+`~/.config/git` は git-signing module の宣言 file(`signing.gitconfig`)の親で、
+`enableGitSigning=false` の profile では chezmoiignore(allowlist)がその file も祖先
+`.config/git` も通さず、**directory subtree ごと**管理から外す(実測)。gate を
 その下に置くと、signing を off にしただけで commit gate が黙って消える(安全機構の
 silent fail-open)。独立した `~/.config/git-hook-gates/` に置くことで交差を断つ。
 この配置が担保であることは `test-git-hook-gates.sh` が pin している。

@@ -68,9 +68,12 @@ fi
 
 check_file_contains "ignore generated from module paths" "$CHEZMOIIGNORE" 'range $module.paths'
 
-for entry in README.md AGENTS.md LICENSE docs scripts worklog; do
-  check_file_has_line "never applies repo file: $entry" "$CHEZMOIIGNORE" "$entry"
-done
+# Allowlist (#207): repo files (README.md, docs, scripts, ...) are never
+# applied because nothing declares them — the "**" root ignores every
+# target that is not un-ignored by a module path. test-render.sh pins the
+# resulting managed set per profile and scans the source for undeclared
+# entries; here only the allowlist root is pinned statically.
+check_file_has_line "allowlist root: every undeclared target is ignored" "$CHEZMOIIGNORE" '**'
 
 section "consistency: module path gates (modules.yaml)"
 
@@ -91,7 +94,7 @@ check_module_gate() {
 check_module_gate ".npmrc managed only with npmHardeningMode=enforce" \
   "supply-chain-npm" ".npmrc" "npmHardeningMode enforce"
 check_module_gate "mise config managed only with enableRuntimeManagement" \
-  "runtime" $'.config/mise\n.config/mise/config.toml' "enableRuntimeManagement true"
+  "runtime" ".config/mise/config.toml" "enableRuntimeManagement true"
 
 section "consistency: doctor enforce expectations"
 

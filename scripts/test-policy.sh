@@ -213,6 +213,19 @@ run_fail_contains \
   "module has requires but no paths: base" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# Module paths become literal "!<path>" allowlist lines (#207): anything
+# that would read as a pattern, or match nothing, must fail closed. The
+# tilde is a deliberate literal (a home-relative path never starts with ~).
+# shellcheck disable=SC2088
+for bad_path in '.config/*.toml' '.config/mise/' "'!.zshrc'" '.config/my dir' '~/.zshrc'; do
+  make_fixture
+  insert_once "$fixture/.chezmoidata/modules.yaml" "      - .npmrc" "      - $bad_path"
+  run_fail_contains \
+    "rejects non-literal module path $bad_path" \
+    "module path must be a literal path (no pattern characters, whitespace, or trailing slash): supply-chain-npm: " \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+
 # Require both the YAML boolean type and canonical lowercase spelling (#206).
 # Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
 # comparisons in registry disclosure and environmentKind checks.

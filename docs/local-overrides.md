@@ -71,8 +71,9 @@ template を足しても ignore されたままになる。extensions の自動 
 
 managed な `~/.claude/settings.json` は、dotfiles が書く key(model / plugin / sandbox 等)に
 ついて **managed-wins**(source が正)。Claude が動的に足す permission や、`/sandbox` による
-per-project の sandbox 調整は **project の `.claude/settings.local.json`**(chezmoi 管理外、
-`.chezmoiignore` 済み)に書かれるため、managed な user 設定とは衝突しない。host 固有・機密の
+per-project の sandbox 調整は **project の `.claude/settings.local.json`**(chezmoi 管理外。
+`.chezmoiignore` は allowlist で宣言外を通さない、#207)に書かれるため、managed な user
+設定とは衝突しない。host 固有・機密の
 settings は user 級 `~/.claude/settings.local.json`(管理外)に置く。`enforceAiSandbox` で出す
 sandbox ブロックの射程は [ai-environment-boundary](ai-environment-boundary.md)、Issue #50。
 
