@@ -167,6 +167,9 @@ if [[ -n "$script_bin" ]] && "$script_bin" --version >/dev/null 2>&1; then
 else
   script_flavour=bsd
 fi
+# The moment the marker is seen is recorded (reached_at), so the case can
+# time only what happens AFTER the command started — script(1) start-up and
+# the marker wait are excluded from the early-interruption bound.
 send_ctrl_c_when_reached() {
   local _tick
   for _tick in $(seq 1 100); do
@@ -174,6 +177,7 @@ send_ctrl_c_when_reached() {
     sleep 0.1
   done
   : "$_tick"
+  date +%s > "$fixture/reached_at"
   sleep 0.2
   printf '\003'
 }
@@ -198,7 +202,7 @@ leftovers() {
 }
 reset_markers() {
   find "$fixture/tmp" -name 'ai-clip.*' -delete
-  rm -f "$fixture/before" "$fixture/after"
+  rm -f "$fixture/before" "$fixture/after" "$fixture/reached_at"
 }
 marker_state() {
   printf 'before=%s after=%s leftovers=%s' \
@@ -259,28 +263,30 @@ reset_markers
 #     (sleep 8) runs under the helper: the tty delivers SIGINT to the
 #     foreground process group, sleep dies, and the interactive zsh aborts
 #     the call — the exact keyboard scenario. The sender waits for the reach
-#     marker, so a slow start cannot make the ^C arrive too early; a run
-#     that lasts the full 8 s means the ^C never interrupted the sleep.
+#     marker, so a slow start cannot make the ^C arrive too early, and the
+#     early-interruption bound counts only from that moment: the 8 s sleep
+#     must end in under 8 s AFTER the command started (start-up time is
+#     excluded), otherwise the ^C never interrupted it.
 if [[ -z "$script_bin" ]]; then
   fail "script(1) not found; the pty Ctrl-C case cannot run"
   status=1
 else
   pty_case() {
-    local func="$1" started ended
+    local func="$1" ended reached_at
     reset_markers
-    started="$(date +%s)"
     run_pty pty "$func"
     ended="$(date +%s)"
-    printf '%s seconds=%s' "$(marker_state)" "$((ended - started))"
+    reached_at="$(cat "$fixture/reached_at" 2>/dev/null || echo 0)"
+    printf '%s after_reach_seconds=%s' "$(marker_state)" "$((ended - reached_at))"
   }
   control_result="$(pty_case _ai_clip_run_old)"
   fixed_result="$(pty_case _ai_clip_run)"
-  if [[ "$control_result" == before=yes\ after=no\ leftovers=1\ seconds=[0-7] \
-    && "$fixed_result" == before=yes\ after=no\ leftovers=0\ seconds=[0-7] ]]; then
-    ok "test passed: real Ctrl-C via pty ($script_flavour script) while sleep runs -> reached, interrupted early, nothing after ran; old body leaves the temp (control), always-block body removes it"
+  if [[ "$control_result" == before=yes\ after=no\ leftovers=1\ after_reach_seconds=[0-7] \
+    && "$fixed_result" == before=yes\ after=no\ leftovers=0\ after_reach_seconds=[0-7] ]]; then
+    ok "test passed: real Ctrl-C via pty ($script_flavour script) while sleep runs -> reached, interrupted within 8 s of starting, nothing after ran; old body leaves the temp (control), always-block body removes it"
   else
     printf 'control: %s\nfixed:   %s\n' "$control_result" "$fixed_result" >&2
-    fail "test failed: pty Ctrl-C case (expected control 'before=yes after=no leftovers=1 seconds<8', fixed 'before=yes after=no leftovers=0 seconds<8')"
+    fail "test failed: pty Ctrl-C case (expected control 'before=yes after=no leftovers=1 after_reach_seconds<8', fixed 'before=yes after=no leftovers=0 after_reach_seconds<8')"
     status=1
   fi
   reset_markers
