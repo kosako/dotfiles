@@ -18,6 +18,10 @@ profiles:
       - ai-policy
       - claude-settings
       - codex-settings
+      # #234: managed OpenCode permission floor (~/.config/opencode/opencode.json).
+      # Module-gated like claude-settings / codex-settings (personal only; work
+      # carries no AI harness settings). Auth, model choice and plugins stay local.
+      - opencode-settings
       - git-signing
       - git-hook-gates
     capabilities:

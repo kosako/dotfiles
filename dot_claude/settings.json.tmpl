@@ -10,7 +10,8 @@
        Three deny tiers (#119 Phase 2 task B):
        1. never-legit secret floor (UNCONDITIONAL): reading SSH private keys or
           credential-store files (gh OAuth token, AWS keys, ~/.netrc, Codex
-          auth.json), dumping the whole env, or touching GitHub Actions secrets
+          auth.json, OpenCode auth.json — #234), dumping the whole env, or
+          touching GitHub Actions secrets
           is never something the human legitimately asks Claude (the AI tool) to
           do, and a deny binds only Claude's own Bash tool calls — never the
           human's own terminal, and not env calls nested inside a script Claude
@@ -60,7 +61,7 @@
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
        it is included only when at least one hook capability is on, so an
        empty "hooks": {} is never emitted. */ -}}
-{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" -}}
+{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list -}}
 {{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(cat *.env*)" "Read(//**/.env*)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}

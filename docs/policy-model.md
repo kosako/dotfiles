@@ -247,6 +247,24 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
+## OpenCode settings(`opencode-settings` module、#234)
+
+第 3 の AI harness。capability ではなく **module 列挙だけで gate**(claude-settings / codex-settings と
+同型): managed な `~/.config/opencode/opencode.json` に permission の床(secret floor の read / bash
+deny・外向きと昇格の bash は ask・他は allow)、`autoupdate: false`(update-policy)、`share: "disabled"`、
+`instructions`(agent-tools 配布の運用ルール。OpenCode は `@` import を辿らない)を置く。provider /
+model / auth / plugin / mcp は local(`OPENCODE_CONFIG` が指す file・`auth.json`)で managed には書かない。
+skill は `~/.claude/skills` を OpenCode が直接読むので再配布しない。
+
+- **boundary ではない**: OpenCode は設定を global → local → project の順に **merge・後勝ち**するので、
+  project 側で床を allow に戻せる。managed `settings.json` と同じ「public-safe な既定」。
+- **Claude 側の secret floor** に `Read(~/.local/share/opencode/auth.json)` を追加(Codex `auth.json` と
+  同型・無条件 deny)。
+- **doctor**: presence(`opencode` / managed 床)と `auth.json` の存在のみ(中身・provider 名は読まない)。
+  module 非 active は「not managed」。乖離は managed drift section。
+- **状態**: personal のみ列挙、work は非列挙。plugin による hook parity と相互レビュー契約への追加は
+  Phase 2(agent-tools)。詳細は [opencode-settings](opencode-settings.md)。
+
 ## dormant capability の扱い(残す基準)
 
 宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ

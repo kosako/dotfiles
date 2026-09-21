@@ -1,0 +1,73 @@
+{{- template "require-profile" . -}}
+{{- /* OpenCode harness floor (#234). Managed for profiles that list the
+       opencode-settings module (personal). OpenCode merges its config sources
+       (global -> OPENCODE_CONFIG -> project opencode.json -> ...), later ones
+       overriding earlier, so this global file is a FLOOR that a project or a
+       local OPENCODE_CONFIG file can raise or (deliberately) lower — the same
+       standing as the managed ~/.claude/settings.json: a public-safe default,
+       not an enforcement boundary (docs/opencode-settings.md).
+
+       What is here and why:
+       - permission: OpenCode defaults to allow-all. The read deny mirrors the
+         Claude secret floor (SSH keys, credential stores incl. the Codex and
+         OpenCode auth.json, .env); the bash deny mirrors its env-dump /
+         gh-secret entries; outward and escalation commands (push, PR / issue /
+         release / repo mutation, auth, sudo, clone, curl) are ask, per
+         docs/ai-policy.md (read-only local work needs no approval; leaving
+         the machine or escalating does). Rules are last-match-wins.
+       - autoupdate off: update-policy (no self-updating tools; updates are
+         deliberate, via the catalog source).
+       - share disabled: no session upload surface (public safety).
+       - instructions: agent-tools' operating rules. OpenCode reads
+         ~/.claude/CLAUDE.md for Claude Code compatibility but does not follow
+         its `@` import, so the imported file is named explicitly.
+       NOT here (local, unmanaged): provider / model (personal choice, like
+       #93 for Claude), auth (~/.local/share/opencode/auth.json), plugins,
+       mcp, agents, tui. Put local additions in a file named by OPENCODE_CONFIG
+       (merged after this one). */ -}}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "share": "disabled",
+  "instructions": [
+    "{{ .chezmoi.homeDir }}/.claude/agent-tools/CLAUDE.md"
+  ],
+  "permission": {
+    "read": {
+      "*": "allow",
+      "~/.ssh/*": "deny",
+      "~/.aws/*": "deny",
+      "~/.config/gh/*": "deny",
+      "~/.netrc": "deny",
+      "~/.codex/auth.json": "deny",
+      "~/.local/share/opencode/auth.json": "deny",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "bash": {
+      "*": "allow",
+      "cat ~/.ssh/*": "deny",
+      "gh secret *": "deny",
+      "gh api *secrets*": "deny",
+      "env": "deny",
+      "env *": "deny",
+      "printenv": "deny",
+      "printenv *": "deny",
+      "git push *": "ask",
+      "git clone *": "ask",
+      "gh pr create *": "ask",
+      "gh pr merge *": "ask",
+      "gh pr comment *": "ask",
+      "gh pr review *": "ask",
+      "gh issue create *": "ask",
+      "gh issue comment *": "ask",
+      "gh release *": "ask",
+      "gh repo *": "ask",
+      "gh auth *": "ask",
+      "sudo *": "ask",
+      "curl *": "ask",
+      "wget *": "ask"
+    }
+  }
+}

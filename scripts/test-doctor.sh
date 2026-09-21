@@ -1192,6 +1192,77 @@ id_check complete "[ok] identity file exists: $id_file" "ok"
 id_check unparsable "[warn] identity file exists but git cannot parse it: $id_file (syntax error?) — commits under $id_root fail until it is fixed" "unparsable warn"
 rm -rf "$id_root" "$id_file"
 
+# OC) OpenCode (#234): presence-level report of the third harness. A fake
+#     opencode sits at the front of PATH (the real one may or may not be
+#     installed); the fixture HOME carries the managed floor or not, and a
+#     fake credential store whose provider name and key are canaries that must
+#     never be printed. personal lists opencode-settings (floor expected);
+#     work does not. doctor stays exit 0 throughout.
+oc_fakebin="$fixture_home/opencodefake"
+mkdir -p "$oc_fakebin" "$fixture_home/.local/share/opencode"
+printf '#!/bin/sh\nexit 0\n' > "$oc_fakebin/opencode"
+chmod +x "$oc_fakebin/opencode"
+oc_floor="$fixture_home/.config/opencode/opencode.json"
+oc_auth="$fixture_home/.local/share/opencode/auth.json"
+oc_canary_provider="canary-provider-7d1e"
+oc_canary_key="canary-key-4b9c0f"
+printf '{"%s":{"type":"api","key":"%s"}}\n' "$oc_canary_provider" "$oc_canary_key" > "$oc_auth"
+#     OC-a) personal with the floor MISSING -> action naming the apply
+#           targets; the credential store is reported by existence only.
+rm -f "$oc_floor"
+if oc_out="$(HOME="$fixture_home" PATH="$oc_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] opencode: $oc_fakebin/opencode" <<< "$oc_out" \
+    && grep -Fq "[warn] opencode-settings module active but the managed floor is missing: $oc_floor" <<< "$oc_out" \
+    && grep -Fxq "[info] - opencode credential store present: $oc_auth (existence only; contents never read)" <<< "$oc_out" \
+    && ! grep -Fq "$oc_canary_provider" <<< "$oc_out" && ! grep -Fq "$oc_canary_key" <<< "$oc_out"; then
+    ok "test passed: OpenCode floor missing on personal is an action; credential store reported by existence only (canaries absent)"
+  else
+    printf '%s\n' "$oc_out" >&2
+    fail "test failed: OpenCode section (personal, floor missing) did not report as expected or leaked a canary"
+    status=1
+  fi
+else
+  printf '%s\n' "$oc_out" >&2
+  fail "test failed: doctor must stay exit 0 (OpenCode, floor missing)"
+  status=1
+fi
+#     OC-b) personal with the floor PRESENT -> ok, no action.
+mkdir -p "${oc_floor%/*}"
+printf '{}\n' > "$oc_floor"
+if oc_out="$(HOME="$fixture_home" PATH="$oc_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "[ok] managed permission floor present: $oc_floor (" <<< "$oc_out" \
+    && ! grep -Fq "managed floor is missing" <<< "$oc_out"; then
+    ok "test passed: OpenCode floor present on personal is ok"
+  else
+    printf '%s\n' "$oc_out" >&2
+    fail "test failed: OpenCode floor present was not reported ok"
+    status=1
+  fi
+else
+  printf '%s\n' "$oc_out" >&2
+  fail "test failed: doctor must stay exit 0 (OpenCode, floor present)"
+  status=1
+fi
+#     OC-c) work (module inactive), no floor, no credential store -> the
+#           floor is declared not managed (no action) and the store absent.
+rm -rf "$fixture_home/.config/opencode" "$oc_auth"
+if oc_out="$(HOME="$fixture_home" PATH="$oc_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] OpenCode permission floor not managed for this profile (opencode-settings module inactive)" <<< "$oc_out" \
+    && grep -Fxq "[info] - opencode credential store absent: $oc_auth (connect a provider with /connect when needed)" <<< "$oc_out" \
+    && ! grep -Fq "managed floor is missing" <<< "$oc_out"; then
+    ok "test passed: OpenCode on work is not managed (no action) and the credential store absence is neutral"
+  else
+    printf '%s\n' "$oc_out" >&2
+    fail "test failed: OpenCode section on work did not report as expected"
+    status=1
+  fi
+else
+  printf '%s\n' "$oc_out" >&2
+  fail "test failed: doctor must stay exit 0 (OpenCode, work)"
+  status=1
+fi
+rm -rf "$oc_fakebin" "$fixture_home/.local/share/opencode"
+
 # NA) next-actions summary (#227): every warning reported through `action`
 #     is repeated once, numbered, at the end of the run with its steps, and
 #     `--actions-only` prints just that list. doctor stays exit 0 (report-

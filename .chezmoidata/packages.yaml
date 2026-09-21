@@ -71,5 +71,10 @@ packages:
   # (anthropics/claude-code#62684). Native install self-updates outside npm, so
   # npm hardening and working auto-update coexist. See docs/supply-chain-npm.md.
   - { name: codex, source: npm_global, pkg: "@openai/codex" }
+  # opencode: homebrew-core formula (#234). The vendor tap (anomalyco/tap) updates
+  # faster, but the catalog has no tap notion (brew inventory lists bare formula
+  # names, so a tap-qualified pkg would read as missing); core is fine under
+  # update-policy (no self-update: the managed opencode.json sets autoupdate off).
+  - { name: opencode, source: brew_formula }
   - { name: goreleaser, source: go_install, pkg: "github.com/goreleaser/goreleaser/v2" }
   - { name: tacho, source: go_install, pkg: "github.com/kosako/tachograph/cmd/tacho" }

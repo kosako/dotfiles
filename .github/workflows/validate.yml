@@ -141,6 +141,9 @@ jobs:
       - name: codex settings hook registration tests
         run: ./scripts/test-codex-settings.sh
 
+      - name: opencode settings permission floor tests
+        run: ./scripts/test-opencode-settings.sh
+
       - name: git-signing gating tests
         run: ./scripts/test-git-signing.sh
 
