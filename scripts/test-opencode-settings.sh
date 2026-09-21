@@ -97,10 +97,10 @@ fi
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
 #    bare command fall through to the allow-all base (Codex review, PR #235).
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view*=allow\ngh pr list*=allow\ngh pr diff*=allow\ngh pr checks*=allow\ngh pr status*=allow\ngh issue view*=allow\ngh issue list*=allow\ngh issue status*=allow\ngh repo view*=allow\ngh release view*=allow\ngh release list*=allow\ngh run view*=allow\ngh run list*=allow\ngh workflow view*=allow\ngh workflow list*=allow\ngh label list*=allow\ngh gist view*=allow\ngh gist list*=allow\ngh search *=allow\ngh status*=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help*=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny'
+expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 6 ask incl. gh default, 24 read allow-backs, 10 deny last; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 6 ask incl. gh default, 44 read allow-backs as exact + '... *' pairs, 10 deny last; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -239,6 +239,13 @@ ask	gh cache delete x
 ask	gh project create
 ask	gh secret
 ask	gh extension install o/r
+ask	gh status-token
+ask	gh statusx
+ask	gh help-token
+ask	gh pr viewx
+ask	gh pr view-token 1
+ask	gh search
+ask	gh auth
 ask	sudo -v
 ask	sudo ls
 ask	curl https://example.invalid
@@ -281,8 +288,14 @@ allow	gh gist list
 allow	gh gist view x
 allow	gh search issues x
 allow	gh status
+allow	gh status --org o
 allow	gh --version
+allow	gh version
+allow	gh help
 allow	gh help pr
+allow	gh pr view
+allow	gh issue list --state open
+allow	gh release list --limit 5
 allow	git status
 allow	git commit -m x
 allow	git fetch origin

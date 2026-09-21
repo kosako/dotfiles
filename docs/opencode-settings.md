@@ -32,7 +32,9 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     `gh api *secrets*`、token 表示 `gh auth token` / `gh auth status --show-token` / `-t`、`cat ~/.ssh/*`)は
     **map の末尾**に置く(last-match-wins で、後続の広い ask に deny を弱めさせないため)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
-    `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。
+    `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。read の allow は
+    「完全一致」と「`… *`(space 付き)」の 2 本 1 組で命令名を区切る(`gh status*` のような space なしの allow だと
+    `gh status-token` のような alias 名まで通る。ask / deny は過剰一致しても安全側なので space なし `*` のまま)。
   - `external_directory` / `doom_loop` は OpenCode 既定(ask)のまま。
 - **`autoupdate: false`**: 起動時の自動 DL を止める([update-policy](update-policy.md))。更新は catalog の
   source(brew)で意図的に行う。
