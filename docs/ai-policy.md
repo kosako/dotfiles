@@ -7,15 +7,16 @@ AI tools は後続 module とする。ただし、AI agent の権限ポリシー
 ## 権限方針の正本と管理点(#139)
 
 「AI エージェントに何を無確認で許すか」の正本はこの文書。tool ごとの**実装(どこで効かせるか)**は
-次の管理点に置き、どちらの tool も同じ原則に従わせる(Codex 側との対称性):
+次の管理点に置き、どの tool も同じ原則に従わせる(tool 間の対称性):
 
 | tool | 権限面 | 管理点 | 堆積への手当て |
 | --- | --- | --- | --- |
 | Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は `settings.local.json`(管理外)に隔離。managed 側は apply で戻る |
 | Codex | 承認 rules(コマンド allowlist) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
 | Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
+| OpenCode | `permission`(read / bash の pattern rule: secret floor は deny、外向き・昇格は ask、他は allow。既定は allow all なので床が要る) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
 
-原則(両 tool 共通):
+原則(全 tool 共通):
 
 - **read(ローカル完結・読み取り)は無確認で許可してよい**。Codex baseline の allow は
   read 系サブコマンド(`gh pr view/list/diff/checks`、`gh issue view/list`、`gh auth status`)と

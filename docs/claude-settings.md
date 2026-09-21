@@ -14,7 +14,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model / effort / public plugin / 通知 / statusLine / tui / workflow 警告抑止 等の global preference) | public repo(`dot_claude/settings.json.tmpl`) | ✅ chezmoi(**personal profile のみ**) |
-| permission ブロック(#119): secret floor の無条件 deny 12 件(`~/.ssh` 読取 / credential-store 読取 / env dump / gh secret 系)、`gateGitHubMcp` の `mcp__github` deny(personal 既定 true で計 13 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
+| permission ブロック(#119): secret floor の無条件 deny 13 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系)、`gateGitHubMcp` の `mcp__github` deny(personal 既定 true で計 14 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `*` に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | personal・機密(secret を含む設定など) | `~/.claude/settings.local.json` | ❌ 非コミット・管理外 |
 | work / client の settings | 暗号化バックアップ(#60)か各マシン手設定 | ❌ public repo に生値を置かない |
@@ -71,13 +71,14 @@ module loop が、module を持たない profile(work)では `.claude` を
 ## permissions(#119: secret floor / GitHub guard)
 
 `permissions.deny` には capability 非依存の **secret floor**(never-legit な secret 読取
-12 件: `Read(~/.ssh/**)` と credential-store 読取 `Read(~/.aws/**)` / `Read(~/.config/gh/**)`
-(gh の OAuth token)/ `Read(~/.netrc)` / `Read(~/.codex/auth.json)`、`Bash(cat ~/.ssh/*)` /
+13 件: `Read(~/.ssh/**)` と credential-store 読取 `Read(~/.aws/**)` / `Read(~/.config/gh/**)`
+(gh の OAuth token)/ `Read(~/.netrc)` / `Read(~/.codex/auth.json)` /
+`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat ~/.ssh/*)` /
 `gh secret` / `gh api *secrets*` / `env` / `printenv` 系)を常時出力する。**Read 側 deny を
 主軸**とする(Read tool はコマンド経由でない読取にも効く。Bash matcher は `head` / `xxd` /
 `python open()` 等の等価経路で迂回できる leaky steering なので、path ごとの Bash 列挙は
 意図的にしない。#136)。`gateGitHubMcp=true`(personal 既定)で
-`mcp__github`(server 全体)の deny を足して計 13 件、`enforceAiSandbox=true` で human-legit gate
+`mcp__github`(server 全体)の deny を足して計 14 件、`enforceAiSandbox=true` で human-legit gate
 (`.env` 読取 / main・master への push の deny、release / branch-protection の ask)を
 追加する。`permissions.allow` は `mcp__pencil` のみ。これらは **steering であって
 enforcement boundary ではない**(射程と限界は

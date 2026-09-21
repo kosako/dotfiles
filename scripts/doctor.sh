@@ -825,6 +825,38 @@ else
   ok "AI tool install/sync not managed (enableAiTools=false)"
 fi
 
+section "OpenCode (report-only)"
+# Third AI harness (#234). Its permission floor is a managed file under the
+# opencode-settings module (personal only). Presence-level report: the binary
+# (catalog: opencode), the managed floor, and the credential store
+# ~/.local/share/opencode/auth.json — EXISTENCE only, never its contents or
+# provider names (it holds API keys / OAuth tokens; the Claude secret floor
+# denies reading it). Drift of the floor is the managed-drift section's job.
+# Where the module is inactive (work) the floor is declared not managed; a
+# locally installed opencode is still shown.
+opencode_floor="$HOME/.config/opencode/opencode.json"
+opencode_auth="$HOME/.local/share/opencode/auth.json"
+if command -v opencode >/dev/null 2>&1; then
+  ok "opencode: $(command -v opencode)"
+else
+  item "opencode not installed (catalog: opencode via brew; docs/opencode-settings.md)"
+fi
+if module_active_for_profile "$profile" opencode-settings; then
+  if [[ -f "$opencode_floor" ]]; then
+    ok "managed permission floor present: $opencode_floor (secret-floor deny, outward/escalation ask, autoupdate off, share disabled; drift shows in the managed drift section)"
+  else
+    action "opencode-settings module active but the managed floor is missing: $opencode_floor — OpenCode defaults to allow-all without it; run chezmoi apply for the directory and the file" \
+      "\$ chezmoi apply $(printf '%q' "${opencode_floor%/*}") $(printf '%q' "$opencode_floor")"
+  fi
+else
+  ok "OpenCode permission floor not managed for this profile (opencode-settings module inactive)"
+fi
+if [[ -f "$opencode_auth" ]]; then
+  item "opencode credential store present: $opencode_auth (existence only; contents never read)"
+else
+  item "opencode credential store absent: $opencode_auth (connect a provider with /connect when needed)"
+fi
+
 # enforceAiSandbox drives the Claude Code native sandbox block in the managed
 # ~/.claude/settings.json (Bash tool fs+network only; see
 # docs/ai-environment-boundary.md). Reported here because AGENTS.md requires a
