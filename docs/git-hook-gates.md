@@ -19,6 +19,10 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
             commit-msg    … 薄い shim: dispatcher へ exec(managed)
                  └─ $HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher
                     … gate 実行 + repo 自身の .git/hooks への chain(agent-tools 配備)
+                       pre-commit : personal-public-safety-gate → personal-git-identity-gate
+                                    (配列順・最初に fail した gate で止まる。identity gate は
+                                    agent-tools#281 / #239: 空 email 等の partial identity を止める)
+                       commit-msg : personal-ai-trailer-gate
 ```
 
 - shim はロジックを持たない(gate 本体の更新は agent-tools の sync が担い、
@@ -41,11 +45,16 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
 1. **intent** = `enableGitHookGates`(profile の方針)。agent-tools を使う
    profile(personal)だけ true。work は false(会社マシンに deploy はない)。
 2. **readiness** = destination に agent-tools 配備が**完全に**存在すること
-   (dispatcher + 両 gate の **3 本すべてが regular file かつ実行可能**。
+   (dispatcher + 3 gate の **4 本すべてが regular file かつ実行可能**。
    `.chezmoitemplates/git-hook-gates-armed` が render 時に destination を
    probe する — doctor / preflight の `-x` 判定と同じ基準)。dispatcher 1 本や
    presence だけでは判定しない — gate 欠け・非実行の部分配備でも dispatcher は
-   fail-closed なので、3 本が実行可能にそろって初めて安全に武装(arm)できる。
+   fail-closed なので、4 本が実行可能にそろって初めて安全に武装(arm)できる。
+   本数は agent-tools 側の gate 追加に**追随が必須**(#239: identity gate 追加時、
+   3 本固定のままだと「dispatcher + 旧 2 gate(計 3 本)」の部分配備で武装し、dispatcher は
+   4 本目の欠損で fail-closed → commit が止まるのに doctor / preflight は green、という
+   PR #197 と同型の穴になる)。probe list は armed template / doctor / preflight /
+   `test-git-hook-gates.sh` の 4 箇所で同一に保つ。
 
 挙動:
 
@@ -54,9 +63,9 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
   (doctor / preflight が誘導する)。
 - **配備が消えた**場合 → 次の apply が配線を可視に解除(disarm)する。apply
   するまでの間は fail-closed で commit が止まる(doctor が最も強く warn)。
-- `preflight` は apply **前**に 3 本の配備状態と「apply が武装するか」を報告する
+- `preflight` は apply **前**に 4 本の配備状態と「apply が武装するか」を報告する
   (apply impact)。`doctor` は apply **後**の配線 chain(shim / hooksPath /
-  3 script)を report-only で監視し、「配線済みなのに配備不完全 = commit が
+  4 script)を report-only で監視し、「配線済みなのに配備不完全 = commit が
   止まっている」を最も強い警告にする。capability off で配線が残置していれば
   それも warn する(apply で prune)。
 - gate は module の `requires` ではなく **template 自己 gate**(鍵が欠けると空

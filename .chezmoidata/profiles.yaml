@@ -70,12 +70,12 @@ profiles:
       # docs/config-ownership.md, agent-tools#146).
       enableGitHubIsolatedReader: true
       # #196: wire the commit-boundary git hook gates (public-safety /
-      # AI trailer). Thin shims in ~/.config/git-hook-gates/hooks exec
-      # agent-tools' personal-git-hook-dispatcher, and global core.hooksPath
+      # git-identity / AI trailer). Thin shims in ~/.config/git-hook-gates/hooks
+      # exec agent-tools' personal-git-hook-dispatcher, and global core.hooksPath
       # points there (include in dot_gitconfig -> managed hooks.gitconfig).
       # true is the INTENT half of a two-key gate: the wiring only renders
       # when the destination also has the COMPLETE agent-tools deploy
-      # (dispatcher + both gates — the dispatcher is FAIL-CLOSED when a gate
+      # (dispatcher + all three gates, #239 — the dispatcher is FAIL-CLOSED when a gate
       # next to it is missing), so a fresh personal machine can apply before
       # agent-tools exists without bricking git commit; re-apply after sync
       # arms the gates (PR #197 Codex must). Best-effort guardrail

@@ -10,9 +10,9 @@ set -euo pipefail
 #
 # The wiring is a TWO-KEY gate (Codex review must-1 on PR #197): the
 # capability is the INTENT, and a COMPLETE agent-tools deploy in the
-# destination (dispatcher + both gates; .chezmoitemplates/git-hook-gates-armed)
-# is the READINESS. The dispatcher is fail-closed (exit 2) when a gate next to
-# it is missing, so:
+# destination (dispatcher + all three gates: public-safety, git-identity,
+# ai-trailer; .chezmoitemplates/git-hook-gates-armed) is the READINESS. The
+# dispatcher is fail-closed (exit 2) when a gate next to it is missing, so:
 #   - bare destination (fresh machine): apply must succeed and must NOT render
 #     any wiring — bootstrap-safe by NOT arming, never by arming a brick.
 #   - partial deploy (dispatcher only): must NOT arm either (must-2: arming on
@@ -53,7 +53,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-GATE_SCRIPTS=(personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate)
+# The complete deploy — four scripts since agent-tools#281 added the
+# git-identity gate to the pre-commit stage (#239). Must match the probe list
+# in .chezmoitemplates/git-hook-gates-armed, doctor.sh and preflight.sh.
+GATE_SCRIPTS=(personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate)
+# What a machine deployed before #281 has: everything but the identity gate.
+PRE_281_SCRIPTS=(personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate)
 
 # plant_gate_deploy HOME_DIR SCRIPT...
 # Simulate the agent-tools deploy in a throwaway destination home: executable
@@ -106,13 +111,31 @@ if ! render_personal_into "$DOTFILES_ROOT" "$partial_root"; then
   fail "test failed: personal apply with a partial deploy did not render"
   status=1
 elif gate_files_absent "$partial_root/home"; then
-  ok "test passed: partial deploy (dispatcher only) stays unarmed (readiness requires all three scripts)"
+  ok "test passed: partial deploy (dispatcher only) stays unarmed (readiness requires all four scripts)"
 else
   fail "test failed: partial deploy armed the wiring (dispatcher-only readiness — must-2 regression)"
   status=1
 fi
 
-# 2b) Non-executable deploy (all three present, dispatcher chmod 644): must
+# 2a) Pre-#281 deploy (dispatcher + public-safety + ai-trailer, identity gate
+#     missing): must NOT arm. A dispatcher that expects the identity gate is
+#     fail-closed without it, so arming on the old three would brick every
+#     commit while doctor / preflight showed green (#239).
+pre281_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-pre281.XXXXXX")"
+tmp_roots+=("$pre281_root")
+mkdir -p "$pre281_root/home"
+plant_gate_deploy "$pre281_root/home" "${PRE_281_SCRIPTS[@]}"
+if ! render_personal_into "$DOTFILES_ROOT" "$pre281_root"; then
+  fail "test failed: personal apply with a pre-#281 deploy did not render"
+  status=1
+elif gate_files_absent "$pre281_root/home"; then
+  ok "test passed: pre-#281 deploy (identity gate missing) stays unarmed (readiness counts four scripts)"
+else
+  fail "test failed: a deploy without personal-git-identity-gate armed the wiring (three-script readiness — #239 regression)"
+  status=1
+fi
+
+# 2b) Non-executable deploy (all four present, dispatcher chmod 644): must
 #     NOT arm. The probe requires the same `-x` readiness doctor and preflight
 #     report — a presence-only probe would arm here while preflight says
 #     "will NOT arm", and the armed shim then bricks every commit (Codex
