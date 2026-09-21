@@ -22,9 +22,16 @@ work / client には配らない(`opencode-settings` module を持たない。cl
 - **permission**: OpenCode の既定は **allow all**。rule は pattern の **last-match-wins**。
   - `read`: `*` allow の上に、SSH 鍵 / credential store(`~/.aws`、`~/.config/gh`、`~/.netrc`、Codex と
     OpenCode の `auth.json`)/ `.env` 系を deny(`.env.example` は allow)。Claude の secret floor と同じ集合。
-  - `bash`: `*` allow の上に、env dump(`env` / `printenv`)、`gh secret` / `gh api *secrets*`、`cat ~/.ssh/*` を
-    deny。マシン外に出る操作と昇格(`git push` / `git clone` / `gh pr|issue|release|repo|auth` / `sudo` /
-    `curl` / `wget`)は **ask**([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認)。
+  - `bash`: `*` allow の上に、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
+    **ask**。GitHub CLI は **`gh *` を既定 ask** にし、read 系の subcommand(`pr view|list|diff|checks|status`、
+    `issue view|list|status`、`repo view`、`release view|list`、`run view|list`、`workflow view|list`、
+    `label list`、`gist view|list`、`search`、`status`、`auth status`、`--version` / `version` / `help`)だけを
+    allow に戻す(#240: mutation を列挙する方式では `gh issue edit` / `gh pr close` / `gh api -XPOST` などが
+    allow-all に落ちた。`gh api` は method に関わらず ask — 短縮 flag `-XPOST` / `-ftitle=x` は flag 照合を
+    すり抜け、GraphQL は read でも POST を使う)。deny(env dump `env` / `printenv`、`gh secret` /
+    `gh api *secrets*`、`cat ~/.ssh/*`)は **map の末尾**に置く(last-match-wins で、後続の広い ask に deny を
+    弱めさせないため)。([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
+    `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。
   - `external_directory` / `doom_loop` は OpenCode 既定(ask)のまま。
 - **`autoupdate: false`**: 起動時の自動 DL を止める([update-policy](update-policy.md))。更新は catalog の
   source(brew)で意図的に行う。
@@ -57,5 +64,9 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   床の乖離は managed drift section が `chezmoi status` で拾う。
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash の rule map を順序込みで、
   autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
+  加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
+  assert する(#240): doctor の Codex outward probe 27 本 + 短縮 flag / alias / read 形の約 100 本。期待値は
+  ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
+  (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
   こと(14 件の exact pin)。

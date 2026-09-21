@@ -10,16 +10,27 @@
        What is here and why:
        - permission: OpenCode defaults to allow-all. The read deny mirrors the
          Claude secret floor (SSH keys, credential stores incl. the Codex and
-         OpenCode auth.json, .env); the bash deny mirrors its env-dump /
-         gh-secret entries; outward and escalation commands (push, PR / issue /
-         release / repo mutation, auth, sudo, clone, curl) are ask, per
-         docs/ai-policy.md (read-only local work needs no approval; leaving
-         the machine or escalating does). Rules are last-match-wins. The ask
+         OpenCode auth.json, .env). bash, per docs/ai-policy.md (read-only
+         local work needs no approval; leaving the machine or escalating
+         does): `git push` / `git clone`, sudo, curl, wget are ask, and the
+         GitHub CLI is ask BY DEFAULT (`gh *`) with only the read-only
+         subcommands allowed back (view / list / diff / checks / status,
+         auth status, search, help) — enumerating mutations was the #240
+         gap (`gh issue edit`, `gh pr close`, `gh api -XPOST`, ... fell to
+         allow-all), and `gh api` stays ask whatever the method because
+         short-flag forms (`-XPOST`, `-ftitle=x`) defeat flag matching and
+         GraphQL reads POST anyway. Rules are last-match-wins, so the deny
+         rules (env dump, gh secret / secrets API, ssh keys) come LAST: an
+         earlier deny would be overridden by a later, broader ask. The ask
          patterns end in a bare `*` with no space before it on purpose: `*`
          matches zero or more characters, so `git push*` covers both the
          argument-less `git push` (upstream set) and `git push origin main`,
          whereas `git push *` would miss the bare form and fall through to
-         the allow-all base (Codex review, PR #235).
+         the allow-all base (Codex review, PR #235). `gh *` keeps the space
+         so `ghq` and friends are not caught; the bare `gh` prints help.
+         scripts/test-opencode-settings.sh pins this map exactly AND
+         evaluates it against a fixed command set (doctor's Codex outward
+         probes plus short-flag / alias / read forms).
        - autoupdate off: update-policy (no self-updating tools; updates are
          deliberate, via the catalog source).
        - share disabled: no session upload surface (public safety).
@@ -52,27 +63,43 @@
     },
     "bash": {
       "*": "allow",
+      "git push*": "ask",
+      "git clone*": "ask",
+      "gh *": "ask",
+      "gh pr view*": "allow",
+      "gh pr list*": "allow",
+      "gh pr diff*": "allow",
+      "gh pr checks*": "allow",
+      "gh pr status*": "allow",
+      "gh issue view*": "allow",
+      "gh issue list*": "allow",
+      "gh issue status*": "allow",
+      "gh repo view*": "allow",
+      "gh release view*": "allow",
+      "gh release list*": "allow",
+      "gh run view*": "allow",
+      "gh run list*": "allow",
+      "gh workflow view*": "allow",
+      "gh workflow list*": "allow",
+      "gh label list*": "allow",
+      "gh gist view*": "allow",
+      "gh gist list*": "allow",
+      "gh search *": "allow",
+      "gh status*": "allow",
+      "gh auth status*": "allow",
+      "gh --version": "allow",
+      "gh version": "allow",
+      "gh help*": "allow",
+      "sudo*": "ask",
+      "curl*": "ask",
+      "wget*": "ask",
       "cat ~/.ssh/*": "deny",
       "gh secret *": "deny",
       "gh api *secrets*": "deny",
       "env": "deny",
       "env *": "deny",
       "printenv": "deny",
-      "printenv *": "deny",
-      "git push*": "ask",
-      "git clone*": "ask",
-      "gh pr create*": "ask",
-      "gh pr merge*": "ask",
-      "gh pr comment*": "ask",
-      "gh pr review*": "ask",
-      "gh issue create*": "ask",
-      "gh issue comment*": "ask",
-      "gh release*": "ask",
-      "gh repo*": "ask",
-      "gh auth*": "ask",
-      "sudo*": "ask",
-      "curl*": "ask",
-      "wget*": "ask"
+      "printenv *": "deny"
     }
   }
 }
