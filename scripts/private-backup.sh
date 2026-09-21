@@ -46,7 +46,9 @@ backup: resolve the public baseline (.chezmoidata/backup-paths.yaml) plus the
   $DEFAULT_RECIPIENT_FILE when no flag is given.
   The supplement itself is captured as $SUPPLEMENT_HOME_PATH (its
   --local-supplement path is backup-time input only, never recorded), so
-  restore lands it there.
+  restore lands it there. Before encrypting, the staging is self-checked
+  with the same manifest test verify/restore apply; on failure nothing is
+  written and the marker is left unchanged.
 verify: decrypt --in into a 0700 temp dir and check it against its manifest
   (checksums, modes, no extra files, safe home-relative paths). Read-only;
   never writes into \$HOME.
@@ -370,6 +372,28 @@ cmd_backup() {
     return 1
   fi
 
+  section "private-backup: self-check manifest"
+  # Run the exact acceptance test verify / restore will run, against the
+  # staging before it is encrypted (#224): an archive they would reject is
+  # never written as a success, and a producer / consumer drift shows up at
+  # backup time instead of at restore time. Scope is staging / manifest
+  # consistency only — a decrypt round-trip needs the identity, which backup
+  # does not hold (that stays `verify`'s contract). A stale partial output
+  # from an earlier failed run is removed first, so a failed self-check
+  # leaves no partial behind and writes no new archive (an existing --out
+  # is kept untouched); the marker is only written after a successful
+  # write below.
+  local partial="$out.partial"
+  rm -f "$partial"
+  # Script-global for the EXIT trap, like staging.
+  selfcheck="$(mktemp -d "${TMPDIR:-/tmp}/private-backup-check.XXXXXX")"
+  chmod 700 "$selfcheck"
+  trap 'rm -rf "$staging" "$selfcheck"; rm -f "$declared" "$seen_paths"' EXIT
+  if ! check_manifest "$staging" "$selfcheck"; then
+    fail "staging failed self-check; no archive written"
+    return 1
+  fi
+
   section "private-backup: confirm"
   ok "captured files: $captured"
   [[ "$skipped" -gt 0 ]] && warn "skipped entries: $skipped"
@@ -392,8 +416,6 @@ cmd_backup() {
   fi
 
   section "private-backup: write archive"
-  local partial="$out.partial"
-  rm -f "$partial"
   # tar the 0700 staging, pipe straight into age so no plaintext tar ever
   # lands on disk; "-C staging ." keeps archive paths relative (no
   # absolute home path in the archive).

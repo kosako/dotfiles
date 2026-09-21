@@ -278,10 +278,13 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
 ```
 
 - **backup**: baseline(`.chezmoidata/backup-paths.yaml`)+ local 補足を解決 → 0700 temp に
-  staging → machine-neutral manifest(時刻 / tool version / 各 file の type・mode・sha256。
-  絶対 home path・host 名は入れない)生成 → `tar | age -r recipient` を pipe(平文 tar を
-  ディスクに残さない)→ `--out` へ書き出し → marker(`~/.local/state/dotfiles/private-backup.json`、
-  最終成功時刻 / archive basename / 件数のみ)更新。捕捉 0 件は空アーカイブを書かず fail。
+  staging(補足リスト自体も canonical path `.config/dotfiles/backup-paths.local` の payload として
+  先に stage、#208)→ machine-neutral manifest(時刻 / tool version / 各 file の type・mode・sha256。
+  絶対 home path・host 名は入れない)生成 → **self-check**(verify / restore と同じ `check_manifest`
+  を staging に当てる。不合格なら `--out` も `.partial` も書かず marker も更新せず exit 非 0、#224)
+  → 確認 → `tar | age -r recipient` を pipe(平文 tar をディスクに残さない)→ `--out` へ書き出し →
+  marker(`~/.local/state/dotfiles/private-backup.json`、最終成功時刻 / archive basename / 件数のみ)
+  更新。捕捉 0 件(補足リストだけも含む)は空アーカイブを書かず fail。
 - **verify**: `--identity` / `--identity-command`(op seam)で 0700 temp に**復号**し、
   **展開前に全 tar member を検査**(非正規 member = symlink/hardlink/special を拒否、
   絶対パス・`..`・制御文字・台帳外 member 名を拒否)してから展開。recipient は公開鍵なので
@@ -327,6 +330,10 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `--local-supplement` の source path は manifest に載らず、復元先も canonical path であること。
   既存の補足は退避 / `--skip-existing` の規則に従うこと。補足が自身の path を宣言しても entry / file が
   重複しないこと。改竄された補足 payload を verify が拒否すること。
+- backup が暗号化前に staging を自己検証すること(#224): 正常 run で self-check の section と
+  `verified N file(s)` が出ること。PATH 先頭の fake `cp`(実 cp の後に staging 側の copy だけを改竄)で
+  manifest と staging がずれると、`checksum mismatch` で拒否し、`--out` も `.partial` も作らず marker が
+  前回のまま・exit 非 0 であること(script に test 用 backdoor は無い)。
 
 ## test-secrets-gate.sh
 
