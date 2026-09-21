@@ -568,11 +568,11 @@ section "managed-path orphans"
 # managed for this profile is likely left over from another profile
 # (e.g. ~/.npmrc after switching personal -> work). Report
 # only; nothing is removed. Only the header line is inspected.
-# Only declared FILE paths are inspected: directory declarations are
-# .chezmoiignore gate plumbing (every managed file has its own line in
-# modules.yaml), and recursing into them swept unrelated tool data that
-# merely quotes the header — ~/.claude session logs / paste-cache — into
-# false orphans (#174).
+# Only declared FILE paths are inspected (every managed file has its own
+# line in modules.yaml; ancestor directories are derived by .chezmoiignore,
+# #207): recursing into directories swept unrelated tool data that merely
+# quotes the header — ~/.claude session logs / paste-cache — into false
+# orphans (#174).
 orphan_count=0
 while IFS= read -r module; do
   [[ -z "$module" ]] && continue

@@ -88,10 +88,13 @@ secret を含みうる前提で age 暗号化する)。ただし credential そ�
   だけで、被害の起きる層を守らない。
 - 防波堤は本 doc の明文リスト + PR での public-safety レビュー(人間の責務。
   [claude-settings](claude-settings.md) の規約と同じ)が担う。
-- 実際に managed path に隣接して混入しやすい `~/.claude/settings.local.json` は
-  既に個別に ignore 済み。それ以上の網羅列挙は実効の薄い宣言を増やすだけで、
-  「決定済み不使用の dormant 配線は残さない」基準(#145、
-  [policy-model](policy-model.md))とも整合しない。
+- 実際に managed path に隣接して混入しやすい `~/.claude/settings.local.json` は、
+  `.chezmoiignore` が allowlist(#207: 宣言した file 以外は通さない)になったことで
+  個別の ignore 行なしに管理外が保たれる。禁止 file の網羅列挙は実効の薄い宣言を
+  増やすだけで、「決定済み不使用の dormant 配線は残さない」基準(#145、
+  [policy-model](policy-model.md))とも整合しない。allowlist はこの決定と矛盾しない:
+  特定の禁止 file を列挙する層ではなく、「module が宣言した file だけを apply する」
+  一般契約であり、守る対象も apply 層のまま(commit 層の防波堤は上記のとおり)。
 
 関連: [ai-environment-boundary](ai-environment-boundary.md)(dotfiles / agent-tools の
 境界定義)、[claude-settings](claude-settings.md)(settings.json の 2 層)、

@@ -16,11 +16,14 @@ policy = 何を許可/禁止するかの判断基準
 
 modules は装飾ラベルではなく、管理対象 path を宣言する単位(2026-06-13 決定。それまでは情報ラベルだった)。
 
-- module は `.chezmoidata/modules.yaml` の `paths:` で home 配下の管理対象を宣言する。
+- module は `.chezmoidata/modules.yaml` の `paths:` で home 配下の管理対象 **file** を宣言する(home 相対のリテラル path・file 1 つにつき 1 行。glob・空白・末尾 `/` は `validate-policy.sh` が fail)。
 - ある path が chezmoi の管理対象になるのは、profile がその module を列挙し、かつ module の `requires:` にある capability 条件をすべて満たすときだけ。
-- それ以外の path は `.chezmoiignore` の生成によって除外される(fail closed)。
+- `.chezmoiignore` は **allowlist**(#207): 先頭の `**` で source の全 target を ignore し、活性 module の宣言 path だけを `!<path>` で戻す。宣言されていない source entry(repo 管理 file、`~/.claude/settings.local.json` のような managed file の隣の local file、commit 済み・untracked を問わず宣言し忘れた file)は、どの profile にも apply されない(fail closed)。
+- 宣言 path の祖先 directory(`.config` など)は template が自動で `!` に展開する。これは **通過用**であって所有ではない: 祖先行は directory entry 自身だけを通し、その下の他の file は個別の宣言がなければ落ちる(directory を宣言しても subtree は入らない。exact のみ)。
 - `paths:` を持たない module は現時点では情報ラベル(実装が入る時点で `paths:` を宣言する)。
 - `requires:` の capability 名・値は `validate-policy.sh` が schema と突き合わせて検証する。複数 module による同一 path の宣言は fail。
+- 宣言し忘れは `scripts/test-render.sh` が CI で止める: source の全 entry を `chezmoi target-path` で target に変換し、全 module の宣言 path ∪ その祖先に含まれなければ fail。chezmoi の未使用の source 種別(`run_` script、`symlink_` / `modify_` / `exact_` などの属性、`.chezmoiscripts` / `.chezmoiexternal*`)も `**` に黙って落ちないよう fail にする(使うときは契約を広げてから)。
+- #138(禁止 file の pattern を `.chezmoiignore` に先置きしない)とは別の層: allowlist は特定の禁止 file を列挙するのではなく「宣言した file だけを通す」一般契約で、個別の ignore 行を持たない([config-ownership](config-ownership.md))。
 
 ## データ読み取り
 

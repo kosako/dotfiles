@@ -2,26 +2,19 @@
 {{- $prof := index .profiles .profile -}}
 {{- $caps := index $prof "capabilities" -}}
 {{- $profileModules := index $prof "modules" -}}
-{{/* Repo-management files are never applied to the home directory.
-     chezmoi reads the source directory, not the git index, so even
-     gitignored local files must be listed here. */}}
-README.md
-AGENTS.md
-LICENSE
-docs
-scripts
-worklog
-
-{{/* User-local Claude files are never tracked. settings.local.json holds
-     dynamic, machine/session-specific permissions that Claude Code writes
-     itself; chezmoi must not manage it. settings.json (the shared, public-safe
-     subset) is gated via the claude-settings module below. */}}
-.claude/settings.local.json
-
-{{/* Module-declared paths (.chezmoidata/modules.yaml) are managed only
-     when the profile lists the module and every capability in its
-     requires: matches. Everything else is ignored, so a path is only
-     applied when a module explicitly claims it. */}}
+{{/* Allowlist (#207): ignore every target, then un-ignore ("!") exactly the
+     paths declared by modules that are active for this profile — a module
+     is active when the profile lists it and every capability in its
+     requires: matches. chezmoi gives "!" patterns precedence regardless of
+     line order, and a directory that stays ignored takes its whole subtree
+     with it, so every ancestor of a declared path is un-ignored as well.
+     An ancestor line is pass-through plumbing only: it admits the directory
+     entry itself, never its other children (a sibling needs its own
+     declaration). Everything else — repo-management files (README, docs,
+     scripts, ...), user-local files next to managed ones
+     (.claude/settings.local.json), and any undeclared source entry, tracked
+     or not — stays under "**" and is never applied to any profile. */}}
+**
 {{- range $name, $module := .modules }}
 {{- if hasKey $module "paths" }}
 {{- $enabled := has $name $profileModules }}
@@ -32,9 +25,12 @@ worklog
 {{- end }}
 {{- end }}
 {{- end }}
-{{- if not $enabled }}
+{{- if $enabled }}
 {{- range $module.paths }}
-{{ . }}
+{{- $parts := splitList "/" . }}
+{{- range $i, $_ := $parts }}
+!{{ slice $parts 0 (add1 $i) | join "/" }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

@@ -52,7 +52,7 @@ profile + environmentKind + modules + capabilities + policy
 
 - **profile**: 用途別プリセット(`personal` / `work`)。選びやすさのための入口で、権限そのものではない。
 - **environmentKind**: `personal` / `work` / `client` / `sandbox` / `agent` の環境種別。許可される capability に制約をかける(下記)。
-- **modules**: 機能単位。`paths:` で管理対象 file を宣言し、`.chezmoiignore` の生成を駆動する。
+- **modules**: 機能単位。`paths:` で管理対象 file を宣言し、`.chezmoiignore`(allowlist: 宣言した file とその祖先 directory だけを通し、宣言外の source はどの profile にも apply しない)の生成を駆動する。
 - **capabilities**: 実際に許可する操作・副作用(install、secret access、npm hardening mode など)。**何が起きるかは最終的に capabilities が決める**。
 - **policy**: 何を許可・禁止するかの判断基準([docs/policy-model.md](docs/policy-model.md))。
 

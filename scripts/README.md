@@ -44,7 +44,9 @@ unknown profile / module / capability や capability enum の不正値は policy
 - environmentKind cross-check: kind が禁止する boolean capability が `true`(#43)、または
   enum capability が禁止値(work / client / agent の `npmHardeningMode=off`、#45)だと
   hard fail すること。
-- module の `paths:` が home 相対であること。同一 path を複数 module が宣言していないこと。
+- module の `paths:` が home 相対のリテラル path であること(glob / pattern 文字・空白・
+  先頭 `~` / `./`・末尾 `/` は fail。`.chezmoiignore` allowlist の `!<path>` 行になるため、#207)。
+  同一 path を複数 module が宣言していないこと。
 - module の `requires:` の capability が定義済みで、値が schema の型に適合すること。
 - `requires:` があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
@@ -181,7 +183,8 @@ fixture は一時 directory に作り、実際の home や global Git config に
 - 期待する hardening 設定(`ignore-scripts=true` など)が定義されていること。
 - token、registry 設定が含まれないこと。
 - `.chezmoiignore` が module の `paths:` からループ生成されていること。
-- `.chezmoiignore` が repo 管理用 file(README、docs、scripts など)を home に apply しないこと。
+- `.chezmoiignore` が allowlist の root `**` を持つこと(repo 管理用 file(README、docs、scripts など)は
+  宣言されないので apply されない。managed set の pin と未宣言 source の検知は `test-render.sh`、#207)。
 - modules.yaml の宣言で `.npmrc` が `npmHardeningMode=enforce` のみ、mise config が `enableRuntimeManagement=true` のみで管理されること。
 - template の設定値と `doctor.sh` の enforce 期待値が一致していること。
 
@@ -354,6 +357,13 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 
 - 全 profile が template エラーなしで apply できること。
 - 各 profile の managed target 一覧が期待値と一致すること(profile を追加・変更したら期待値の更新が必要)。
+- allowlist 契約(#207): source の複製に未宣言の root file / subtree / 宣言済み directory 配下の
+  sibling を置いても、全 profile で managed set が期待値のままで、apply がそれらを作らず、
+  home に既にある未管理 file にも触れないこと。
+- 宣言忘れの検知(#207): 実 source の全 entry(`.` 始まりと repo 管理 file を除く)を
+  `chezmoi target-path` で target に変換し、全 module の宣言 path ∪ 祖先 directory に含まれること。
+  未宣言 entry を置いた複製ではこの検査が fail すること(空振り防止)。未使用の chezmoi source
+  種別(`run_` 等の属性 prefix、`.chezmoiscripts` 等の special file)は fail すること。
 - typo profile が known profile 一覧つきのエラーで fail すること。
 - profile 未設定が init 誘導メッセージで fail すること。
 - 非対話 init(`--promptString profile=<name>`)が動くこと。

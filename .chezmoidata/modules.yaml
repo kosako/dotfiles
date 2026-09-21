@@ -1,3 +1,9 @@
+# paths: declares the managed FILES of a module (home-relative, literal,
+# one line per file). .chezmoiignore is an allowlist (#207): everything is
+# ignored except the declared paths of active modules, and the ancestor
+# directories of a declared path are un-ignored automatically as
+# pass-through — so directories are not declared here, and declaring a
+# directory never admits its other children.
 modules:
   base:
     description: 全環境共通の最小設定。
@@ -5,7 +11,6 @@ modules:
     description: directory convention に基づく Git identity 分離。非 personal context は managed な identity reset(~/.config/git-profile/identity-reset.gitconfig、値なし)を context file の直前に include し、personal の remote fallback が context をまたいで流入しない(#202)。
     paths:
       - .gitconfig
-      - .config/git-profile
       - .config/git-profile/identity-reset.gitconfig
   supply-chain-git:
     description: Git credential 漏洩防止と remote URL 検査。
@@ -24,7 +29,6 @@ modules:
   runtime:
     description: mise による runtime 管理。
     paths:
-      - .config/mise
       - .config/mise/config.toml
     requires:
       enableRuntimeManagement: true
@@ -38,7 +42,6 @@ modules:
   ssh-1password:
     description: 1Password SSH Agent 用の SSH 設定。秘密鍵は管理しない。
     paths:
-      - .ssh
       - .ssh/config
   direnv-policy:
     description: direnv 利用方針。direnv allow は自動化しない。
@@ -49,7 +52,6 @@ modules:
   git-signing:
     description: commit / tag の SSH 署名(1Password op-ssh-sign)。仕組みのみ managed、鍵と opt-in は context 別 local。
     paths:
-      - .config/git
       - .config/git/signing.gitconfig
     requires:
       enableGitSigning: true
@@ -58,25 +60,19 @@ modules:
   claude-settings:
     description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。hooks 登録は 3 capability が同じ hooks object(.chezmoitemplates/agent-hooks-json、Codex と共有)に出す — enableGitHubIsolatedReader(PreToolUse safe-gh 誘導・#137)、enableQualityLoopHooks(PostToolUse fast-edit-check + Stop changed-scope-qa・#199)、enableHerdrIntegration(SessionStart herdr-agent-state.sh・#225)。registration=dotfiles / body=agent-tools(herdr hook の body は herdr の installer)。
     paths:
-      - .claude
       - .claude/settings.json
   opencode-settings:
     description: OpenCode harness 設定(#234)。managed な ~/.config/opencode/opencode.json に permission の床(secret floor の read / bash deny・外向き / 昇格 bash は ask・他は allow)、autoupdate off(update-policy)、share disabled、instructions(agent-tools 配布の運用ルール。OpenCode は @ import を解釈しないので明示)を置く。provider / model / auth / plugin / TUI の好みは書かない(local は OPENCODE_CONFIG が指す file で merge 上書き)。skill は ~/.claude/skills を OpenCode が直接読むので配布不要。plugin による hook parity と相互レビュー契約への追加は Phase 2(agent-tools)。
     paths:
-      - .config/opencode
       - .config/opencode/opencode.json
   git-hook-gates:
     description: commit 境界の git hook gates 配線(#196)。~/.config/git-hook-gates/hooks に薄い shim(pre-commit / commit-msg)を置き、agent-tools 配備の personal-git-hook-dispatcher へ exec で委譲する(実体=agent-tools・配線=dotfiles。契約の正本は agent-tools の docs/git-hook-gates.md)。global core.hooksPath は dot_gitconfig の無条件 include が読む hooks.gitconfig(この module の managed file)で設定する(missing なら git が無視=signing.gitconfig と同型)。render は 2 段 gate — enableGitHookGates(intent)AND destination に agent-tools 配備 3 本(dispatcher+両 gate)が完全に存在(readiness、.chezmoitemplates/git-hook-gates-armed)— の両立時のみ。dispatcher は gate 欠損時 fail-closed なので、未配備・部分配備のマシンでは武装せず素通りする(新規マシンの apply で commit を brick しない。PR #197 Codex must)。cap gate は module の requires ではなく template 自己 gate(鍵が欠けると空 render → chezmoi が既存 target も削除。requires だと chezmoiignore が既存 file を prune せず、fail-closed な shim が残置される)。置き場を ~/.config/git 配下にしないのは意図的 — そこは git-signing module の path で、enableGitSigning=false の profile では chezmoiignore が dir ごと subtree を落とし、gate が黙って消えるため(実測)。
     paths:
-      - .config/git-hook-gates
       - .config/git-hook-gates/hooks.gitconfig
-      - .config/git-hook-gates/hooks
       - .config/git-hook-gates/hooks/pre-commit
       - .config/git-hook-gates/hooks/commit-msg
   codex-settings:
     description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook(#181・#137 の Codex parity・gate=enableGitHubIsolatedReader)、品質ループの PostToolUse fast-edit-check + Stop changed-scope-qa(#199・gate=enableQualityLoopHooks)、herdr integration の SessionStart hook(#225・gate=enableHerdrIntegration・body は herdr の installer)を登録し(hooks object は .chezmoitemplates/agent-hooks-json で Claude と共有)、~/.codex/rules/default.rules に承認 rules の read-only baseline を配る(#139・gate=enableAiPolicy。堆積 grant を drift 可視化し apply で棚卸し)。registration=dotfiles / body=agent-tools(safe-gh・品質ループ)または herdr(herdr integration)。config.toml は codex 所有の live ファイルなので管理しない(projects trust は doctor が report-only 監視)。cap gate はすべて module の requires ではなく template 自己 gate で行う(hooks.json は 3 つの hook cap が全部 false で空 render → chezmoi が既存 target も削除)。requires を使うと chezmoiignore が既存 file を prune せず残置するため(Codex review #184)。
     paths:
-      - .codex
       - .codex/hooks.json
-      - .codex/rules
       - .codex/rules/default.rules

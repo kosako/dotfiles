@@ -50,6 +50,14 @@ validate_modules() {
           fail "module path must be home-relative: $module: $path"
           status=1
           ;;
+        # Each declared path becomes a literal "!<path>" line of the
+        # .chezmoiignore allowlist (#207). Pattern characters, whitespace,
+        # a leading "~" / "./" or a trailing "/" would change what that line
+        # admits (or match nothing), so they are rejected here.
+        *[][*?{}!#\\]*|*[[:space:]]*|~*|.|./*|*/.|*/./*|*//*|*/)
+          fail "module path must be a literal path (no pattern characters, whitespace, or trailing slash): $module: $path"
+          status=1
+          ;;
         *)
           ok "module path: $module: $path"
           printf '%s\n' "$path" >> "$all_paths_file"
