@@ -207,7 +207,9 @@ fixture は一時 directory に作り、実際の home や global Git config に
 - modules.yaml の宣言で `.npmrc` が `npmHardeningMode=enforce` のみ、mise config が `enableRuntimeManagement=true` のみで管理されること。
 - template の設定値と `doctor.sh` の enforce 期待値が一致していること。
 
-chezmoi が未導入でも実行できるよう、render はせず静的検査に留める。
+静的検査は chezmoi 無しで実行できる(CI の validate job)。chezmoi がある環境では加えて personal を
+throwaway destination に実 render し、生成された `~/.npmrc` の内容(hardening 値・token / registry の
+不在)も検査する(#150。CI では render job が担い、chezmoi の無い validate job は skip を warn する)。
 
 ## test-doctor.sh
 

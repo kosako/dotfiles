@@ -96,8 +96,11 @@ commit は拒否される(Git は空 name を拒否)。未指定と空値の区�
 `--get` は空値と同じに見えるが Git の identity 読み込みは `fatal: missing value for 'user.email'` で
 拒否する(git 2.50.1 実測)。doctor は `--list` に `=` 無しで現れることで判別し、reset の有無に関わらず
 「値なし key・commit 不能」として別に報告する。
-`~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
-では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
+`~/.config/git/` 配下に置かなかったのは、#207 以前の denylist 時代に `git-signing` module が
+`~/.config/git` を directory ごと宣言しており、signing off の profile では subtree ごと管理外になった
+ため(git-hook-gates と同じ判断)。現行の allowlist では祖先 directory は活性 module の宣言 path から
+union されるので、この制約はもう無い([git-hook-gates](git-hook-gates.md) の同名節)。配置は経緯どおり
+維持する。
 
 context file の状態ごとの結果(`scripts/test-gitconfig.sh` の matrix が固定):
 

@@ -73,14 +73,21 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
   file を prune せず、fail-closed な shim が残置される(#184 の教訓)。off にした
   後に `hooks.gitconfig` も消えるので、`core.hooksPath` の配線ごと外れる。
 
-## 置き場所が `~/.config/git/` 配下でない理由
+## 置き場所が `~/.config/git/` 配下でない理由(経緯と現行の契約)
 
-`~/.config/git` は git-signing module の宣言 file(`signing.gitconfig`)の親で、
-`enableGitSigning=false` の profile では chezmoiignore(allowlist)がその file も祖先
-`.config/git` も通さず、**directory subtree ごと**管理から外す(実測)。gate を
-その下に置くと、signing を off にしただけで commit gate が黙って消える(安全機構の
-silent fail-open)。独立した `~/.config/git-hook-gates/` に置くことで交差を断つ。
-この配置が担保であることは `test-git-hook-gates.sh` が pin している。
+**経緯(#196 当時、#207 以前)**: `.chezmoiignore` は denylist で、`~/.config/git` は git-signing
+module が directory ごと宣言していた。`enableGitSigning=false` の profile ではその dir 宣言が
+ignore 行になり、配下の別 module の file も含めて **subtree ごと**管理から外れた(当時の実測)。
+gate をその下に置くと signing を off にしただけで commit gate が黙って消える(silent
+fail-open)ため、独立した `~/.config/git-hook-gates/` に置いた。
+
+**現行(#207 以降)**: `.chezmoiignore` は allowlist で、祖先 directory は**活性 module の宣言 path から
+union して通過用に自動展開**される。別 module が `.config/git/<file>` を宣言していれば、signing の
+on / off に関わらず `.config/git` は通る。つまり「signing off で subtree が落ちる」は現行の制約では
+ない([policy-model](policy-model.md) の Modules 節)。配置を `~/.config/git/` 配下へ戻す理由も無い
+(所有の分離が読みやすく、既存の apply / doctor / test がこの path を前提にしている)ので、
+配置はそのまま維持する。`test-git-hook-gates.sh` は「signing off でも gate が残る」を pin する
+(これは現行 allowlist の契約でも成立する)。
 
 ## 強度ラベル(偽らない)
 

@@ -21,7 +21,7 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
 | herdr integration hook **実体**(`~/.claude/hooks/herdr-agent-state.sh`、`~/.codex/herdr-agent-state.sh`。#225) | herdr(`herdr integration install claude\|codex` が配置し、`HERDR_INTEGRATION_VERSION` header で版管理) | herdr の installer(登録は dotfiles が installer と同一形で render。work 機のように settings module が無い profile では installer が登録も持つ) | 手で編集しない(再 install で上書きされる)。herdr 更新後に `herdr integration status` が outdated を出したら再 install |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
-| マシン固有・動的値(`~/.claude/settings.local.json`、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
+| マシン固有・動的値(各 project の `.claude/settings.local.json`(Claude が動的許可を書く。user 級 `~/.claude/settings.local.json` は読まれない、#245)、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
 | repo 固有の作業ルール(各 repo の `AGENTS.md`) | 各 repo | — | 各 repo の PR |
 
 補足:
