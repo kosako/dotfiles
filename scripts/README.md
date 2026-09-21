@@ -51,7 +51,9 @@ unknown profile / module / capability や capability enum の不正値は policy
 - `requires:` があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
 - backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
-  重複なしであること。
+  重複なしであること。entry の構造(map・非空 string の `path`・`type` / `category` は `|` と制御文字を
+  含まない string)は共有 parser `backup_paths_in` が file 全体を先に検査し、不正なら
+  `backup-paths entry invalid` で fail する(#246。local 補足の backup 時読み取りも同じ検査)。
 - capability registry(#151): 全 capability が `implemented: true|false` を持ち、
   `implemented: false` は doctor.sh が言及していること(source-text の静的 proxy)。
 

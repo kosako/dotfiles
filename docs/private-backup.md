@@ -48,10 +48,15 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 | --- | --- | --- |
 | `path` | ✓ | canonical な home-relative パス。先頭 `/`・`..`・`.` component・重複 `/`・末尾 `/`・制御文字・glob メタ文字(`* ? [`)は禁止。`path` を最後に持つ行形式なので path 中の `|` も曖昧にならない |
 | `type` | | `file` / `dir`(期待する種別)|
-| `category` | | public-safe な自由ラベル(例 `shell` / `ssh`)|
+| `category` | | public-safe な自由ラベル(例 `shell` / `ssh`)。**`|` と制御文字は不可**(行形式の区切りなので、含むと path が変質する。#246)|
 
 `validate-policy.sh` がこれらを機械的に検査する(home-relative / glob 禁止 / type 既定値 /
 path 重複を fail-closed)。パスの public-safety 自体は人間レビューの責務。
+entry の**構造**(map であること・`path` が非空文字列で制御文字を含まない・`type` / `category` は
+文字列で `|` と制御文字を含まない)は共有 parser(`backup_paths_in`)が **file 全体を先に検査**し、
+1 件でも不正なら行を出さず fail する(#246)。baseline(validate-policy)と非コミットの local 補足
+(backup 実行時)の両入口が同じ規則で拒否され、補足の不正 entry が無言で落ちたり、`|` 入りの
+category で path が変わったりしない。不正な補足では backup は archive も marker も書かない。
 
 ## スクリプト
 

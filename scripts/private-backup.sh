@@ -181,9 +181,18 @@ collect_declared() {
     fail "could not parse backup paths from $file"
     return 1
   fi
+  # A valid file with no entries declares nothing (an empty here-string would
+  # otherwise read as one blank row).
+  [[ -n "$rows" ]] || return 0
   local type category path
   while IFS='|' read -r type category path; do
-    [[ -z "$path" ]] && continue
+    # backup_paths_in validated the whole file (#246): an entry without a
+    # path can no longer reach here, so treat one as a broken invariant
+    # rather than skipping it silently.
+    if [[ -z "$path" ]]; then
+      fail "internal: empty backup path row after validation in $file"
+      return 1
+    fi
     printf '%s|%s|%s|%s\n' "$origin" "$type" "$category" "$path" >> "$out"
   done <<< "$rows"
   return 0
