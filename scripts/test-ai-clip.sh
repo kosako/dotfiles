@@ -38,13 +38,19 @@ mkdir -p "$fixture/tmp" "$fixture/bin" "$fixture/nobin" "$fixture/home"
 # Extract exactly the helper functions (strip / copy / run) from the managed
 # zshrc: from the first helper's definition up to the widget section. An
 # empty extraction fails loudly rather than testing nothing.
+start_markers="$(grep -c '^_ai_clip_strip_ansi() {$' "$ZSHRC_SOURCE" || true)"
+end_markers="$(grep -c '^# Ctrl-O widget:' "$ZSHRC_SOURCE" || true)"
+if [[ "$start_markers" != 1 || "$end_markers" != 1 ]]; then
+  fail "extraction markers must appear exactly once in $ZSHRC_SOURCE (start x$start_markers, end x$end_markers) — a moved or dropped marker would source the wrong block"
+  exit 1
+fi
 awk '/^_ai_clip_strip_ansi\(\) \{$/ { on = 1 } /^# Ctrl-O widget:/ { on = 0 } on' \
   "$ZSHRC_SOURCE" > "$fixture/helpers.zsh"
 if ! grep -q '^_ai_clip_run() {$' "$fixture/helpers.zsh"; then
   fail "could not extract _ai_clip_run from $ZSHRC_SOURCE (layout changed? update the awk markers)"
   exit 1
 fi
-ok "extracted the ai-clip helpers from dot_zshrc"
+ok "extracted the ai-clip helpers from dot_zshrc (markers present exactly once)"
 
 # Tool-only PATH: the helpers use mktemp / cat / rm / perl / base64 / tr.
 # Resolved from THIS bash (no aliases), symlinked so the real pbcopy is never
@@ -96,6 +102,31 @@ leftovers() {
   find "$fixture/tmp" -name 'ai-clip.*' | wc -l | tr -d ' '
 }
 
+# run_pty ZSH_SCRIPT -> runs the zsh script under a pseudo-terminal (script(1),
+# BSD or util-linux flavour) as an interactive zsh and sends a real Ctrl-C
+# (^C byte) to the terminal after 1 s, so the tty driver delivers SIGINT to
+# the foreground process group exactly as a keyboard Ctrl-C does. Output is
+# discarded; only side effects (markers, leftovers) are inspected.
+script_bin="$(command -v script || true)"
+if [[ -n "$script_bin" ]] && "$script_bin" --version >/dev/null 2>&1; then
+  script_flavour=util-linux
+else
+  script_flavour=bsd
+fi
+run_pty() {
+  local zsh_script="$1"
+  case "$script_flavour" in
+    bsd)
+      ( sleep 1; printf '\003' ) | env -i HOME="$fixture/home" TMPDIR="$fixture/tmp" CLIP_FILE="$fixture/clip.txt" \
+        PATH="$with_clip" "$script_bin" -q /dev/null "$zsh_bin" -f -i "$zsh_script" >/dev/null 2>&1 || true
+      ;;
+    util-linux)
+      ( sleep 1; printf '\003' ) | env -i HOME="$fixture/home" TMPDIR="$fixture/tmp" CLIP_FILE="$fixture/clip.txt" \
+        PATH="$with_clip" "$script_bin" -q -e -c "'$zsh_bin' -f -i '$zsh_script'" /dev/null >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
 with_clip="$fixture/bin:$fixture/nobin"
 no_clip="$fixture/nobin"
 
@@ -128,23 +159,68 @@ else
 fi
 
 # 3) Interrupt mid-command (the audit's reproduction), under an INTERACTIVE
-#    zsh — the path a real Ctrl-C takes. First the control: the old body
-#    must leave the file behind (otherwise this case proves nothing); then
-#    the managed body must not. The zsh's own exit status is irrelevant.
-find "$fixture/tmp" -name 'ai-clip.*' -delete
-run_zsh "$with_clip" "-i" "_ai_clip_run_old 'echo audit-output; kill -INT \$\$'" >/dev/null 2>&1 || true
-control_left="$(leftovers)"
-find "$fixture/tmp" -name 'ai-clip.*' -delete
-run_zsh "$with_clip" "-i" "_ai_clip_run 'echo audit-output; kill -INT \$\$'" >/dev/null 2>&1 || true
-fixed_left="$(leftovers)"
-if [[ "$control_left" == 1 && "$fixed_left" == 0 ]]; then
-  ok "test passed: SIGINT mid-command (interactive zsh) -> old body leaves the temp (control), always-block body removes it"
+#    zsh — the path a real Ctrl-C takes. Reach markers pin that the command
+#    ran up to the interrupt (before) and that nothing after the interrupted
+#    call ran (after) — a body that returned early (e.g. mktemp failure)
+#    would leave no temp either, so leftovers alone prove nothing. First the
+#    control: the old body must leave the file behind; then the managed body
+#    must not. The zsh's own exit status is irrelevant.
+# interrupt_case FUNC -> prints "before=<yes|no> after=<yes|no> leftovers=N"
+interrupt_case() {
+  local func="$1"
+  find "$fixture/tmp" -name 'ai-clip.*' -delete
+  rm -f "$fixture/before" "$fixture/after"
+  run_zsh "$with_clip" "-i" "$func 'print reached > \"$fixture/before\"; kill -INT \$\$'; print x > '$fixture/after'" >/dev/null 2>&1 || true
+  printf 'before=%s after=%s leftovers=%s\n' \
+    "$([[ -e "$fixture/before" ]] && echo yes || echo no)" \
+    "$([[ -e "$fixture/after" ]] && echo yes || echo no)" "$(leftovers)"
+}
+control_result="$(interrupt_case _ai_clip_run_old)"
+fixed_result="$(interrupt_case _ai_clip_run)"
+if [[ "$control_result" == "before=yes after=no leftovers=1" && "$fixed_result" == "before=yes after=no leftovers=0" ]]; then
+  ok "test passed: SIGINT to the shell mid-command (interactive zsh) -> reached the command, nothing after it ran; old body leaves the temp (control), always-block body removes it"
 else
-  find "$fixture/tmp" -name 'ai-clip.*' >&2
-  fail "test failed: interrupt case (control leftovers=$control_left, fixed leftovers=$fixed_left; expected 1 and 0)"
+  printf 'control: %s\nfixed:   %s\n' "$control_result" "$fixed_result" >&2
+  fail "test failed: interrupt case (expected control 'before=yes after=no leftovers=1', fixed 'before=yes after=no leftovers=0')"
   status=1
 fi
 find "$fixture/tmp" -name 'ai-clip.*' -delete
+
+# 3b) A real Ctrl-C through a pseudo-terminal while an EXTERNAL command
+#     (sleep) runs under the helper: the tty delivers SIGINT to the
+#     foreground process group, sleep dies, and the interactive zsh aborts
+#     the call — the exact keyboard scenario. Same control / reach markers.
+if [[ -z "$script_bin" ]]; then
+  fail "script(1) not found; the pty Ctrl-C case cannot run"
+  status=1
+else
+  # pty_case FUNC -> prints "before=<yes|no> after=<yes|no> leftovers=N seconds=S"
+  pty_case() {
+    local func="$1" started ended
+    find "$fixture/tmp" -name 'ai-clip.*' -delete
+    rm -f "$fixture/before" "$fixture/after"
+    printf "source '%s'; source '%s'; print reached > '%s'; %s 'sleep 5'; print x > '%s'\n" \
+      "$fixture/helpers.zsh" "$fixture/old.zsh" "$fixture/before" "$func" "$fixture/after" > "$fixture/pty-case.zsh"
+    started="$(date +%s)"
+    run_pty "$fixture/pty-case.zsh"
+    ended="$(date +%s)"
+    printf 'before=%s after=%s leftovers=%s seconds=%s\n' \
+      "$([[ -e "$fixture/before" ]] && echo yes || echo no)" \
+      "$([[ -e "$fixture/after" ]] && echo yes || echo no)" "$(leftovers)" "$((ended - started))"
+  }
+  control_result="$(pty_case _ai_clip_run_old)"
+  fixed_result="$(pty_case _ai_clip_run)"
+  # seconds < 5 proves sleep was interrupted rather than run to completion.
+  if [[ "$control_result" == before=yes\ after=no\ leftovers=1\ seconds=[0-4] \
+    && "$fixed_result" == before=yes\ after=no\ leftovers=0\ seconds=[0-4] ]]; then
+    ok "test passed: real Ctrl-C via pty ($script_flavour script) while sleep runs -> interrupted early, nothing after ran; old body leaves the temp (control), always-block body removes it"
+  else
+    printf 'control: %s\nfixed:   %s\n' "$control_result" "$fixed_result" >&2
+    fail "test failed: pty Ctrl-C case (expected control 'before=yes after=no leftovers=1 seconds<5', fixed 'before=yes after=no leftovers=0 seconds<5')"
+    status=1
+  fi
+  find "$fixture/tmp" -name 'ai-clip.*' -delete
+fi
 
 # 4) The command runs in the current shell: cd and export persist.
 if out="$(run_zsh "$with_clip" "" "cd '$fixture/home'; _ai_clip_run 'cd /; export AI_CLIP_TEST=set'; print -r -- \"\$PWD \$AI_CLIP_TEST\"" 2>&1)" \
