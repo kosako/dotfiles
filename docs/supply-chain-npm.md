@@ -54,24 +54,28 @@ rebuild する(#244)。
 
 ```sh
 npm install                                                          # lifecycle script は動かない(hardening のまま)
-npm rebuild <package> --ignore-scripts=false --foreground-scripts    # 指定 package の script だけを、この 1 回だけ実行
+npm rebuild <package> --ignore-scripts=false --rebuild-bundle=false --foreground-scripts
+#            ^ 指定 package の script だけを、この 1 回だけ実行(同梱依存には広げない)
 ```
 
 - `--ignore-scripts=false` がこの command 限りで禁止を解除する。`~/.npmrc` の `ignore-scripts=true` は
   変わらないので、次の `npm install` から通常の hardening に戻る。
+- `--rebuild-bundle=false` が対象を**名前を指定した package だけ**に絞る。npm 11 の既定
+  `rebuild-bundle=true` では、その package の同梱依存(`bundleDependencies`)も rebuild 対象に加わり、
+  確認していない依存の lifecycle script まで走る。
 - `--foreground-scripts` は script の入出力を前面に出す**表示**設定で、禁止の解除ではない。
   `--foreground-scripts` だけでは install script は走らずに exit 0 で終わる(npm 11.13 で確認。
   `--ignore-scripts=false` を添えると走る)。
-- `npm rebuild <package>` は名前を指定した package だけを対象にする。依存 tree 全体の script を
-  まとめて許可する `npm install --ignore-scripts=false` は使わない。
 
-または、信頼できる project に限り project local で override する。
+上が **package 単位の復旧手順**で、通常はこれで足りる。project の依存 tree **全体**の script を信頼できると
+判断した project に限り、例外として project local で解除してよい(依存全体に効くので、判断の理由を
+project 側に書き残す。global の `~/.npmrc` は変えない):
 
 ```sh
-npm install --ignore-scripts=false
+npm install --ignore-scripts=false          # その project の依存全体の script を、この 1 回だけ許可
 ```
 
-project の `.npmrc` に `ignore-scripts=false` を置く方法もあるが、その project の依存全体に効くため、理由を project 側に書き残すこと。
+project の `.npmrc` に `ignore-scripts=false` を置くと以後のその project の install 全部に効く(同じく理由を残す)。
 
 ### Claude Code(native installer で入れる。npm-global にしない)
 
