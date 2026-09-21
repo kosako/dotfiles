@@ -120,6 +120,7 @@ main 直 commit は例外扱いにする。
 ./scripts/test-preflight.sh
 ./scripts/test-gclone.sh
 ./scripts/test-shell-syntax.sh
+./scripts/test-ai-clip.sh
 bash -ec 'for file in scripts/*.sh; do bash -n "$file"; done'
 bash -ec 'for file in dot_zshenv dot_zshrc dot_zprofile; do zsh -n "$file"; done'
 shellcheck -S warning scripts/*.sh

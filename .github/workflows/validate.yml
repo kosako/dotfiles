@@ -67,6 +67,9 @@ jobs:
       - name: shell syntax gate regression tests
         run: ./scripts/test-shell-syntax.sh
 
+      - name: ai-clip (Ctrl-O) helper tests
+        run: ./scripts/test-ai-clip.sh
+
       - name: gclone helper tests
         run: ./scripts/test-gclone.sh
 

@@ -113,6 +113,23 @@ CI の bash / zsh syntax check をそのまま取り出し、各入力ファイ�
 順番に挿入して非 0 になることを検証する。先頭ファイルだけの検査や、後続ファイルの
 成功で途中の失敗が隠れる退行を防ぐ(#211)。
 
+## test-ai-clip.sh
+
+`dot_zshrc` の Ctrl-O helper(`_ai_clip_strip_ansi` / `_ai_clip_copy` / `_ai_clip_run`)を
+managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔離 zsh(`zsh -f`、`env -i`)で
+振る舞いを検証する(#243)。実 clipboard・実 home・network には触れない。
+
+- 平文出力の一時 file(`ai-clip.*`)が、正常終了・非 0 終了・**SIGINT による中断**のいずれでも残らないこと
+  (`always` block。末尾の `rm` だけでは Ctrl-C で残っていた)。中断は 2 経路で検証する: shell 自身への
+  `kill -INT $$`(対話 zsh `-i`。非対話 zsh は SIGINT で即死し always に到達しないため)と、pseudo-terminal
+  (`script(1)`、BSD / util-linux 両対応)経由で外部コマンド(`sleep`)実行中に送る**本物の Ctrl-C**。どちらも
+  到達 marker で「中断前まで実行・中断後は未実行」を確認し、旧実装(末尾 `rm`)が file を残すことを対照として
+  assert する(空振り防止)。
+- コマンド自身の exit status が返り、clipboard 失敗(`pbcopy` 不在・OSC 52 未 opt-in)は stderr の警告のみで
+  status を変えないこと。
+- コマンドは現在の shell で実行され `cd` / `export` が残ること。
+- コピー内容が「`$ コマンド`」+ 出力 +「`[exit status: N]`」であること。
+
 ## test-policy.sh
 
 外部 test framework を使わずに policy validation の fail-closed 挙動を検証する。
