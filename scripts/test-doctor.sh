@@ -1184,12 +1184,37 @@ id_check() {
     status=1
   fi
 }
+# The managed identity reset (#202) is present for these cases: it is what
+# makes "identity file missing" mean "commits refused" (its own check is
+# ID-r below).
+id_reset="$fixture_home/.config/git-profile/identity-reset.gitconfig"
+mkdir -p "${id_reset%/*}"
+cp "$DOTFILES_ROOT/private_dot_config/git-profile/identity-reset.gitconfig" "$id_reset"
 id_check missing "[warn] project root exists but identity file missing: $id_file" "missing-file action (unchanged)"
 id_check empty "[warn] identity file is partial: $id_file has no user.name user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming both keys"
 id_check name-only "[warn] identity file is partial: $id_file has no user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming user.email"
 id_check email-only "[warn] identity file is partial: $id_file has no user.name — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming user.name"
 id_check complete "[ok] identity file exists: $id_file" "ok"
 id_check unparsable "[warn] identity file exists but git cannot parse it: $id_file (syntax error?) — commits under $id_root fail until it is fixed" "unparsable warn"
+
+# ID-r) The identity reset itself is checked, presence-only (#241): a partial
+#     apply (Quickstart with ~/.gitconfig alone) leaves it missing and Git
+#     silently skips the include, so the personal fallback leaks into
+#     non-personal repos. Present -> ok line; absent -> action naming the
+#     apply, and the missing-identity action for a NON-personal context must
+#     then say the fallback is in use rather than "refused".
+id_check missing "[ok] identity reset file present: $id_reset (non-personal contexts fail closed without a context file)" "reset present -> ok"
+rm -f "$id_reset"
+id_check missing "[warn] identity reset file missing: $id_reset — the fail-closed boundary of #202 is NOT in place: a non-personal repo without its context file falls back to the personal identity instead of refusing to commit" "reset absent -> action naming the apply"
+id_check missing "[warn] project root exists but identity file missing: $id_file (and the identity reset is missing too: commits under $id_root currently use the personal fallback, not refused)" "reset absent -> missing-identity action says fallback, not refused"
+id_reset_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || true
+if grep -Fxq "        \$ chezmoi apply ${id_reset%/*} $id_reset" <<< "$id_reset_out"; then
+  ok "test passed: reset absent -> next-actions step names the directory and file apply"
+else
+  printf '%s\n' "$id_reset_out" >&2
+  fail "test failed: reset absent: expected the exact apply step for the directory and the file"
+  status=1
+fi
 rm -rf "$id_root" "$id_file"
 
 # OC) OpenCode (#234): presence-level report of the third harness. A fake

@@ -191,6 +191,26 @@ else
 fi
 
 section "Git identity contexts"
+# The managed identity reset (#202) is what makes a missing / empty context
+# file fail closed: ~/.gitconfig includes it before each non-personal context
+# file, and Git silently ignores a missing include. A partial apply (README
+# Quickstart step 3 used to apply ~/.gitconfig alone, #241) therefore leaves
+# the personal remote fallback leaking into work / client / sandbox / agent
+# repos without any error. Presence-only check; the remedy is the same apply
+# the Quickstart names (the parent directory target is required).
+identity_reset_file="$HOME/.config/git-profile/identity-reset.gitconfig"
+identity_reset_present=1
+if module_active_for_profile "$profile" git-profile; then
+  if [[ -f "$identity_reset_file" ]]; then
+    ok "identity reset file present: $identity_reset_file (non-personal contexts fail closed without a context file)"
+  else
+    identity_reset_present=0
+    action "identity reset file missing: $identity_reset_file — the fail-closed boundary of #202 is NOT in place: a non-personal repo without its context file falls back to the personal identity instead of refusing to commit" \
+      "\$ chezmoi apply $(printf '%q' "${identity_reset_file%/*}") $(printf '%q' "$identity_reset_file")"
+  fi
+else
+  item "identity reset not managed for this profile (git-profile module inactive)"
+fi
 # An existing identity file is also checked for COMPLETENESS, presence-only:
 # `git config --file` tells whether user.name / user.email are set and
 # non-empty; the values are never printed. A partial file is the one state the
@@ -222,8 +242,13 @@ for context in personal work client sandbox agent; do
       fi
     fi
   elif [[ -d "$project_root" ]]; then
-    action "project root exists but identity file missing: $identity_file" \
-      "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) — commits under $project_root are refused until then"
+    if [[ "$identity_reset_present" -eq 1 || "$context" == "personal" ]]; then
+      action "project root exists but identity file missing: $identity_file" \
+        "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) — commits under $project_root are refused until then"
+    else
+      action "project root exists but identity file missing: $identity_file (and the identity reset is missing too: commits under $project_root currently use the personal fallback, not refused)" \
+        "create $identity_file with the [user] name/email for the $context context (local-only, never managed; docs/git-identity.md) and apply the identity reset (see above)"
+    fi
   else
     item "context unused, identity file not configured: $context"
   fi

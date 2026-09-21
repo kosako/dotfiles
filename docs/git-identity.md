@@ -77,6 +77,15 @@ identity がそのまま commit に使われていた(後勝ちで上書きす�
 
 reset が先に identity を空にするので、それまでに何が当たっていても(personal fallback を含む)
 context file の値だけが残る。include 順は契約なので `scripts/test-gitconfig.sh` が exact pin する。
+
+**reset file は `.gitconfig` と必ず一緒に配備する(#241)。** Git は欠損 include を黙って無視するため、
+`.gitconfig` だけを apply した home(README Quickstart の初回 apply がかつてそうだった)では、この節の
+契約は成立せず #202 以前の挙動(personal fallback の流入)に戻る。README の Quickstart は
+`~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig` を 1 回で apply し
+(親 directory の target を省くと chezmoi が stat error になる)、`scripts/test-gitconfig.sh` がその
+command 行と「その 3 target だけの apply で reset が配備されること」を pin する。`doctor.sh` は
+reset の presence を検査し(値は持たない file なので中身は見ない)、欠損なら apply を next action に出す。
+欠損時は「identity file が無い context は commit 拒否」の案内も「personal fallback が使われている」に変わる。
 `~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
 では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
 

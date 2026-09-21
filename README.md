@@ -103,8 +103,14 @@ chezmoi init --source ~/dotfiles --promptString profile=personal
 # 2. 何が適用されるかを全て確認する
 chezmoi diff --source ~/dotfiles
 
-# 3. 初回は target を絞って適用する(例: gitconfig だけ)
-chezmoi apply --source ~/dotfiles ~/.gitconfig
+# 3. 初回は target を絞って適用する(例: Git の最小セット)
+#    .gitconfig は非 personal context で identity reset file を include する。reset が無いと
+#    Git は欠損 include を黙って無視し、work 等で personal identity が流入する(#202 / #241)ので、
+#    親 directory ごと必ず一緒に apply する(directory target を省くと chezmoi が stat error になる)。
+#    chezmoi は target の外の祖先 dir を作らないので、新しい home では ~/.config を先に作る
+#    (権限は後の全体 apply で managed の 0700 に揃う)
+mkdir -p ~/.config
+chezmoi apply --source ~/dotfiles ~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig
 ```
 
 Git identity の実値は repository に入れない。使う context の identity file を手で置く。
