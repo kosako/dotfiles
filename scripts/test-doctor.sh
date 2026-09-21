@@ -1173,10 +1173,12 @@ id_check() {
     empty-values) printf '[user]\n\tname =\n\temail =\n' > "$id_file" ;;
     name-empty-email-unset) printf '[user]\n\tname =\n' > "$id_file" ;;
     # Keys with no `=` at all: git's boolean shorthand. `git config --get`
-    # (untyped) prints an empty string with exit 0 for them — the same as an
-    # explicit empty value, and what git itself uses as the ident — so doctor
-    # must classify them as explicit-empty, not unset (#241 review F8).
+    # (untyped) prints an empty string with exit 0 for them, exactly like an
+    # explicit empty value — but git's identity reader rejects them ("missing
+    # value for 'user.email'", fatal; measured on git 2.50.1), so doctor must
+    # diagnose them as their own state (#241 review F8 / F9).
     bare-keys) printf '[user]\n\tname\n\temail\n' > "$id_file" ;;
+    email-bare) printf '[user]\n\tname = %s\n\temail\n' "$id_canary_name" > "$id_file" ;;
   esac
   if out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     if grep -Fxq "$expect" <<< "$out" \
@@ -1224,7 +1226,11 @@ id_check empty "[warn] identity file is partial: $id_file has no user.name user.
 id_check name-only "[warn] identity file is partial: $id_file has no user.email (and the identity reset is missing: the unset user.email $id_mixed_tail" "reset absent -> name-only: email unset -> mixed identity"
 id_check email-only "[warn] identity file is partial: $id_file has no user.name (and the identity reset is missing: the unset user.name $id_mixed_tail" "reset absent -> email-only: name unset -> mixed identity"
 id_check empty-values "[warn] identity file is partial: $id_file has no user.name user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "reset absent -> explicit empty values still blank the ident (no inheritance)"
-id_check bare-keys "[warn] identity file is partial: $id_file has no user.name user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "reset absent -> bare keys (no =) count as explicit empty, not unset"
+# Value-less keys are their own state: git refuses to read the identity at
+# all, whatever the reset — the "empty email is accepted as <>" wording would
+# be wrong for them.
+id_check bare-keys "[warn] identity file has a key without a value: $id_file (user.name user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "bare keys (no =) -> own action: git rejects the identity"
+id_check email-bare "[warn] identity file has a key without a value: $id_file (user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "name set + bare email -> action names user.email only, no value shown"
 # Inheritance and commit outcome are separate: with the name explicitly
 # empty the email still inherits, but the commit is refused (empty name).
 id_check name-empty-email-unset "[warn] identity file is partial: $id_file has no user.name user.email (and the identity reset is missing: the unset user.email inherits the personal identity in a repo under $id_root whose remote matches the personal patterns — but the commit is still refused because user.name is explicitly empty; an explicitly empty key stays empty)" "reset absent -> empty name + unset email: email inherits, commit still refused"

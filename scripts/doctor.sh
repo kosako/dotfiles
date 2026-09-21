@@ -239,10 +239,20 @@ for context in personal work client sandbox agent; do
       # before, but an unset key keeps it — the personal identity, in a repo
       # whose remote matches the personal patterns. The value itself is never
       # printed (key names only).
+      # A third kind: a key with NO value at all (`name` on a line by itself,
+      # git's boolean shorthand). `--get` prints an empty string for it too,
+      # but git's identity reader rejects it outright ("missing value for
+      # 'user.email'", fatal), so it is neither empty nor unset — it breaks
+      # every commit under the root regardless of the reset. `--list` shows
+      # such a key without "=", which is how it is told apart here (the
+      # listing is only grepped, never printed).
       identity_missing=""
       identity_unset=""
+      identity_bare=""
       for identity_key in name email; do
-        if identity_value="$(git config --file "$identity_file" --get "user.$identity_key" 2>/dev/null)"; then
+        if git config --file "$identity_file" --list 2>/dev/null | grep -Fxq -- "user.$identity_key"; then
+          identity_bare+="${identity_bare:+ }user.$identity_key"
+        elif identity_value="$(git config --file "$identity_file" --get "user.$identity_key" 2>/dev/null)"; then
           [[ -n "$identity_value" ]] || identity_missing+="${identity_missing:+ }user.$identity_key"
         else
           identity_missing+="${identity_missing:+ }user.$identity_key"
@@ -250,7 +260,10 @@ for context in personal work client sandbox agent; do
         fi
       done
       identity_value=""
-      if [[ -z "$identity_missing" ]]; then
+      if [[ -n "$identity_bare" ]]; then
+        action "identity file has a key without a value: $identity_file ($identity_bare) — git rejects the whole identity (fatal: missing value), so commits under $project_root fail until it is fixed" \
+          "give $identity_bare a value in $identity_file, or remove the line (local-only, never managed; docs/git-identity.md)"
+      elif [[ -z "$identity_missing" ]]; then
         ok "identity file exists: $identity_file"
       elif [[ "$identity_reset_present" -eq 1 || "$context" == "personal" || -z "$identity_unset" ]]; then
         action "identity file is partial: $identity_file has no $identity_missing — commits under $project_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" \

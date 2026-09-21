@@ -90,9 +90,12 @@ mkdir + apply を next action に出す。欠損時は非 personal context の�
 remote が personal の hasconfig pattern に一致し、personal identity が設定されている repo に限る。それ以外は
 `useConfigOnly` で従来どおり拒否): identity file が無ければ「commit 拒否」ではなく「personal identity を
 継承しうる」、partial なら「**未指定**の key は personal identity を継承する(混在 identity)。明示的な空値
-(`name =`、`=` 無しの boolean 省略記法も同じ)は上書きするので空のまま」。継承と commit 可否は別で、name が
-明示的に空なら email を継承しても commit は拒否される(Git は空 name を拒否)。未指定と空値の区別は
-`git config --get` の exit code で見る(未指定 = 1、空値 = 0 で空出力)。
+(`name =`)は上書きするので空のまま」。継承と commit 可否は別で、name が明示的に空なら email を継承しても
+commit は拒否される(Git は空 name を拒否)。未指定と空値の区別は `git config --get` の exit code で見る
+(未指定 = 1、空値 = 0 で空出力)。`=` 無しの key(`email` だけの行、boolean 省略記法)は第 3 の状態で、
+`--get` は空値と同じに見えるが Git の identity 読み込みは `fatal: missing value for 'user.email'` で
+拒否する(git 2.50.1 実測)。doctor は `--list` に `=` 無しで現れることで判別し、reset の有無に関わらず
+「値なし key・commit 不能」として別に報告する。
 `~/.config/git/` 配下に置かないのは、そこが `git-signing` module の path で、signing off の profile
 では subtree ごと管理外になるため(git-hook-gates と同じ判断)。
 
