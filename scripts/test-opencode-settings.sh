@@ -97,10 +97,10 @@ fi
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
 #    bare command fall through to the allow-all base (Codex review, PR #235).
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view*=allow\ngh pr list*=allow\ngh pr diff*=allow\ngh pr checks*=allow\ngh pr status*=allow\ngh issue view*=allow\ngh issue list*=allow\ngh issue status*=allow\ngh repo view*=allow\ngh release view*=allow\ngh release list*=allow\ngh run view*=allow\ngh run list*=allow\ngh workflow view*=allow\ngh workflow list*=allow\ngh label list*=allow\ngh gist view*=allow\ngh gist list*=allow\ngh search *=allow\ngh status*=allow\ngh auth status*=allow\ngh --version=allow\ngh version=allow\ngh help*=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny'
+expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view*=allow\ngh pr list*=allow\ngh pr diff*=allow\ngh pr checks*=allow\ngh pr status*=allow\ngh issue view*=allow\ngh issue list*=allow\ngh issue status*=allow\ngh repo view*=allow\ngh release view*=allow\ngh release list*=allow\ngh run view*=allow\ngh run list*=allow\ngh workflow view*=allow\ngh workflow list*=allow\ngh label list*=allow\ngh gist view*=allow\ngh gist list*=allow\ngh search *=allow\ngh status*=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help*=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 6 ask incl. gh default, 24 read allow-backs, 7 deny last; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 6 ask incl. gh default, 24 read allow-backs, 10 deny last; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -140,8 +140,15 @@ opencode_bash_decision() {
 }
 
 decision_failures=0
+# Rows are "<expected>\t<command>". A row with no tab is one of doctor.sh's
+# outward_probes VERBATIM (argument-less forms included) and expects ask —
+# the same strings, so a decision regression on the bare forms is caught too.
 while IFS=$'\t' read -r expected cmd; do
-  [[ -z "$cmd" ]] && continue
+  if [[ -z "$cmd" ]]; then
+    [[ -z "$expected" ]] && continue
+    cmd="$expected"
+    expected="ask"
+  fi
   actual="$(opencode_bash_decision "$cmd")"
   if [[ "$actual" == "$expected" ]]; then
     ok "test passed: $expected: $cmd"
@@ -150,10 +157,34 @@ while IFS=$'\t' read -r expected cmd; do
     decision_failures=$((decision_failures + 1))
   fi
 done <<'CASES'
-ask	git push
+git push
+git clone https://example.invalid/repo
+gh pr create
+gh pr merge
+gh pr comment
+gh pr edit
+gh pr close
+gh issue create
+gh issue comment
+gh issue edit
+gh issue close
+gh issue delete
+gh issue transfer
+gh release create
+gh release edit
+gh release delete
+gh release upload
+gh repo delete
+gh repo edit
+gh repo archive
+gh repo rename
+gh api --method POST repos/o/r/issues
+gh auth login
+sudo -v
+curl https://example.invalid
+wget https://example.invalid
+deny	gh secret set
 ask	git push origin main
-ask	git clone https://example.invalid/repo
-ask	gh pr create
 ask	gh pr merge 1
 ask	gh pr comment 1 --body x
 ask	gh pr review 1 --approve
@@ -216,6 +247,13 @@ deny	gh secret set X
 deny	gh secret list
 deny	gh api repos/o/r/actions/secrets
 deny	gh api --method PUT repos/o/r/actions/secrets/X
+deny	gh auth token
+deny	gh auth token --hostname github.com
+deny	gh auth status --show-token
+deny	gh auth status -t
+deny	gh auth status --hostname github.com -t
+deny	gh auth status --hostname github.com --show-token
+ask	gh auth status --hostname github.com
 deny	env
 deny	env FOO=1 gh pr create
 deny	printenv
@@ -268,9 +306,12 @@ else
   status=1
 fi
 
-# 6) No secret-shaped value and no real identity in the rendered file (the
+# 6) No secret-shaped VALUE and no real identity in the rendered file (the
 #    only '@' allowed is none; the only home path is the rendered fixture home).
-if grep -Eqi 'sk-[a-z0-9]|api[_-]?key|token|@' "$config_file"; then
+#    Matches value shapes (provider key prefixes, `api_key: ...` / `token: "..."`
+#    assignments), not the bare word: the bash rules legitimately name
+#    `gh auth token` / `--show-token` as deny patterns (#240).
+if grep -Eqi 'sk-[a-z0-9]|ghp_[a-z0-9]|gho_[a-z0-9]|github_pat_|api[_-]?key"?[[:space:]]*[:=]|token"?[[:space:]]*[:=][[:space:]]*"[^"]+"|@' "$config_file"; then
   fail "test failed: rendered opencode.json contains a secret-like or email-like string"
   status=1
 else

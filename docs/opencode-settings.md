@@ -25,12 +25,13 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   - `bash`: `*` allow の上に、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
     **ask**。GitHub CLI は **`gh *` を既定 ask** にし、read 系の subcommand(`pr view|list|diff|checks|status`、
     `issue view|list|status`、`repo view`、`release view|list`、`run view|list`、`workflow view|list`、
-    `label list`、`gist view|list`、`search`、`status`、`auth status`、`--version` / `version` / `help`)だけを
+    `label list`、`gist view|list`、`search`、`status`、bare の `auth status`、`--version` / `version` / `help`)だけを
     allow に戻す(#240: mutation を列挙する方式では `gh issue edit` / `gh pr close` / `gh api -XPOST` などが
     allow-all に落ちた。`gh api` は method に関わらず ask — 短縮 flag `-XPOST` / `-ftitle=x` は flag 照合を
     すり抜け、GraphQL は read でも POST を使う)。deny(env dump `env` / `printenv`、`gh secret` /
-    `gh api *secrets*`、`cat ~/.ssh/*`)は **map の末尾**に置く(last-match-wins で、後続の広い ask に deny を
-    弱めさせないため)。([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
+    `gh api *secrets*`、token 表示 `gh auth token` / `gh auth status --show-token` / `-t`、`cat ~/.ssh/*`)は
+    **map の末尾**に置く(last-match-wins で、後続の広い ask に deny を弱めさせないため)。
+    ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
     `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。
   - `external_directory` / `doom_loop` は OpenCode 既定(ask)のまま。
 - **`autoupdate: false`**: 起動時の自動 DL を止める([update-policy](update-policy.md))。更新は catalog の

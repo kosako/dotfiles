@@ -19,8 +19,11 @@
          gap (`gh issue edit`, `gh pr close`, `gh api -XPOST`, ... fell to
          allow-all), and `gh api` stays ask whatever the method because
          short-flag forms (`-XPOST`, `-ftitle=x`) defeat flag matching and
-         GraphQL reads POST anyway. Rules are last-match-wins, so the deny
-         rules (env dump, gh secret / secrets API, ssh keys) come LAST: an
+         GraphQL reads POST anyway. `gh auth status` is allowed only in its
+         bare form: `--show-token` / `-t` print the token, and `gh auth
+         token` exists for that alone, so those are deny (Codex review, PR
+         #249). Rules are last-match-wins, so the deny rules (env dump, gh
+         secret / secrets API, token display, ssh keys) come LAST: an
          earlier deny would be overridden by a later, broader ask. The ask
          patterns end in a bare `*` with no space before it on purpose: `*`
          matches zero or more characters, so `git push*` covers both the
@@ -86,7 +89,7 @@
       "gh gist list*": "allow",
       "gh search *": "allow",
       "gh status*": "allow",
-      "gh auth status*": "allow",
+      "gh auth status": "allow",
       "gh --version": "allow",
       "gh version": "allow",
       "gh help*": "allow",
@@ -96,6 +99,9 @@
       "cat ~/.ssh/*": "deny",
       "gh secret *": "deny",
       "gh api *secrets*": "deny",
+      "gh auth token*": "deny",
+      "gh auth status*--show-token*": "deny",
+      "gh auth status* -t*": "deny",
       "env": "deny",
       "env *": "deny",
       "printenv": "deny",
