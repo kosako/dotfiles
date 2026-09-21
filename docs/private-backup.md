@@ -32,8 +32,15 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
   誰の環境でも当たり障りない public-safe なパスのみ。「何を追っているか」を repo で
   可視化する。shell の上書きファイル `.zshrc.local` / `.zprofile.local` も含む。
 - **local 補足**(`~/.config/dotfiles/backup-paths.local`、非コミット):
-  client 固有・private なパスはここだけに書く。**暗号化アーカイブに同梱**され、
-  復元時に参照される。public-safety を守りつつリストごと復元できる。
+  client 固有・private なパスはここだけに書く。backup はこの file 自体を**通常の payload として
+  canonical path `.config/dotfiles/backup-paths.local` に捕捉**する(manifest の `files[]` に
+  hash 付きで載り、`entries[]` には `origin: supplement` で 1 行)。restore は他の file と同じ規則
+  (dry-run / `--skip-existing` / 既存の退避 / symlink 親拒否)で **常にこの canonical path へ**戻し、
+  復元した home からの次回 backup は flag なしでそれを読む。`--local-supplement PATH` で別の場所を
+  渡しても、その source path は manifest に記録されず復元先にも使わない(backup 時の入力に過ぎない。
+  #208)。public-safety を守りつつリストごと復元できる。
+  **旧 archive(#208 以前)**は補足を archive 最上位に同梱していた。この member は今も受理されるが
+  検証も復元もされないので、更新後に backup を取り直す(旧形式を読む分岐は持たない)。
 
 `backup-paths.yaml` の各 entry:
 
@@ -67,8 +74,10 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   を想定)。後者は出力を /dev/fd 経由で age に渡し、秘密鍵をディスクに置かない。
 - archive は `tar | age` を pipe して平文 tar をディスクに残さない。アーカイブ内のパスは
   home 相対(`-C` で絶対パスを含めない)。
-- backup は捕捉 0 件なら空アーカイブを書かず fail。symlink / 不在 / 非正規 / 読取不可の
-  ファイルは skip(warn)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+- backup は捕捉 0 件なら空アーカイブを書かず fail(補足リストだけの archive も空扱い)。symlink /
+  不在 / 非正規 / 読取不可のファイルは skip(warn)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+  補足リスト自身は宣言より先に canonical path で捕捉するので、baseline / 補足が同じ path を宣言して
+  いても entry / file は重複しない(補足の copy が優先)。
 - 書き込み前の確認は `--yes` で省略できる。`--yes` なしでは TTY での対話確認が必須:
   TTY が無い(cron / CI など無人実行)場合は明示エラーで **exit 非 0**、対話で decline
   した場合も **exit 非 0**(アーカイブを書かなかった実行は成功を返さない。無人実行での
@@ -86,7 +95,7 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
 
 - **第1段(完了)**: リスト schema + parser + validate + `age` を catalog に追加(宣言レイヤ)。
   runtime secrets gate。backup(machine-neutral manifest + age identity 暗号化 +
-  指定先書き出し + local 補足同梱)+ verify。doctor の report-only section
+  指定先書き出し + local 補足の捕捉。#208 で最上位同梱から payload 化)+ verify。doctor の report-only section
   (public baseline の解決 + marker からバックアップ有無/最終日時。local 補足は存在のみ・
   中身は読まない)。
 - **第2段(完了)**: restore(dry-run 既定 / `--apply` / 既存は timestamp 退避 / 0700 temp /
