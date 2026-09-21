@@ -241,10 +241,13 @@ cmd_backup() {
   # runs a single subcommand then exits.
   declared="$(mktemp)"
   seen_paths="$(mktemp)"
+  # Per-directory find listing (NUL-delimited), outside the staging so it
+  # never lands in the archive; reused for every declared directory.
+  dir_listing="$(mktemp)"
   staging="$(mktemp -d "${TMPDIR:-/tmp}/private-backup.XXXXXX")"
   chmod 700 "$staging"
   # Clean up the 0700 staging (plaintext config) and temp lists on exit.
-  trap 'rm -rf "$staging"; rm -f "$declared" "$seen_paths"' EXIT
+  trap 'rm -rf "$staging"; rm -f "$declared" "$seen_paths" "$dir_listing"' EXIT
 
   collect_declared "$BACKUP_PATHS_FILE" baseline "$declared" || return 1
   if [[ -f "$local_supplement" ]]; then
@@ -268,6 +271,9 @@ cmd_backup() {
     }' > "$manifest"
 
   local origin type category path target captured=0 skipped=0 supplement_captured=0
+  # Set when a declared directory could not be enumerated completely (#242);
+  # recorded in the marker so doctor can show it after the fact.
+  local capture_incomplete=0 incomplete_dirs=0 find_rc
   # The supplement itself goes in first, as ordinary payload at its canonical
   # path (#208): restore then lands it with the same dry-run / skip-existing /
   # displace / symlink rules as every other file, verify hashes it, and the
@@ -325,7 +331,15 @@ cmd_backup() {
       # delimiting tolerates odd names; each captured path still gets the
       # same safety checks as a declared entry (a control character or a
       # ".." segment would otherwise corrupt the manifest or trip verify).
+      # The listing goes through a file, not a process substitution, so
+      # find's exit status is kept (#242): an unreadable subdirectory makes
+      # find exit 1 AFTER listing what it could, and a `< <(find ...)` loop
+      # would swallow that and report a complete backup. The partial listing
+      # is still captured (the unreadable-file contract: warn + skip and
+      # continue), but the run is marked incomplete below.
       local f rel
+      find_rc=0
+      find "$target" -type f -print0 > "$dir_listing" 2>/dev/null || find_rc=$?
       while IFS= read -r -d '' f; do
         rel="${f#"$HOME"/}"
         if ! backup_path_is_safe "$rel"; then
@@ -348,7 +362,15 @@ cmd_backup() {
         fi
         stage_file "$f" "$rel" "$manifest" "$staging"
         captured=$((captured + 1))
-      done < <(find "$target" -type f -print0 2>/dev/null)
+      done < "$dir_listing"
+      if [[ "$find_rc" -ne 0 ]]; then
+        # One skipped entry per directory whose enumeration failed — not a
+        # count of the files it could not list (that number is unknowable).
+        warn "directory enumeration incomplete (find exit $find_rc; entries under it could not all be listed): $path"
+        skipped=$((skipped + 1))
+        incomplete_dirs=$((incomplete_dirs + 1))
+        capture_incomplete=1
+      fi
     else
       if [[ ! -f "$target" ]]; then
         warn "declared file is not a regular file (skipped): $path"
@@ -388,7 +410,7 @@ cmd_backup() {
   # Script-global for the EXIT trap, like staging.
   selfcheck="$(mktemp -d "${TMPDIR:-/tmp}/private-backup-check.XXXXXX")"
   chmod 700 "$selfcheck"
-  trap 'rm -rf "$staging" "$selfcheck"; rm -f "$declared" "$seen_paths"' EXIT
+  trap 'rm -rf "$staging" "$selfcheck"; rm -f "$declared" "$seen_paths" "$dir_listing"' EXIT
   if ! check_manifest "$staging" "$selfcheck"; then
     fail "staging failed self-check; no archive written"
     return 1
@@ -397,6 +419,13 @@ cmd_backup() {
   section "private-backup: confirm"
   ok "captured files: $captured"
   [[ "$skipped" -gt 0 ]] && warn "skipped entries: $skipped"
+  # Incomplete is distinct from ordinary skips (an optional baseline file
+  # being absent is normal); the marker records it so doctor can still tell
+  # later. The self-check above proves staging and manifest agree — it
+  # cannot prove the capture was complete, which is what this flag is for.
+  if [[ "$capture_incomplete" -eq 1 ]]; then
+    warn "capture INCOMPLETE: enumeration failed for $incomplete_dirs declared director(y/ies); files it could not list are missing from this archive (fix the unreadable entries and back up again)"
+  fi
   item "destination: $out"
   if [[ "$assume_yes" -ne 1 ]]; then
     printf '[info] - proceed and write the encrypted archive? [y/N] ' >&2
@@ -428,15 +457,18 @@ cmd_backup() {
   ok "wrote encrypted archive: $out"
 
   # Marker: repo-external, minimal, machine-neutral (basename only; no
-  # absolute path, no hostname, no entry contents).
+  # absolute path, no hostname, no entry contents). capture_incomplete is a
+  # boolean (#242): true when a declared directory could not be fully
+  # enumerated; doctor treats a marker without the field as unknown.
   mkdir -p "$(dirname "$MARKER_FILE")"
   SV="$MANIFEST_SCHEMA_VERSION" TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    AB="$(basename "$out")" FC="$captured" \
+    AB="$(basename "$out")" FC="$captured" CI="$capture_incomplete" \
     yq -n -o=json '{
       "schema_version": (strenv(SV) | tonumber),
       "last_success": strenv(TS),
       "archive": strenv(AB),
-      "file_count": (strenv(FC) | tonumber)
+      "file_count": (strenv(FC) | tonumber),
+      "capture_incomplete": (strenv(CI) == "1")
     }' > "$MARKER_FILE"
   ok "updated marker: $MARKER_FILE"
   return 0

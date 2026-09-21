@@ -625,13 +625,25 @@ if [[ -f "$backup_marker" ]]; then
   marker_last="$(bm '.last_success // ""')"
   marker_archive_raw="$(bm '.archive // ""')"
   marker_count="$(bm '.file_count // ""')"
+  # capture_incomplete (#242): a boolean, so `// "unknown"` would turn false
+  # into unknown — read it as a string instead. Absent (a marker written
+  # before #242) is UNKNOWN, never assumed complete.
+  marker_incomplete_raw="$(bm '.capture_incomplete | tostring')"
   marker_archive="unknown"
   [[ -n "$marker_archive_raw" ]] && marker_archive="$(basename "$marker_archive_raw")"
   [[ "$marker_count" =~ ^[0-9]+$ ]] || marker_count="unknown"
-  if [[ -n "$marker_last" ]]; then
-    ok "last backup: $marker_last (archive: $marker_archive, files: $marker_count)"
-  else
+  case "$marker_incomplete_raw" in
+    true) marker_capture="INCOMPLETE" ;;
+    false) marker_capture="complete" ;;
+    *) marker_capture="unknown" ;;
+  esac
+  if [[ -z "$marker_last" ]]; then
     warn "backup marker present but unreadable"
+  elif [[ "$marker_capture" == "INCOMPLETE" ]]; then
+    action "last backup: $marker_last (archive: $marker_archive, files: $marker_count) was INCOMPLETE: a declared directory could not be fully enumerated, so files under it are missing from that archive" \
+      "fix the unreadable entries (see the backup run's warnings), then run ./scripts/private-backup.sh backup again"
+  else
+    ok "last backup: $marker_last (archive: $marker_archive, files: $marker_count, capture: $marker_capture)"
   fi
   unset -f bm
 elif profile_allows_secrets_access "$profile"; then

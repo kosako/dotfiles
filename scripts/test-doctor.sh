@@ -339,9 +339,10 @@ mkdir -p "$fixture_home/.local/state/dotfiles"
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2}\n' \
   > "$fixture_home/.local/state/dotfiles/private-backup.json"
 if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "last backup: 2026-06-19T00:00:00Z" <<< "$pb_out" \
-    && grep -Fq "backup.age" <<< "$pb_out"; then
-    ok "test passed: backup marker last-success reported"
+  # A marker from before #242 has no capture_incomplete field: the capture
+  # state is UNKNOWN (never assumed complete), still an ok line.
+  if grep -Fq "[ok] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2, capture: unknown)" <<< "$pb_out"; then
+    ok "test passed: backup marker last-success reported (pre-#242 marker -> capture unknown)"
   else
     printf '%s\n' "$pb_out" >&2
     fail "test failed: backup marker details not reported"
@@ -352,6 +353,32 @@ else
   fail "test failed: doctor must stay exit 0 with a backup marker"
   status=1
 fi
+
+# I2) capture_incomplete (#242): false -> "capture: complete" ok line; true ->
+#     an action (warn + next-actions step) naming the re-run, exit 0.
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2,"capture_incomplete":false}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fq "[ok] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2, capture: complete)" <<< "$pb_out"; then
+  ok "test passed: marker capture_incomplete=false -> capture: complete"
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: marker capture_incomplete=false not reported as complete (or doctor exited non-zero)"
+  status=1
+fi
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2,"capture_incomplete":true}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fq "[warn] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2) was INCOMPLETE: a declared directory could not be fully enumerated, so files under it are missing from that archive" <<< "$pb_out" \
+  && grep -Fq "then run ./scripts/private-backup.sh backup again" <<< "$pb_out"; then
+  ok "test passed: marker capture_incomplete=true -> INCOMPLETE action with the re-run step (exit 0)"
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: marker capture_incomplete=true not reported as an INCOMPLETE action"
+  status=1
+fi
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
 
 # J) The local supplement is reported by existence only — never parsed or
 #    its contents/count shown. A supplement with a recognisable secret-ish
