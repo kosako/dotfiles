@@ -141,6 +141,20 @@ export AGENT_TOOLS="$HOME/path/to/agent-tools"
 - 共通原則どおり managed 側は AGENT_TOOLS 未設定でも壊れない(既定 path に fallback し、
   不在なら report-only の warn)。
 
+## Git global ignore: managed-only(local 無し、#248)
+
+managed な `~/.config/git/ignore`(`git-ignore` module。AI agent の local-only file `.agent-packets/` と
+`**/.claude/settings.local.json` を全 repo から除外)には **local override file が無い**。git は global
+excludes を **1 file しか読まない**(`core.excludesFile`、未設定なら XDG 既定の `~/.config/git/ignore`)ので、
+zsh の末尾 source や SSH の末尾 Include に当たる合成の仕組みが git 側に存在しないため。
+
+- host 固有の除外 pattern は **各 repo の `.git/info/exclude`** に置く(git / chezmoi 管理外)。
+- managed 側は `core.excludesFile` を pin しない(明示値は host 自身の設定を黙って上書きする)。host が
+  `core.excludesFile` を持つ環境では managed file が読まれないだけで壊れず、doctor がその状態を warn
+  する。
+- 共通原則どおり doctor / preflight は file の**存在と pattern 行**しか見ない(値を持つ file ではない)。
+  詳細は [git-ignore](git-ignore.md)。
+
 ## 決定記録
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で

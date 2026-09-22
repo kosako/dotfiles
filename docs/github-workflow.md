@@ -115,6 +115,7 @@ main 直 commit は例外扱いにする。
 ./scripts/test-codex-settings.sh
 ./scripts/test-opencode-settings.sh
 ./scripts/test-git-signing.sh
+./scripts/test-git-ignore.sh
 ./scripts/test-git-hook-gates.sh
 ./scripts/test-starship.sh
 ./scripts/test-ssh.sh

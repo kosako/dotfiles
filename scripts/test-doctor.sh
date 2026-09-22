@@ -49,6 +49,16 @@ SH
   chmod +x "$dest"
 }
 
+# steps_consecutive OUTPUT FIRST SECOND — SECOND is on the line right after
+# some line equal to FIRST. Next-actions steps are the contract under test
+# in several places (identity reset #241, global gitignore #248), and more
+# than one action may start with the same `mkdir -p ~/.config` step, so the
+# pair is searched rather than the first FIRST match.
+steps_consecutive() {
+  local out="$1" first="$2" second="$3"
+  grep -F -x -A1 -- "$first" <<< "$out" | grep -Fxq -- "$second"
+}
+
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
@@ -478,6 +488,96 @@ else
   fail "test failed: doctor must stay exit 0 (enableGitSigning dangling)"
   status=1
 fi
+
+# Global gitignore report (git-ignore module, #248). doctor stays report-only
+# / exit 0 and must tell apart: managed file in effect (ok), missing
+# (action naming mkdir + apply), redirected by core.excludesFile in the
+# global scope, in the SYSTEM scope only, or by XDG_CONFIG_HOME (git reads
+# another file; the value is a path and IS shown since it is not a secret),
+# an explicitly EMPTY core.excludesFile (git reads no global excludes file:
+# not "unset"), an unreadable config (unknown, not ok), drifted (a managed
+# pattern line removed -> action), and the module-inactive profile (work).
+# Every run is hermetic: `env -i` with only PATH, HOME and the git variables
+# the case needs — GIT_CONFIG_NOSYSTEM=1 by default, GIT_CONFIG_SYSTEM
+# pointing at a fixture file for the system-only case — so the developer
+# shell's GIT_CONFIG_GLOBAL / XDG_CONFIG_HOME and the host's system
+# gitconfig cannot leak in (Codex review).
+gi_home="$fixture_home/gi"
+gi_managed="$gi_home/.config/git/ignore"
+gi_other="$gi_home/elsewhere/ignore"
+# gi_check PROFILE EXPECT_LINE LABEL [VAR=value...] — extra env words for the
+# doctor run; GIT_CONFIG_NOSYSTEM=1 when none are given.
+gi_check() {
+  local profile="$1" expect="$2" label="$3" out
+  shift 3
+  [[ $# -gt 0 ]] || set -- GIT_CONFIG_NOSYSTEM=1
+  if out="$(env -i PATH="$PATH" HOME="$gi_home" "$@" "$SCRIPT_DIR/doctor.sh" "$profile" 2>&1)"; then
+    if grep -Fxq -- "$expect" <<< "$out"; then
+      ok "test passed: global gitignore $label"
+    else
+      printf '%s\n' "$out" >&2
+      fail "test failed: global gitignore $label: expected the exact line '$expect'"
+      status=1
+    fi
+  else
+    printf '%s\n' "$out" >&2
+    fail "test failed: doctor must stay exit 0 (global gitignore $label)"
+    status=1
+  fi
+}
+rm -rf "$gi_home"
+mkdir -p "$gi_home/.config/git"
+# GI-1) managed file present and read by git -> ok.
+cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
+gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo" "managed file in effect -> ok"
+# GI-2) missing -> action (mkdir then apply, %q-escaped like the identity reset).
+rm -f "$gi_managed"
+gi_check personal "[warn] global gitignore missing: $gi_managed (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" "missing -> action"
+if out="$(env -i PATH="$PATH" HOME="$gi_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && steps_consecutive "$out" "        \$ mkdir -p $(printf '%q' "$gi_home/.config")" \
+    "        \$ chezmoi apply $(printf '%q' "$gi_home/.config/git") $(printf '%q' "$gi_managed")"; then
+  ok "test passed: global gitignore missing -> steps are mkdir then apply, consecutive and %q-escaped"
+else
+  printf '%s\n' "${out:-<no output>}" >&2
+  fail "test failed: global gitignore missing -> expected the mkdir step immediately followed by the apply step"
+  status=1
+fi
+# GI-3) present but core.excludesFile points elsewhere -> git reads the other file.
+cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
+mkdir -p "$gi_home/elsewhere"
+: > "$gi_other"
+gi_redirect="[warn] global gitignore: git reads $gi_other, not the managed $gi_managed (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
+printf '[core]\n\texcludesFile = %s\n' "$gi_other" > "$gi_home/.gitconfig"
+gi_check personal "$gi_redirect" "redirected by core.excludesFile (global) -> warn"
+# GI-3b) the same key in the SYSTEM scope only: git honours it, so a
+#        --global-only lookup would wrongly report the managed file as in
+#        effect (Codex must). GIT_CONFIG_SYSTEM stands in for the host file.
+rm -f "$gi_home/.gitconfig"
+printf '[core]\n\texcludesFile = %s\n' "$gi_other" > "$gi_home/system.gitconfig"
+gi_check personal "$gi_redirect" "redirected by core.excludesFile (system scope only) -> warn" GIT_CONFIG_SYSTEM="$gi_home/system.gitconfig"
+# GI-3c) ... but GIT_CONFIG_NOSYSTEM=1 makes git skip the system scope, and
+#        so must the lookup (git config --system does not honour it itself).
+gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo" "system-scope value is ignored under GIT_CONFIG_NOSYSTEM=1 -> ok" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM="$gi_home/system.gitconfig"
+rm -f "$gi_home/system.gitconfig"
+# GI-3d) XDG_CONFIG_HOME moves git's default location away from ~/.config.
+gi_check personal "[warn] global gitignore: git reads $gi_home/xdg/git/ignore, not the managed $gi_managed (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect" "redirected by XDG_CONFIG_HOME -> warn" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/xdg"
+# GI-3e) explicitly EMPTY core.excludesFile: git reads no global excludes file
+#        at all (measured: .agent-packets/x.md shows up in git status), so
+#        falling back to the default path would be a false ok (Codex must).
+printf '[core]\n\texcludesFile =\n' > "$gi_home/.gitconfig"
+gi_check personal "[warn] global gitignore: core.excludesFile is explicitly empty (global or system config), so git reads NO global excludes file — the managed $gi_managed is not in effect; unset the key to restore git's default location" "explicitly empty core.excludesFile -> warn, no default fallback"
+# GI-3f) a value-less key makes git refuse the config (fatal: missing
+#        value): unknown, reported as such rather than as ok.
+printf '[core]\n\texcludesFile\n' > "$gi_home/.gitconfig"
+gi_check personal "[warn] global gitignore: git cannot read its global/system config (core.excludesFile lookup failed), so whether the managed $gi_managed is in effect is unknown — fix the config error first (git config --global --list / git config --system --list)" "unreadable global config -> unknown warn"
+rm -f "$gi_home/.gitconfig"
+# GI-4) present, read by git, but a managed pattern line is gone -> drift action.
+grep -Fxv -- ".agent-packets/" "$DOTFILES_ROOT/private_dot_config/git/ignore" > "$gi_managed"
+gi_check personal "[warn] global gitignore: $gi_managed lacks: .agent-packets/ (drifted from the managed file)" "pattern removed -> drift action"
+# GI-5) work does not list the module -> not managed, whatever is on disk.
+cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
+gi_check work "[ok] global gitignore not managed (git-ignore module inactive for profile work)" "work -> not managed"
+rm -rf "$gi_home"
 
 # SSH 1Password agent report (enable1PasswordSSH, issue #17). doctor stays
 # report-only / exit 0 and must reflect both the active and the dangling
@@ -1275,7 +1375,10 @@ id_check name-empty-email-unset "[warn] identity file is partial: $id_file has n
 # The next-actions steps are printf %q-escaped by doctor, so the expected
 # lines are built the same way (a TMPDIR with a space would otherwise fail a
 # correct output). ORDER is the contract: mkdir must come right before the
-# apply within the same action, so the two lines are checked as consecutive.
+# apply within the same action, so the apply step must be a line that
+# immediately follows a mkdir line (steps_consecutive). Other actions start
+# with the same mkdir step (the global gitignore one, #248), so the pair is
+# searched, not the first mkdir match.
 # assert_reset_steps HOME_DIR LABEL
 assert_reset_steps() {
   local home_dir="$1" label="$2" out rc=0 step_mkdir step_apply
@@ -1283,7 +1386,7 @@ assert_reset_steps() {
   step_mkdir="        \$ mkdir -p $(printf '%q' "$home_dir/.config")"
   step_apply="        \$ chezmoi apply $(printf '%q' "$home_dir/.config/git-profile") $(printf '%q' "$home_dir/.config/git-profile/identity-reset.gitconfig")"
   if [[ "$rc" -eq 0 ]] \
-    && [[ "$(grep -F -x -A1 -- "$step_mkdir" <<< "$out" | sed -n '2p')" == "$step_apply" ]]; then
+    && steps_consecutive "$out" "$step_mkdir" "$step_apply"; then
     ok "test passed: reset absent -> $label: doctor exit 0, steps are mkdir then apply, consecutive and %q-escaped"
   else
     printf '%s\n' "$out" >&2

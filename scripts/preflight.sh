@@ -113,6 +113,38 @@ for context in personal work client sandbox agent; do
     item "identity file already present: $identity_file"
   fi
 done
+# git-ignore apply impact (#248): with the module active, apply replaces
+# ~/.config/git/ignore — git's default global excludes file — with the
+# managed one. Git reads exactly ONE global excludes file, so there is no
+# .local companion: host-specific patterns must move to each repo's
+# .git/info/exclude before apply (or be diffed first). Existence only; the
+# file is never read here. A core.excludesFile set in the global OR system
+# scope makes git read a different file than the managed one (an explicitly
+# empty one makes it read none), so report the state (value not shown) —
+# the managed ~/.gitconfig does not pin it (docs/git-ignore.md).
+global_ignore="$HOME/.config/git/ignore"
+if module_active_for_profile "$profile" git-ignore; then
+  if [[ -e "$global_ignore" ]]; then
+    warn "exists: $global_ignore — apply (git-ignore) replaces it; git reads one global excludes file (no .local), so move host-specific patterns to each repo's .git/info/exclude first, then diff (see docs/git-ignore.md)"
+  else
+    ok "absent: $global_ignore (apply creates the managed global gitignore)"
+  fi
+  if command -v git >/dev/null 2>&1; then
+    case "$(git_excludes_file_setting)" in
+      path\ *)
+        warn "core.excludesFile is set (value not shown; global or system config) — git reads that file instead of the managed $global_ignore; unset it and fold its patterns into per-repo .git/info/exclude (see docs/git-ignore.md)"
+        ;;
+      empty)
+        warn "core.excludesFile is explicitly empty (global or system config) — git reads no global excludes file, so the managed $global_ignore would not be in effect; unset the key (see docs/git-ignore.md)"
+        ;;
+      error)
+        warn "git cannot read its global/system config (core.excludesFile lookup failed) — fix the config error before apply (see docs/git-ignore.md)"
+        ;;
+    esac
+  fi
+elif [[ -e "$global_ignore" ]]; then
+  item "exists: $global_ignore — not managed for profile $profile (left as-is)"
+fi
 if command -v git >/dev/null 2>&1; then
   if git config --global --get user.name >/dev/null 2>&1; then
     warn "global user.name is set (value not shown)"

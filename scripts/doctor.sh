@@ -92,6 +92,54 @@ if command -v git >/dev/null 2>&1; then
   else
     ok "Git signing mechanism not managed (enableGitSigning=false)"
   fi
+  # git-ignore module (#248): the managed global gitignore sits at git's
+  # DEFAULT excludes location (~/.config/git/ignore), which git reads only
+  # while core.excludesFile is unset — in the global AND the system scope
+  # (system-only values count; Codex review) — and XDG_CONFIG_HOME does not
+  # redirect it. An explicitly EMPTY core.excludesFile is not "unset": git
+  # then reads no global excludes file at all. The managed ~/.gitconfig
+  # deliberately does not pin core.excludesFile: an explicit value would
+  # silently override a host's own excludesFile (an unmanaged
+  # ~/.config/git/config on a work machine). So doctor reports whether the
+  # managed file is the one git actually reads (git_excludes_file_setting,
+  # shared with preflight), and whether it still carries the agent
+  # local-only patterns. Patterns are checked as exact lines: `git
+  # check-ignore` needs a repository and doctor creates nothing; the real
+  # ignore behaviour is pinned by test-git-ignore.sh.
+  if module_active_for_profile "$profile" git-ignore; then
+    managed_ignore="$HOME/.config/git/ignore"
+    excludes_setting="$(git_excludes_file_setting)"
+    case "$excludes_setting" in
+      unset) effective_ignore="$(git_default_excludes_file)" ;;
+      path\ *) effective_ignore="${excludes_setting#path }" ;;
+      *) effective_ignore="" ;;
+    esac
+    if [[ ! -f "$managed_ignore" ]]; then
+      action "global gitignore missing: $managed_ignore (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" \
+        "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
+        "\$ chezmoi apply $(printf '%q' "$HOME/.config/git") $(printf '%q' "$managed_ignore")"
+    elif [[ "$excludes_setting" == error ]]; then
+      warn "global gitignore: git cannot read its global/system config (core.excludesFile lookup failed), so whether the managed $managed_ignore is in effect is unknown — fix the config error first (git config --global --list / git config --system --list)"
+    elif [[ "$excludes_setting" == empty ]]; then
+      warn "global gitignore: core.excludesFile is explicitly empty (global or system config), so git reads NO global excludes file — the managed $managed_ignore is not in effect; unset the key to restore git's default location"
+    elif [[ "$effective_ignore" != "$managed_ignore" ]]; then
+      warn "global gitignore: git reads $effective_ignore, not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
+    else
+      missing_ignore_patterns=""
+      for ignore_pattern in '.agent-packets/' '**/.claude/settings.local.json'; do
+        grep -Fxq -- "$ignore_pattern" "$managed_ignore" \
+          || missing_ignore_patterns="${missing_ignore_patterns:+$missing_ignore_patterns }$ignore_pattern"
+      done
+      if [[ -z "$missing_ignore_patterns" ]]; then
+        ok "global gitignore: managed $managed_ignore is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
+      else
+        action "global gitignore: $managed_ignore lacks: $missing_ignore_patterns (drifted from the managed file)" \
+          "\$ chezmoi apply $(printf '%q' "$managed_ignore")"
+      fi
+    fi
+  else
+    ok "global gitignore not managed (git-ignore module inactive for profile $profile)"
+  fi
 else
   warn "git not found"
 fi
