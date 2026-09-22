@@ -4,3 +4,4 @@
 .local/
 worklog/
 .agent-context.local.md
+.agent-packets/

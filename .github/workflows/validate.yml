@@ -150,6 +150,9 @@ jobs:
       - name: git-signing gating tests
         run: ./scripts/test-git-signing.sh
 
+      - name: git-ignore (global gitignore) gating and behaviour tests
+        run: ./scripts/test-git-ignore.sh
+
       - name: git hook gates wiring tests
         run: ./scripts/test-git-hook-gates.sh
 

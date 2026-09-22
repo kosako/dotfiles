@@ -160,7 +160,8 @@ fatal: no email was given and auto-detection is disabled
     `user.email` の**有無だけ**(値は出さない)を見て、片方が欠ける partial を action として出す
     (#202。git が parse できない file はその旨を warn)。
 - `scripts/preflight.sh` は apply 前に既存の home Git config(`~/.gitconfig`、`~/.config/git/config`)と
-  global identity の設定有無を検知する。値そのものは表示しない。
+  global identity の設定有無を検知する。値そのものは表示しない。同じ `~/.config/git/` 配下の
+  global gitignore(`git-ignore` module、#248)の置換 warn もここに出る([git-ignore](git-ignore.md))。
 - `scripts/test-gitconfig.sh` は `dot_gitconfig` の安全設定と includeIf の挙動を local fixture で検証する
   (include 順の exact pin、非 personal context × identity file 状態 × personal remote 表記 / multi-remote
   の matrix を実 commit の author / committer で検証、linked worktree の特性)。

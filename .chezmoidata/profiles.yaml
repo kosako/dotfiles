@@ -24,6 +24,12 @@ profiles:
       - opencode-settings
       - git-signing
       - git-hook-gates
+      # #248: managed global gitignore (~/.config/git/ignore) excluding AI
+      # agent local-only files (.agent-packets/ packets, .claude/
+      # settings.local.json) from every repo. Module-gated, personal only:
+      # the packet convention is agent-tools', and a work machine's existing
+      # global ignore must not be replaced without a diff (preflight warns).
+      - git-ignore
     capabilities:
       installPackages: true
       installGuiApps: true
@@ -125,6 +131,10 @@ profiles:
       - direnv-policy
       - update-policy
       - ai-policy
+      # git-ignore (#248) is not listed: no agent-tools packets are written on
+      # work machines, and apply would replace an existing ~/.config/git/ignore
+      # (git reads one global excludes file, no .local). Opt in by listing it
+      # after preflight has shown what is there.
     capabilities:
       installPackages: false
       installGuiApps: false

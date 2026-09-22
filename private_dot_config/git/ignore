@@ -1,0 +1,19 @@
+# Managed by chezmoi from kosako/dotfiles (git-ignore module, #248).
+#
+# Global gitignore at git's DEFAULT excludes location: git reads this file
+# only while core.excludesFile is unset (and XDG_CONFIG_HOME does not point
+# elsewhere). It excludes AI-agent local-only files from EVERY repository, so
+# a repo that forgot its own .gitignore entry cannot commit them by `git add
+# -A`; per-repo .gitignore entries stay as the fail-safe. Git reads exactly
+# one global excludes file, so there is no ~/.config/git/ignore.local: put
+# host-specific patterns into a repository's .git/info/exclude instead.
+# See docs/git-ignore.md.
+
+# Agent packets (agent-tools docs/agent-packets.md): per-issue work state with
+# private details (paths, reasons, capacity). Local only, never committed.
+.agent-packets/
+
+# Claude Code's per-project local settings (the dynamic permissions the agent
+# writes itself). Claude Code excludes it per repo when it creates the file;
+# this line is the global belt-and-braces, at any depth (monorepo packages).
+**/.claude/settings.local.json

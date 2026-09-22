@@ -268,6 +268,21 @@ skill は `~/.claude/skills` を OpenCode が直接読むので再配布しな�
 - **状態**: personal のみ列挙、work は非列挙。plugin による hook parity と相互レビュー契約への追加は
   Phase 2(agent-tools)。詳細は [opencode-settings](opencode-settings.md)。
 
+## Git global ignore(`git-ignore` module、#248)
+
+AI agent の local-only file(agent packet `.agent-packets/`、Claude Code の `**/.claude/settings.local.json`)を
+全 repo から除外する managed な global gitignore `~/.config/git/ignore`。git 既定の excludes 場所に置き、
+managed `~/.gitconfig` は `core.excludesFile` を pin しない(明示値は host 自身の設定を黙って上書きする)。
+git は global excludes を 1 file しか読まないので `.local` は無く、host 固有の除外は各 repo の
+`.git/info/exclude`。
+
+- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work は非列挙(packet を書く運用が
+  無く、会社 Mac の既存 global ignore を diff 無しで置換しないため。採用は preflight で既存を見てから)。
+- **doctor**: managed file の presence、git が実際に読む excludes path との一致、pattern 行の drift。
+  **preflight**: 既存 file の置換 warn(中身は読まない)と `core.excludesFile` 設定の warn(値は出さない)。
+- 実挙動(`.gitignore` の無い repo で `git status` に出ない)は `test-git-ignore.sh` が throwaway HOME で
+  pin する。詳細は [git-ignore](git-ignore.md)。
+
 ## dormant capability の扱い(残す基準)
 
 宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ

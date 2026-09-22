@@ -847,6 +847,61 @@ require_secrets_access() {
 # in remote.<name>.pushurl with a clean fetch url (#144). Each remote is
 # printed once even when both url and pushurl are flagged. URL values are
 # never printed.
+# git_default_excludes_file — the global excludes file git reads when
+# core.excludesFile is unset: $XDG_CONFIG_HOME/git/ignore if that variable is
+# set and non-empty, else $HOME/.config/git/ignore (git's rule). A trailing
+# slash is stripped so the result compares equal to a chezmoi target path.
+git_default_excludes_file() {
+  local xdg="${XDG_CONFIG_HOME:-}"
+  [[ -n "$xdg" ]] || xdg="$HOME/.config"
+  printf '%s/git/ignore\n' "${xdg%/}"
+}
+
+# git_excludes_file_setting — classify core.excludesFile the way git resolves
+# it outside any repository (#248): the global scope (~/.gitconfig and
+# $XDG_CONFIG_HOME/git/config) wins over the system scope, and the system
+# scope is skipped when GIT_CONFIG_NOSYSTEM is true — git skips it then, but
+# `git config --system` itself still reads GIT_CONFIG_SYSTEM (measured on git
+# 2.50.1), so the skip is applied here. Prints exactly one line:
+#   unset         neither scope sets the key: git reads its default file
+#                 (git_default_excludes_file)
+#   empty         the winning scope sets it to "": git reads NO global
+#                 excludes file at all — the default is not used either
+#   path <PATH>   the winning scope sets it (~ expanded by --type=path)
+#   error         git could not read a scope's config (syntax error, a
+#                 value-less key, ...)
+# Repository-local config is deliberately not consulted: it would make the
+# answer depend on the cwd, and a repo-local core.excludesFile is that repo's
+# own business, not the global state these checks report on.
+git_excludes_file_setting() {
+  local scope value rc
+  for scope in global system; do
+    if [[ "$scope" == system ]]; then
+      case "$(printf '%s' "${GIT_CONFIG_NOSYSTEM:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) continue ;;
+      esac
+    fi
+    rc=0
+    value="$(git config "--$scope" --includes --type=path --get core.excludesFile 2>/dev/null)" || rc=$?
+    case "$rc" in
+      0)
+        if [[ -z "$value" ]]; then
+          printf 'empty\n'
+        else
+          printf 'path %s\n' "$value"
+        fi
+        return 0
+        ;;
+      1) ;;  # not set in this scope: fall through to the next one
+      *)
+        printf 'error\n'
+        return 0
+        ;;
+    esac
+  done
+  printf 'unset\n'
+}
+
 git_remotes_with_credentials() {
   local repo="$1"
   git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null |
