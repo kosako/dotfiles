@@ -13,6 +13,7 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | --- | --- | --- | --- |
 | ハーネス環境設定 `~/.claude/settings.json`(model / permissions / hooks **登録** / plugin / statusLine / tui 等の global preference) | dotfiles(`dot_claude/settings.json.tmpl`) | `chezmoi apply` | dotfiles の Issue + PR |
 | Codex user 層 hooks **登録** `~/.codex/hooks.json`(safe-gh 誘導の PreToolUse hook・#181、品質ループの PostToolUse / Stop hook・#199、herdr integration の SessionStart hook・#225) | dotfiles(`dot_codex/hooks.json.tmpl`、hooks object は `.chezmoitemplates/agent-hooks-json` で Claude と共有) | `chezmoi apply`(+ Codex で一度 `/hooks` trust。hook 定義を変えるたびに再 trust) | dotfiles の Issue + PR |
+| Codex 承認 rules の **baseline** `~/.codex/rules/default.rules`(コマンド allowlist の read-only baseline・#139。gate は `enableAiPolicy` による template 自己 gate) | dotfiles(`dot_codex/rules/default.rules.tmpl`、[ai-policy](ai-policy.md)) | `chezmoi apply`(承認で堆積した grant は drift として見え、apply で baseline に戻る) | dotfiles の Issue + PR。live で足した grant は次の apply で消える |
 | 品質ループ hook の check **宣言** `~/.config/agent-tools/checks.local.json`(repo 実 path → `edit_checks` / `qa_checks`。#199 / agent-tools#203) | ユーザー手書き | なし(unmanaged・非 tracked) | 手動のみ(agent は read-only。doctor も presence しか見ない) |
 | git hook gates の**配線**(`~/.config/git-hook-gates/` の shim + `core.hooksPath` include・#196。gate/dispatcher **実体**は agent-tools) | dotfiles(`private_dot_config/git-hook-gates/`、[git-hook-gates](git-hook-gates.md)) | `chezmoi apply` | dotfiles の Issue + PR |
 | Git identity の **reset**(`~/.config/git-profile/identity-reset.gitconfig`。非 personal context の include 直前で identity を空にする・値なし・#202) | dotfiles(`private_dot_config/git-profile/`、[git-identity](git-identity.md)) | `chezmoi apply` | dotfiles の Issue + PR |
@@ -21,6 +22,7 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 | OpenCode の local 設定(provider / model / plugin / mcp / TUI。`OPENCODE_CONFIG` が指す file)と auth(`~/.local/share/opencode/auth.json`) | ローカル(git / chezmoi 管理外) | なし(auth は 1Password が SoR、backup 対象外) | 直接編集 / `/connect` |
 | skill・指示文・hook スクリプト**実体**(`~/.claude/skills/`、`~/.claude/agent-tools/`、`~/.codex` への配布物) | agent-tools | agent-tools の build / sync | agent-tools の Issue + PR |
 | herdr integration hook **実体**(`~/.claude/hooks/herdr-agent-state.sh`、`~/.codex/herdr-agent-state.sh`。#225) | herdr(`herdr integration install claude\|codex` が配置し、`HERDR_INTEGRATION_VERSION` header で版管理) | herdr の installer(登録は dotfiles が installer と同一形で render。work 機のように settings module が無い profile では installer が登録も持つ) | 手で編集しない(再 install で上書きされる)。herdr 更新後に `herdr integration status` が outdated を出したら再 install |
+| herdr の config `~/.config/herdr/config.toml`(組み込み通知 `[ui.toast]` の delivery、表示の設定等) | ローカル(dotfiles は現状管理しない。module 無し) | なし | 直接編集。managed にするなら dotfiles の Issue + PR |
 | 個人の参照先入りファイル(`~/.claude/CLAUDE.md`、各 repo の `.agent-context.local.md`) | ユーザー手書き | なし(unmanaged) | 手動のみ(agent は read-only) |
 | マシン固有・動的値(各 project の `.claude/settings.local.json`(Claude が動的許可を書く。user 級 `~/.claude/settings.local.json` は読まれない、#245)、`~/.zshrc.local`、`~/.ssh/config.local` 等の `.local` 系、`~/.config/git/personal.gitconfig`) | ローカル(git / chezmoi 管理外) | なし(一部は暗号化バックアップ #60 が運ぶ) | 直接編集 |
 | repo 固有の作業ルール(各 repo の `AGENTS.md`) | 各 repo | — | 各 repo の PR |
@@ -38,9 +40,10 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
   `~/.codex/hooks.json`(user 層)。Codex の `config.toml` は codex 自身が
   `[hooks.state]` 等を書き込む live ファイルなので **dotfiles は触らない**(登録は
   別ファイルへ分離。backup-paths で運ぶ codex 所有物)。Codex はさらに、登録済みでも
-  一度 `/hooks` で trust するまで無警告で不活性という段がある(#181)。
+  一度 `/hooks` で trust するまで不活性という段がある(#181。当時は無警告だったが、現行の公式仕様では起動時に
+  `/hooks` での確認を促す警告が出る — agent-tools の `docs/runtime-injection-defense.md`)。
 - `~/.claude/CLAUDE.md`(ユーザー手書き)から参照される `~/.claude/agent-tools/CLAUDE.md`
-  は 2 行目の配布物。本体と参照先で正本が異なる。
+  は表の「skill・指示文・hook スクリプト**実体**」行(agent-tools)の配布物。本体と参照先で正本が異なる。
 - `settings.json` / `settings.local.json` の 2 層境界の正本は
   [claude-settings](claude-settings.md)。`.local` 系の勝ち方(local-wins /
   managed-wins)は [local-overrides](local-overrides.md)。

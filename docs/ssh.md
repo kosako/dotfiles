@@ -17,8 +17,9 @@ managed file 以外(鍵・`known_hosts`・`config.local`)を削除しないの�
 ## 1Password SSH agent(capability gate)
 
 1Password SSH Agent を使うかは `enable1PasswordSSH` capability で制御する(personal=true、
-work-*=false)。`true` のとき managed config に `Host github.com` の `IdentityAgent`(1Password
-の agent socket)だけを出力する。
+work=false。work は `ssh-1password` module 自体を列挙しないので `~/.ssh/config` を管理しない)。
+`true` のとき managed config に `Host github.com` の `IdentityAgent`(1Password の agent socket)だけを
+出力する。
 
 - **`Host *` には付けない**。agent 設定を broad に出すと、接続先すべてに鍵リストを提示し得る。
   agent を使う host は **明示した host にだけ** scope する(github.com、その他は `config.local`)。
@@ -35,7 +36,7 @@ managed の上のブロックが勝つ = **managed-wins**([local-overrides](loca
 
 ```text
 Host github.com
-    IdentityAgent "...op-agent.sock"
+    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
 
 Match all
 Include config.local
@@ -50,8 +51,9 @@ config.local は **github.com に接続したときしか読まれない**(他 h
 
 ## 既存 `~/.ssh/config` からの移行
 
-`enable1PasswordSSH` が有効な profile(personal)で `chezmoi apply` すると、`~/.ssh/config` は
-managed 版に **置き換わる**。既存の host を失わないよう、apply の前に必ず次を行う。
+`ssh-1password` module を列挙する profile(personal)で `chezmoi apply` すると、`enable1PasswordSSH` の値に
+関わらず `~/.ssh/config` は managed 版に **置き換わる**(capability が決めるのは `Host github.com` の agent 設定を
+出すかどうかだけ)。既存の host を失わないよう、apply の前に必ず次を行う。
 
 1. **棚卸し**: 現 `~/.ssh/config` の中身を確認する(host alias、`IdentityAgent`、`HostName` 等)。
 2. **backup / 退避**: machine 固有の host を `~/.ssh/config.local` に移す。
@@ -69,11 +71,12 @@ managed 版に **置き換わる**。既存の host を失わないよう、appl
 
 ## バックアップ
 
-`~/.ssh/config.local` は git/chezmoi 管理外だが、暗号化バックアップの対象にできる
+`~/.ssh/config.local` は git/chezmoi 管理外だが、暗号化バックアップの public baseline
+(`.chezmoidata/backup-paths.yaml`)に含まれており、存在すれば backup 時に自動で archive に入る
 ([private-backup](private-backup.md)、issue #60)。秘密鍵は 1Password が source of record。
 
 ## 関連
 
 - [local-overrides](local-overrides.md) — managed-wins / local-wins の境界規約。
 - [secrets](secrets.md) — 鍵・secret の供給方式(平文を repo に置かない)。
-- [git-identity](git-identity.md) — context 別の Git 設定(SSH 署名は [git-signing 関連] 参照)。
+- [git-identity](git-identity.md) — context 別の Git 設定(SSH 署名は同 doc の「SSH 署名」節を参照)。

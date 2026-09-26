@@ -17,7 +17,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | permission ブロック(#119): secret floor の無条件 deny 13 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系)、`gateGitHubMcp` の `mcp__github` deny(personal 既定 true で計 14 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `*` に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | personal・機密(secret を含む設定など) | project の `.claude/settings.local.json`(project 単位)/ `CLAUDE_CONFIG_DIR` の別 config dir(machine 全体)/ `--settings` や環境変数(session 限定)。user 級 `~/.claude/settings.local.json` は Claude Code が**読まない**ので置き場にしない(#245、[local-overrides](local-overrides.md)) | ❌ 非コミット・管理外 |
-| work / client の settings | 暗号化バックアップ(#60)か各マシン手設定 | ❌ public repo に生値を置かない |
+| work / client の settings | 各マシン手設定(#60 の暗号化バックアップは `allowSecretsAccess=false` の work / client では実行を拒否するため使えない) | ❌ public repo に生値を置かない |
 | skill / instruction(`skills/`、`agent-tools/CLAUDE.md`) | agent-tools が配布 | ❌ 別 repo の責務 |
 
 ## なぜ profile で分けるか
@@ -38,14 +38,15 @@ work / client は別系統(上表)。
 
 ## 2 層(`settings.json` / `settings.local.json`)
 
-Claude Code は `settings.json`(共有)と `settings.local.json`(ローカル)の 2 ファイルを
-持つ。dotfiles は **前者だけ**を管理し、後者は常に管理外(`.chezmoiignore` は allowlist で、
-宣言した file 以外は隣の file でも通さない。#207)。
+dotfiles が管理するのは user 級の `~/.claude/settings.json` **だけ**。Claude Code が動的に書く
+`settings.local.json` は **project の `.claude/settings.local.json`** で、常に管理外(`.chezmoiignore` は
+allowlist で、宣言した file 以外は通さない。#207)。user 級の `~/.claude/settings.local.json` は
+Claude Code が読まないので、この 2 層には含めない(#245、[local-overrides](local-overrides.md))。
 
 Claude Code は書き先を 2 つに分ける: **動的に承認した permission** は
-`settings.local.json`(machine / context 固有・絶対 path を含むので非 public-safe)へ、
+project の `.claude/settings.local.json`(machine / context 固有・絶対 path を含むので非 public-safe)へ、
 **global な preference**(`effortLevel` / `tui` / `skipWorkflowUsageWarning` / 通知 /
-`remoteControlAtStartup` / plugin 有効化など)は **`settings.json` 本体**へ書く。
+`remoteControlAtStartup` / plugin 有効化など)は **`~/.claude/settings.json` 本体**へ書く。
 前者は管理外なので衝突しないが、後者は managed な `settings.json` を Claude が
 書き換えるため、template に無いキーは `chezmoi apply` で消える(drift)。
 
@@ -100,10 +101,11 @@ false で出ない)が固定する。
 
 ## 後日 / 対象外
 
-- work / client の settings を新マシンで復元したいか次第で、**#60 暗号化バックアップ**に
-  含めるか「管理しない(各マシン手設定)」かを決める。今回の personal 実装とは独立。
-- doctor への settings presence/管理状態の report(任意・低優先)。
+- work / client の settings を新マシンで復元する手段は現状無い(#60 の暗号化バックアップは
+  work / client では実行を拒否するため、各マシン手設定)。必要になったら #60 とは別の仕組みとして起票する。
+- doctor への settings presence/管理状態の report → 対応済み。doctor の managed drift section(#148)が
+  `chezmoi status` で、managed な `~/.claude/settings.json` の差分と欠落(未 apply)を report-only で報告する。
 
 関連: [ai-environment-boundary](ai-environment-boundary.md)(責務境界)、
 [local-overrides](local-overrides.md)(`.local` の扱い)、#60(暗号化バックアップ)、
-#16(VS Code settings = 類似の tool 設定管理)。
+#16(VS Code settings は管理しないと決定。配線は #145 で削除済み)。

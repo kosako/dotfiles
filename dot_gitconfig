@@ -55,8 +55,10 @@
 # fail-closed, no inheritance. A PARTIAL file (name only) still commits with
 # an empty email — Git only rejects an empty name — so that case is not
 # closed here but is visibly broken (prompt shows no-identity, doctor reports
-# the partial file); a commit-hook gate for it is a separate issue. The two
-# entries per context MUST stay adjacent and in this order.
+# the partial file); where the git hook gates are armed, their git-identity
+# gate (#239 / agent-tools#281) also refuses it at commit time (best-effort,
+# see below). The two entries per context MUST stay adjacent and in this
+# order.
 [includeIf "gitdir:~/src/work/"]
 	path = ~/.config/git-profile/identity-reset.gitconfig
 [includeIf "gitdir:~/src/work/"]
@@ -85,12 +87,13 @@
 [include]
 	path = ~/.config/git/signing.gitconfig
 
-# Commit-boundary git hook gates (public-safety / AI trailer; #196), managed
-# only when enableGitHookGates is on (git-hook-gates module). Same pattern as
-# the signing include above: unconditional here, a silent no-op until the
-# capability renders ~/.config/git-hook-gates/hooks.gitconfig, which sets
-# core.hooksPath to the managed shim directory. Best-effort guardrail, not an
-# enforcement boundary: --no-verify and a repo-local core.hooksPath (husky
-# etc.) bypass it. See docs/git-hook-gates.md.
+# Commit-boundary git hook gates (public-safety / git-identity / AI trailer;
+# #196 / #239), managed only when enableGitHookGates is on (git-hook-gates
+# module). Same pattern as the signing include above: unconditional here, a
+# silent no-op until the capability renders
+# ~/.config/git-hook-gates/hooks.gitconfig, which sets core.hooksPath to the
+# managed shim directory. Best-effort guardrail, not an enforcement boundary:
+# --no-verify and a repo-local core.hooksPath (husky etc.) bypass it. See
+# docs/git-hook-gates.md.
 [include]
 	path = ~/.config/git-hook-gates/hooks.gitconfig

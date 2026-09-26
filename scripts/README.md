@@ -59,7 +59,7 @@ unknown profile / module / capability や capability enum の不正値は policy
 
 ## preflight.sh
 
-導入前の危険検知を行う。既存 home file、既存 Git config(`~/.gitconfig`、`~/.config/git/config`、global identity の設定有無。値は表示しない)、global gitignore(`git-ignore` module が active な profile で `~/.config/git/ignore` が既にあれば apply が置換する warn — git は global excludes を 1 file しか読まないので host 固有 pattern は `.git/info/exclude` へ。`core.excludesFile` が global / system に設定済みなら managed file が読まれない warn、明示的に空なら「global excludes を読まない」warn。値は表示しない、#248)、必要 command、project root などを確認する。
+導入前の危険検知を行う。確認する内容は次のとおり: system(arch・macOS version・Xcode Command Line Tools)、既存 home file(`~/.gitconfig` / `~/.npmrc`)、shell config の apply impact(`shell-extra` module が active な profile で `~/.zshenv` / `~/.zshrc` / `~/.zprofile` / `~/.config/starship.toml` が既にあれば apply が置換する warn と退避先の案内)、ssh config の apply impact(`ssh-1password` module が active な profile で `~/.ssh/config` が既にあれば apply が置換する warn。`~/.ssh/config.local` は存在のみで中身は読まない)、`~/.config` の権限(0700 でなければ apply が 0700 に変える warn)、既存 Git config(`~/.config/git/config`、context 別 identity file の有無、global identity の設定有無。値は表示しない)、global gitignore(`git-ignore` module が active な profile で `~/.config/git/ignore` が既にあれば apply が置換する warn — git は global excludes を 1 file しか読まないので host 固有 pattern は `.git/info/exclude` へ。`core.excludesFile` が global / system に設定済みなら managed file が読まれない warn、明示的に空なら「global excludes を読まない」warn。値は表示しない、#248)、git hook gates の apply impact(`enableGitHookGates=true` の profile で agent-tools deploy の 4 script が揃っているか — 欠けていれば apply は commit gate を武装しない warn — と、global `core.hooksPath` が managed 以外に設定済みかどうか。値は表示しない)、必要 command、Homebrew、dotfiles root の存在と書き込み可否、標準 project root。
 副作用は持たない。既存 file や command 不足の warning は report-only として exit 0 のままにする。
 
 ```sh
@@ -70,9 +70,35 @@ policy validation が失敗した場合は exit 1。
 
 ## doctor.sh
 
-導入後または現状環境の健康診断を行う。chezmoi、Git、Git signing(`enableGitSigning` の SSH 署名 mechanism が managed か、capability true で module inactive の dangling か)、global gitignore(`git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定 — と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない。#248)、Git identity context(各 context の identity file が存在するか、意図的に未設定か。存在する file は `user.name` / `user.email` の有無だけを見て partial を action 化 — 値は出さない。managed な identity reset が塞げない唯一の状態なので、#202)、Git remote URL(credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない)、npm、Corepack、software catalog drift(catalog 宣言 vs 実機の brew/npm/go/mas。declared-missing / undeclared-sprawl / source-mismatch を report-only で表示)、runtime、1Password(`allowSecretsAccess=true` のとき `op` の存在と sign-in。`op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し、応答なしは「未確認」の warn にして doctor を止めない — 未ログインの `op` が対話 unlock 待ちで固まり診断全体が止まっていた、#231)、SSH(`enable1PasswordSSH` の managed `~/.ssh/config` が active か dangling か)、managed-path orphan(managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出。宣言済み **file** path のみ検査し、dir 宣言(gate 配管)の中身には再帰しない — セッションログ等の header 引用を偽 orphan にしない、#174)、managed drift(`chezmoi status` の乖離を report-only で warn。enforce profile では `~/.npmrc` の `_authToken` 行の有無をキー名のみで scan — 値は読まない・出さない — と managed-by header の有無も報告。#148)、AI policy(`enableAiPolicy` / `enableAiTools` の現状。codex-settings が active な profile では Codex 権限面も監視 — managed rules baseline の presence と、**外向き/昇格 probe(push・PR/issue/comment 作成・release・sudo・auth login・clone・curl 等の固定リスト)を `codex execpolicy check` で live rules に評価**し auto-allow を warn(行 grep は blanket prefix・複数行 rule・decision 省略の既定 allow を見逃し、rule 行 echo は任意文字列由来の secret を漏らしうるため不採用 — doctor は rules file を読まず path を codex に渡すだけ・echo するのは自前の probe 文字列のみ。codex CLI 不在時は skip を明示)、`config.toml` の `[projects]` trust は **section header の path と trust_level のみ** scan(MCP env 等の他内容は読まない・#148 と同じキー名限定規律)し、trusted な home root と実在しない path の残骸を warn、#139)、enforceAiSandbox(sandbox ブロックと human-legit write gate の live state)、GitHub injection guard(secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る、#137)、quality loop hooks(`enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない、#199)、herdr integration(`enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える、#225)、OpenCode(report-only。`opencode` の presence、`opencode-settings` module が active な profile では managed な permission 床 `~/.config/opencode/opencode.json` の presence — 無ければ apply 手順の action、非 active なら not managed。credential store `~/.local/share/opencode/auth.json` は**存在のみ**で中身も provider 名も読まない、#234)、network tunnels(`allowNetworkTunnels` と tunnel tool の存在)、agent-tools(report-only。`~/src/agent/agent-tools`(既定。`AGENT_TOOLS` env で override 可)の presence を表示し、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --root <checkout> --json`。root を pin しないと status.sh は cwd を検査して空 repo を偽報告する)を実行して安全な summary を出す。clone / pull / sync はしない)、private-backup(report-only。public baseline の各 target の存在と marker からのバックアップ有無/最終日時を表示。backup 未実行は allowSecretsAccess=true の profile でのみ warn — false の profile は backup 実行自体を拒否する設計なので中立表示(#174)。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない)、project root の状態を表示する。
+導入後または現状環境の健康診断を行う。section は出力順に次のとおり(最後に next actions の一覧。下記)。
+
+- doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
+- chezmoi: chezmoi の version と source directory。
+- Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 2 つを見る。
+  - Git signing: `enableGitSigning` の SSH 署名 mechanism が managed か、capability true で module inactive の dangling か。
+  - global gitignore: `git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定 — と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない(#248)。
+- git hook gates(report-only): `enableGitHookGates` が true で module が active なら、shim 2 本(`~/.config/git-hook-gates/hooks/pre-commit` / `commit-msg`)が実行可能に置かれているか、global `core.hooksPath`(`--includes` 付きで読む)が managed shim directory を指すか(別の値なら値は出さずに warn)、agent-tools deploy 4 本(dispatcher + gate 3 本)が揃っているかを report する。配線済みなのに deploy が欠けていれば commit が fail-closed で止まる旨を warn し、`core.hooksPath` が未設定なら action。capability true で module inactive なら dangling として warn。capability=false で shim / hooksPath が残っていれば、apply で除去するよう action(lingering)。`--no-verify` と repo-local `core.hooksPath` で迂回できる best-effort である旨も表示する(#196 / #239。詳細は `docs/git-hook-gates.md`)。
+- Git identity contexts: `git-profile` module が active な profile では、managed な identity reset `~/.config/git-profile/identity-reset.gitconfig` の presence を見る — 中身は見ない。無ければ、context file の無い非 personal repo で personal pattern に一致する remote が personal identity を継承して commit 拒否にならないので、`mkdir -p ~/.config` → `chezmoi apply`(dir と file)を action にする(#241)。各 context の identity file が存在するか、意図的に未設定かも見る。存在する file は `user.name` / `user.email` の有無だけを見て partial を action 化し、値の無い key(`=` なし。git が identity 全体を拒否する)は別の action、git が parse できない file は warn — 値は出さない。partial は managed な identity reset が塞げない唯一の状態なので doctor が主な検出手段になる(#202)。
+- Git remote URLs: credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない。
+- npm hardening / Corepack: 検査内容は下記の docs に従う。
+- software catalog(report-only): catalog 宣言 vs 実機の brew/npm/go/mas。declared-missing / undeclared-sprawl / source-mismatch を report-only で表示。
+- runtime and shell: mise(`enableRuntimeManagement`)・direnv(`enableDirenv`)・zsh・starship の有無。
+- 1Password: `allowSecretsAccess=true` のとき `op` の存在と sign-in。`op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し、応答なしは「未確認」の warn にして doctor を止めない — 未ログインの `op` が対話 unlock 待ちで固まり診断全体が止まっていた(#231)。
+- SSH (1Password agent): `enable1PasswordSSH` の managed `~/.ssh/config` が active か dangling か。
+- private-backup(report-only): public baseline の各 target の存在と、marker からのバックアップ有無・最終日時と、捕捉が完全かどうか(`capture: complete`。#242 以前の marker は `unknown`)を表示する。`capture_incomplete=true` なら warn とし、読めない entry を直してから再 backup する手順を next actions に出す(#242)。backup 未実行は allowSecretsAccess=true の profile でのみ warn — false の profile は backup 実行自体を拒否する設計なので中立表示(#174)。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない。
+- managed-path orphans: managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出。宣言済み **file** path のみ検査し、dir 宣言(gate 配管)の中身には再帰しない — セッションログ等の header 引用を偽 orphan にしない(#174)。
+- managed drift(report-only): `chezmoi status` の乖離を report-only で warn。enforce profile では `~/.npmrc` の `_authToken` 行の有無をキー名のみで scan — 値は読まない・出さない — と managed-by header の有無も報告(#148)。
+- AI policy: `enableAiPolicy` / `enableAiTools` の現状。codex-settings が active な profile では Codex 権限面も監視 — managed rules baseline の presence と、**外向き/昇格 probe(push・PR/issue/comment 作成・release・sudo・auth login・clone・curl 等の固定リスト)を `codex execpolicy check` で live rules に評価**し auto-allow を warn(行 grep は blanket prefix・複数行 rule・decision 省略の既定 allow を見逃し、rule 行 echo は任意文字列由来の secret を漏らしうるため不採用 — doctor は rules file を読まず path を codex に渡すだけ・echo するのは自前の probe 文字列のみ。codex CLI 不在時は skip を明示)、`config.toml` の `[projects]` trust は **section header の path と trust_level のみ** scan(MCP env 等の他内容は読まない・#148 と同じキー名限定規律)し、trusted な home root と実在しない path の残骸を warn(#139)。
+- OpenCode(report-only): `opencode` の presence、`opencode-settings` module が active な profile では managed な permission 床 `~/.config/opencode/opencode.json` の presence — 無ければ apply 手順の action、非 active なら not managed。credential store `~/.local/share/opencode/auth.json` は**存在のみ**で中身も provider 名も読まない(#234)。この section の末尾に enforceAiSandbox(sandbox ブロックと human-legit write gate の live state)の行も出る。
+- GitHub injection guard(report-only): secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
+- quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
+- herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。
+- agent-tools(report-only): `~/src/agent/agent-tools`(既定。`AGENT_TOOLS` env で override 可)の presence を表示し、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --root <checkout> --json`。root は常に明示的に pin する — #73 当時の status.sh は `--root` 省略時に cwd を検査して空 repo を偽報告した。agent-tools#305 以降の既定は script 自身の repo)を実行して安全な summary を出す。clone / pull / sync はしない。
+- network tunnels: `allowNetworkTunnels` と tunnel tool の存在。
+- project roots: project root の状態。
+
 副作用は持たない。設定不足や未導入 command の warning は report-only として exit 0 のままにする。
-remote URL scan の方針は `docs/supply-chain-git.md`、npm hardening の検査は `docs/supply-chain-npm.md`、Corepack の検査は `docs/supply-chain-corepack.md` に従う。
+remote URL scan の方針は [docs/supply-chain-git.md](../docs/supply-chain-git.md)、npm hardening の検査は [docs/supply-chain-npm.md](../docs/supply-chain-npm.md)、Corepack の検査は [docs/supply-chain-corepack.md](../docs/supply-chain-corepack.md) に従う。
 `npmHardeningMode=enforce` の profile では、期待する npm config 値と現在値の不一致を `[warn]` で報告する(apply 前は不一致が正常)。
 
 ```sh
@@ -84,9 +110,11 @@ policy validation が失敗した場合は exit 1。`--actions-only` 以外の `
 
 **next actions**(#227): 具体的な command / 手順を言える warning は `action`(`lib-policy.sh`)経由で
 報告され、inline の `[warn]` 行はそのままに、末尾の `== next actions (N) ==` に理由と手順が番号つきで
-まとまる(git hook gates の hooksPath 未設定 / lingering、identity file 不在、managed-path orphan、
-managed drift、Codex projects trust の stale / home 全体、herdr integration の body 不在 / outdated / work
-機での未導入、agent-tools の dirty / stale)。判断が要る warning(catalog 外 package 等)は warn のまま。
+まとまる(global gitignore の欠損 / pattern drift、git hook gates の hooksPath 未設定 / lingering、
+identity reset の欠損、identity file の不在 / partial / 値の無い key、private-backup の不完全な捕捉、
+managed-path orphan、managed drift、Codex projects trust の stale / home 全体、OpenCode の permission 床の
+欠損、herdr integration の body 不在 / outdated / work 機での未導入、agent-tools の dirty / stale)。
+判断が要る warning(catalog 外 package 等)は warn のまま。
 `--actions-only` は `[fail]` と summary 以外を mute するだけで、doctor はファイルを書かない(report-only)。
 手順行も key-name-only / secret を出さない規律の対象。
 
@@ -95,6 +123,9 @@ managed drift、Codex projects trust の stale / home 全体、herdr integration
 `preflight.sh` の report-only 契約と apply-impact 警告を fixture HOME で検証する(#150)。
 空 home の exit 0 / shell-extra・ssh-1password の replace 警告と override pointer /
 非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
+git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
+`core.excludesFile` が設定済み・明示的な空値のときの warn(値は出さない)、work の left-as-is、不在時の ok。
+`env -i` で hermetic に回す、#248)/
 policy validation 失敗時のみ非 0、をカバーする。
 
 ## test-lib.sh
@@ -150,7 +181,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   文字列 / 数値 / null / 大文字綴りを拒否すること(#206)。
 - 同一 path を複数 module が宣言したら fail、`requires:` を持つ module は `paths:` 必須。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
-- backup-paths(#60): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog を拒否。
+- backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
+  共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar
+  (`backup_paths: false`)を拒否。
 - environmentKind 制約: work / client / agent で権限付与型 capability の true、sandbox の
   allowSecretsAccess、`npmHardeningMode=off` を hard fail。安全強化型(`enforceAiSandbox` /
   GitHub guard 2 本 / `enableQualityLoopHooks` / `enableHerdrIntegration`)は全 kind で true を許容
@@ -158,6 +191,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - capability registry(#151): `implemented:` 欠落は fail、`implemented: false` は doctor.sh がその名前に
   言及していなければ fail(undisclosed dormant)。
 - 単一 dash の option は usage error、非 mikefarah yq / v4 未満は fail closed、空の profiles / schema は fail closed。
+- software catalog drift(`report_catalog_drift`): fake の brew / npm / go(と yq・coreutils)だけを置いた PATH で、
+  drift なし・catalog 外の brew leaf / go binary・未 install の宣言・source 不一致(info)・Go toolchain 自身の
+  binary を sprawl にしないこと・manager 不在時の skip を検証し、いずれも exit 0(report-only)であること。
 
 ## test-gitconfig.sh
 
@@ -224,12 +260,21 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
 
 - managed-path orphan: header があり現 profile で管理対象でない file が warning / 管理対象の
   profile では orphan にならない / header 無しは対象外 / dir 宣言の中身に再帰しない(#174)。
-- managed drift: fake chezmoi の status 行ごとに warn、空なら ok、失敗は INCOMPLETE(#148)。
+- managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は「not initialized」の
+  item で skip(いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
+  managed-by header の欠落も warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
   warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ /
   `AGENT_TOOLS` override(#71 / #73)。
 - private-backup: marker 不在は allowSecretsAccess=true の profile だけ warn(false は中立)、marker
-  ありで最終成功時刻 / archive / 件数、不正 marker は unreadable、local 補足は**存在のみ**(#174)。
+  ありで最終成功時刻 / archive / 件数、不正 marker は unreadable、local 補足は**存在のみ**(#174)。marker の
+  `capture_incomplete` が false なら `capture: complete`、true なら再 backup 手順の action、field の無い旧 marker
+  なら unknown になること(#242)。
+- global gitignore(#248): managed file を git が読んでいれば ok / 不在は `mkdir -p` → `chezmoi apply` の action /
+  `core.excludesFile`(global、または system だけの設定)や `XDG_CONFIG_HOME` で別の file に振り替わっていれば
+  warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視)/ 明示的な空値は「global excludes を読まない」warn /
+  config が読めなければ「不明」の warn / pattern 行の欠落は drift の action / work は not managed。どの run も
+  `env -i` で hermetic。
 - git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling。
 - GitHub injection guard(#119 / #137): secret floor 常時 deny、`gateGitHubMcp` / `enableGitHubIsolatedReader`
   の wired 状態、hook body の presence(contents-blind)、`enforceAiSandbox` の human-legit gate 開示。
@@ -243,9 +288,13 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
   ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
   stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・
   hang・stdin の mode を持つ。
-- Git identity contexts(#202): identity file の状態(missing / empty / name-only / email-only / complete /
-  parse 不能)ごとに、missing と partial は action(手順に file path)、complete は ok、parse 不能は warn。
-  値は出力に現れない(canary email で pin)。
+- Git identity contexts(#202 / #241): identity file の状態(missing / empty / name-only / email-only / complete /
+  parse 不能 / 明示的な空値 / 値の無い key(`=` なし))ごとに、missing と partial は action(手順に file path)、
+  complete は ok、parse 不能は warn、値の無い key は「git が identity 全体を拒否する」別の action になること
+  (4 万行の file の末尾にあっても検出する)。managed な identity reset の presence も見て、無ければ `mkdir -p` →
+  `chezmoi apply` の連続 2 step の action になること(空白を含む home でも `%q` で一致)。その場合、非 personal
+  context の文言は「remote が personal pattern に一致する repo で personal identity を継承」に変わる(継承するのは
+  未指定の key だけで、明示的な空値は空のまま)。値は出力に現れない(canary の email / name で pin)。
 - OpenCode(#234): fake opencode を PATH 先頭に置き、personal で床 missing → apply 手順の action / 床 present → ok /
   work → not managed(action なし)。credential store は存在のみ(fake auth.json の provider 名と key を canary にして
   非表示を pin)。
@@ -258,6 +307,7 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、`config.toml` の projects trust は header + trust_level のみ scan。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
+- Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
 ## install-packages.sh
@@ -315,8 +365,9 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
   `--identity-command` はユーザー指定の shell コマンド列(`op read op://...` 想定)で、
   quoting のため shell 実行する。アーカイブ由来ではなく呼び出し側が管理するため注入面ではない。
 - **restore**: verify を通った後のみ復元(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
-  `--apply` で実行。既存ファイルは上書き前に **timestamp 退避 dir**(`~/.local/state/dotfiles/
-  restore-backup-<ts>/`)へ move。`--skip-existing` で既存は触らない。**symlink 化した親 dir 経由の
+  `--apply` で実行。既存ファイルは上書き前に **timestamp 退避 dir**(復元先 home 配下の
+  `.local/state/dotfiles/restore-backup-<UTC ts>.<ランダム>/`。既定は `~` 配下、`--target-home` 指定時はその dir 配下)
+  へ move。`--skip-existing` で既存は触らない。**symlink 化した親 dir 経由の
   書き込みを拒否**して HOME 外 escape を防ぐ。`--target-home` で復元先を差し替え可(既定 `$HOME`)。
 - recipient / identity が解決できなければ fail-closed。仕様は `docs/private-backup.md`。
 
@@ -340,6 +391,10 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
 - 拒否 profile(work)では backup が実行拒否し、アーカイブを書かないこと。
 - 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
+- local 補足リストの構造不正(#246): path の無い entry・category の `|`・path 内の改行・list の代わりの scalar
+  (`backup_paths: false`)があれば、`backup-paths entry invalid` で backup ごと fail し、archive も marker も
+  書かないこと(個々の unsafe path を skip する上の扱いとは別)。`|` を含まない自由な category label は通り、
+  宣言どおり manifest に記録されること。
 - recipient 未指定は usage error(exit 2)になること。
 - restore が dry-run では何も書かず、`--apply` で原文どおり復元すること。
 - restore の上書きで既存ファイルを timestamp 退避すること。`--skip-existing` で既存を触らないこと。
@@ -407,6 +462,14 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 - profile 未設定が init 誘導メッセージで fail すること。
 - 非対話 init(`--promptString profile=<name>`)が動くこと。
 - profile 無回答の init が fail すること(default を持たない)。
+- README Quickstart の最小 Git apply(#241): README に `mkdir -p ~/.config` と
+  `chezmoi apply --source ~/dotfiles ~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig`
+  の 2 行が exact にあること。その 3 target だけを apply すると `~/.gitconfig` と identity reset の 2 file だけが
+  配備されること。
+- typed boolean guard(#206): validate-policy を通さずに chezmoi を直接使う場合も、profile の capability・module の
+  `requires:`・schema の `implemented:` に文字列 `"true"` / `"false"`・数値・null・配列・map を置くと、apply が
+  型エラーで fail して hook 登録(`~/.claude/settings.json` / `~/.codex/hooks.json`)を作らないこと。両 template の
+  execute-template も同じ型エラーで fail すること。
 
 chezmoi が必要(CI では version pin して導入する)。
 
@@ -433,10 +496,14 @@ apply 済み file が **削除される**こと(template 自己 gate)、rules ba
 
 managed `~/.config/opencode/opencode.json`(OpenCode の permission 床・#234)の rendered content を検証する。
 `permission.read` / `permission.bash` の rule map を**順序込みで exact pin**(OpenCode は last-match-wins なので
-順序も契約。read = secret floor の deny 6 + `.env` 系、bash = env dump / gh secret / ssh 鍵の deny 7 と外向き・昇格の ask 14)、
+順序も契約。read = secret floor の deny 6 + `.env` 系、bash = allow-all の上に外向き・昇格と `gh *` の既定 ask 計 6、
+read 系 `gh` subcommand の allow 戻し 44、末尾に env dump / gh secret・token 表示 / ssh 鍵の deny 10。#240)、
 `autoupdate: false` / `share: "disabled"` / `instructions` が agent-tools の運用ルール 1 件だけ(絶対 path)であること、
 top-level key が `$schema / autoupdate / share / instructions / permission` だけ(provider / model / plugin / mcp / agent を
 managed に書かない)、secret / email らしき文字列が無いこと、work では `~/.config/opencode` が render されないことを確認する。
+加えて rendered の bash map を OpenCode の規則(glob・last match wins)で評価し、doctor.sh の外向き probe と `gh` の
+mutation・短縮 flag・alias、deny、維持すべき read からなる固定 command 集合の判定が、`docs/ai-policy.md` から手で書いた
+期待値(allow / ask / deny。map からは導かない)と一致することを確認する(`*` 以外の pattern 文字を含む rule は fail、#240)。
 chezmoi が必要(render job)。
 
 ## test-git-signing.sh
@@ -457,6 +524,20 @@ throwaway repo に対して `env -i` の throwaway HOME で `git status` を回�
 で判定源が managed file であることも確認)。chezmoi と git が必要(render job)。実 home や実 global
 git config には触れない。
 
+## test-git-hook-gates.sh
+
+git-hook-gates module(#196)の配線内容と武装条件を検証する。武装の条件は、capability(意図)と、destination に
+agent-tools の deploy 4 本(dispatcher + public-safety / git-identity / ai-trailer gate、#239)が実行可能な状態で
+揃っていること(readiness)の 2 段 gate。bare destination、dispatcher だけの部分 deploy、identity gate が欠けた旧
+deploy(agent-tools#281 以前の 3 本)、実行 bit の無い dispatcher のどれでも、shim と `hooks.gitconfig` が render
+されない(武装しない)ことを確認する。完全 deploy では shim 2 本(`pre-commit` / `commit-msg`、実行可能)と
+`hooks.gitconfig`(`core.hooksPath`)が exact な内容で render されること、render した `~/.gitconfig` 経由の実 commit で
+dispatcher が pre-commit → commit-msg の順に呼ばれること、失敗する dispatcher が commit を止めること、`--no-verify` で
+両方を迂回できること(best-effort の既知の限界)を確認する。`enableGitHookGates=false` の apply で適用済みの配線が
+**削除される**こと、`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
+`--includes` 付きで読むこと(静的 pin)も確認する。throwaway destination に render し、実 home には触れない。
+chezmoi が必要(render job)。end-to-end 検査は git を使う(無ければ skip)。
+
 ## test-ssh.sh
 
 ssh-1password module の gating と安全契約を検証する。`enable1PasswordSSH` の on/off gating、
@@ -473,13 +554,15 @@ path traversal 拒否、既存 dest の非破壊を固定する。zsh が必要(
 
 ## test-starship.sh
 
-starship.toml の render を検証する。TOML として parse できること(tomllib)、
-git-identity context の色分けが runtime 照合で行われ、identity の実値(email 等)が
-managed file に混入しないことを確認する。chezmoi が必要(render job)。
+`private_dot_config/starship.toml`(template ではない source)を render せずに静的に検証する。identity の実値
+(`name =` / `email =` の代入や `@`)が含まれないこと、git-identity context が runtime に local の
+`~/.config/git/personal.gitconfig` と照合する形で `custom.git_ctx_personal` / `git_ctx_other` / `git_ctx_none` の
+3 module を定義していること、TOML として parse できること(tomllib。python3 や tomllib が無ければ skip)を確認する。
+chezmoi は不要(CI では render job で実行)。
 
 ## lib-policy.sh
 
 他 script から source される共通 helper。
 data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)、global excludes の解決(`git_excludes_file_setting`: global > system・`GIT_CONFIG_NOSYSTEM` 尊重・unset / empty / path / error の 4 状態、`git_default_excludes_file`: XDG 既定。doctor と preflight が共有、#248)を提供する。ほかに、BSD/GNU をまたぐ octal mode 取得(`file_mode`)、doctor / preflight が共有する policy ゲート(`run_policy_validation`)と標準 project roots 報告(`report_standard_project_roots`)、catalog source → package manager の対応表(`manager_present`。installer と catalog drift 報告の単一 source)を持つ。
 
-policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `test-npmrc.sh` / `test-render.sh` が冒頭で呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
+policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。

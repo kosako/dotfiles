@@ -6,7 +6,7 @@
 
 ```text
 off     何も管理しない。doctor も Corepack を検査しない前提の profile 向け。
-report  doctor が Corepack の availability と version を表示するだけ(default)。
+report  doctor が Corepack の availability と version を表示するだけ。
 enable  明示 opt-in。`corepack enable` を実行済みであることを前提に doctor が shim を確認する。
 ```
 
@@ -28,8 +28,7 @@ corepack enable
 ```
 
 - pin は project 側の責務。dotfiles は global に package manager を強制しない。
-- exact pin の例: `"packageManager": "pnpm@10.12.1"`(range 指定ではなく exact version にする)。
-- range 指定や hash なしの曖昧な pin は避け、exact version を使う。
+- range 指定は避け、上の例のような exact version で pin する。
 
 ## update policy との関係
 

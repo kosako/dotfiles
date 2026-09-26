@@ -18,8 +18,7 @@ What should change?
 
 ## Validation Plan
 
-- [ ] `./scripts/validate-policy.sh --all`
-- [ ] `git diff --check`
+- [ ] `docs/github-workflow.md` の「最低限の validation」(CI runs it on every PR)
 
 Add task-specific checks here.
 

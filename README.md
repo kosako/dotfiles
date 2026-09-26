@@ -23,25 +23,27 @@ personal project として段階的に作っている。現時点の実装状況
 
 | 領域 | 状態 |
 | --- | --- |
-| Git identity 分離(context 別、fail-closed) | 実装済み・実機適用済み |
-| policy / capabilities / profile 検証(fail-closed) | 実装済み |
+| Git identity 分離(context 別、fail-closed、[docs/git-identity.md](docs/git-identity.md)) | 実装済み・実機適用済み |
+| policy / capabilities / profile 検証(fail-closed、[docs/policy-model.md](docs/policy-model.md)) | 実装済み |
 | environmentKind による capability 制約の強制 | 実装済み |
-| supply-chain(git credential scan / npm hardening / Corepack policy) | 実装済み・実機適用済み(#91) |
-| mise runtime | 実装済み・実機適用済み |
-| doctor / preflight(report-only の健康診断) | 実装済み |
-| software catalog + install action(dry-run 既定) | 実装済み・運用中(#53) |
-| private backup(age 暗号化・verify/restore) | 実装済み・運用中(#60) |
-| agent-tools との report-only 連携 | 実装済み(personal で opt-in 済み、#73) |
-| zsh(shell-extra)+ starship の管理 | 実装済み・実機適用済み(#96) |
-| Claude Code settings(personal の public-safe な settings.json) | 実装済み・実機適用済み(personal のみ) |
-| Git signing(SSH 署名 + 1Password、opt-in) | 実装済み・実機適用済み(#85/#97) |
+| supply-chain([git credential scan](docs/supply-chain-git.md) / [npm hardening](docs/supply-chain-npm.md) / [Corepack policy](docs/supply-chain-corepack.md)) | 実装済み・実機適用済み(#91) |
+| mise runtime([docs/runtime.md](docs/runtime.md)) | 実装済み・実機適用済み |
+| doctor / preflight(report-only の健康診断、[scripts/README.md](scripts/README.md)) | 実装済み |
+| software catalog + install action(dry-run 既定、[scripts/README.md](scripts/README.md) の「install-packages.sh」) | 実装済み・運用中(#53) |
+| private backup(age 暗号化・verify/restore、[docs/private-backup.md](docs/private-backup.md)) | 実装済み・運用中(#60) |
+| agent-tools との report-only 連携([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md)) | 実装済み(personal で opt-in 済み、#73) |
+| zsh(shell-extra)+ starship の管理([docs/shell.md](docs/shell.md)) | 実装済み・実機適用済み(#96) |
+| Claude Code settings(personal の public-safe な settings.json、[docs/claude-settings.md](docs/claude-settings.md)) | 実装済み・実機適用済み(personal のみ) |
+| Codex CLI settings(user 層 `~/.codex/hooks.json` の hook 登録 + 承認 rules の read-only baseline `~/.codex/rules/default.rules`。`config.toml` は codex 所有なので管理しない、[docs/ai-policy.md](docs/ai-policy.md) の「権限方針の正本と管理点」) | 実装済み・実機適用済み(personal のみ、#139/#181) |
+| OpenCode settings(`~/.config/opencode/opencode.json` の permission の床・`autoupdate: false`・share 無効。auth / model は local、[docs/opencode-settings.md](docs/opencode-settings.md)) | 実装済み・実機適用済み(personal のみ、#234。plugin による hook parity は Phase 2 として agent-tools#295) |
+| Git signing(SSH 署名 + 1Password、opt-in、[docs/git-identity.md](docs/git-identity.md) の「SSH 署名」) | 実装済み・実機適用済み(#85/#97) |
 | VS Code settings の管理 | 管理しない(未使用のため見送り #16、dormant 配線も削除済み #145) |
-| SSH(ssh-1password)の管理 | 実装済み・実機適用済み(personal のみ、#17/#121) |
-| GitHub injection 防御(secret floor / MCP deny、steering) | Phase 2 まで実機適用済み(hard 層は #131) |
-| Git hook gates 配線(commit 境界の public-safety / AI trailer gate、実体は agent-tools) | 実装済み(personal のみ、#196) |
-| 品質ループ hook 配線(PostToolUse fast-edit-check / Stop changed-scope-qa、実体は agent-tools・宣言は `checks.local.json`) | 実装済み(personal のみ、#199) |
-| herdr integration hook 配線(SessionStart → herdr-agent-state.sh、実体は `herdr integration install` が配置・版管理) | 実装済み(personal のみ、#225) |
-| Git global ignore(AI agent の local-only file `.agent-packets/` / `.claude/settings.local.json` を全 repo から除外、[docs/git-ignore.md](docs/git-ignore.md)) | 実装済み(personal のみ、#248) |
+| SSH(ssh-1password)の管理([docs/ssh.md](docs/ssh.md)) | 実装済み・実機適用済み(personal のみ、#17/#121) |
+| GitHub injection 防御(secret floor / MCP deny / safe-gh 誘導 hook の登録、steering 層で enforcement 境界ではない。hook・reader の実体は agent-tools、[docs/policy-model.md](docs/policy-model.md) の「GitHub injection guard」) | 実装済み・実機適用済み(personal のみ、#119 Phase 2 と #137/#181。epic #119 と #131 は close 済み。OS egress firewall は #188 に切り出して需要待ち、write-gate hook / 制限 context の launcher は未実装で追跡 issue なし) |
+| Git hook gates 配線(commit 境界の public-safety / git-identity / AI trailer gate、実体は agent-tools、[docs/git-hook-gates.md](docs/git-hook-gates.md)) | 実装済み・実機適用済み(personal のみ、#196/#239) |
+| 品質ループ hook 配線(PostToolUse fast-edit-check / Stop changed-scope-qa、実体は agent-tools・宣言は `checks.local.json`、[docs/policy-model.md](docs/policy-model.md) の「quality loop hooks」) | 実装済み・実機適用済み(personal のみ、#199) |
+| herdr integration hook 配線(SessionStart → herdr-agent-state.sh、実体は `herdr integration install` が配置・版管理、[docs/policy-model.md](docs/policy-model.md) の「herdr integration」) | 実装済み・実機適用済み(personal のみ、#225) |
+| Git global ignore(AI agent の local-only file `.agent-packets/` / `.claude/settings.local.json` を全 repo から除外、[docs/git-ignore.md](docs/git-ignore.md)) | 実装済み・実機適用済み(personal のみ、#248) |
 
 「実機適用済み」は、現時点でこの author の Mac 上で managed file が実際に稼働しているという意味(実機の状態は repo からは検証できないので、この列は運用記録。repo 側で機械検証されるのは managed template と render / test の整合まで)。VS Code は未使用のため管理しない(#16。dormant 配線も #145 で削除)。SSH の移行手順は [docs/ssh.md](docs/ssh.md)。
 
@@ -67,6 +69,8 @@ environmentKind は飾りラベルではない。`validate-policy.sh` が、環�
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 
+加えて enum の capability では、work / client / agent で `npmHardeningMode=off` を禁止する(下限は `report`。#45、[docs/policy-model.md](docs/policy-model.md))。
+
 つまり「会社 profile なのに package を自動 install する」ような設定は、構造的に作れない。
 
 ## ディレクトリ規約
@@ -81,7 +85,9 @@ environmentKind は飾りラベルではない。`validate-policy.sh` が、環�
 ~/src/agent/<repo>
 ```
 
-例えば `~/src/work/...` 配下では work の Git identity が自動で選ばれ、`~/src/` の外では identity が解決されず commit が(意図的に)失敗する。
+例えば `~/src/work/...` 配下では work の Git identity が自動で選ばれ、`~/src/` の外では identity が解決されず commit が(意図的に)失敗する。例外は personal だけで、remote が `github.com/kosako/**` の repo は `~/src/` の外に clone しても personal identity が当たる(remote URL による二次判定)。
+
+`~/src` の外で commit したい場合の解除方法(repo ごとに `user.name` / `user.email` を設定する)と、非標準配置で doctor / preflight の自動検査から外れる範囲は [docs/directory-convention.md](docs/directory-convention.md) の「許容された非標準配置」を、identity の解決規則(remote URL による二次判定を含む)は [docs/git-identity.md](docs/git-identity.md) を参照。
 
 ## Quickstart
 
@@ -163,11 +169,12 @@ chezmoi apply --source ~/dotfiles          # 反映(target を絞るなら末尾
 ./scripts/doctor.sh personal               # 反映後の健康診断
 ```
 
-profile を切り替える別マシン(例: 会社 Mac)では、**先に `git -C ~/dotfiles pull` してから** profile を更新する(古い profile 値のまま apply すると `require-profile` が fail-closed で止まる=設計どおり)。
+profile を変更するマシン(profile の改名・統合への追従や、別 profile への切り替え。例: 会社 Mac)では、**先に `git -C ~/dotfiles pull` してから** profile を更新する(古い profile 値のまま apply すると `require-profile` が fail-closed で止まる=設計どおり)。config に profile が既にあると `promptStringOnce` は既存値を返し `--promptString` を使わない(黙って切り替わらない)ため、`--prompt` を付けて既存値を上書きさせる。更新後の値を確かめてから diff / apply に進む。
 
 ```sh
 git -C ~/dotfiles pull
-chezmoi init --source ~/dotfiles --promptString profile=<kind>
+chezmoi init --source ~/dotfiles --prompt --promptString profile=<profile>   # <profile> は personal / work
+chezmoi execute-template --source ~/dotfiles '{{ .profile }}'                 # <profile> になっていることを確認
 ```
 
 ## 何が得られるか
@@ -189,9 +196,34 @@ chezmoi init --source ~/dotfiles --promptString profile=<kind>
 
 ## repository の構成
 
-- `scripts/` — policy 検証 / doctor / preflight / テスト([scripts/README.md](scripts/README.md))。
-- `.chezmoidata/` — profiles / modules / capabilities schema。
-- `docs/` — policy model、Git identity、supply-chain、runtime、AI 境界などの方針。
+- `scripts/` — policy 検証 / doctor / preflight / catalog install(`install-packages.sh`)/ private backup(`private-backup.sh`)/ テスト([scripts/README.md](scripts/README.md))。
+- `.chezmoidata/` — profiles / modules / capabilities schema / software catalog(`packages.yaml`)/ backup 対象(`backup-paths.yaml`)。
+- `.chezmoitemplates/` / `.chezmoiignore` / `.chezmoi.toml.tmpl` — 共有 template partial、module 宣言から生成する allowlist、init 時の profile 設定。
+- `docs/` — 方針と規約。
+  - 横断の規約
+    - [config-ownership.md](docs/config-ownership.md) — AI agent 関連を中心に、設定ごとの正本(dotfiles / agent-tools / 手書き・local)と変更フローを 1 枚で引く早見表。
+    - [local-overrides.md](docs/local-overrides.md) — managed file と host 固有の `.local` 上書きの境界(領域ごとの local-wins / managed-wins / managed-only)。
+    - [policy-model.md](docs/policy-model.md) — profile / environmentKind / modules / capabilities の定義と各 capability の仕様。
+    - [directory-convention.md](docs/directory-convention.md) — `~/src/<context>/` の配置規約と非標準配置の扱い。
+    - [secrets.md](docs/secrets.md) — secret の供給方式(op + direnv の実行時注入)。
+    - [update-policy.md](docs/update-policy.md) — 自動 upgrade をしない方針と例外。
+    - [github-workflow.md](docs/github-workflow.md) — Issue → PR → merge の運用と最低限の validation。
+  - AI agent
+    - [ai-environment-boundary.md](docs/ai-environment-boundary.md) — dotfiles と agent-tools の責務境界、sandbox / GitHub injection 防御の射程と限界。
+    - [ai-policy.md](docs/ai-policy.md) — AI agent に何を無確認で許すかの権限方針と tool ごとの管理点。
+    - [claude-settings.md](docs/claude-settings.md) — Claude Code の `settings.json` の管理規約。
+    - [opencode-settings.md](docs/opencode-settings.md) — OpenCode の `opencode.json` の管理規約。
+  - module ごと
+    - [git-identity.md](docs/git-identity.md) — Git identity の分離と SSH 署名。
+    - [git-ignore.md](docs/git-ignore.md) — AI agent の local-only file を除外する global gitignore。
+    - [git-hook-gates.md](docs/git-hook-gates.md) — commit 境界 gate の配線(実体は agent-tools)。
+    - [ssh.md](docs/ssh.md) — `~/.ssh/config` と 1Password SSH agent。
+    - [shell.md](docs/shell.md) — zsh と starship(shell-extra)。
+    - [runtime.md](docs/runtime.md) — mise による runtime 管理。
+    - [private-backup.md](docs/private-backup.md) — private な設定の age 暗号化 backup / restore。
+    - [supply-chain-git.md](docs/supply-chain-git.md) — Git 経由の credential 漏洩の予防と検出。
+    - [supply-chain-npm.md](docs/supply-chain-npm.md) — npm hardening(`npmHardeningMode`)。
+    - [supply-chain-corepack.md](docs/supply-chain-corepack.md) — Corepack と `packageManager` field の扱い(`corepackMode`)。
 - `dot_*` / `private_dot_*` — chezmoi が管理する home file の source。
 
 ## 開発フロー

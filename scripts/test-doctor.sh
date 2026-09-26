@@ -22,9 +22,9 @@ unset AGENT_TOOLS
 # contract: accept `--root DIR` and `--json` in any order, and assert the
 # caller pins the inspection root to the checkout DEST lives in, not its
 # own cwd (#73; the AGENT_TOOLS-override case regresses #71 the same way).
-# status.sh defaults its root to cwd, so a doctor that omits --root would
-# inspect the wrong dir; exit non-zero on a wrong/missing root to regress
-# that loudly. Touches ../ran-marker so tests can prove it ran, then
+# Older status.sh defaulted its root to cwd (agent-tools#305 changed that to
+# its own repo), so doctor must keep pinning --root; exit non-zero on a
+# wrong/missing root to regress that loudly. Touches ../ran-marker so tests can prove it ran, then
 # prints JSON_PAYLOAD verbatim (one line + newline).
 write_root_pinned_status_sh() {
   local dest="$1" payload="$2"
@@ -806,8 +806,8 @@ printf '#!/bin/sh\nexit 0\n' > "$ql_codex/personal-changed-scope-qa"
 chmod +x "$ql_codex/personal-changed-scope-qa"
 if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "managed ~/.claude/settings.json registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present" <<< "$ql_out" \
-    && grep -Fq "managed ~/.codex/hooks.json registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present (Codex: inert until a one-time /hooks trust; fast-edit-check stays a no-op on Codex — apply_patch carries no file_path, agent-tools#203)" <<< "$ql_out"; then
-    ok "test passed: quality-loop hooks reported wired in both homes once every body is deployed (Codex line carries the trust + edit-check no-op caveats)"
+    && grep -Fq "managed ~/.codex/hooks.json registers PostToolUse(Edit|Write) -> fast-edit-check and Stop -> changed-scope-qa (best-effort, not a boundary); both bodies present (Codex: inert until a one-time /hooks trust)" <<< "$ql_out"; then
+    ok "test passed: quality-loop hooks reported wired in both homes once every body is deployed (Codex line carries the trust caveat)"
   else
     printf '%s\n' "$ql_out" >&2
     fail "test failed: fully deployed quality-loop hooks not reported as wired in both homes"

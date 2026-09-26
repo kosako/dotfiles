@@ -80,38 +80,49 @@ context file の値だけが残る。include 順は契約なので `scripts/test
 
 **reset file は `.gitconfig` と必ず一緒に配備する(#241)。** Git は欠損 include を黙って無視するため、
 `.gitconfig` だけを apply した home(README Quickstart の初回 apply がかつてそうだった)では、この節の
-契約は成立せず #202 以前の挙動(personal fallback の流入)に戻る。README の Quickstart は
-`mkdir -p ~/.config` の後に `~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig`
-を 1 回で apply し(親 directory の target を省くと chezmoi が stat error になる。`~/.config` は target 外の
-祖先なので chezmoi が作らず、target にすると subtree ごと apply されて最小にならない)、`scripts/test-render.sh`
-がその command 行と「その 3 target だけの apply で `.gitconfig` と reset の 2 file だけが配備されること」を
-pin する。`doctor.sh` は reset の presence を検査し(値は持たない file なので中身は見ない)、欠損なら
-mkdir + apply を next action に出す。欠損時は非 personal context の案内も変わる(流入は**条件付き**:
-remote が personal の hasconfig pattern に一致し、personal identity が設定されている repo に限る。それ以外は
-`useConfigOnly` で従来どおり拒否): identity file が無ければ「commit 拒否」ではなく「personal identity を
-継承しうる」、partial なら「**未指定**の key は personal identity を継承する(混在 identity)。明示的な空値
-(`name =`)は上書きするので空のまま」。継承と commit 可否は別で、name が明示的に空なら email を継承しても
-commit は拒否される(Git は空 name を拒否)。未指定と空値の区別は `git config --get` の exit code で見る
-(未指定 = 1、空値 = 0 で空出力)。`=` 無しの key(`email` だけの行、boolean 省略記法)は第 3 の状態で、
-`--get` は空値と同じに見えるが Git の identity 読み込みは `fatal: missing value for 'user.email'` で
-拒否する(git 2.50.1 実測)。doctor は `--list` に `=` 無しで現れることで判別し、reset の有無に関わらず
-「値なし key・commit 不能」として別に報告する。
+契約は成立せず #202 以前の挙動(personal fallback の流入)に戻る。
+
+- **初回 apply**: README の Quickstart は `mkdir -p ~/.config` の後に
+  `~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig` を 1 回で apply する。
+  親 directory の target を省くと chezmoi が stat error になる。`~/.config` は target 外の祖先なので chezmoi が
+  作らず、target にすると subtree ごと apply されて最小にならない。`scripts/test-render.sh` がその command 行と
+  「その 3 target だけの apply で `.gitconfig` と reset の 2 file だけが配備されること」を pin する。
+- **doctor**: reset の presence を検査し(値は持たない file なので中身は見ない)、欠損なら mkdir + apply を
+  next action に出す。
+- **reset 欠損時の非 personal context の案内**: 流入は**条件付き**で、remote が personal の hasconfig pattern に
+  一致し、personal identity が設定されている repo に限る(それ以外は `useConfigOnly` で従来どおり拒否)。
+  - identity file が無い: 「commit 拒否」ではなく「personal identity を継承しうる」。
+  - partial: 「**未指定**の key は personal identity を継承する(混在 identity)。明示的な空値(`name =`)は
+    上書きするので空のまま」。継承と commit 可否は別で、name が明示的に空なら email を継承しても commit は
+    拒否される(Git は空 name を拒否)。
+- **key の 3 状態**(doctor の判別):
+  - 未指定: `git config --get` が exit 1。
+  - 空値: exit 0 で空出力。
+  - `=` 無しの key(`email` だけの行、boolean 省略記法): `--get` は空値と同じに見えるが、Git の identity
+    読み込みは `fatal: missing value for 'user.email'` で拒否する(git 2.50.1 実測)。doctor は
+    `--list` に `=` 無しで現れることで判別し、reset の有無に関わらず「値なし key・commit 不能」として別に報告する。
+
 `~/.config/git/` 配下に置かなかったのは、#207 以前の denylist 時代に `git-signing` module が
 `~/.config/git` を directory ごと宣言しており、signing off の profile では subtree ごと管理外になった
 ため(git-hook-gates と同じ判断)。現行の allowlist では祖先 directory は活性 module の宣言 path から
-union されるので、この制約はもう無い([git-hook-gates](git-hook-gates.md) の同名節)。配置は経緯どおり
-維持する。
+union されるので、この制約はもう無い([git-hook-gates](git-hook-gates.md) の「置き場所が `~/.config/git/`
+配下でない理由(経緯と現行の契約)」節)。配置は経緯どおり維持する。
 
-context file の状態ごとの結果(`scripts/test-gitconfig.sh` の matrix が固定):
+context file の状態ごとの config 層の結果(git hook gates を通さない素の `git commit`。`scripts/test-gitconfig.sh`
+の matrix が固定):
 
 | context file | 結果 |
 | --- | --- |
 | 無い / 空 / email だけ | commit 拒否(`fatal: empty ident name (for <>) not allowed`) — fail-closed |
-| name だけ | context の name + **空 email** で commit が通る(Git は空 name は拒否するが空 email は受理する)。personal ではないが壊れた identity。prompt は赤(no-identity)、`doctor` が partial として action、`git log` で `<>` が見える |
+| name だけ | config 層では context の name + **空 email** で commit が通る(Git は空 name は拒否するが空 email は受理する)。personal ではないが壊れた identity。gate が武装したマシンでは pre-commit の `personal-git-identity-gate` が止める(下記)。prompt は赤(no-identity)、`doctor` が partial として action、gate の無い環境では `git log` で `<>` が見える |
 | 完全 | その context の identity |
 
-- **部分設定は config 層では塞げない**。可視化(prompt / doctor / log)で検知し、commit hook で
-  止める gate は別 issue(agent-tools の dispatcher 側)。
+- **部分設定は config 層では塞げない**。可視化(prompt / doctor / log)で検知し、commit 時は git hook gates の
+  pre-commit gate `personal-git-identity-gate`(agent-tools#281 / #239)が空 email 等の partial identity を
+  止める([git-hook-gates](git-hook-gates.md))。ただしこれは配線が武装した環境(`enableGitHookGates` が true の
+  personal profile で、agent-tools の gate が配備済み)の通常経路だけで効く best-effort guardrail で、
+  `--no-verify` や repo local の `core.hooksPath` で迂回できる。work profile や未武装のマシンでは可視化が
+  残る検知手段になる。
 - **`~/src/` の外**には reset は当たらない(gitdir 条件)。personal remote なら二次判定で personal、
   それ以外は従来どおり fail-closed。
 - **linked worktree / submodule は主 repo の `.git` の場所で判定される**(includeIf の gitdir は
@@ -138,7 +149,8 @@ identity file は当面、完全手動・local only とする。
 
 ## Unknown directory での挙動
 
-known project root(`~/src/{personal,work,client,sandbox,agent}/`)の外では、どの identity file も include されない。
+known project root(`~/src/{personal,work,client,sandbox,agent}/`)の外では gitdir の includeIf が当たらず、
+remote が `github.com/kosako/**` の repo(上記の二次判定で personal が当たる)以外では、どの identity file も include されない。
 `useConfigOnly = true` のため、Git は identity を自動推測せず、commit は以下のように失敗する。
 
 ```text
@@ -156,9 +168,11 @@ fatal: no email was given and auto-detection is disabled
 
 - `scripts/doctor.sh` は report-only で以下を確認する。
   - `user.useConfigOnly=true` / `transfer.credentialsInUrl=die`
+  - identity reset file(`~/.config/git-profile/identity-reset.gitconfig`)の presence(#241。欠損なら
+    mkdir + apply を action に出す)
   - 各 context の identity file が存在するか、意図的に未設定か。存在する file は `user.name` /
-    `user.email` の**有無だけ**(値は出さない)を見て、片方が欠ける partial を action として出す
-    (#202。git が parse できない file はその旨を warn)。
+    `user.email` の**有無だけ**(値は出さない)を見て、どちらか(または両方)が欠ける partial と、
+    `=` 無しの値なし key を action として出す(#202 / #241。git が parse できない file はその旨を warn)。
 - `scripts/preflight.sh` は apply 前に既存の home Git config(`~/.gitconfig`、`~/.config/git/config`)と
   global identity の設定有無を検知する。値そのものは表示しない。同じ `~/.config/git/` 配下の
   global gitignore(`git-ignore` module、#248)の置換 warn もここに出る([git-ignore](git-ignore.md))。

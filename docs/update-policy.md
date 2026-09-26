@@ -7,6 +7,7 @@
 - `brew upgrade` は自動実行しない。
 - `mise upgrade` は自動実行しない。
 - shell plugin update は自動実行しない。
+- ツール本体の自己更新(起動時の自動 DL)に任せない。更新は catalog の source で明示的に行う(例: OpenCode は managed 設定で `autoupdate: false`)。例外は下記の claude-code。
 - `doctor` は状態を報告するだけにする。
 - 更新は明示コマンドとして実行する。
 

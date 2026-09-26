@@ -1,7 +1,7 @@
 # Private-config backup catalog: the public-safe baseline of home-relative
 # paths that the private-backup tooling captures into an age-encrypted
 # archive (see docs/private-backup.md, issue #60). This is the declarative
-# layer only; the backup / restore scripts come in later stages.
+# layer read by scripts/private-backup.sh (backup / verify / restore).
 #
 # Public-safety: this file is committed to a public repo, so it may list
 # only paths that are safe to disclose. Client- or host-specific paths go
@@ -16,6 +16,7 @@
 #   type      file | dir (optional). Declares what the path is expected to
 #             be so the tooling can validate and restore it correctly.
 #   category  free-form public-safe label (optional), e.g. shell / ssh.
+#             No "|" or control characters (#246).
 #
 # Read by scripts via mikefarah/yq v4; validated by validate-policy.sh.
 backup_paths:
@@ -47,10 +48,12 @@ backup_paths:
   # carries it so a new machine keeps the same clone discipline. Absent =>
   # gclone falls back to ask-or-abort (fail closed).
   - { path: .config/dotfiles/clone-contexts.local, type: file, category: git }
-  # GitHub injection-guard trust list (#119). Holds the self trust basis
-  # (GitHub login + numeric id) plus any opt-in trusted collaborators; it is
-  # consumed by the isolated reader / safe-gh (Phase 3). Absent ⇒ fail closed
-  # (only self is trusted, computed at runtime; no opt-in accounts). Identity
-  # values must not enter the public repo, so it is non-committed; the
-  # encrypted archive carries it. The path itself is public-safe. (#119 PR3)
+  # GitHub injection-guard trust list (#119). Holds the self trust basis only
+  # (GitHub login + numeric id); the trust basis is is_self and there are no
+  # opt-in trusted accounts (docs/ai-policy.md). Read by agent-tools'
+  # personal-safe-gh (env SAFE_GH_TRUST_FILE overrides the path). Absent ⇒
+  # safe-gh resolves self via `gh api user`; if that also fails, every author
+  # is untrusted (fail closed). Identity values must not enter the public repo,
+  # so it is non-committed; the encrypted archive carries it. The path itself
+  # is public-safe. (#119 PR3)
   - { path: .config/dotfiles/github-trust.local, type: file, category: ai-tools }

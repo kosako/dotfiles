@@ -2,8 +2,8 @@
 {{- $caps := index .profiles .profile "capabilities" -}}
 {{- /* GitHub injection guard (epic #119). Best-effort / steering only:
        command-string matchers are bypassable ($(), equivalent read paths like
-       xxd / python open(), MCP by other means, subagent gaps) and are NOT an
-       enforcement boundary — see docs/ai-environment-boundary.md and the bypass
+       xxd / python open(), MCP by other means) and are NOT an enforcement
+       boundary — see docs/ai-environment-boundary.md and the bypass
        negative test in scripts/test-claude-settings.sh. deny = never-OK (hard);
        ask = always needs approval.
 
@@ -16,7 +16,7 @@
           do, and a deny binds only Claude's own Bash tool calls — never the
           human's own terminal, and not env calls nested inside a script Claude
           runs. So this floor is always on at ~zero human friction, making the
-          decision-6 secret floor live on personal WITHOUT enforceAiSandbox's
+          secret floor (epic #119) live on personal WITHOUT enforceAiSandbox's
           egress block. Read() denies are the PRIMARY axis (they bind the Read
           tool regardless of which command would print the file); the Bash
           matchers are bypassable steering (head/xxd/python open() slip through),
@@ -25,10 +25,13 @@
        3. enforceAiSandbox (human-legit, stays gated): git push to main/master and
           reading .env are things the human does legitimately direct Claude to do,
           so they ride on enforceAiSandbox — which personal keeps false because its
-          egress block is unusable on a daily driver (a restricted context is the
-          Phase 3 home for these). The context-gated writes (merge/PR/comment/
-          label/push ai/*) need the PreToolUse hook that Phase 2 handed off to
-          Phase 3 (#131) and are intentionally absent.
+          egress block is unusable on a daily driver. The restricted-context
+          launcher meant to carry these (a session started with claude
+          --settings stacked on this template) is not built (#131 closed
+          without it; no tracking issue). The context-gated writes (merge/PR/
+          comment/label/push ai/*) would need a context-gated write hook, which
+          is not built either (#131 closed without it; no tracking issue; the
+          #137 hook below only steers reads), so they are intentionally absent.
 
        enableGitHubIsolatedReader (#137) registers the PreToolUse read-steering
        hook (matcher Bash): agent-tools deploys the body (personal-safe-gh-hook)

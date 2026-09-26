@@ -25,7 +25,8 @@ set -euo pipefail
 # The registration is declarative and must render without the body deployed
 # (bootstrap-safe); runtime is fail-open (missing body / non-2 exit / bad JSON /
 # timeout continue the tool call — only exit 2 blocks), and Codex adds an inert
-# stage (silently skipped until a one-time `/hooks` trust). Steering, NOT an
+# stage (skipped, with a startup warning in current Codex, until a one-time
+# `/hooks` trust). Steering, NOT an
 # enforcement boundary — see docs/ai-environment-boundary.md.
 # Renders into throwaway destinations; never touches the real home directory.
 

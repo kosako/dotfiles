@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # private-backup.sh — capture curated private config into a single
-# age-encrypted archive, and verify such an archive. Disaster recovery
-# only (one-way backup -> restore); restore lands in a later stage. See
-# docs/private-backup.md and issue #60.
+# age-encrypted archive, verify such an archive, and restore it. Disaster
+# recovery only (one-way backup -> restore). See docs/private-backup.md
+# and issue #60.
 #
 # Encryption uses an age identity (X25519). backup encrypts to the public
 # recipient (no secret needed to back up); verify/restore decrypt with the

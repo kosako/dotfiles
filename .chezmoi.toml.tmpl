@@ -1,7 +1,10 @@
 {{- /* No default on purpose: a profile must be chosen explicitly.
        Valid profiles live in .chezmoidata/profiles.yaml; a typo fails
        at render time via .chezmoitemplates/require-profile.
-       Non-interactive init: chezmoi init --promptString profile=<name> */ -}}
+       Non-interactive first init:
+       chezmoi init --source ~/dotfiles --promptString profile=<name>
+       To change an existing profile add --prompt (promptStringOnce keeps
+       the stored value otherwise). */ -}}
 {{- $profile := promptStringOnce . "profile" "profile" -}}
 sourceDir = {{ .chezmoi.sourceDir | quote }}
 

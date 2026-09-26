@@ -10,16 +10,20 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
 - secret、会社・クライアント固有の値、host 固有の調整は local override file 側にのみ置く。
 - managed file は local override file が存在しなくても壊れないように書く。
 - doctor は local override file の存在を report-only で表示してよいが、中身は読まない。
-- 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.ssh/config.local`)。
+- 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.zprofile.local`、`~/.ssh/config.local`)。
+  対応する managed file を持たない local 値(trust list・clone context など)は
+  `~/.config/dotfiles/<name>.local` に置く(下記)。
 - local override file は git/chezmoi 管理外だが、再セットアップに備えた **暗号化バックアップ**の
   対象にできる(`docs/private-backup.md`、issue #60)。
 
 ## zsh: local-wins(末尾 source)
 
-managed な `~/.zshrc` は末尾で local file を source する。
+managed な `~/.zshrc` はほぼ末尾(widget を包む plugin の zsh-autosuggestions /
+zsh-syntax-highlighting の直前)で local file を source する。`~/.zprofile` も末尾で
+`~/.zprofile.local` を同じ形で source する。
 
 ```sh
-[ -f "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"
+[ -r "$HOME/.zshrc.local" ] && source "$HOME/.zshrc.local"
 ```
 
 zsh は後に評価された設定が勝つため、末尾 source は **local-wins** になる。
@@ -34,7 +38,7 @@ Include する。
 
 ```text
 Host github.com
-    IdentityAgent "...op-agent.sock"
+    IdentityAgent ".../2BUA8C4S2C.com.1password/t/agent.sock"
 Match all
 Include config.local
 ```
@@ -53,16 +57,18 @@ local 側は managed が定義していない Host を追加する用途に限�
 VS Code は現在この環境で**未使用**(editor は別物)。よって #16 は「VS Code settings を
 管理しない」で決着した。当初は capability / `vscode` module / doctor section を dormant で
 残したが、**#145 で配線ごと削除**(「決定済み不使用の dormant 宣言は残さない」基準。
-基準の明文化は #145 の後続 PR で [policy-model](policy-model.md) に置く)。
+基準は [policy-model](policy-model.md) の「dormant capability の扱い(残す基準)」に明文化済み)。
 
 将来 VS Code を採用するときは、git 履歴(#16 / #145)から配線を復元しつつ、
-(1) `capabilities.schema.yaml` に `enableVsCodeSettings` を再宣言(全 profile への記入が
-validate で強制される)、(2) settings template を足し、(3) `.chezmoidata/modules.yaml` に
+(1) `capabilities.schema.yaml` に `enableVsCodeSettings` を `type: boolean` と `implemented`
+付きで再宣言(全 profile への記入と `implemented` の有無が validate で強制される)、
+(2) settings template を足し、(3) `.chezmoidata/modules.yaml` に
 `vscode` module を `paths` + `requires: { enableVsCodeSettings: true }` 付きで再宣言
 (`runtime` / `git-signing` module と同じ形)、(4) doctor section を追加する
-(AGENTS.md の「capability は doctor section を駆動する」規約)。`.chezmoiignore` の
-module loop は module の `paths` / `requires` で管理対象を gate するため、(3) を欠くと
-template を足しても ignore されたままになる。extensions の自動 install はしない。
+(AGENTS.md の「新しい capability は、最低限 `doctor` が読む section を同梱して導入する」規約)。
+`.chezmoiignore` の module loop は module の `paths` / `requires` で管理対象を gate するため、
+(3) を欠くと template を足しても ignore されたままになる。extensions の自動 install はしない。
+テストと docs を含む全手順は [policy-model](policy-model.md) の「capability 追加チェックリスト」に従う。
 
 採用時の設計メモ: VS Code の settings は JSON 単一 file のため source / Include に相当する
 仕組みがなく、managed file に一本化するか機械 merge を導入するかをその時点で決める。
@@ -84,7 +90,7 @@ project local `.claude/settings.local.json` → project `.claude/settings.json` 
 | 効かせたい範囲 | 経路 | 備考 |
 | --- | --- | --- |
 | project ごと | その repo の `.claude/settings.local.json` | Claude 自身も動的許可をここに書く(git 除外は自動)。chezmoi 管理外 |
-| この machine の全 project(永続) | `CLAUDE_CONFIG_DIR` で config dir ごと別 path に切り替える | `settings.json` / session / plugin も丸ごと別 dir になるので、managed な `~/.claude/settings.json` とは独立。`~/.zshrc.local` で export する |
+| この machine の全 project(永続) | `CLAUDE_CONFIG_DIR` で config dir ごと別 path に切り替える | `settings.json` / session / plugin も丸ごと別 dir になる。**managed な `~/.claude/settings.json` は読まれなくなる**ので、secret floor の deny や hooks 登録も効かない(上書きではなく置き換え。使うなら別 dir 側に同等の設定を自分で置く)。`~/.zshrc.local` で export する |
 | 1 session だけ | `claude --settings <file または JSON>` | managed より弱く project 設定より強い。永続しない |
 | 個別の値 | 環境変数(`ANTHROPIC_MODEL` 等) | key ごとに対応が異なる(公式の env-vars 一覧を参照) |
 
@@ -98,7 +104,7 @@ GitHub injection 防御(epic #119)の trust 基点の local 値は、managed fil
 **`~/.config/dotfiles/github-trust.local`**(chezmoi 管理外・非コミット)に置く。trust の
 基点は `is_self`(自分の login + numeric id)で、collaborator / bot は既定 untrusted(方針は
 [ai-policy](ai-policy.md))。egress allowlist の local 値も同じ `~/.config/dotfiles/*.local`
-規約に従う(具体ファイル名は OS egress firewall を実装する Phase 3(#131)で pin する)。
+規約に従う(具体ファイル名は OS egress firewall を実装する #188(#131 から切り出し)で pin する)。
 
 - 共通原則どおり managed 側は trust list が無くても壊れないように書く(fail closed で
   「自分以外は untrusted」に倒す)。
@@ -133,8 +139,9 @@ export AGENT_TOOLS="$HOME/path/to/agent-tools"
 ```
 
 - doctor は status 読み取り時に `status.sh --root "$AGENT_TOOLS"` と root を pin する。
-  status.sh は既定で **cwd** を検査するため、pin しないと doctor を起動した cwd を誤検査して
-  空の repo を偽報告する(#73)。
+  #73 当時の status.sh は既定で **cwd** を検査し、pin しないと doctor を起動した cwd を誤検査して
+  空の repo を偽報告した。agent-tools#305 以降の既定は script の属する repo(cwd 非依存)だが、
+  検査対象を明示するため pin は続ける。
 - 監視層自体を動かすかどうかの opt-in は `enableAgentToolsStatus`(profile capability、tracked)
   で、AGENT_TOOLS(checkout path の解決)とは別レイヤ。capability が off なら presence までで
   status は読まない。

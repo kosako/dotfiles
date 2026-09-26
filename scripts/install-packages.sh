@@ -87,7 +87,9 @@ main() {
   [[ -f "$PACKAGES_FILE" ]] || { fail "catalog missing: $PACKAGES_FILE"; return 1; }
 
   # Fail-closed profile resolution: never assume a default. work / client /
-  # sandbox / agent then gate out via installPackages / installGuiApps = false.
+  # agent then gate out via installPackages / installGuiApps = false (forced by
+  # environmentKind); sandbox forbids only secret access, so it installs iff its
+  # profile sets them true.
   local profile
   if ! profile="$(resolve_runtime_profile)"; then
     fail "cannot resolve the machine profile from chezmoi config; refusing. Run: chezmoi init --source ~/dotfiles"

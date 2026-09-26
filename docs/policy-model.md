@@ -54,7 +54,7 @@ installer は inventory の不明と正常な空リストを区別する。取�
 - destructive な操作は work / client / agent でデフォルト無効(environmentKind の制約として `validate-policy.sh` が hard fail で強制。下記参照)。
 - secret access、network tunnel、AI tools は personal でも明示的に扱う。
 - boolean で足りない capability は enum にする。
-- `report` は検査のみ、`enforce` / `enable` は実際の適用を意味する。
+- `report` は検査のみ、`enforce` は実際の適用(例: `~/.npmrc` を chezmoi で管理)を意味する。`corepackMode=enable` は手動の `corepack enable` を前提にした検査で、dotfiles は適用しない([supply-chain-corepack](supply-chain-corepack.md))。
 
 ## environmentKind の制約
 
@@ -97,7 +97,7 @@ sandbox ブロックを出して Claude Code に内部適用させる」意)。�
   (work / client / agent)でこそ true にしたい capability。
 - 効くのは **`claude-settings` module が active な profile だけ**(今は personal)。module を
   持たない profile で true にしても settings には反映されない(dangling)。`doctor` が
-  この dangling を report する(AGENTS.md の「capability は doctor section を駆動する」)。
+  この dangling を report する(AGENTS.md の「新しい capability は、最低限 `doctor` が読む section を同梱して導入する」)。
 - **既定は全 profile で false**(配線のみ・opt-in)。有効化は allowlist を詰め、push /
   install が壊れないか検証してから cap を反転する別ステップ。
 - 将来 agent profile を足すときは「特定 kind で true 必須」(forbidden の逆の不変条件)の
@@ -123,23 +123,23 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   hook body(`personal-safe-gh-hook`)は agent-tools が両 home へ配布し、dotfiles は絶対
   path 参照のみ(登録=dotfiles・実体=agent-tools。path 安定は agent-tools#146 の契約)。
   **steering / fail-open で enforcement ではない**(body 不在・非 2 exit・不正 JSON は
-  すべて tool call 続行)。Codex は加えて、登録済みでも一度 `/hooks` trust するまで silent
-  skip される inert stage がある(registration ≠ activation)。効くのは対応 module
-  (`claude-settings` / `codex-settings`)が active な profile だけ。dangling(module 非
-  active / body 不在)は doctor が report。
+  すべて tool call 続行)。Codex は加えて、登録済みでも一度 `/hooks` trust するまで skip
+  される inert stage がある(registration ≠ activation。現行の Codex は起動時に `/hooks` での
+  確認を促す警告を出す)。効くのは対応 module(`claude-settings` / `codex-settings`)が
+  active な profile だけ。dangling(module 非 active / body 不在)は doctor が report。
 - GitHub 由来の deny は専用 capability を作らず **3 tier**(#119 Phase 2 task B): never-legit な
   secret 読取(`~/.ssh` と credential-store の `~/.aws` / `~/.config/gh` / `~/.netrc` /
-  `~/.codex/auth.json`(#136)/ `printenv` / `env` / `gh secret` / `gh api *secrets*`)は
-  **無条件 deny**(`enforceAiSandbox` を待たず常時)。file 系は **Read 側 deny を主軸**とし、
+  `~/.codex/auth.json`(#136)/ `~/.local/share/opencode/auth.json`(#234)/ `printenv` /
+  `env` / `gh secret` / `gh api *secrets*`)は **無条件 deny**(`enforceAiSandbox` を待たず常時)。file 系は **Read 側 deny を主軸**とし、
   Bash matcher の path 列挙はしない(等価経路で迂回できる leaky steering。#136)。main / master 直 push と `.env` 読取 deny + release /
   branch-protection ask は **`enforceAiSandbox` に相乗り**(human-legit ゆえ常時 ON にしない)。
 - tier3 の main-push deny(`git push * main|master`)は **leaky steering**: ` main` 末尾の explicit
   形しか拾わず bare `git push` / `git push origin HEAD` / refspec(`HEAD:main`)は抜ける(Claude Code
   の matcher セマンティクスを #119 で裏取り)。真の「main 直 push を止める」hard 層は server-side
-  branch protection か Phase 3(#131)の隔離 reader。enumeration で matcher を広げて塞ぐのは
-  command-string ≠ enforcement のアンチパターンゆえ **しない**。tier3 を `enforceAiSandbox` から
-  切り出して常時 ON にする案も、この leak ゆえ「摩擦ゼロだが保護もゼロ」になるため採らない。射程と
-  限界・接続規約の正本は [ai-environment-boundary](ai-environment-boundary.md)。
+  branch protection だけ(#131 で入った隔離 reader / safe-gh は steering)。enumeration で
+  matcher を広げて塞ぐのは command-string ≠ enforcement のアンチパターンゆえ **しない**。tier3 を
+  `enforceAiSandbox` から切り出して常時 ON にする案も、この leak ゆえ「摩擦ゼロだが保護もゼロ」に
+  なるため採らない。射程と限界・接続規約の正本は [ai-environment-boundary](ai-environment-boundary.md)。
 - **状態**: `gateGitHubMcp` は **personal=true**(Phase 2 で github MCP deny を live 化。
   render→diff→実機 dry-run の検証ゲート済み)、work=false(`claude-settings` 非 active)。
   `enableGitHubIsolatedReader` も **personal=true**(#137 で Claude、#181 で Codex の
@@ -164,8 +164,10 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   - `PostToolUse` / matcher `Edit|Write` → `personal-fast-edit-check`(steering。失敗要約を
     `additionalContext` で返すだけで block しない・自動 fix しない)。
   - `Stop`(matcher なし。Claude Code は非対応・Codex は無視)→ `personal-changed-scope-qa`
-    (best-effort gate。dirty scope に対し宣言 QA が未実行/失敗なら **新しい scope に 1 回だけ**
-    exit 2 で block。`stop_hook_active` では block しない。cache で同一 scope は再検査しない)。
+    (best-effort gate。宣言 repo の dirty scope に対して hook 自身が `qa_checks` を実行し、失敗した check があれば
+    **新しい scope に 1 回だけ** exit 2 で block。`stop_hook_active` では block しない(新しい scope なら check は
+    走らせ、失敗はユーザー向けの警告にする)。check command の不在・起動失敗は警告に留め、block しない。同一 scope は
+    cache で再実行しないが、実行できなかった check だけは次の Stop で再試行する)。
   - timeout は両 hook とも未指定(両 harness とも既定 600s)。check の実行時間は宣言側
     (checks.local.json)の責務なので dotfiles で値を発明しない。
 - **repo 単位 opt-in**: 宣言の正本はユーザー所有・非 tracked の
@@ -174,19 +176,24 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   しても安全(fail-open)。repo 内の宣言 file は読まない(第三者 repo が任意 command を
   宣言できてしまうため)。
 - **honest-label**: enforcement boundary ではない(hook 無効化・`--no-verify` 相当の迂回・
-  fail-open)。#199 配備時の実測(Claude Code 2.1.258 / codex-cli 0.145.0):
+  fail-open)。#199 配備時の実測(Claude Code 2.1.258 / codex-cli 0.145.0)。その後 hook body は
+  agent-tools 側で更新されている(Codex `apply_patch` 対応は agent-tools#232、Stop 警告の分離は
+  agent-tools#231。実機確認は agent-tools#239 / #237)。現行の契約と実機確認の記録は agent-tools の
+  `docs/quality-loop-hooks.md` を正本とする:
   - Claude Code: PostToolUse の失敗要約は `additionalContext` で届く。Stop は失敗 scope で 1 回
-    block(exit 2 + stderr がモデルに届く)、`stop_hook_active` の 2 回目は **Stop の
-    additional context として警告が届く**(hook error 扱いではない。2.1.163 で Stop の
-    `hookSpecificOutput.additionalContext` が公式対応)。稼働中 session も settings.json の変更を
+    block(exit 2 + stderr がモデルに届く)。block しない警告(`stop_hook_active` の 2 回目、同一 scope の
+    未解消の失敗、check を実行できないとき)は exit 0 + `systemMessage` の**ユーザー向け警告**で、モデルへの
+    追加指示や継続要求は出さない(agent-tools#231。Stop の `additionalContext` は会話を継続させるので警告には
+    使わない。#199 配備時は Stop の additional context で届けていた)。稼働中 session も settings.json の変更を
     file watcher で自動反映。
-  - Codex: `apply_patch` の payload に `file_path` が無く(docs)、宣言 edit check は**呼ばれない**
-    = fast-edit-check は無言 no-op(agent-tools#203 に報告)。Stop の **block 経路**は動く(理由が
-    モデルに届き続行)。**非 block の警告経路**(exit 0 + stdout の
-    `hookSpecificOutput{hookEventName:"Stop"}`)は `codex exec --json` に invalid hook output の
-    event は出なかったが、警告文がモデルに届くかは未検証(落ちても block にはならない)。
+  - Codex: fast-edit-check は `apply_patch` の `tool_input.command` から対象 file を取る(agent-tools#232。
+    #199 配備時の codex-cli 0.145.0 では body が `file_path` しか読まず無言 no-op だった)。agent-tools 側の
+    Codex 0.153.4 native smoke で、check 失敗の要約が `additionalContext` でモデルに届くことを確認済み。
+    Stop の **block 経路**は動く(理由がモデルに届き続行)。**非 block の警告**(exit 0 + `systemMessage`)は
+    ユーザー向け警告で、`codex exec` の出力には現れず、TUI では `Hook` 通知として表示される
+    (agent-tools#237 の実機確認。継続要求は出さず、block にもならない)。
   - Codex は登録後に一度 `/hooks` trust が要る(registration ≠ activation。hook 定義を変えると
-    再 trust。未 trust は silent skip)。
+    再 trust。未 trust の間は skip され、起動時に `/hooks` を促す警告が出る)。
 - **doctor**: 両 home の登録 + body presence(contents-blind)、`checks.local.json` の presence
   (**中身は読まない** — hook が実行する command を列挙する file なので)、best-effort の
   但し書きを report する。module 非 active / body 不在は dangling / fail-open として warn。
@@ -223,11 +230,12 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   よい。**enforcement boundary ではない**(session identity の報告のみ)。
 - **Codex 固有**: `herdr integration install codex` は codex 所有の `~/.codex/config.toml` に
   `[features] hooks = true` を書く(dotfiles 管理外・doctor も読まない)。hook 定義が増える
-  ので一度 `/hooks` で再 trust するまで silent skip(registration ≠ activation)。
+  ので一度 `/hooks` で再 trust するまで skip される(registration ≠ activation)。
 - **work profile**: `claude-settings` / `codex-settings` が非 active なので dotfiles は登録を
   持てない → capability は false。work 機では `herdr integration install` が unmanaged な
   両 file に登録と body の両方を持つ(managed-wins の衝突が無いので installer 任せでよい)。
-  doctor は capability=false でも `herdr integration status` の見え方を info で出す。
+  doctor は capability=false でも `herdr integration status` の見え方を出す(current なら info、
+  current 以外(not installed / outdated / needs repair)なら action として warn。下記「doctor」)。
 - **doctor**: 両 home の登録 + body presence(contents-blind。登録は `bash '<path>' session`
   で起動するので実行ビットは見ず、読取可能な通常ファイルかで判定)+ `herdr integration
   status` の currency(current / outdated / needs repair。herdr は body header を読むだけで
@@ -266,7 +274,7 @@ skill は `~/.claude/skills` を OpenCode が直接読むので再配布しな�
 - **doctor**: presence(`opencode` / managed 床)と `auth.json` の存在のみ(中身・provider 名は読まない)。
   module 非 active は「not managed」。乖離は managed drift section。
 - **状態**: personal のみ列挙、work は非列挙。plugin による hook parity と相互レビュー契約への追加は
-  Phase 2(agent-tools)。詳細は [opencode-settings](opencode-settings.md)。
+  OpenCode 導入 Phase 2(agent-tools#295)。詳細は [opencode-settings](opencode-settings.md)。
 
 ## Git global ignore(`git-ignore` module、#248)
 
@@ -313,8 +321,10 @@ capability を 1 つ追加するときに触る場所(fail-closed の意図的�
 3. 危険な権限なら `lib-policy.sh` の `environment_kind_forbidden_capabilities` と
    本 doc / README の表(3 箇所)+ `test-policy.sh` の cross-check に追加。
    安全強化型(true ほど締まる)は**入れない**(極性は sandbox 節参照)。
-4. 実装の配線 — 原則 requires 方式(上の規範)。`implemented: false` で land する場合は
-   doctor に未実装/未配線の warn を出す section を追加(AGENTS.md 規約 + #151 検査)。
+4. 実装の配線 — 原則 requires 方式。off にしたとき既存 file を確実に消す必要があれば
+   テンプレート自己 gate(下の「capability → 実装の gating 方式(規範)」)。
+   `implemented: false` で land する場合は doctor に未実装/未配線の warn を出す section を追加
+   (AGENTS.md 規約 + #151 検査)。
 5. テスト — render 影響があれば `test-render.sh` の期待 managed set、settings 影響が
    あれば `test-claude-settings.sh` / `test-codex-settings.sh`(hook 登録なら両方)、極性は
    `test-policy.sh`(forbidden 表に入れない capability は「全 kind で true を許容」を pin し、
@@ -325,7 +335,14 @@ capability を 1 つ追加するときに触る場所(fail-closed の意図的�
 
 capability が実装を gate する方式は **原則 requires 方式**(module の `requires:` で
 path ごと管理対象を gate。`runtime` / `git-signing` / `supply-chain-npm` が例)。
-ファイル自体は常に管理し**中身だけ**を capability で分岐させたい場合のみ、テンプレート内
+ただし `requires:` は `.chezmoiignore` で source を落とすだけで、apply 済みの target は
+削除しない(capability を false にしても既存 file が残置される)。残置されると動き続ける
+file(hook 登録・`core.hooksPath` など)は、module の `requires:` ではなく
+**テンプレート自己 gate**(gate 条件を満たさなければ空 render → chezmoi が既存 target も削除)で gate する
+(`codex-settings` の `hooks.json` / `default.rules`、`git-hook-gates` が例。#184)。
+自己 gate で target を消せるのは module が active な profile の中だけで、profile 切替で
+module 自体が非 active になった場合の残置は別扱い(#201)。
+ファイル自体は常に管理し**中身だけ**を capability で分岐させたい場合は、テンプレート内
 分岐を使ってよい(`claude-settings` / `ssh-1password` が例)。その場合は capability true
 かつ module inactive の組み合わせを doctor が dangling として警告する section を必ず併設する。
 
@@ -344,7 +361,7 @@ npmHardeningMode:
 corepackMode:
   off: 何もしない
   report: doctor で状態だけ確認する
-  enable: 明示的に Corepack を有効化する
+  enable: 手動で corepack enable 済みの前提で、doctor が pnpm / yarn の shim を確認する(dotfiles は corepack enable を実行しない)
 ```
 
 ## Initial Profiles

@@ -271,10 +271,12 @@ fi
 # `git config --file` tells whether user.name / user.email are set and
 # non-empty; the values are never printed. A partial file is the one state the
 # managed identity reset (#202) cannot fail close — Git refuses an empty name
-# but accepts an empty email — so doctor is its main detector: commits under
-# that root carry an empty ident, visibly broken rather than another
-# context's identity. A file git cannot parse is reported as such, not as
-# partial.
+# but accepts an empty email (the action below describes Git itself). doctor
+# reports it before any commit; at commit time only the git hook gates'
+# git-identity gate refuses it, where those gates are armed (#239). Elsewhere
+# commits under that root carry an empty ident, visibly broken rather than
+# another context's identity. A file git cannot parse is reported as such, not
+# as partial.
 for context in personal work client sandbox agent; do
   identity_file="$HOME/.config/git/$context.gitconfig"
   project_root="$HOME/src/$context"
@@ -325,7 +327,7 @@ for context in personal work client sandbox agent; do
         ok "identity file exists: $identity_file"
       elif [[ "$identity_reset_present" -eq 1 || "$context" == "personal" || -z "$identity_unset" ]]; then
         action "identity file is partial: $identity_file has no $identity_missing — commits under $project_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" \
-          "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md)"
+          "set $identity_missing in $identity_file (local-only, never managed; docs/git-identity.md); until then a missing email is refused at commit time only where the git hook gates' git-identity gate is armed (#239)"
       else
         # Inheritance and the commit outcome are separate facts: an unset
         # key inherits, but an explicitly empty NAME still refuses the commit
@@ -689,13 +691,13 @@ if [[ -f "$backup_marker" ]]; then
     warn "backup marker present but unreadable"
   elif [[ "$marker_capture" == "INCOMPLETE" ]]; then
     action "last backup: $marker_last (archive: $marker_archive, files: $marker_count) was INCOMPLETE: a declared directory could not be fully enumerated, so files under it are missing from that archive" \
-      "fix the unreadable entries (see the backup run's warnings), then run ./scripts/private-backup.sh backup again"
+      "fix the unreadable entries (see the backup run's warnings), then run ./scripts/private-backup.sh backup again with --out PATH"
   else
     ok "last backup: $marker_last (archive: $marker_archive, files: $marker_count, capture: $marker_capture)"
   fi
   unset -f bm
 elif profile_allows_secrets_access "$profile"; then
-  warn "no backup recorded yet (run private-backup.sh backup)"
+  warn "no backup recorded yet (run ./scripts/private-backup.sh backup --out PATH; see docs/private-backup.md)"
 else
   # The backup runtime gate refuses profiles without allowSecretsAccess, so
   # "never ran" is the designed steady state here, not an actionable warning.
@@ -932,8 +934,8 @@ report_codex_projects_trust() {
 
 section "AI policy"
 if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
-  ok "enableAiPolicy=true (policy docs + report-only checks; see docs/ai-policy.md)"
-  item "boundary today: directory convention + Git identity separation + policy docs"
+  ok "enableAiPolicy=true (policy docs + report-only checks, plus the managed Codex approval-rules baseline where codex-settings is active; see docs/ai-policy.md)"
+  item "boundary today: directory convention + Git identity separation + policy docs + managed Codex approval-rules baseline (codex-settings profiles only)"
   # The standard agent root is optional: agent repos may live outside ~/src (a
   # non-standard placement) resolved via AGENT_TOOLS / repo-local identity, so a
   # missing standard root is reported neutrally, not as a warning (#134).
@@ -1051,20 +1053,22 @@ if module_active_for_profile "$profile" claude-settings; then
   # Tier 2 — human-legit write gate: main-push deny, .env read deny, and the
   # release/branch-protection ask still ride on enforceAiSandbox, which personal
   # keeps false (its egress block is unusable on a daily driver). A restricted
-  # context for these is #119 Phase 3 (#131) — disclose the live state so the
-  # green line above is not read as a complete injection guard.
+  # context for these is not built (#131 closed without it; no tracking issue) —
+  # disclose the live state so the green line above is not read as a complete
+  # injection guard.
   if [[ "$enforce_ai_sandbox" == "true" ]]; then
     item "human-legit write gate active (enforceAiSandbox): main-push + .env-read deny, release/protection ask"
   else
-    item "human-legit write gate INERT (enforceAiSandbox=false): main-push / .env-read deny and release/protection ask are not rendered — needs a restricted context (#119 Phase 3, #131), not the daily-driver egress block"
+    item "human-legit write gate INERT (enforceAiSandbox=false): main-push / .env-read deny and release/protection ask are not rendered — needs a restricted context (not built: #131 closed without it; no tracking issue), not the daily-driver egress block"
   fi
   # The main-push deny is leaky steering even where it renders: the matcher
   # `git push * main|master` only catches the explicit trailing-`main` form and
   # misses bare `git push`, `git push origin HEAD`, and refspecs (`HEAD:main`).
   # Verified against Claude Code matcher semantics (#119). Disclosed so the deny
-  # is not mistaken for a real main-push boundary — the real enforcement is
-  # server-side branch protection or the Phase 3 isolated reader (#131).
-  item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; real block is branch protection or the Phase 3 isolated reader (#131)"
+  # is not mistaken for a real main-push boundary — the real block is
+  # server-side branch protection (the isolated reader / safe-gh are steering,
+  # not a block).
+  item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; the real block is server-side branch protection"
 fi
 # enableGitHubIsolatedReader wires the isolated-reader steering (#137 + #181): one
 # capability registers the PreToolUse hook (matcher Bash) that steers raw `gh`
@@ -1088,7 +1092,8 @@ if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; 
   fi
   # Codex parity (#181): the same capability registers the hook in the user-layer
   # ~/.codex/hooks.json (codex-settings module). Codex has an EXTRA inert stage vs
-  # Claude — even a registered+present hook is silently skipped until a one-time
+  # Claude — even a registered+present hook is skipped (current Codex shows a
+  # startup warning; it was silent at #181) until a one-time
   # interactive `/hooks` trust (trust recorded in ~/.codex/config.toml
   # [hooks.state]). Report registration + body presence contents-blind and honest-
   # label the trust requirement; never read config.toml here.
@@ -1105,11 +1110,12 @@ if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; 
 else
   ok "enableGitHubIsolatedReader not active (false)"
 fi
-# Trust list (#119 PR3): the self trust basis (GitHub login + numeric id) plus
-# any opt-in trusted collaborators live in a non-committed local file consumed by
-# the isolated reader / safe-gh (Phase 3). Pointer only — never read here. Its
-# existence is reported contents-blind by the private-backup section (it is in
-# backup-paths.yaml). Absent ⇒ fail closed (only self is trusted).
+# Trust list (#119 PR3): the self trust basis only (GitHub login + numeric id;
+# no collaborator entries) lives in a non-committed local file read by
+# agent-tools' personal-safe-gh (env SAFE_GH_TRUST_FILE overrides the path).
+# Pointer only — never read here. Its existence is reported contents-blind by the
+# private-backup section (it is in backup-paths.yaml). Absent ⇒ safe-gh resolves
+# self via `gh api user`; if that also fails, every author is untrusted (fail closed).
 item "trust list: ~/.config/dotfiles/github-trust.local (#119; contents never read; absent ⇒ only self trusted)"
 
 section "quality loop hooks (report-only)"
@@ -1135,10 +1141,11 @@ if [[ "$(capability_value "$profile" enableQualityLoopHooks)" == "true" ]]; then
       .codex)
         quality_hooks_module=codex-settings
         quality_hooks_target="managed ~/.codex/hooks.json"
-        # Measured at the #199 deploy (codex-cli 0.145.0): apply_patch carries
-        # no file_path, so the declared edit check is never invoked on Codex —
-        # say so, or a green line reads as "edit steer active after trust".
-        quality_hooks_note=" (Codex: inert until a one-time /hooks trust; fast-edit-check stays a no-op on Codex — apply_patch carries no file_path, agent-tools#203)"
+        # The #199-era caveat (codex-cli 0.145.0: apply_patch carries no
+        # file_path, so the edit check never ran on Codex) was lifted by
+        # agent-tools#232: the body now reads apply_patch's tool_input.command.
+        # Only the trust requirement is left to disclose.
+        quality_hooks_note=" (Codex: inert until a one-time /hooks trust)"
         ;;
     esac
     if module_active_for_profile "$profile" "$quality_hooks_module"; then
@@ -1303,17 +1310,19 @@ fi
 
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
-# agent-tools. Presence is always reported, but running its status.sh
-# (executing code from another repo) is opt-in via enableAgentToolsStatus
-# so doctor's no-side-effects invariant is never delegated implicitly.
+# agent-tools. Presence is reported whenever enableAiPolicy=true, but running
+# its status.sh (executing code from another repo) is opt-in via
+# enableAgentToolsStatus so doctor's no-side-effects invariant is never
+# delegated implicitly.
 # See docs/ai-environment-boundary.md and the agent-tools
 # status-manifest-contract (contract_version 3).
 # The expected path defaults to the dotfiles directory convention
 # (~/src/agent/agent-tools) but is overridable via the AGENT_TOOLS env so a
 # non-standard checkout can still be reported. presence only; never cloned.
-# status.sh defaults its inspection root to its own cwd, so doctor pins
-# --root to the resolved checkout; otherwise it would inspect doctor's cwd
-# and falsely report an empty repo (#73).
+# status.sh used to default its inspection root to its own cwd and falsely
+# report an empty repo (#73); since agent-tools#305 it defaults to its own
+# repo, but doctor still pins --root to the resolved checkout so the
+# inspected tree is explicit on older checkouts too.
 if [[ "$(capability_value "$profile" enableAiPolicy)" != "true" ]]; then
   ok "AI policy disabled; skipping agent-tools check"
 else
