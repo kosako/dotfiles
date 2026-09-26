@@ -44,7 +44,7 @@ profiles:
       enableAiTools: false
       enforceAiSandbox: false
       # #73: opt in to the report-only monitoring layer. doctor runs
-      # agent-tools' status.sh (--json, read-only, contract v2) and summarizes
+      # agent-tools' status.sh (--json, read-only, contract v3) and summarizes
       # its health (clean / checks / stale / sync conflicts) as warnings. Still
       # report-only / exit 0; never clones / pulls / syncs. A non-standard
       # checkout path is resolved via AGENT_TOOLS in the local, non-tracked
@@ -71,7 +71,8 @@ profiles:
       # the user-layer ~/.codex/hooks.json (#181, Codex parity). Steering / fail-
       # open (missing body, non-2 exit, bad JSON all continue the tool call) — NOT
       # an enforcement boundary. Codex adds an extra inert stage: even a registered
-      # hook is silently skipped until a one-time `/hooks` trust. Hook/reader bodies
+      # hook is skipped (with a startup warning in current Codex) until a one-time
+      # `/hooks` trust. Hook/reader bodies
       # are deployed by agent-tools (registration=dotfiles, body=agent-tools;
       # docs/config-ownership.md, agent-tools#146).
       enableGitHubIsolatedReader: true

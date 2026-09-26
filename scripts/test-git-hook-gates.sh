@@ -211,8 +211,9 @@ hooks_gitconfig="$gates_dir/hooks.gitconfig"
 expected_gitconfig="$(printf '%s\n' \
   '# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).' \
   "# Read via the unconditional [include] in ~/.gitconfig. Points every repo's" \
-  '# hooks at the managed shim directory; the shims chain to each repo'"'"'s own' \
-  '# .git/hooks, so existing repo hooks keep running (docs/git-hook-gates.md).' \
+  '# hooks at the managed shim directory (pre-commit / commit-msg only); those' \
+  '# shims chain to the repo'"'"'s own .git/hooks/<stage>. Other repo hooks (pre-push,' \
+  '# post-checkout, ...) do not run while this is set (docs/git-hook-gates.md).' \
   '[core]' \
   $'\thooksPath = ~/.config/git-hook-gates/hooks')"
 if [[ ! -f "$hooks_gitconfig" ]]; then

@@ -10,7 +10,7 @@
 ~/src/agent/<repo>
 ```
 
-この階層を Git identity、secret access、install policy、AI agent policy の判定基準にする。
+この階層を Git identity、secret access、install policy、AI agent policy の判定基準にする。ただし配置で自動的に切り替わるのは Git identity(下記の `includeIf "gitdir:..."`)だけで、secret access・install・AI agent の権限は machine の profile の capability で決まる([policy-model](policy-model.md))。directory ごとの AI の扱いは [ai-policy](ai-policy.md) の「Directory Policy」に従う運用上の基準である。
 
 ## Git Identity
 
@@ -38,11 +38,11 @@ Git config では `user.useConfigOnly = true` を使い、known directory 外で
   path = ~/.config/git/agent.gitconfig
 ```
 
-実体は `dot_gitconfig` が管理する。identity file の置き場所と扱いは `docs/git-identity.md` に従う。
+実体は `dot_gitconfig` が管理する。上の例は directory と identity file の対応だけを示す簡略形で、実体にはさらに次の 2 つがある。personal には remote URL による二次判定(`includeIf "hasconfig:remote.*.url:..."`、#52)がある。非 personal context には、各 identity file の include の直前に managed な identity reset(`~/.config/git-profile/identity-reset.gitconfig`、#202)が入る。どちらも `docs/git-identity.md` の該当節を参照。identity file の置き場所と扱いは `docs/git-identity.md` に従う。
 
 ## Home config directory
 
-`~/.config` は chezmoi の管理対象で、permission を 0700 にする(`private_dot_config` による)。個人の設定 directory を他ユーザーから保護する意図で、全 profile に適用される(中身がすべて ignore でも directory 自体は管理される)。
+`~/.config` は、活性 module が配下の file を宣言している profile で chezmoi の管理対象になり、permission を 0700 にする(`private_dot_config` による)。`.chezmoiignore` の allowlist(#207)が、宣言 path の祖先 directory として `~/.config` を通すため([policy-model](policy-model.md))。個人の設定 directory を他ユーザーから保護する意図。現行の全 profile(personal / work)は `~/.config` 配下の path を持つ module(`git-profile` / `runtime` / `shell-extra`)を列挙しているので、全 profile で適用される(配下に宣言 file を持たない profile では `~/.config` 自体も管理外になる)。
 
 既存 host で `~/.config` が 0755 の場合、初回 apply で 0700 に変わる。これは仕様。`chezmoi diff` に mode 変更として表示され、`preflight` も apply 前にこの差分を warning で知らせる。0700 を望まない場合は、その host で apply しないか、profile 構成を見直す。
 
@@ -55,6 +55,10 @@ context を fail-closed に解決して `~/src/<context>/<repo>` に置くので
 2. 非追跡の `~/.config/dotfiles/clone-contexts.local`(`<owner> <context-path>` 行形式)の
    マッチ。会社 org はここ(各マシンの local)にだけ書く([local-overrides](local-overrides.md))
 3. どれにも当たらなければ TTY で確認、非対話なら中断(黙って既定に倒さない)
+
+`github.com/kosako` の repo は、agent project(例: agent-tools)も含めて規則 1 で `personal` に
+解決される(`clone-contexts.local` では上書きできない)。`~/src/agent` に置く `github.com/kosako` の
+repo は `gclone` を使わずに手で clone する。
 
 ghq は不採用(2026-07-05、#177): `<root>/<host>/<owner>/<repo>` layout の強制がこの
 context 階層(identity の `includeIf gitdir` が依存)と衝突し、remote を持たない sandbox を
@@ -79,8 +83,9 @@ context 階層(identity の `includeIf gitdir` が依存)と衝突し、remote �
   (どちらも report-only なので実害はないが、網羅性は下がる)。
 
 doctor / preflight は標準 root の不在を中立に報告し(警告ではない)、非標準配置を妨げない。
-ただし標準の `~/src/<context>/` 構造の方が identity 判定・secret access・policy の自動適用を
-受けられるので、特段の理由がなければ標準配置を推奨する。
+ただし標準の `~/src/<context>/` 構造の方が identity の自動判定と doctor / preflight の自動検査
+(standard root の presence・remote URL の credential scan)を受けられるので、特段の理由がなければ
+標準配置を推奨する。
 
 ## Rules
 
@@ -94,5 +99,6 @@ doctor / preflight は標準 root の不在を中立に報告し(警告ではな
 - 新規 repo のディレクトリ名は kebab-case とし、remote の repo 名に一致させる
   (既存 repo の rename はしない)。
 - `~/src` の外(unknown directory)では Git identity が解決されず commit が fail-closed に
-  なる(意図した安全側の挙動)。標準 root の不在自体は doctor が中立に報告する(警告ではない)。
+  なる(意図した安全側の挙動)。ただし remote URL が personal の GitHub に一致する repo は、
+  remote URL による二次判定(Issue #52)で personal identity が解決される。標準 root の不在自体は doctor が中立に報告する(警告ではない)。
   非標準配置で運用する場合の解除方法は上の「許容された非標準配置」を参照。

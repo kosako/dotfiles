@@ -30,7 +30,7 @@ AI agent の安全境界は `dotfiles` に置く。AI agent の振る舞いを�
 - AI tool を導入または有効化してよいかを決める gate。
 - secret を含まない、profile-independent な policy document。
 - 別 AI project を参照するための抽象的な設定項目。
-- Claude Code ハーネスの環境設定(`settings.json` の model / permission / plugin / cost posture)を **personal の public-safe な範囲だけ** chezmoi 管理する control plane。これは「skill が使う tool-specific config template」(後述。agent-tools 側の責務)とは別物 ── ハーネスをどう振る舞わせるかは環境ポリシーであり dotfiles に属する。`settings.local.json`(Claude が動的に書く machine 固有値)と skill / instruction の配布物は管理しない。work / client の settings は別系統(暗号化バックアップ / 各マシン手設定)。
+- AI ハーネスの環境設定を **personal の public-safe な範囲だけ** chezmoi 管理する control plane: Claude Code の `~/.claude/settings.json`(model / permission / hooks 登録 / plugin / cost posture。[claude-settings](claude-settings.md))、Codex の `~/.codex/hooks.json`(hooks 登録)と `~/.codex/rules/default.rules`(承認 rules の read-only baseline。[ai-policy](ai-policy.md))、OpenCode の `~/.config/opencode/opencode.json`(harness の床 = permission・autoupdate off・share disabled・instructions。[opencode-settings](opencode-settings.md))。これは「skill が使う tool-specific config template」(後述。agent-tools 側の責務)とは別物 ── ハーネスをどう振る舞わせるかは環境ポリシーであり dotfiles に属する。tool 自身が書く live ファイル(project の `.claude/settings.local.json`、Codex の `config.toml`)、認証ファイル、skill / instruction の配布物は管理しない。work / client の settings は別系統(暗号化バックアップ / 各マシン手設定)。
 
 `dotfiles` は、AI tools を暗黙に install しない。AI skills / agents project を暗黙に clone / pull / sync しない。
 
@@ -88,10 +88,10 @@ AI skills / agents project は、`dotfiles` の policy を前提に動く。poli
 
 連携は 2 層に分かれる。混同しない:
 
-- **配布層**(AI skills / agents project → AI tool home): skill / instruction を `~/.claude` / `~/.codex` などへ配置するのは AI skills / agents project 側の責務(build / sync)。`dotfiles` はこの**配布物(skill / instruction)**を作らない。配布の正本は当該 project 側の docs。(例外: ハーネス設定 `~/.claude/settings.json` は配布物ではなく**環境設定**なので、personal の public-safe な範囲だけ `dotfiles` が control plane として管理する。上の「dotfiles が持つもの」参照。)
+- **配布層**(AI skills / agents project → AI tool home): skill / instruction を `~/.claude` / `~/.codex` などへ配置するのは AI skills / agents project 側の責務(build / sync)。`dotfiles` はこの**配布物**(skill / instruction)を作らない。配布の正本は当該 project 側の docs。(例外: ハーネス設定 ── Claude の `~/.claude/settings.json`、Codex の `~/.codex/hooks.json` / `~/.codex/rules/default.rules`、OpenCode の `~/.config/opencode/opencode.json` ── は配布物ではなく**環境設定**なので、personal の public-safe な範囲だけ `dotfiles` が control plane として管理する。上の「dotfiles が持つもの」参照。)
 - **監視層**(`dotfiles` → AI skills / agents project): `dotfiles` の `doctor` が presence と、opt-in 時に status の health を read-only で覗くだけ(上の箇条書き)。書き込み・clone・sync はしない。
 
-監視層の status 読み取りは personal で on(`enableAgentToolsStatus: true`、#73)。work profile は既定 off のまま。doctor は status を `status.sh --root <checkout>` で pin して読む(status.sh は既定で cwd を検査するため、未 pin だと doctor の cwd を誤検査して空 repo を偽報告する)。非標準 checkout の path は `AGENT_TOOLS`(override 機構は #71)を非追跡の `~/.zshrc.local` に置く(具体 path は tracked file に焼かない。[local-overrides](local-overrides.md))。
+監視層の status 読み取りは personal で on(`enableAgentToolsStatus: true`、#73)。work profile は既定 off のまま。doctor は status を `status.sh --root <checkout>` で pin して読む(#73 当時の status.sh は既定で cwd を検査し、未 pin だと doctor の cwd を誤検査して空 repo を偽報告した。agent-tools#305 以降は既定の root が script の属する repo になり cwd に依存しないが、検査対象を明示するため pin は続ける)。非標準 checkout の path は `AGENT_TOOLS`(override 機構は #71)を非追跡の `~/.zshrc.local` に置く(具体 path は tracked file に焼かない。[local-overrides](local-overrides.md))。
 
 推奨する置き場所:
 
@@ -121,20 +121,20 @@ AI skills / agents project から `dotfiles` に昇格してよいもの:
 - 個人・会社・クライアント文脈に依存するもの。
 - それ単体で private context を推測できるもの。
 
-## 初期実装の扱い
+## `enableAiPolicy` / `enableAiTools` の現状
 
-現在の `dotfiles` では、AI tools は後続 module とする。
-ただし、AI agent の権限ポリシーは初期段階から定義する。
+AI agent の権限ポリシーは初期段階から定義し、AI tool 導入の capability(`enableAiTools`)は後続とした。
+AI tool の binary(`codex` / `opencode` / `copilot-cli`)は、他の CLI と同じく software catalog に載っており、`installPackages` / `installGuiApps` の gate の下で `install-packages.sh` が明示 install する(Claude Code は catalog 外の native installer)。harness 設定は `claude-settings` / `codex-settings` / `opencode-settings` module が管理する。
 
-初期状態:
+現在の値(personal / work 共通):
 
 ```text
 enableAiPolicy: true
 enableAiTools: false
 ```
 
-`enableAiPolicy=true` は policy document と report-only check を有効にする。
-`enableAiTools=false` は AI tool install / AI asset sync / agent setup を行わないことを意味する。
+`enableAiPolicy=true` は policy document と report-only check(doctor の AI policy / agent-tools section)を有効にする。また `codex-settings` module が active な profile(personal)では、managed な Codex 承認 rules baseline `~/.codex/rules/default.rules` の render もこの capability で gate する(#139。template 自己 gate のため、false にすると空 render になり、apply 済みの file も次の `chezmoi apply` で削除される)。
+`enableAiTools` は roadmap 上の placeholder(`implemented: false`)で、現在は何も駆動しない(true にすると doctor が未実装を warn し、work / client / agent では policy 違反)。AI tool を install するか、harness 設定を置くかはこの capability では決まらず、上記の catalog と module で決まる。AI asset の sync は AI skills / agents project の責務で、dotfiles は行わない。
 
 ## Claude Code sandbox の射程と限界(`enforceAiSandbox`)
 
@@ -192,7 +192,9 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
   body を配布しない。**steering / fail-open**: body 不在(exit 127)・非 2 の非ゼロ exit・
   不正 JSON・timeout はすべて tool call 続行(block は exit 2 のみ)なので、agent-tools 未
   sync の新規マシンでも登録は安全な no-op。**Codex はさらに inert stage**: 登録済みでも一度
-  `/hooks` で trust するまで無警告で silent skip される(registration ≠ activation)。
+  `/hooks` で trust するまで skip される(registration ≠ activation)。#181 当時(Codex
+  0.142.2)は無警告だったが、現行の公式仕様では起動時に `/hooks` での確認を促す警告が出る
+  (時点付きの仕様は agent-tools の `docs/runtime-injection-defense.md` が正本)。
   dangling(claude-settings / codex-settings 非 active、body 不在)は doctor が report。
   同じ partial(`agent-hooks-json`)は品質ループ(#199 `enableQualityLoopHooks`)と herdr
   integration(#225 `enableHerdrIntegration`)の登録も出すが、どちらも GitHub 防御の層ではない
@@ -200,7 +202,8 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
 - GitHub 由来の deny は **3 tier**(#119 Phase 2 task B。専用 capability は作らない):
   - **(1) never-legit secret floor は無条件**(常時 render)。SSH 秘密鍵読取(`~/.ssh`)・
     credential-store 読取(`~/.aws` / `~/.config/gh` の OAuth token / `~/.netrc` /
-    `~/.codex/auth.json`。#136)・全 env dump(`printenv` / `env`)・GitHub Actions secret
+    `~/.codex/auth.json`(#136)/ `~/.local/share/opencode/auth.json`(#234))・全 env dump
+    (`printenv` / `env`)・GitHub Actions secret
     (`gh secret` / `gh api *secrets*`)は誰も Claude に正規に頼まず、deny は Claude の
     tool call にしか効かない(人間のターミナル非影響)ので、`enforceAiSandbox` を待たず
     常時 deny する(personal で今日 live)。file 系は **Read 側 deny を主軸**とし、Bash
@@ -210,62 +213,72 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
   - **(3) human-legit な write は `enforceAiSandbox` に相乗り**。main / master への直 push と
     `.env` 読取(`cat *.env*` / `Read(//**/.env*)`)を deny、release 操作と branch protection /
     rulesets 変更を ask にする。人間が正規に Claude に頼みうるので常時 ON にはせず、制限
-    context(= 下記「制限 context の接続規約」/ Phase 3 [#131])に寄せる。なお main-push deny
+    context(= 下記「制限 context の接続規約」。実体は未実装)に寄せる。なお main-push deny
     の matcher(`git push * main|master`)は **leaky steering**: ` main` 末尾の explicit 形しか
     拾わず bare `git push` / `git push origin HEAD` / refspec(`HEAD:main`)は抜ける(Claude Code
     の matcher セマンティクスを #119 で裏取り。`*` は空白跨ぎ・末尾 ` main` は word boundary 固定・
     複合コマンドは分割評価)。真の「main 直 push を止める」hard 層は server-side branch protection
-    か Phase 3 の隔離 reader であり、matcher を enumeration で広げて塞ぐのは command-string ≠
-    enforcement のアンチパターンゆえ **しない**。
+    だけであり(Phase 3 [#131] で入った隔離 reader / safe-gh は steering なので hard 層にはならない)、
+    matcher を enumeration で広げて塞ぐのは command-string ≠ enforcement のアンチパターンゆえ
+    **しない**。
 
 **boundary でない理由(過大評価しない)**:
 
 - command-string matcher は **steering であって enforcement ではない**。`$()`・等価な
-  read path・別経路の MCP・subagent のギャップ(PreToolUse 不発 [anthropics/claude-code#21460])
-  で迂回しうる。
+  read path・別経路の MCP で迂回しうる。
 - context-gated な write(他人由来の untrusted が無い clean なときだけ comment / label /
-  PR create / push を自律許可)を判定する **write-gate hook** はまだ**無い**(意図的。
-  Phase 2 から Phase 3 [#131] へ hand-off 済み。#137 で登録した read-steering hook とは
-  別物で、あれは読取を safe-gh に寄せる nudge だけを担う)。
+  PR create / push を自律許可)を判定する **write-gate hook** は**無い**(意図的。
+  Phase 2 から Phase 3 [#131] へ hand-off したが未実装で、#131 はこれを実装せずに close した。
+  現在は追跡 issue なし。#137 で登録した read-steering hook とは別物で、あれは読取を
+  safe-gh に寄せる nudge だけを担う)。
 - egress は `enforceAiSandbox` の network allowlist = **hostname best-effort**(TLS 終端せず、
   DNS exfil は素通り。上の sandbox 節)。
-- **Phase 1 には trifecta(untrusted 読取 × secret × egress)を構造的に断つ hard 層が無い**。
-  hard 層 ── 隔離 reader / network egress sandbox / token の物理分離 ── は Phase 3 [#131]。
+- **dotfiles(control plane)自体には trifecta(untrusted 読取 × secret × egress)を構造的に断つ
+  hard 層が無い**。trifecta を断つ hard 層は 2 つだけで、(a) credential 隔離(untrusted を
+  読む session で管理下の `gh` / git の既定認証源を断つ token 隔離 session。Phase 3 [#131] で
+  agent-tools が実装し、下記 acceptance を実機で充足。その隔離 session で起動したときだけ効く)と、
+  (b) OS egress firewall の L3/L4 遮断(未実装・別 tier・将来 opt-in。#188)。Phase 3 で入った
+  隔離 reader / safe-gh / provenance は **steering** であって hard 層ではない(強度ラベルの正本は
+  agent-tools の `docs/runtime-injection-defense.md`)。
   `enableGitHubIsolatedReader` が配線する hook 登録(#137)も **steering であって hard 層
   ではない**(fail-open で黙って消えうる。hard 保証は hook に通さない ── fail-closed の床は
   `permissions.deny` の側)。
 
-**subagent への適用(deny は継承・親 hook は subagent 不発)**: `permissions.deny` は main session
-だけでなく **subagent にも継承される**(Claude Code が subagent に親会話の permission context を
-引き継がせる)。よって `mcp__github` deny と secret 床は **subagent からも効く** ── injection で
-subagent を spawn して回避する経路は塞がっている。これは **settings.json(親 session)側の
-`PreToolUse` hook が subagent の個別 tool call に継承発火しない**([anthropics/claude-code#21460])
-のとは別レイヤ:**`permissions.deny`(enforcement)は subagent をカバーするが、親 session 側の
-hook(steering)は subagent の tool call には継承発火しない**(subagent 固有の hook は agent
-frontmatter で別途定義できるが、それは agent-tools 領分)。一方 `permissions.deny` は session 一律
-なので、「main は許可・subagent だけ非付与」(例: untrusted な GitHub を読む subagent からだけ
-`WebFetch` を外す)は settings.json では表現できない ── それは agent 定義(agent-tools 領分)/
-Phase 3 の隔離 reader の役割になる。
+**subagent への適用(deny も settings の hook も subagent に効く)**: `permissions.deny` は main session
+だけでなく **subagent にも適用される**(公式仕様: settings の deny rule は main conversation と subagent の
+両方に効く)。よって `mcp__github` deny と secret 床は **subagent からも効く** ── injection で
+subagent を spawn して回避する経路は塞がっている。settings.json の hook も、現行の公式仕様では subagent 内に
+適用され、`PreToolUse` / `PostToolUse` は subagent の tool call でも発火する(agent-tools 側で 2026-09-05 に
+仕様確認。配備先での実機 smoke とは区別する。以前の「親 session の hook は subagent 不発」
+[anthropics/claude-code#21460] は現行の制約として扱わない)。ただし hook は subagent で発火しても
+**steering(fail-open)** のままで、boundary ではない(subagent 固有の hook は agent frontmatter で別途
+定義できるが、それは agent-tools 領分)。一方 `permissions.deny` は session 一律なので、「main は許可・
+subagent だけ非付与」(例: untrusted な GitHub を読む subagent からだけ `WebFetch` を外す)は settings.json
+では表現できない ── それは agent 定義(agent-tools 領分)/ 隔離 reader(Phase 3 [#131] で agent-tools が
+実装)の役割になる。
 
-**token 分離の実態(P0-B・best-effort)**: 「untrusted を読む間 `GH_TOKEN` を env から外せば
+**token 分離の実態(P0-B)**: 「untrusted を読む間 `GH_TOKEN` を env から外せば
 private-token を hard に切れる」は **この環境では成り立たない**。実機の `gh` は `GH_TOKEN`
 未設定でも **keyring 認証**(macOS keychain)で動くため、env を外しても認証は残る = 偽の安心。
 真に切るには untrusted-read 用 shell で `GH_CONFIG_DIR` を隔離し、全認証源(keychain / OAuth /
-git credential helper / MCP token / curl)を遮断する **session 隔離**が要る = hard 化は Phase 3。
-これは runtime / invocation そのものなので dotfiles(control plane)には置かず、**Phase 3 [#131]
-への単一 hand-off** とする。acceptance criteria は「隔離 session で `gh` / git の認証済み
-private access が失敗することを実機検証する」。dotfiles 側で `GH_CONFIG_DIR` 隔離 shell や
+git credential helper / MCP token / curl)を遮断する **session 隔離**が要る = hard 化は Phase 3 [#131]
+に hand-off した(runtime / invocation そのものなので dotfiles(control plane)には置かない)。
+agent-tools が credential 隔離 harness として実装し、acceptance「隔離 session で `gh` / git の認証済み
+private access が失敗することを実機検証する」を充足済み(required = gh + git-https、git-ssh / curl は
+opt-in。keychain 直読み・MCP token は env 隔離の射程外。#131 は 2026-07-10 close。正本は agent-tools の
+`docs/credential-isolation-acceptance.md`)。dotfiles 側で `GH_CONFIG_DIR` 隔離 shell や
 safe-gh wrapper は land しない(env-strip だけの半端な実体は inert = 偽の安心になる)。
 
-**制限 context の接続規約(#119 Phase 2 で確定・実体は agent-tools / Phase 3 [#131])**: tier3 の
+**制限 context の接続規約(#119 Phase 2 で確定・実体(launcher)は未実装。#131 はこれを実装せずに
+close。現在は追跡 issue なし)**: tier3 の
 human-legit write gate を daily driver 全体に被せず「untrusted な GitHub を読む制限 context」に
 だけ効かせる方法は、`permissions.deny` が **session 一律**(「main は許可・制限 context だけ deny」を
 1 つの settings 内で表現できない)である以上、**別 session を立てる**ことに帰着する。その別 session の
-実体(launcher / 隔離起動)は invocation = agent-tools 領分(Phase 3)に置き、**dotfiles は launcher を
+実体(launcher / 隔離起動)は invocation = agent-tools 領分に置く想定で(未実装)、**dotfiles は launcher を
 持たない**。接続規約: 制限 context は agent-tools が **`claude --settings <path>` で dotfiles の managed
 template を基底に重ねて** 起動する。重ねる中身は **write-gate のみ**(secret floor + `mcp__github`
 deny + tier3 の human-legit write deny)で、**`enforceAiSandbox` の egress sandbox ブロックは含めない**
-── egress は別 tier(Phase 3 の OS egress firewall)。permission deny(Claude tool)・network egress
+── egress は別 tier(OS egress firewall。未実装・#188)。permission deny(Claude tool)・network egress
 (Bash subprocess)・token 隔離(OS / session credential)は同じ file に書けても **同じ enforcement
 layer ではない**ので束ねない。deny floor は managed template を single source とし、agent-tools 側で
 再発明・drift させない。dotfiles はこの規約を **doc として持つだけ**で、制限 settings file 自体は

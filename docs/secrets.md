@@ -47,8 +47,9 @@ secret 供給が有効になるのは `allowSecretsAccess=true` の profile に�
 
 - `allowSecretsAccess` は [policy-model](policy-model.md) の environmentKind 不変条件により、**work / client / sandbox / agent では `false` 必須**(`validate-policy.sh` が hard fail で強制)。供給規約が効くのは `personal` 等に限られる。
 - `doctor` の `1Password` section は `allowSecretsAccess=true` のときだけ `op` の存在と sign-in を report-only で確認する。secret 値そのものは読まない。`false` の profile では「secret access disabled」と報告して終わる。sign-in 確認の `op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し(未ログインの `op` は対話 unlock を待って応答しないことがある、#231)、期限内に答えが無ければ「sign-in 未確認」と warn して次の section へ進む(「not signed in」とは断定しない)。
+- private-backup(`backup` / `verify` / `restore`)の runtime gate も `allowSecretsAccess` を使う。実 profile を chezmoi config から fail-closed に解決し、`true` 以外では実行を拒否する([private-backup](private-backup.md))。
 
-この gate は **secret 供給という用途だけ**を縛る。direnv 一般の利用(後述)は別 capability で、ここでは縛らない。
+この gate は **secret を扱う用途**(op による供給と private-backup)だけを縛る。direnv 一般の利用(後述)は別 capability で、ここでは縛らない。
 
 ## identity は別ルール(二層)
 
@@ -59,9 +60,9 @@ secret 全般は op + direnv で供給してよいが、**Git identity は対象
 
 ## AI agent との関係
 
-[ai-policy](ai-policy.md) の default deny は維持する。dotfiles は供給規約を置くだけで、AI に secret store を読ませる動線は作らない。
+[ai-policy](ai-policy.md) の「secret の読取は deny」は維持する。dotfiles は供給規約を置くだけで、AI に secret store を読ませる動線は作らない。
 
-- AI agent は secret store に直接アクセスしない(default deny)。secret access は明示承認が必要。
+- AI agent は secret store に直接アクセスしない(ai-policy の「Prohibited By Default」)。secret を使う操作は明示承認が必要(同「Approval Required」)。
 - 本 doc の供給方式は**利用者本人**のプロセス起動時注入であって、AI agent への自動供給ではない。
 
 ## direnv 一般との関係

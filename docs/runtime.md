@@ -43,9 +43,9 @@ runtime の upgrade は project 側の pin 変更、または global baseline �
 
 既に node / go / uv を Homebrew で入れている環境を mise 供給へ移す手順。**実 home への操作は本人が明示的に行う**(repo は勝手に install / uninstall しない)。npm global package は node の prefix 配下に入るため、node 供給元を切り替えると **見えなくなる**。先に入れ直すこと。
 
-1. **mise 導入**: `brew install mise`(`packages.yaml` の `cli.runtime` に宣言済み)。shell 統合(`mise activate`)を有効化。
+1. **mise 導入**: `brew install mise`(`.chezmoidata/packages.yaml` に `source: brew_formula` で宣言済み)。shell 統合(`mise activate`)を有効化。
 2. **baseline runtime を install**: `mise install`(global config の `node` / `go` / `uv` を取得)。`not_found_auto_install=false` なのでこの明示実行が必要。
-3. **PATH 確認**: 新しい shell で `command -v node npm go uv` が mise 配下(`$HOME/.local/share/mise/...` の shim)を指すことを確認。
+3. **PATH 確認**: 新しい shell で `command -v node npm go uv` が mise 配下(`$HOME/.local/share/mise/...`。対話 shell では `mise activate` による `installs/...`、`zsh -c` などの非対話 shell では `shims/...`)を指すことを確認。
 4. **global npm tool の入れ直し**: mise の node 配下に `@openai/codex` を入れ直す。`npm root -g` が mise 配下になっていることを確認する。（`claude` は npm-global ではなく native installer で入れるため対象外。`docs/supply-chain-npm.md`）
 5. **go tool**: `$HOME/go/bin` 配下の tool(`goreleaser` 等)は go バイナリと独立なので PATH に残るが、必要なら mise の go で再ビルドする。
 6. **検証**: `command -v node npm go uv codex` がすべて解決し、`npm root -g` が mise 配下を指すことを確認してから次へ（`claude` は native installer の `~/.local/bin` で別管理）。

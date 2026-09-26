@@ -1,6 +1,6 @@
 # Git Hook Gates(commit 境界 gate の配線)
 
-commit 境界の機械的規律(public-safety scan / AI trailer 検証)を git hook として
+commit 境界の機械的規律(public-safety scan / git identity 検査 / AI trailer 検証)を git hook として
 決定的に実行するための **dotfiles 側の配線**。gate / dispatcher の**実体**は
 agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfiles、
 [config-ownership](config-ownership.md))、**契約の正本は agent-tools の
@@ -31,9 +31,11 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
   (agent-tools#202)。shim がどちらを指すかは dotfiles の裁定で、**`~/.claude` 側を
   正とする**(Claude 側 hooks 登録が既に同じ home を参照している並びに合わせた。
   `$HOME` は shim 実行時に sh が展開するため、render に実 home path は焼かれない)。
-- `core.hooksPath` は per-repo `.git/hooks` を完全置換するが、dispatcher が
-  gate 通過後に repo 自身の `.git/hooks/<stage>` へ chain するので、既存 repo hook は
-  動き続ける(契約の詳細は agent-tools 側 doc)。
+- `core.hooksPath` は per-repo `.git/hooks` を完全置換する。dispatcher が gate 通過後に repo 自身の
+  `.git/hooks/<stage>`(linked worktree でも common dir 側)へ chain するので、**pre-commit / commit-msg の**
+  既存 repo hook は動き続ける(契約の詳細は agent-tools 側 doc)。shim を置いていない stage
+  (`prepare-commit-msg` / `post-commit` / `pre-push` / `post-checkout` / `post-merge` など)の repo hook は、
+  配線中は**実行されない**(git は `core.hooksPath` の directory しか見ない)。
 
 ## gating(2 段 gate = intent × readiness)
 
@@ -67,7 +69,9 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
   (apply impact)。`doctor` は apply **後**の配線 chain(shim / hooksPath /
   4 script)を report-only で監視し、「配線済みなのに配備不完全 = commit が
   止まっている」を最も強い警告にする。capability off で配線が残置していれば
-  それも warn する(apply で prune)。
+  それも warn する(git-hook-gates module が active な profile で capability を off に
+  した場合は apply で prune される。profile 切替で module 自体が非 active になった場合は
+  apply では消えないので、managed-path orphans の案内どおり手で消す。#201)。
 - gate は module の `requires` ではなく **template 自己 gate**(鍵が欠けると空
   render → chezmoi が既存 target も削除)。`requires` だと chezmoiignore が既存
   file を prune せず、fail-closed な shim が残置される(#184 の教訓)。off にした

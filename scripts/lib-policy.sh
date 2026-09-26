@@ -286,8 +286,8 @@ is_allowed_environment_kind() {
 
 # Boolean capabilities that must be false for a given environmentKind.
 # Encodes the policy that work / client / agent environments do not carry
-# elevated permissions (install, system mutation, secrets, network, AI
-# tooling) by default, and that sandbox forbids secret access. personal
+# elevated permissions (install, secrets, network, AI tooling) by default,
+# and that sandbox forbids secret access. personal
 # is unconstrained; enum capabilities have their own forbidden-VALUE table
 # below (#45). See docs/policy-model.md. agent has no profile yet; the row
 # is defined so the constraint takes effect the moment an agent profile is
@@ -842,11 +842,6 @@ require_secrets_access() {
   return 0
 }
 
-# Print names of remotes whose URL embeds password-like userinfo
-# (scheme://user:password@host). Covers pushurl too — a credential can hide
-# in remote.<name>.pushurl with a clean fetch url (#144). Each remote is
-# printed once even when both url and pushurl are flagged. URL values are
-# never printed.
 # git_default_excludes_file — the global excludes file git reads when
 # core.excludesFile is unset: $XDG_CONFIG_HOME/git/ignore if that variable is
 # set and non-empty, else $HOME/.config/git/ignore (git's rule). A trailing
@@ -902,6 +897,11 @@ git_excludes_file_setting() {
   printf 'unset\n'
 }
 
+# Print names of remotes whose URL embeds password-like userinfo
+# (scheme://user:password@host). Covers pushurl too — a credential can hide
+# in remote.<name>.pushurl with a clean fetch url (#144). Each remote is
+# printed once even when both url and pushurl are flagged. URL values are
+# never printed.
 git_remotes_with_credentials() {
   local repo="$1"
   git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null |

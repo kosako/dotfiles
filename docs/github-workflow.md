@@ -1,6 +1,6 @@
 # GitHub Workflow
 
-この repository では、Phase 2 以降の作業を GitHub Issues / Pull Requests で管理する。
+この repository の作業は GitHub Issues / Pull Requests で管理する。
 
 ## 目的
 
@@ -33,24 +33,19 @@ main
 4. 変更する。
 5. validation を実行する。
 6. PR を作る。
-7. PR に validation result と residual risk を書く。
+7. PR に検証結果と残リスクを書く(見出しは下記「PR に書くこと」)。
 8. PR を merge する。
 9. 必要なら Notion worklog / handoff notes を更新する。
 
-推奨 branch 名:
+推奨 branch 名(`<種別>/<Issue 番号>-<要約>`。種別は `feat` / `fix` / `docs` / `chore` / `refactor` など):
 
 ```text
-phase2/git-profile
-chore/issue-pr-workflow
-docs/ai-boundary
-fix/policy-validation
+feat/199-quality-loop-hooks-wiring
+fix/248-global-gitignore
+docs/244-245-247-audit-docs
 ```
 
-Issue 番号を明示したい場合:
-
-```text
-issue-12/git-profile
-```
+`issue-<Issue 番号>/<要約>`(例: `issue-234/opencode-phase1`)の形も使ってよい。
 
 ## Issue が必要な変更
 
@@ -61,7 +56,7 @@ issue-12/git-profile
 - package install / GUI app install / macOS defaults に関係する変更。
 - secret access / network tunnel / AI tools に関係する変更。
 - Git identity、SSH、npm、Corepack、runtime に関係する変更。
-- Phase roadmap 上の task。
+- Notion の設計メモや作業ログの `Next` から切り出した task(Phase 別 roadmap は凍結済みで更新しない)。
 
 ## PR が必要な変更
 
@@ -84,18 +79,20 @@ main 直 commit は例外扱いにする。
 
 - merge 後に見つかった typo の即時修正。
 - broken commit の最小修正。
-- GitHub / Notion 運用移行中の bootstrap。
 
 例外を使った場合でも、Notion worklog または follow-up Issue に理由を残す。
 
 ## PR に書くこと
 
-- Summary: 何を変えたか。
-- Linked Issue: 対応 Issue。
-- Validation: 実行した検証。
-- Side Effects: install / secret / network / apply の有無。
-- Residual Risk: 残っているリスク。
-- Next: 次にやること。
+見出しは `.github/PULL_REQUEST_TEMPLATE.md` と同じ。
+
+- 変更内容: 何を変えたか。
+- 関連 Issue: 対応 Issue(`Closes #N`)。
+- 検証結果: 実行した検証。
+- 副作用: install / secret / network / `chezmoi apply` の有無。
+- 残リスク: 残っているリスク。
+- 補足: 上記以外の補足。secret・内部 URL・組織 / クライアント固有の機密情報は書かない。次にやることは
+  PR には書かず、Notion worklog の `Next` か follow-up Issue に残す。
 
 ## 最低限の validation
 
@@ -129,11 +126,18 @@ shellcheck -S warning scripts/*.sh
 git diff --check
 ```
 
-`test-render.sh` / `test-claude-settings.sh` / `test-git-signing.sh` / `test-starship.sh` /
-`test-ssh.sh` は chezmoi を必要とする(CI では version pin して導入する。render job 所属)。
+`test-render.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` /
+`test-git-signing.sh` / `test-git-ignore.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
+(CI では version pin して導入する。render job 所属)。`test-starship.sh` は source の静的検査なので chezmoi は
+不要だが、CI では render job で走る。
 `test-npmrc.sh` は両 job で走る(静的検査は validate job、chezmoi が要る rendered-content
 検査は render job で実行される。#150)。
+`test-inventory.sh` は `test-install-packages.sh` から呼ばれるため個別には載せない(単独実行も可)。
+`test-lib.sh` はテスト共通の helper で、source 専用(直接は実行しない)。
 この一覧は `.github/workflows/validate.yml` が正なので、CI にテストを足したらここも更新する。
+一覧の `git diff --check` は手元用で、未 stage の変更だけを見る(stage 済みの変更は `git diff --cached --check` で見る)。
+CI は fresh checkout で差分が無いため、代わりに commit 済み tree 全体を空 tree と比べる
+`git diff --check "$(git hash-object -t tree /dev/null)" HEAD` を実行する。
 
 `preflight` / `doctor` を変更した場合:
 
@@ -164,7 +168,7 @@ VM 検証は行わない(2026-06-12 決定: throwaway destination + CI render �
 
 ## 新しい file 種別を managed にするときの標準手順
 
-1. module の `paths:` / `requires:` を `.chezmoidata/modules.yaml` に宣言する(`docs/policy-model.md`)。
+1. module の `paths:` / `requires:` を `.chezmoidata/modules.yaml` に宣言する(`docs/policy-model.md`)。新しい module なら、使う profile の `modules:`(`.chezmoidata/profiles.yaml`)にも列挙する(列挙しない限りどの profile にも apply されない)。
 2. throwaway destination で apply し、`scripts/test-render.sh` の期待 managed 一覧を更新する。
 3. 実 host では `chezmoi diff` の全出力を確認してから、target を絞って apply する。
 4. 適用後に `./scripts/doctor.sh <profile>` を確認する。

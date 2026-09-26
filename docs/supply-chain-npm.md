@@ -79,7 +79,7 @@ project の `.npmrc` に `ignore-scripts=false` を置くと以後のその proj
 
 ### Claude Code(native installer で入れる。npm-global にしない)
 
-Claude Code は **native installer(`curl -fsSL https://claude.ai/install.sh | bash`)で入れる**。`~/.local/bin/claude` にスタンドアロン配置され、npm を一切経由せずバックグラウンドで自己更新するので、`ignore-scripts=true` などの npm hardening と**独立して両立**する(catalog からも外してある = `packages.yaml` / `docs/runtime.md`。PATH 前置は `dot_zshenv`)。
+Claude Code は **native installer(`curl -fsSL https://claude.ai/install.sh | bash`)で入れる**。`~/.local/bin/claude` にスタンドアロン配置され、npm を一切経由せずバックグラウンドで自己更新するので、`ignore-scripts=true` などの npm hardening と**独立して両立**する(catalog からも外してある = `packages.yaml` / `docs/runtime.md`。PATH 前置は非対話 shell 向けが `dot_zshenv`、対話 shell では `dot_zshrc` が `mise activate` の後で再前置する = [shell](shell.md))。
 
 **なぜ npm-global にしないか**: claude-code 2.x は ~226MB のネイティブバイナリを optional dependency(`@anthropic-ai/claude-code-<platform>`)として配り、`postinstall`(`install.cjs`)で package の bin にハードリンク配置する。`ignore-scripts=true` だと postinstall が走らずバイナリが配置されない(optional dep 自体は取得されている)。さらに **Claude Code の組み込みオートアップデータは内部で `npm install -g` を実行して同じ hardening を継承する**ため自己更新に失敗し、`claude` が `native binary not installed` で落ちる/バイナリがエラースタブに置換され得る([anthropics/claude-code#62684](https://github.com/anthropics/claude-code/issues/62684))。npm-global のままこれを直す公式手段は無く、native installer がこの層の公式解。
 

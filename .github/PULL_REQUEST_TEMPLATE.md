@@ -1,29 +1,28 @@
-## Summary
+## 変更内容
 
 -
 
-## Linked Issue
+## 関連 Issue
 
 Closes #
 
-## Validation
+## 検証結果
 
-- [ ] `./scripts/validate-policy.sh --all`
-- [ ] `git diff --check`
+- [ ] `docs/github-workflow.md` の「最低限の validation」(`.github/workflows/validate.yml` が PR ごとに自動実行。手元での事前実行も推奨)
 
-Add task-specific checks here.
+task 固有の検証があればここに足す。
 
-## Side Effects
+## 副作用
 
-- Install side effects: none / planned / unknown
-- Secret access: none / planned / unknown
-- Network changes: none / planned / unknown
-- `chezmoi apply`: no / planned / unknown
+- install: なし / 予定 / 不明
+- secret access: なし / 予定 / 不明
+- network 変更: なし / 予定 / 不明
+- `chezmoi apply`: 不要 / 予定 / 不明
 
-## Residual Risk
+## 残リスク
 
 -
 
-## Notes
+## 補足
 
-Do not include secrets, tokens, private endpoints, internal URLs, or organization/client-specific confidential details.
+secret・token・private endpoint・内部 URL・組織 / クライアント固有の機密情報は書かない。次にやることは PR には書かず、Notion worklog の `Next` か follow-up Issue に残す。

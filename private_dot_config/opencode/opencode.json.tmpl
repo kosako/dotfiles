@@ -10,14 +10,16 @@
        What is here and why:
        - permission: OpenCode defaults to allow-all. The read deny mirrors the
          Claude secret floor (SSH keys, credential stores incl. the Codex and
-         OpenCode auth.json, .env). bash, per docs/ai-policy.md (read-only
-         local work needs no approval; leaving the machine or escalating
-         does): `git push` / `git clone`, sudo, curl, wget are ask, and the
-         GitHub CLI is ask BY DEFAULT (`gh *`) with only the read-only
-         subcommands allowed back (view / list / diff / checks / status,
-         auth status, search, help) — enumerating mutations was the #240
-         gap (`gh issue edit`, `gh pr close`, `gh api -XPOST`, ... fell to
-         allow-all), and `gh api` stays ask whatever the method because
+         OpenCode auth.json) and also denies .env, which on the Claude side is
+         the enforceAiSandbox human-legit gate (off on personal), not the
+         floor — so this floor is stricter there. bash, per docs/ai-policy.md
+         (read-only local work needs no approval; leaving the machine or
+         escalating does): `git push` / `git clone`, sudo, curl, wget are
+         ask, and the GitHub CLI is ask BY DEFAULT (`gh *`) with only the
+         read-only subcommands allowed back (view / list / diff / checks /
+         status, auth status, search, help) — enumerating mutations was the
+         #240 gap (`gh issue edit`, `gh pr close`, `gh api -XPOST`, ... fell
+         to allow-all), and `gh api` stays ask whatever the method because
          short-flag forms (`-XPOST`, `-ftitle=x`) defeat flag matching and
          GraphQL reads POST anyway. `gh auth status` is allowed only in its
          bare form: `--show-token` / `-t` print the token, and `gh auth
@@ -34,8 +36,10 @@
          instead a pair — the exact bare form and `... *` with a space — so
          the command name is delimited and an alias such as `gh status-token`
          (→ `auth token`) does not ride an allow for `gh status` (Codex
-         review, PR #249). `gh *` keeps the space so `ghq` and friends are not
-         caught; the bare `gh` prints help.
+         review, PR #249). Exceptions: `gh search *` has no bare form, so a
+         bare `gh search` stays ask; `gh auth status` (see above),
+         `gh --version` and `gh version` are bare-only. `gh *` keeps the
+         space so `ghq` and friends are not caught; the bare `gh` prints help.
          scripts/test-opencode-settings.sh pins this map exactly AND
          evaluates it against a fixed command set (doctor's Codex outward
          probes plus short-flag / alias / read forms).
@@ -47,8 +51,9 @@
          its `@` import, so the imported file is named explicitly.
        NOT here (local, unmanaged): provider / model (personal choice, like
        #93 for Claude), auth (~/.local/share/opencode/auth.json), plugins,
-       mcp, agents, tui. Put local additions in a file named by OPENCODE_CONFIG
-       (merged after this one). */ -}}
+       mcp, agents. Put local additions in a file named by OPENCODE_CONFIG
+       (merged after this one); TUI settings go in the separate, also local
+       tui.json (path overridable by OPENCODE_TUI_CONFIG). */ -}}
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,

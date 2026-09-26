@@ -13,7 +13,7 @@
 
 ## GitHub 運用
 
-Phase 2 以降の作業は、原則として Issue 作成、branch 作成、Pull Request、merge の順で進める。
+作業は、原則として Issue 作成、branch 作成、Pull Request、merge の順で進める。
 
 詳細は `docs/github-workflow.md` に従う。
 
@@ -78,6 +78,6 @@ Notion dotfiles project page
 
 ## コミット前チェック
 
-検証コマンドは `docs/github-workflow.md` の「最低限の validation」に従う。CI(`.github/workflows/validate.yml`)も同じ内容を実行するため、コマンド一覧はそちらを single source of truth とし、ここには重複して書かない。
+検証コマンドは `docs/github-workflow.md` の「最低限の validation」に従う。一覧の正は CI(`.github/workflows/validate.yml`)で、`docs/github-workflow.md` はそれを手元で実行する形に写したもの(CI にテストを足したら両方を揃える)。ここには重複して書かない。
 
 `doctor` / `preflight` は環境依存の warning が出ることがある。policy violation と report-only warning を混同しない。

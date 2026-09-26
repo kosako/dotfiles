@@ -1,12 +1,12 @@
 # AI Policy
 
-AI tools は後続 module とする。ただし、AI agent の権限ポリシーは初期段階で定義する。
+AI tool の導入は software catalog の capability(`installPackages` / `installGuiApps`)で gate し、harness 設定は module で gate する。AI agent の権限ポリシーは初期段階で定義する。
 
 `dotfiles` と別 project として管理する AI skills / agents repository の境界は [AI Environment Boundary](ai-environment-boundary.md) に定義する。
 
 ## 権限方針の正本と管理点(#139)
 
-「AI エージェントに何を無確認で許すか」の正本はこの文書。tool ごとの**実装(どこで効かせるか)**は
+「AI エージェントに何を無確認で許すか」の正本はこの文書。tool ごとの**実装**(どこで効かせるか)は
 次の管理点に置き、どの tool も同じ原則に従わせる(tool 間の対称性):
 
 | tool | 権限面 | 管理点 | 堆積への手当て |
@@ -24,9 +24,9 @@ AI tools は後続 module とする。ただし、AI agent の権限ポリシー
   (任意 remote への network 取得で、URL 自体が injection 下では covert channel になる —
   都度承認)。
 - **マシン外に出る操作(push・PR/issue/comment 作成・release・外部送信)と昇格系
-  (sudo・auth login)は無確認 allow にしない**。都度承認を通す。将来は #131 の
-  write-gate hook で「untrusted がセッションに無ければ自律許可」の context-gated に
-  置き換える(下記 #119 節の write 規則が目標形)。
+  (sudo・auth login)は無確認 allow にしない**。都度承認を通す。将来は write-gate hook
+  (未実装。#131 はこれを実装せずに close。現在は追跡 issue なし)で「untrusted がセッションに
+  無ければ自律許可」の context-gated に置き換える(下記 #119 節の write 規則が目標形)。
 - **一時許可は堆積させず棚卸しする**。Codex rules はリセット操作を機械化済み
   (`chezmoi apply` = baseline へ戻す。定期実行までは仕組み化しておらず、doctor / drift
   表示が棚卸しのトリガー)。projects trust はリセット手段がない(codex 所有)ため
@@ -38,9 +38,25 @@ AI tools は後続 module とする。ただし、AI agent の権限ポリシー
 
 ## Default
 
-AI agent は default deny。
+AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う: ローカル完結の read は無確認で許可、
+マシン外に出る操作と昇格系は都度承認、secret の読取は deny。これは方針で、tool ごとの実装の射程は次のように異なる。
 
-- 許可された project directory のみ読む。
+- secret の読取 deny: Claude Code は managed の `permissions.deny`(claude-settings module が active な
+  personal)、OpenCode は `permission` の床(opencode-settings module が active な personal。project / local
+  設定で上書きできる)で実装する。Codex の rules
+  baseline は command の allowlist で、相当する床を持たない(方針のみ)。
+- 外向き操作・昇格の都度承認: OpenCode が ask にするのは床に列挙した command(`git push` / `git clone` /
+  read 系以外の `gh` / `sudo` / `curl` / `wget`)だけで、それ以外(`ssh` / `scp` / `npm publish` など)は
+  allow all の既定に落ちる。
+- ローカルでの書き込みや破壊的な操作(`rm` など)の確認要否は原則では定めず、tool の既定に委ねる(OpenCode は
+  allow all の上に床を置く形、Claude Code は managed settings に承認モードを置かず harness 既定の確認に従う形、
+  Codex は承認 rules の baseline と codex 所有の approval_policy に従う形)。
+
+下記「Prohibited By Default」「Approval Required」に挙げた操作も方針として無確認では行わせないが、tool の既定で
+自動的に止まるとは限らない(enforcement の射程は [ai-environment-boundary](ai-environment-boundary.md))。
+
+その他の既定:
+
 - secret store は直接読ませない。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
 - token は短命・scope限定にする。
 - work / client では会社・クライアントポリシーを優先する。
@@ -85,12 +101,14 @@ trust の基点は `is_self`(自分の login + id)のみで、collaborator / bot
 untrusted。
 
 下記の read / write 規則は **目標方針(policy intent)であって、現状の enforcement ではない**。
-Phase 1 / 2 で実際に効いているのは steering 層と、Phase 2 で live 化した secret floor
+現在実際に効いているのは steering 層と、Phase 2 で live 化した secret floor
 (never-legit な secret 読取の無条件 hard deny)+ `gateGitHubMcp` の `mcp__github` deny、
-それに #137 で登録した read-steering hook(raw な `gh` 読取を safe-gh へ誘導する
-`personal-safe-gh-hook`。fail-open steering)まで。context-gated な write を判定する
-write-gate hook と trifecta を断つ hard 層(隔離 reader の hard 化 / token 隔離 /
-OS egress)は Phase 3(#131)へ hand-off 済み(射程と限界は
+#137 で登録した read-steering hook(raw な `gh` 読取を safe-gh へ誘導する
+`personal-safe-gh-hook`。fail-open steering)、それに Phase 3(#131、2026-07-10 close)で
+agent-tools 側に実装した credential 隔離(token 隔離 session で起動したときだけ効く hard 層)まで。
+Phase 3 で入った隔離 reader は steering であって hard ではない。OS egress firewall は別 tier・
+将来 opt-in として #188 で追跡している(未実装)。context-gated な write を判定する write-gate hook は
+未実装(#131 はこれを実装せずに close。現在は追跡 issue なし。射程と限界は
 [ai-environment-boundary](ai-environment-boundary.md))。
 
 - **read**: 自分の本文 = allow / 他人 = metadata only(title も入れない)/ 他人のコメント =

@@ -7,7 +7,7 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 `docs/local-overrides.md` は「private な値は `.local` に置き git に入れない」と定めるが、
 それを退避・復元する手段が無い(バックアップ空白地帯)。本機能がその空白を埋める。
 
-設計の正本と論点は issue #60。本ドキュメントは確定した規約をまとめる(上書き更新)。
+当初の設計と論点は issue #60(close 済み)。現行の規約の正本は本ドキュメントで、以後の変更もここへ上書きで反映する。
 
 ## 確定した規約
 
@@ -39,19 +39,19 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
   復元した home からの次回 backup は flag なしでそれを読む。`--local-supplement PATH` で別の場所を
   渡しても、その source path は manifest に記録されず復元先にも使わない(backup 時の入力に過ぎない。
   #208)。public-safety を守りつつリストごと復元できる。
-  **旧 archive(#208 以前)**は補足を archive 最上位に同梱していた。この member は今も受理されるが
+  **旧 archive**(#208 以前)は補足を archive 最上位に同梱していた。この member は今も受理されるが
   検証も復元もされないので、更新後に backup を取り直す(旧形式を読む分岐は持たない)。
 
 `backup-paths.yaml` の各 entry:
 
 | field | 必須 | 内容 |
 | --- | --- | --- |
-| `path` | ✓ | canonical な home-relative パス。先頭 `/`・`..`・`.` component・重複 `/`・末尾 `/`・制御文字・glob メタ文字(`* ? [`)は禁止。`path` を最後に持つ行形式なので path 中の `|` も曖昧にならない |
+| `path` | ✓ | canonical な home-relative パス。先頭 `/`・`..`・`.` component・重複 `/`・末尾 `/`・制御文字・glob メタ文字(`* ? [`)は禁止。`path` を最後に持つ行形式なので path 中の `\|` も曖昧にならない |
 | `type` | | `file` / `dir`(期待する種別)|
-| `category` | | public-safe な自由ラベル(例 `shell` / `ssh`)。**`|` と制御文字は不可**(行形式の区切りなので、含むと path が変質する。#246)|
+| `category` | | public-safe な自由ラベル(例 `shell` / `ssh`)。**`\|` と制御文字は不可**(行形式の区切りなので、含むと path が変質する。#246)|
 
-`validate-policy.sh` がこれらを機械的に検査する(home-relative / glob 禁止 / type 既定値 /
-path 重複を fail-closed)。パスの public-safety 自体は人間レビューの責務。
+`validate-policy.sh` がこれらを機械的に検査する(home-relative / glob 禁止 /
+type は `file` か `dir` のみ / path 重複を fail-closed)。パスの public-safety 自体は人間レビューの責務。
 entry の**構造**(map であること・`path` が非空文字列で制御文字を含まない・`type` / `category` は
 文字列で `|` と制御文字を含まない)は共有 parser(`backup_paths_in`)が **file 全体を先に検査**し、
 1 件でも不正なら行を出さず fail する(#246)。baseline(validate-policy)と非コミットの local 補足
@@ -81,6 +81,8 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   home 相対(`-C` で絶対パスを含めない)。
 - backup は捕捉 0 件なら空アーカイブを書かず fail(補足リストだけの archive も空扱い)。symlink /
   不在 / 非正規 / 読取不可のファイルは skip(warn)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+  補足リスト自身は宣言より先に canonical path で捕捉するので、baseline / 補足が同じ path を宣言して
+  いても entry / file は重複しない(補足の copy が優先)。
 - **directory 列挙の途中失敗(#242)**: 宣言 directory の `find` が途中で失敗(読めない subdirectory 等・
   exit 非 0)した場合、列挙できた file は捕捉して**継続**する(読取不能 file と同じ warn + skip の契約。
   abort はしない)が、その directory を skip 1 件として数え、`capture INCOMPLETE` を warn し、marker に
@@ -88,8 +90,6 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   self-check / verify は staging と manifest の整合を証明するだけで、**元 directory の完全取得は証明しない**
   (完全性は marker が持つ)。doctor は `capture_incomplete` を読み、true なら再 backup を next action に
   出す。field の無い旧 marker は unknown(完全と推定しない)。
-  補足リスト自身は宣言より先に canonical path で捕捉するので、baseline / 補足が同じ path を宣言して
-  いても entry / file は重複しない(補足の copy が優先)。
 - 書き込み前の確認は `--yes` で省略できる。`--yes` なしでは TTY での対話確認が必須:
   TTY が無い(cron / CI など無人実行)場合は明示エラーで **exit 非 0**、対話で decline
   した場合も **exit 非 0**(アーカイブを書かなかった実行は成功を返さない。無人実行での
@@ -104,10 +104,11 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   受理条件は 3 コマンドで共有し、backup 独自の緩い検査は持たない。off にする flag は無い(対象は小さな
   private path 集合で再 hash のコストは無視できる)。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
-  `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(`~/.local/state/dotfiles/
-  restore-backup-<ts>/`)へ move。`--skip-existing` で既存は触らない。**symlink 化した親ディレクトリ
-  経由の書き込みを拒否**して HOME 外への escape を防ぐ。退避先が既に存在する場合も上書きせず拒否する。
-  verify と同じ展開前 member 検証を共有。
+  `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(復元先 home(既定 `~`、
+  `--target-home` 指定時はその dir)の `.local/state/dotfiles/restore-backup-<UTC ts>.<ランダム>/`。
+  退避が発生した場合は実 path が実行結果に表示される)へ move。`--skip-existing` で既存は触らない。
+  **symlink 化した親ディレクトリ経由の書き込みを拒否**して HOME 外への escape を防ぐ。退避先が既に存在する
+  場合も上書きせず拒否する。verify と同じ展開前 member 検証を共有。
 
 ## 段階
 
@@ -149,20 +150,23 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   --identity-command 'op read op://Personal/dotfiles-age-identity/identity' --apply
 ```
 
-restore は `allowSecretsAccess=true` の profile でのみ実行できる(work / client / agent では拒否)。
+restore は `allowSecretsAccess=true` の profile でのみ実行できる(environmentKind が work / client / sandbox /
+agent の profile では拒否。backup / verify も同じ gate)。
 復元後に**新しい backup を作る**には公開鍵(recipient)が要る ——
 `~/.config/dotfiles/private-backup.recipient` を置くか `--recipient` で渡す(公開鍵なので
 secret ではないが repo にはコミットしない)。
 
-## 安全境界(後続スクリプトが守る規約)
+## 安全境界(スクリプトが守る規約)
 
 - backup / restore は **手動起動のみ**・`chezmoi apply` 非結合。
 - **runtime gate**: 実 profile を chezmoi config から fail-closed に取得し、
-  `allowSecretsAccess != true`(work / client / agent など)では実行を拒否する。
+  `allowSecretsAccess != true`(work / client / sandbox / agent など)では実行を拒否する。
 - restore は home-relative entry のみ許可・**0700 temp** に展開して検証後 copy・
-  symlink / hardlink は既定禁止・`..` / 絶対パスを拒否し HOME 外を壊さない。
+  symlink / hardlink の member は常に拒否(許可する flag は無い)・`..` / 絶対パスを拒否し
+  HOME 外を壊さない。
 - 復号物・一時展開は確実に削除(trap)し平文を残さない。
-- doctor は report-only。public baseline の解決とバックアップ有無 / 最終日時のみ表示し、
+- doctor は report-only。public baseline の解決と、marker 由来の要約(バックアップ有無 / 最終日時 /
+  archive の basename / file 数 / 捕捉の完全性 = `capture_incomplete`。扱いは上記 #242 の項)のみ表示し、
   local 補足は **存在のみ**(中身・件数を出さない。`docs/local-overrides.md` の規約に従う)。
 - marker・manifest に絶対 home path / host 名 / private list path を入れない。
 - 復元チェーンの循環を避ける: 復元に必要な op 設定 / 1Password sign-in 材料を

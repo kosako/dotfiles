@@ -8,11 +8,13 @@ source "$SCRIPT_DIR/lib-policy.sh"
 usage() {
   cat <<EOF
 Usage:
-  $0 [profile]
+  $0 [profile]      (default: personal)
   $0 --all
   $0 --list-profiles
 
-Validate profile/module/capability policy data.
+Validate the policy data: modules, the capability registry, the software
+catalog (packages.yaml), the backup-paths catalog, and the given profile
+(--all: every profile).
 EOF
 }
 

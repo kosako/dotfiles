@@ -118,10 +118,13 @@ _ai_clip_strip_ansi() {
   fi
 }
 
-# Clipboard sink: pbcopy locally. OSC 52 is opt-in (AI_CLIPBOARD_OSC52=1) for
-# remote/containerised sessions where pbcopy cannot reach the host clipboard;
-# it is not a silent fallback because terminal support and size limits vary.
-# Fail (return 1) when neither target is available so the caller can report it.
+# Clipboard sink: pbcopy whenever it is on PATH (it copies to the clipboard of
+# the machine this shell runs on — over SSH into another Mac that is the remote
+# one, and AI_CLIPBOARD_OSC52 is ignored). OSC 52 is opt-in (AI_CLIPBOARD_OSC52=1)
+# and used only where pbcopy is absent (e.g. Linux VMs / containers); it is not a
+# silent fallback because terminal support and size limits vary.
+# Fail (non-zero) when neither target is available, or when the chosen sink
+# itself fails (e.g. pbcopy with no pasteboard access), so the caller can report it.
 _ai_clip_copy() {
   if command -v pbcopy >/dev/null 2>&1; then
     pbcopy
@@ -264,7 +267,7 @@ gclone() {
   if [[ -z "$ctx" ]]; then
     if [[ -t 0 && -t 2 ]]; then
       print -u2 -- "gclone: no context rule for '$owner' ($host)."
-      print -u2 -- "  convention: personal | work/<org> | client/<name> | sandbox (docs/directory-convention.md)"
+      print -u2 -- "  convention: personal | work/<org> | client/<name> | sandbox | agent (docs/directory-convention.md)"
       print -u2 -n -- "  context path (empty aborts): "
       read -r ctx || ctx=""
     fi

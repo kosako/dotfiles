@@ -86,7 +86,7 @@
 
 - 挙動・キーバインド・alias の上書き:`~/.zshrc.local`(local が勝つ)。
 - プロンプトの見た目:`~/.config/starship.toml`(managed。変更は source 経由で apply)。
-- `Ctrl-O`(出力コピー)で `pbcopy` が host に届かない remote / container セッションでは、`~/.zshrc.local` に `export AI_CLIPBOARD_OSC52=1` を置くと OSC 52 経由で端末にコピーさせる(端末対応・サイズ制限に注意。既定は off)。
+- `Ctrl-O`(出力コピー)で `pbcopy` が無い remote / container セッション(Linux など)では、`~/.zshrc.local` に `export AI_CLIPBOARD_OSC52=1` を置くと OSC 52 経由で端末にコピーさせる(端末対応・サイズ制限に注意。既定は off)。`pbcopy` が PATH にあると常にそちらが優先されるため、SSH 先が macOS の場合はこの設定を置いても remote 側の clipboard に入る(または `pbcopy` が失敗する)だけで、手元にはコピーされない。
 
 ## `~/.zshenv`(非対話 shell の PATH)
 
@@ -114,7 +114,7 @@ managed file はこれらを末尾で source するので、local 側が最終�
 
 ## 移行手順
 
-既存の `~/.zshrc` / `~/.zprofile`(および `~/.zshenv` / `~/.config/starship.toml` があれば)が apply で置き換わるため、apply は backup と diff 確認を伴って行う(この module 単体では apply しない。実際の apply は別途)。
+既存の `~/.zshrc` / `~/.zprofile`(および `~/.zshenv` / `~/.config/starship.toml` があれば)が apply で置き換わるため、既存の zsh 設定がある home に初めて apply するときは、以下のとおり backup と diff 確認を伴って行う。
 
 1. **backup**: 元の状態を変更する前に取る。`cp ~/.zshrc ~/.zshrc.pre-chezmoi`(`~/.zprofile` / `~/.zshenv` / `~/.config/starship.toml` も存在すれば同様)。
 2. **machine 固有行を退避**: 既存 `~/.zshrc` の中で managed に含めない行(ツール / IDE の PATH、tool env、secret)を `~/.zshrc.local` に移す。`~/.zprofile` も同様に `~/.zprofile.local` へ。`.zshenv` は local override を持たないので、既存 `~/.zshenv` の行も対話用なら `~/.zshrc.local` へ移す。`~/.config/starship.toml` は local override を持たない(managed が全体)ので、独自のプロンプト設定は managed file に畳み込む。
@@ -137,4 +137,3 @@ managed 化自体を戻す場合は `chezmoi forget ~/.zshenv ~/.zshrc ~/.zprofi
 
 - プラグインマネージャ / oh-my-zsh(explicit-first 方針で不使用)。ツールの install は catalog + `install-packages.sh` の領分。
 - machine 固有値・secret の repo への持ち込み。
-- この module 単体での実 home への apply。
