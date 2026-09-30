@@ -271,7 +271,7 @@ Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
   `model_reasoning_effort` だけを読んで `-c` で渡す。preflight は空行・comment・`key = "<1 行の basic string>"`
   (値は `[A-Za-z0-9._-]+`)以外の行があると fail-closed にするので、file はその形に保つ。
 - 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` は空 render で、apply 済みの
-  file も消える(テンプレート自己 gate)。現状は personal = review `high` / worker `medium`、work = `off`
+  file も消える(テンプレート自己 gate)。現状は personal = review `xhigh` / worker `high`(#268)、work = `off`
   (codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
 - **中身は effort だけ**: `model` は置かず、両方とも `config.toml` の値を使う(review は Codex が profile を
   `config.toml` に重ね、worker は preflight が `config.toml` の top-level から読む)。`service_tier` は review
