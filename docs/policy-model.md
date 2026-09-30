@@ -258,6 +258,28 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
+## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264)
+
+agent-tools の `personal-codex-review` と `personal-codex-worker` が使う Codex の reasoning effort を、
+対話の既定(`~/.codex/config.toml`)と分けて軽くするための profile file を `codex-settings` module が配る
+(agent-tools#339 の hand-off)。file 名は agent-tools の公開契約で、中身は dotfiles・読むのは agent-tools・
+Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
+
+- `~/.codex/agent-tools-review.config.toml`: review は file が在るときだけ `codex exec -p agent-tools-review`
+  を足し、Codex がこの file を `config.toml` の上に丸ごと重ねる。
+- `~/.codex/agent-tools-worker.config.toml`: worker は `-p` を使わず、preflight が top-level の `model` /
+  `model_reasoning_effort` だけを読んで `-c` で渡す。preflight は空行・comment・`key = "<1 行の basic string>"`
+  (値は `[A-Za-z0-9._-]+`)以外の行があると fail-closed にするので、file はその形に保つ。
+- 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` は空 render で、apply 済みの
+  file も消える(テンプレート自己 gate)。現状は personal = review `high` / worker `medium`、work = `off`
+  (codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
+- **中身は effort だけ**: `model` と `service_tier` は置かず `config.toml` の値を引き継ぐ。model の指定
+  (単価の差が大きい)や Fast mode を外す `service_tier` は、消費と受け付ける値を実測してから enum
+  capability を足す形で追加する。
+- **doctor**: 2 つの file の presence のみ(中身は config 値なので出さない)。module 非 active の profile では
+  手置き・他 profile の残置を中立に表示し、`off` 以外の値は dangling として warn。`CODEX_HOME` が
+  `~/.codex` 以外を指すと agent-tools はそちらを読むので warn する。
+
 ## OpenCode settings(`opencode-settings` module、#234)
 
 第 3 の AI harness。capability ではなく **module 列挙だけで gate**(claude-settings / codex-settings と
@@ -362,6 +384,10 @@ corepackMode:
   off: 何もしない
   report: doctor で状態だけ確認する
   enable: 手動で corepack enable 済みの前提で、doctor が pnpm / yarn の shim を確認する(dotfiles は corepack enable を実行しない)
+
+codexReviewEffort / codexWorkerEffort:
+  off: profile file を配らない(agent-tools は config.toml の既定を使う)
+  minimal | low | medium | high | xhigh: その値の model_reasoning_effort を書いた profile file を配る
 ```
 
 ## Initial Profiles

@@ -28,6 +28,10 @@ set -euo pipefail
 # stage (skipped, with a startup warning in current Codex, until a one-time
 # `/hooks` trust). Steering, NOT an
 # enforcement boundary — see docs/ai-environment-boundary.md.
+# Also covered: the approval-rules baseline (#139) and the agent-tools Codex
+# review / worker profile files (#264: header, effort-only content in the
+# worker preflight's top-level shape, value from the enum capability, off
+# removes an applied file independently).
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -366,6 +370,104 @@ else
   fail "test failed: hook capabilities false unexpectedly removed the rules baseline"
   status=1
 fi
+
+section "codex review / worker profile files (#264)"
+
+# 6) Committed personal: codexReviewEffort=high / codexWorkerEffort=medium, so
+#    both agent-tools profile files render. The file names are agent-tools'
+#    public contract (agent-tools#339). Pinned: the first line is the
+#    managed-by header (doctor's managed-path orphans rely on it after a
+#    profile switch, #201), the only setting is model_reasoning_effort with the
+#    capability's value (effort only — model / service_tier stay with
+#    config.toml), and every line fits the worker preflight's conservative
+#    top-level shape (blank / comment / bare_key = "[A-Za-z0-9._-]+"); anything
+#    else makes the worker preflight fail closed.
+review_profile_file="${home:-}/.codex/agent-tools-review.config.toml"
+worker_profile_file="${home:-}/.codex/agent-tools-worker.config.toml"
+check_codex_profile_file() {
+  local label="$1" file="$2" expected_setting="$3"
+  if [[ ! -f "$file" ]]; then
+    fail "test failed: $label profile file not rendered: $file"
+    status=1
+  elif [[ "$(head -n 1 "$file")" != "# Managed by chezmoi from kosako/dotfiles (codex-settings, #264)." ]]; then
+    fail "test failed: $label profile file lacks the managed-by header on line 1"
+    status=1
+  elif [[ "$(grep -v -E '^[[:space:]]*(#|$)' "$file")" != "$expected_setting" ]]; then
+    fail "test failed: $label profile file settings are not exactly '$expected_setting'; rendered was:"
+    cat "$file" >&2
+    status=1
+  elif grep -v -E '^[[:space:]]*(#|$)' "$file" | grep -q -v -E '^[A-Za-z0-9_-]+ = "[A-Za-z0-9._-]+"$'; then
+    fail "test failed: $label profile file has a line outside the worker preflight's top-level shape"
+    status=1
+  else
+    ok "test passed: $label profile file renders the header and exactly: $expected_setting"
+  fi
+}
+check_codex_profile_file review "$review_profile_file" 'model_reasoning_effort = "high"'
+check_codex_profile_file worker "$worker_profile_file" 'model_reasoning_effort = "medium"'
+
+# Enum capabilities, so the value is written with strenv (flip_personal_capability
+# in test-lib.sh parses booleans).
+set_personal_enum() {
+  C="$2" V="$3" yq -i '.profiles.personal.capabilities[strenv(C)] = strenv(V)' \
+    "$1/.chezmoidata/profiles.yaml"
+}
+
+# 7) The effort comes from the capability, not the template: other enum values
+#    render verbatim, per file.
+effort_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-effort.XXXXXX")"
+tmp_roots+=("$effort_src")
+make_flipped_source "$effort_src"
+set_personal_enum "$effort_src/src" codexReviewEffort xhigh
+set_personal_enum "$effort_src/src" codexWorkerEffort low
+effort_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-effort-home.XXXXXX")"
+tmp_roots+=("$effort_root")
+if render_personal_into "$effort_src/src" "$effort_root"; then
+  check_codex_profile_file "review (xhigh)" "$effort_root/home/.codex/agent-tools-review.config.toml" 'model_reasoning_effort = "xhigh"'
+  check_codex_profile_file "worker (low)" "$effort_root/home/.codex/agent-tools-worker.config.toml" 'model_reasoning_effort = "low"'
+else
+  fail "test failed: personal render with other effort values failed"
+  status=1
+fi
+
+# 8) off removes an already-applied file (template self-gate prunes the managed
+#    target; a `requires:` gate would leave it lingering, #184), and each file
+#    rides on its own capability: turning one off keeps the other file and the
+#    rest of the module (hooks.json / rules baseline).
+check_codex_profile_off() {
+  local kind="$1" cap="$2" other_kind="$3"
+  local off_src removal
+  off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-$kind-off.XXXXXX")"
+  tmp_roots+=("$off_src")
+  make_flipped_source "$off_src"
+  set_personal_enum "$off_src/src" "$cap" off
+  removal="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-$kind-rm.XXXXXX")"
+  tmp_roots+=("$removal")
+  mkdir -p "$removal/home"
+  printf '[data]\nprofile = "personal"\n' > "$removal/chezmoi.toml"
+  if ! chezmoi --config "$removal/chezmoi.toml" --source "$DOTFILES_ROOT" \
+    --destination "$removal/home" apply >/dev/null 2>&1; then
+    fail "test failed: committed apply into the $kind removal home did not render"
+    status=1
+  elif [[ ! -f "$removal/home/.codex/agent-tools-$kind.config.toml" ]]; then
+    fail "test failed: committed apply did not create the $kind profile file (removal test precondition)"
+    status=1
+  elif ! chezmoi --config "$removal/chezmoi.toml" --source "$off_src/src" \
+    --destination "$removal/home" apply >/dev/null 2>&1; then
+    fail "test failed: $cap=off apply did not run"
+    status=1
+  elif [[ ! -e "$removal/home/.codex/agent-tools-$kind.config.toml" ]] \
+    && [[ -f "$removal/home/.codex/agent-tools-$other_kind.config.toml" ]] \
+    && [[ -f "$removal/home/.codex/hooks.json" ]] \
+    && [[ -f "$removal/home/.codex/rules/default.rules" ]]; then
+    ok "test passed: $cap=off removes an already-applied $kind profile file while the $other_kind file, hooks.json and the rules baseline stay"
+  else
+    fail "test failed: $cap=off left the $kind profile file lingering or disturbed another codex-settings file"
+    status=1
+  fi
+}
+check_codex_profile_off review codexReviewEffort worker
+check_codex_profile_off worker codexWorkerEffort review
 
 if [[ "$status" -eq 0 ]]; then
   ok "codex settings tests passed"

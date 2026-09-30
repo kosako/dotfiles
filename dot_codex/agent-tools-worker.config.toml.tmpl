@@ -1,0 +1,31 @@
+{{- template "require-profile" . -}}
+{{- $caps := index .profiles .profile "capabilities" -}}
+{{- /* Codex profile file for agent-tools' personal-codex-worker (#264,
+       agent-tools#339 hand-off). The file name is agent-tools' public
+       contract. The worker is NOT started with -p: its preflight reads only
+       the top-level `model` / `model_reasoning_effort` of this file (over
+       the same keys in config.toml) and re-passes them with -c, because the
+       worker runs with --ignore-user-config and must not pick up any other
+       key. The preflight parses conservatively and fails closed on anything
+       but blank lines, comments and `bare_key = "<one-line basic string>"`
+       with values in [A-Za-z0-9._-]+ — keep this file in that shape.
+       Content = dotfiles (per-profile value), reader = agent-tools, and
+       Codex never rewrites it.
+
+       Only the reasoning effort is set (the value is the codexWorkerEffort
+       enum, validated by validate-policy): the model comes from config.toml.
+
+       Gating (template self-gate, NOT a module `requires` — #184 lesson):
+       codexWorkerEffort=off renders EMPTY and chezmoi removes the managed
+       target, so the worker falls back to the config.toml top-level values.
+       Active for profiles that list the codex-settings module (personal).
+       The managed-by header lets doctor's managed-path orphans flag a copy
+       left behind by a profile switch (#201). */ -}}
+{{- $effort := index $caps "codexWorkerEffort" -}}
+{{- if ne $effort "off" -}}
+# Managed by chezmoi from kosako/dotfiles (codex-settings, #264).
+# Profile for agent-tools' personal-codex-worker: its preflight reads only the
+# top-level model / model_reasoning_effort here. Effort only; the model comes
+# from ~/.codex/config.toml.
+model_reasoning_effort = "{{ $effort }}"
+{{ end -}}
