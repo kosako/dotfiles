@@ -1308,6 +1308,51 @@ else
   fi
 fi
 
+section "Codex review / worker profiles (report-only)"
+# #264 (agent-tools#339 hand-off): codex-settings renders the Codex profile
+# files that agent-tools' personal-codex-review (`codex exec -p
+# agent-tools-review`) and personal-codex-worker (its preflight reads the
+# top-level model / effort) pick up whenever they exist; without them both use
+# the config.toml defaults. PRESENCE only — the contents are config values
+# and stay out of the report; drift of a managed file is the managed drift
+# section's job. agent-tools looks in $CODEX_HOME when it is set, while
+# chezmoi always renders into ~/.codex, so a diverging CODEX_HOME is flagged.
+for codex_profile_kind in review worker; do
+  case "$codex_profile_kind" in
+    review) codex_profile_cap=codexReviewEffort ;;
+    worker) codex_profile_cap=codexWorkerEffort ;;
+  esac
+  codex_profile_value="$(capability_value "$profile" "$codex_profile_cap")"
+  codex_profile_file="$HOME/.codex/agent-tools-$codex_profile_kind.config.toml"
+  if module_active_for_profile "$profile" codex-settings; then
+    if [[ "$codex_profile_value" == "off" ]]; then
+      if [[ -e "$codex_profile_file" ]]; then
+        action "$codex_profile_cap=off but $codex_profile_file exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
+          "\$ chezmoi apply $(printf '%q' "$codex_profile_file")"
+      else
+        ok "$codex_profile_cap=off; no $codex_profile_kind profile file (personal-codex-$codex_profile_kind uses the config.toml defaults)"
+      fi
+    elif [[ -f "$codex_profile_file" ]]; then
+      ok "$codex_profile_cap=$codex_profile_value; $codex_profile_file present (read by personal-codex-$codex_profile_kind)"
+    else
+      action "$codex_profile_cap=$codex_profile_value but $codex_profile_file is missing — personal-codex-$codex_profile_kind falls back to the config.toml defaults" \
+        "\$ chezmoi apply $(printf '%q' "$codex_profile_file")"
+    fi
+  else
+    if [[ "$codex_profile_value" != "off" ]]; then
+      warn "$codex_profile_cap=$codex_profile_value but the codex-settings module is inactive for this profile; nothing renders $codex_profile_file (dangling capability)"
+    fi
+    if [[ -e "$codex_profile_file" ]]; then
+      item "$codex_profile_file present but not managed for this profile (hand-placed, or left by another profile — see managed-path orphans); agent-tools reads it whenever it exists"
+    else
+      ok "no $codex_profile_kind profile file (not managed for this profile; personal-codex-$codex_profile_kind uses the config.toml defaults)"
+    fi
+  fi
+done
+if [[ -n "${CODEX_HOME:-}" && "${CODEX_HOME%/}" != "$HOME/.codex" ]]; then
+  warn "CODEX_HOME is set to $CODEX_HOME: agent-tools reads the review / worker profile files from there, but chezmoi renders them into ~/.codex"
+fi
+
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
 # agent-tools. Presence is reported whenever enableAiPolicy=true, but running

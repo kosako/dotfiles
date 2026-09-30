@@ -71,3 +71,23 @@ capabilities:
   enableHerdrIntegration:
     type: boolean
     implemented: true
+  codexReviewEffort:
+    type: enum
+    implemented: true
+    values:
+      - off
+      - minimal
+      - low
+      - medium
+      - high
+      - xhigh
+  codexWorkerEffort:
+    type: enum
+    implemented: true
+    values:
+      - off
+      - minimal
+      - low
+      - medium
+      - high
+      - xhigh

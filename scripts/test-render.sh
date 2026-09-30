@@ -55,7 +55,7 @@ expected_managed() {
   local profile="$1"
   case "$profile" in
     personal)
-      printf '%s\n' .claude .claude/settings.json .codex .codex/hooks.json .codex/rules .codex/rules/default.rules .config .config/git .config/git-hook-gates .config/git-hook-gates/hooks .config/git-hook-gates/hooks.gitconfig .config/git-hook-gates/hooks/commit-msg .config/git-hook-gates/hooks/pre-commit .config/git-profile .config/git-profile/identity-reset.gitconfig .config/git/ignore .config/git/signing.gitconfig .config/mise .config/mise/config.toml .config/opencode .config/opencode/opencode.json .config/starship.toml .gitconfig .npmrc .ssh .ssh/config .zprofile .zshenv .zshrc
+      printf '%s\n' .claude .claude/settings.json .codex .codex/agent-tools-review.config.toml .codex/agent-tools-worker.config.toml .codex/hooks.json .codex/rules .codex/rules/default.rules .config .config/git .config/git-hook-gates .config/git-hook-gates/hooks .config/git-hook-gates/hooks.gitconfig .config/git-hook-gates/hooks/commit-msg .config/git-hook-gates/hooks/pre-commit .config/git-profile .config/git-profile/identity-reset.gitconfig .config/git/ignore .config/git/signing.gitconfig .config/mise .config/mise/config.toml .config/opencode .config/opencode/opencode.json .config/starship.toml .gitconfig .npmrc .ssh .ssh/config .zprofile .zshenv .zshrc
       ;;
     work)
       printf '%s\n' .config .config/git-profile .config/git-profile/identity-reset.gitconfig .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .zprofile .zshenv .zshrc
@@ -471,6 +471,55 @@ for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
       elif ! grep -Fq "$expected_error" <<< "$output"; then
         printf '%s\n' "$output" >&2
         fail "test failed: $agent_template did not report the $bool_input type error"
+        status=1
+      fi
+    done
+  done
+done
+
+section "typed enum guards (direct chezmoi, without validate-policy)"
+
+# The Codex profile files (#264) write the enum value verbatim, so an unknown,
+# mistyped or missing value must stop the apply in require-profile rather than
+# reach a rendered file. npmHardeningMode shows the guard is generic.
+for enum_cap in codexReviewEffort codexWorkerEffort npmHardeningMode; do
+  for invalid_enum in '"turbo"' '"HIGH"' true 0 null '[]' missing; do
+    make_root
+    make_flipped_source "$root"
+    write_config personal
+    if [[ "$invalid_enum" == missing ]]; then
+      C="$enum_cap" yq -i 'del(.profiles.personal.capabilities[strenv(C)])' \
+        "$root/src/.chezmoidata/profiles.yaml"
+    else
+      C="$enum_cap" V="$invalid_enum" yq -i '.profiles.personal.capabilities[strenv(C)] = env(V)' \
+        "$root/src/.chezmoidata/profiles.yaml"
+    fi
+    expected_error="capability enum invalid: personal.$enum_cap (allowed: "
+    if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
+      --destination "$root/home" apply 2>&1)"; then
+      fail "test failed: apply accepted $enum_cap value $invalid_enum"
+      status=1
+    elif grep -Fq "$expected_error" <<< "$output"; then
+      ok "test passed: apply rejects $enum_cap value $invalid_enum"
+    else
+      printf '%s\n' "$output" >&2
+      fail "test failed: apply did not report the $enum_cap enum error"
+      status=1
+    fi
+    if [[ -e "$root/home/.codex/agent-tools-review.config.toml" || -e "$root/home/.codex/agent-tools-worker.config.toml" ]]; then
+      fail "test failed: invalid $enum_cap value rendered a Codex profile file"
+      status=1
+    fi
+    # Each profile-file template guards itself too: execute-template bypasses
+    # the managed-set/apply path.
+    for profile_template in dot_codex/agent-tools-review.config.toml.tmpl dot_codex/agent-tools-worker.config.toml.tmpl; do
+      if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
+        --destination "$root/home" execute-template < "$root/src/$profile_template" 2>&1)"; then
+        fail "test failed: $profile_template accepted $enum_cap value $invalid_enum"
+        status=1
+      elif ! grep -Fq "$expected_error" <<< "$output"; then
+        printf '%s\n' "$output" >&2
+        fail "test failed: $profile_template did not report the $enum_cap enum error"
         status=1
       fi
     done

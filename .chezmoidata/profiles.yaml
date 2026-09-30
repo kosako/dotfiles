@@ -116,6 +116,17 @@ profiles:
       # hook error, so registering first is safe. Codex: inert until a
       # one-time `/hooks` trust, like the other hooks.
       enableHerdrIntegration: true
+      # #264 (agent-tools#339 hand-off): reasoning effort for agent-tools'
+      # Codex review / worker, rendered by codex-settings into the Codex
+      # profile files ~/.codex/agent-tools-review.config.toml and
+      # ~/.codex/agent-tools-worker.config.toml (file names are the
+      # agent-tools public contract; content = dotfiles, reader =
+      # agent-tools, Codex never rewrites them). `off` renders nothing, so
+      # review / worker fall back to the user config.toml defaults. Only the
+      # effort is set: both keep the config.toml model; service_tier carries
+      # over to review only (the worker runs with --ignore-user-config).
+      codexReviewEffort: high
+      codexWorkerEffort: medium
 
   work:
     environmentKind: work
@@ -166,3 +177,9 @@ profiles:
       # unmanaged ~/.claude/settings.json / ~/.codex/hooks.json (doctor shows
       # herdr's own view there).
       enableHerdrIntegration: false
+      # #264: off — codex-settings is not part of work, and whether (and at
+      # which values) a work machine gets the profile files is decided
+      # separately (plan / billing differ). A hand-placed file still works:
+      # agent-tools reads it whenever it exists.
+      codexReviewEffort: off
+      codexWorkerEffort: off

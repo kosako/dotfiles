@@ -34,7 +34,7 @@ personal project として段階的に作っている。現時点の実装状況
 | agent-tools との report-only 連携([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md)) | 実装済み(personal で opt-in 済み、#73) |
 | zsh(shell-extra)+ starship の管理([docs/shell.md](docs/shell.md)) | 実装済み・実機適用済み(#96) |
 | Claude Code settings(personal の public-safe な settings.json、[docs/claude-settings.md](docs/claude-settings.md)) | 実装済み・実機適用済み(personal のみ) |
-| Codex CLI settings(user 層 `~/.codex/hooks.json` の hook 登録 + 承認 rules の read-only baseline `~/.codex/rules/default.rules`。`config.toml` は codex 所有なので管理しない、[docs/ai-policy.md](docs/ai-policy.md) の「権限方針の正本と管理点」) | 実装済み・実機適用済み(personal のみ、#139/#181) |
+| Codex CLI settings(user 層 `~/.codex/hooks.json` の hook 登録 + 承認 rules の read-only baseline `~/.codex/rules/default.rules` + agent-tools の review / worker 用 profile file `~/.codex/agent-tools-{review,worker}.config.toml`(#264)。`config.toml` は codex 所有なので管理しない、[docs/ai-policy.md](docs/ai-policy.md) の「権限方針の正本と管理点」) | 実装済み・実機適用済み(personal のみ、#139/#181/#264) |
 | OpenCode settings(`~/.config/opencode/opencode.json` の permission の床・`autoupdate: false`・share 無効。auth / model は local、[docs/opencode-settings.md](docs/opencode-settings.md)) | 実装済み・実機適用済み(personal のみ、#234。plugin による hook parity は Phase 2 として agent-tools#295) |
 | Git signing(SSH 署名 + 1Password、opt-in、[docs/git-identity.md](docs/git-identity.md) の「SSH 署名」) | 実装済み・実機適用済み(#85/#97) |
 | VS Code settings の管理 | 管理しない(未使用のため見送り #16、dormant 配線も削除済み #145) |

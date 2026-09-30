@@ -29,7 +29,7 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 
 `.chezmoidata/*.yaml`(profiles / modules / capabilities.schema / packages / backup-paths)の読み取りは shell script 側では mikefarah/yq v4 で行う(chezmoi template 側は Go template が読む)。yq が無い・別 variant の場合は `require_yq` が fail closed する。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない(injection 防止)。
 
-boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型を、引用符なしの小文字 `true` / `false` で指定する。`validate-policy.sh` は型と綴りを検査し、文字列 `"true"` / `"false"`、数値、null に加え、`True` / `FALSE` などの大文字を含む綴りも拒否する。直接の `chezmoi apply` / template 展開は共通 `require-profile` guard でデコード後の型を検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の小文字 boolean `true` だけを許可する。enum の値は従来どおり文字列で指定する。
+boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型を、引用符なしの小文字 `true` / `false` で指定する。`validate-policy.sh` は型と綴りを検査し、文字列 `"true"` / `"false"`、数値、null に加え、`True` / `FALSE` などの大文字を含む綴りも拒否する。直接の `chezmoi apply` / template 展開は共通 `require-profile` guard でデコード後の型を検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の小文字 boolean `true` だけを許可する。enum の値は従来どおり文字列で指定する。enum も `require-profile` が schema の値に含まれるかを検査し、未知の値・型違い・欠落なら直接の apply でも fail する(値をそのまま書く template があるため。#264)。
 
 `packages`(`.chezmoidata/packages.yaml`)は software catalog。各 entry の `source`(brew_formula / brew_cask / npm_global / go_install / mas / manual)と canonical id を宣言する。`validate-policy.sh` が source の妥当性・go_install/mas の pkg 必須・name 重複を fail closed で検査する。
 
@@ -258,6 +258,30 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
+## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264)
+
+agent-tools の `personal-codex-review` と `personal-codex-worker` が使う Codex の reasoning effort を、
+対話の既定(`~/.codex/config.toml`)と分けて軽くするための profile file を `codex-settings` module が配る
+(agent-tools#339 の hand-off)。file 名は agent-tools の公開契約で、中身は dotfiles・読むのは agent-tools・
+Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
+
+- `~/.codex/agent-tools-review.config.toml`: review は file が在るときだけ `codex exec -p agent-tools-review`
+  を足し、Codex がこの file を `config.toml` の上に丸ごと重ねる。
+- `~/.codex/agent-tools-worker.config.toml`: worker は `-p` を使わず、preflight が top-level の `model` /
+  `model_reasoning_effort` だけを読んで `-c` で渡す。preflight は空行・comment・`key = "<1 行の basic string>"`
+  (値は `[A-Za-z0-9._-]+`)以外の行があると fail-closed にするので、file はその形に保つ。
+- 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` は空 render で、apply 済みの
+  file も消える(テンプレート自己 gate)。現状は personal = review `high` / worker `medium`、work = `off`
+  (codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
+- **中身は effort だけ**: `model` は置かず、両方とも `config.toml` の値を使う(review は Codex が profile を
+  `config.toml` に重ね、worker は preflight が `config.toml` の top-level から読む)。`service_tier` は review
+  だけが `config.toml` から引き継ぎ、worker は `--ignore-user-config` で起動して再指定しないので効かない。
+  model の指定(単価の差が大きい)や review で Fast mode を外す `service_tier` は、消費と受け付ける値を
+  実測してから enum capability を足す形で追加する。
+- **doctor**: 2 つの file の presence のみ(中身は config 値なので出さない)。module 非 active の profile では
+  手置き・他 profile の残置を中立に表示し、`off` 以外の値は dangling として warn。`CODEX_HOME` が
+  `~/.codex` 以外を指すと agent-tools はそちらを読むので warn する。
+
 ## OpenCode settings(`opencode-settings` module、#234)
 
 第 3 の AI harness。capability ではなく **module 列挙だけで gate**(claude-settings / codex-settings と
@@ -362,6 +386,10 @@ corepackMode:
   off: 何もしない
   report: doctor で状態だけ確認する
   enable: 手動で corepack enable 済みの前提で、doctor が pnpm / yarn の shim を確認する(dotfiles は corepack enable を実行しない)
+
+codexReviewEffort / codexWorkerEffort:
+  off: profile file を配らない(agent-tools は config.toml の既定を使う)
+  minimal | low | medium | high | xhigh: その値の model_reasoning_effort を書いた profile file を配る
 ```
 
 ## Initial Profiles

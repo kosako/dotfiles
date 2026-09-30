@@ -1474,6 +1474,105 @@ else
 fi
 rm -rf "$oc_fakebin" "$fixture_home/.local/share/opencode"
 
+# CX) Codex review / worker profile files (#264): presence-only report of the
+#     agent-tools profile files codex-settings renders. The fixture files hold
+#     a canary value that must never be printed (config values stay out of
+#     the report). Own fixture copy for the capability flips. CODEX_HOME is
+#     unset for every run except the one that sets it. doctor stays exit 0.
+cx_root="$fixture_home/.dotfiles-codexprofiles"
+copy_repo_fixture "$cx_root"
+cx_review="$fixture_home/.codex/agent-tools-review.config.toml"
+cx_worker="$fixture_home/.codex/agent-tools-worker.config.toml"
+cx_canary="canary-effort-5e2a"
+cx_run() {
+  env -u CODEX_HOME HOME="$fixture_home" "$@" 2>&1
+}
+cx_expect() {
+  local label="$1" out="$2"
+  shift 2
+  local line
+  for line in "$@"; do
+    if ! grep -Fxq -- "$line" <<< "$out"; then
+      printf '%s\n' "$out" >&2
+      fail "test failed: $label: missing line: $line"
+      status=1
+      return
+    fi
+  done
+  if grep -Fq "$cx_canary" <<< "$out"; then
+    fail "test failed: $label: a profile file value leaked into the report"
+    status=1
+    return
+  fi
+  ok "test passed: $label"
+}
+#     CX-a) committed personal (review=high, worker=medium), files missing ->
+#           one action per file naming the apply target.
+rm -f "$cx_review" "$cx_worker"
+if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
+  cx_expect "profile files missing on personal are actions" "$cx_out" \
+    "[warn] codexReviewEffort=high but $cx_review is missing — personal-codex-review falls back to the config.toml defaults" \
+    "[warn] codexWorkerEffort=medium but $cx_worker is missing — personal-codex-worker falls back to the config.toml defaults"
+else
+  fail "test failed: doctor must stay exit 0 (Codex profiles, missing)"
+  status=1
+fi
+#     CX-b) files present -> ok, contents never printed.
+mkdir -p "$fixture_home/.codex"
+printf 'model_reasoning_effort = "%s"\n' "$cx_canary" > "$cx_review"
+printf 'model_reasoning_effort = "%s"\n' "$cx_canary" > "$cx_worker"
+if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
+  cx_expect "profile files present on personal are ok (presence only)" "$cx_out" \
+    "[ok] codexReviewEffort=high; $cx_review present (read by personal-codex-review)" \
+    "[ok] codexWorkerEffort=medium; $cx_worker present (read by personal-codex-worker)"
+else
+  fail "test failed: doctor must stay exit 0 (Codex profiles, present)"
+  status=1
+fi
+#     CX-c) codex-settings active but the capability off while a file
+#           lingers -> action (agent-tools still reads it until apply).
+set_capability_all "$cx_root" codexReviewEffort off
+rm -f "$cx_worker"
+set_capability_all "$cx_root" codexWorkerEffort off
+if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
+  cx_expect "capability off with a lingering file is an action; off without a file is ok" "$cx_out" \
+    "[warn] codexReviewEffort=off but $cx_review exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
+    "[ok] codexWorkerEffort=off; no worker profile file (personal-codex-worker uses the config.toml defaults)"
+else
+  fail "test failed: doctor must stay exit 0 (Codex profiles, off)"
+  status=1
+fi
+#     CX-d) work (module inactive): a hand-placed file is neutral, a missing
+#           one is ok, and a non-off capability is a dangling warning.
+set_capability_all "$cx_root" codexWorkerEffort high
+if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" work)"; then
+  cx_expect "work reports hand-placed / missing files neutrally and a set capability as dangling" "$cx_out" \
+    "[info] - $cx_review present but not managed for this profile (hand-placed, or left by another profile — see managed-path orphans); agent-tools reads it whenever it exists" \
+    "[warn] codexWorkerEffort=high but the codex-settings module is inactive for this profile; nothing renders $cx_worker (dangling capability)" \
+    "[ok] no worker profile file (not managed for this profile; personal-codex-worker uses the config.toml defaults)"
+else
+  fail "test failed: doctor must stay exit 0 (Codex profiles, work)"
+  status=1
+fi
+#     CX-e) a CODEX_HOME that is not ~/.codex is flagged: agent-tools would
+#           look there, chezmoi renders into ~/.codex. The default spelled
+#           with a trailing slash is not flagged.
+if cx_out="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/elsewhere" "$cx_root/scripts/doctor.sh" personal 2>&1)" \
+  && cx_default="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/.codex/" "$cx_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] CODEX_HOME is set to $fixture_home/elsewhere: agent-tools reads the review / worker profile files from there, but chezmoi renders them into ~/.codex" <<< "$cx_out" \
+    && ! grep -Fq "CODEX_HOME is set to" <<< "$cx_default"; then
+    ok "test passed: a diverging CODEX_HOME is flagged; the default (trailing slash) is not"
+  else
+    printf '%s\n' "$cx_out" >&2
+    fail "test failed: CODEX_HOME divergence not reported as expected"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (Codex profiles, CODEX_HOME)"
+  status=1
+fi
+rm -f "$cx_review" "$cx_worker"
+
 # NA) next-actions summary (#227): every warning reported through `action`
 #     is repeated once, numbered, at the end of the run with its steps, and
 #     `--actions-only` prints just that list. doctor stays exit 0 (report-
