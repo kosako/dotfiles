@@ -75,8 +75,8 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   (module 非 active なら「not managed」)、`auth.json` は**存在のみ**(中身も provider 名も読まない)。
   床の乖離は managed drift section が `chezmoi status` で拾う。
   agent-tools の plugin(#263)は **静的に**確認する: global の plugins dir(`plugins/personal-*.js`)にあるか、
-  **二重読込**になる配置(`.ts` / `.mjs` の併置、単数形 `plugin/` dir の copy、設定ファイルの `plugin` 欄に同じ
-  plugin 名)が無いか。doctor は OpenCode を起動しない — `opencode debug config` でさえ OpenCode の DB
+  **二重読込**になる配置(`.ts` / `.mjs` の併置、単数形 `plugin/` dir の copy、OpenCode が読む設定 — managed の床と `OPENCODE_CONFIG` が指す file — の `plugin` 欄に同じ
+  plugin 名)が無いか(読まれていない `opencode.local.json` に載っているだけなら注記にとどめる)。doctor は OpenCode を起動しない — `opencode debug config` でさえ OpenCode の DB
   (`~/.local/share/opencode/opencode.db`)に書き込むため(1.18.30 で実測)、doctor の副作用なしの規則に反する。
   設定ファイルは secret を含みうるので `plugin` 欄だけを読み、中身は表示しない。報告するのは「plugins dir に
   ある」までで、init の成功ではない(init の throw は user に見えず、1.18.30 の log にも plugin の読込は出ない)。

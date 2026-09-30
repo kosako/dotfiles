@@ -1041,31 +1041,57 @@ done
 if [[ "${#opencode_plugins[@]}" -eq 0 ]]; then
   item "no agent-tools plugin in ~/.config/opencode/plugins (agent-tools sync deploys personal-*.js there)"
 else
-  # Plugin names listed in the config files OpenCode merges (managed floor,
-  # the local file, whatever OPENCODE_CONFIG points at), basenames only.
-  opencode_listed=""
-  for opencode_cfg_file in "$opencode_config_dir/opencode.json" "$opencode_config_dir/opencode.local.json" "${OPENCODE_CONFIG:-}"; do
+  # Plugin names listed in the `plugin` key of the config files OpenCode
+  # actually reads from this shell: the managed floor (always) and the file
+  # OPENCODE_CONFIG points at. opencode.local.json counts only when
+  # OPENCODE_CONFIG points at it; a listing in it that is not active here is
+  # shown as a note, never as a double load (Codex review, PR #270).
+  # opencode_plugin_names FILE — print the basenames in FILE's plugin key,
+  # one per line; fail (and print nothing) when FILE cannot be parsed.
+  opencode_plugin_names() {
+    local names
+    names="$(yq -p json -o json '.plugin // [] | map(select(type == "!!str") | sub(".*/"; ""))' "$1" 2>/dev/null)" || return 1
+    yq -p json '.[]' <<< "$names" 2>/dev/null
+  }
+  opencode_listed_active=""
+  opencode_listed_inactive=""
+  opencode_local_cfg="$opencode_config_dir/opencode.local.json"
+  for opencode_cfg_file in "$opencode_config_dir/opencode.json" "${OPENCODE_CONFIG:-}"; do
     [[ -n "$opencode_cfg_file" && -f "$opencode_cfg_file" ]] || continue
-    if opencode_cfg_plugins="$(yq -p json -o json '.plugin // [] | map(select(type == "!!str") | sub(".*/"; ""))' "$opencode_cfg_file" 2>/dev/null)" \
-      && opencode_cfg_plugins="$(yq -p json '.[]' <<< "$opencode_cfg_plugins" 2>/dev/null)"; then
-      opencode_listed+="$opencode_cfg_plugins"$'\n'
+    if opencode_cfg_plugins="$(opencode_plugin_names "$opencode_cfg_file")"; then
+      opencode_listed_active+="$opencode_cfg_plugins"$'\n'
     else
       item "the plugin key of $opencode_cfg_file could not be read (not JSON?); double loading via config not checked (contents never shown)"
     fi
   done
+  if [[ -f "$opencode_local_cfg" ]] && ! [[ -n "${OPENCODE_CONFIG:-}" && "$OPENCODE_CONFIG" -ef "$opencode_local_cfg" ]]; then
+    if opencode_cfg_plugins="$(opencode_plugin_names "$opencode_local_cfg")"; then
+      opencode_listed_inactive+="$opencode_cfg_plugins"$'\n'
+    else
+      item "the plugin key of $opencode_local_cfg could not be read (not JSON?); double loading via config not checked (contents never shown)"
+    fi
+  fi
+  # plugin_listed_in NAMES STEM — true when a name in NAMES (one per line)
+  # equals STEM once its extension is dropped (literal, not a pattern).
+  plugin_listed_in() {
+    local listed_name
+    while IFS= read -r listed_name; do
+      [[ -n "$listed_name" && "${listed_name%.*}" == "$2" ]] && return 0
+    done <<< "$1"
+    return 1
+  }
   for opencode_plugin_name in "${opencode_plugins[@]}"; do
     opencode_stem="${opencode_plugin_name%.js}"
-    opencode_dup=0
-    while IFS= read -r opencode_listed_name; do
-      [[ -n "$opencode_listed_name" ]] || continue
-      [[ "${opencode_listed_name%.*}" == "$opencode_stem" ]] && opencode_dup=1
-    done <<< "$opencode_listed"
-    if [[ "$opencode_dup" -eq 1 ]]; then
+    if plugin_listed_in "$opencode_listed_active" "$opencode_stem"; then
       warn "agent-tools plugin $opencode_stem is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
     else
       ok "agent-tools plugin $opencode_plugin_name in the global plugins dir (OpenCode loads it at startup; a successful init is not verifiable yet: doctor does not run OpenCode, agent-tools#343)"
+      if plugin_listed_in "$opencode_listed_inactive" "$opencode_stem"; then
+        item "$opencode_stem is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it — it would then load twice"
+      fi
     fi
   done
+  unset -f plugin_listed_in opencode_plugin_names
 fi
 
 # The local (non-managed) config — provider / model / plugin / mcp — lives in

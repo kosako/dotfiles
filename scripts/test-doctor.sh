@@ -204,6 +204,31 @@ else
   status=1
 fi
 
+# B2) Per-tool summary (#263): counts per tool in a stable (sorted) order,
+#     and each finding names exactly the tools whose rows are in that state.
+#     The fixture mixes tools and states; restored afterwards for the cases
+#     below.
+write_root_pinned_status_sh "$agent_scripts/status.sh" \
+  '{"contract_version":3,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"opencode","name":"p","state":"stale"},{"tool":"codex","name":"c","state":"ok"},{"tool":"claude-code","name":"a","state":"stale"},{"tool":"codex","name":"d","state":"conflict"},{"tool":"claude-code","name":"e","state":"deployed_but_inactive"}]}'
+if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[info] - sync targets: 5 (claude-code 2, codex 2, opencode 1)" <<< "$at_out" \
+    && grep -Fq "[warn] agent-tools has stale sync targets (generated artifact newer than target; tools: claude-code, opencode)" <<< "$at_out" \
+    && grep -Fq "sync conflicts (unmanaged same-name targets; tools: codex)" <<< "$at_out" \
+    && grep -Fq "deployed-but-inactive sync targets (gated entries still on disk; tools: claude-code;" <<< "$at_out"; then
+    ok "test passed: sync targets are counted per tool (sorted) and each finding names only the tools in that state"
+  else
+    printf '%s\n' "$at_out" >&2
+    fail "test failed: per-tool sync target summary not reported as expected"
+    status=1
+  fi
+else
+  printf '%s\n' "$at_out" >&2
+  fail "test failed: doctor must stay exit 0 (per-tool sync targets)"
+  status=1
+fi
+write_root_pinned_status_sh "$agent_scripts/status.sh" \
+  '{"contract_version":3,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"pass","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":true,"registered":1,"human_review_required":0,"unsupported":0},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"},{"tool":"codex","name":"y","state":"deployed_but_inactive"}]}'
+
 # C) Opt-in + unknown contract version: not interpreted, still exit 0.
 # Sentinel fields prove fail-closed: a doctor that warns but still interprets
 # fields would emit the summary lines below, so their absence is asserted too.
@@ -1768,18 +1793,33 @@ fi
 #     OP-b) the same plugin also listed in a config's plugin key -> double
 #           load warning; the config's other values never show.
 printf '{"mcp":{"x":{"headers":{"Authorization":"%s"}}},"plugin":["file:///elsewhere/personal-agent-tools.js","some-npm-plugin@1"]}\n' "$op_canary" > "$op_cfg/opencode.local.json"
-if op_out="$(op_run)"; then
-  op_expect "a plugin also listed in a config's plugin key is a double-load warning" "$op_out" \
+if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
+  op_expect "a plugin also listed in the active config's plugin key is a double-load warning" "$op_out" \
     "[warn] agent-tools plugin personal-agent-tools is also listed in an OpenCode config's plugin key — OpenCode loads it twice"
 else
   fail "test failed: doctor must stay exit 0 (OpenCode plugin listed in config)"
+  status=1
+fi
+#     OP-b2) the same listing in opencode.local.json while OPENCODE_CONFIG does
+#            not point at it: OpenCode does not read that file here, so it is
+#            a note, never a double-load warning.
+if op_out="$(op_run)"; then
+  op_expect "a listing in an opencode.local.json that is not read here is only a note" "$op_out" \
+    "$op_ok_line" \
+    "[info] - personal-agent-tools is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it"
+  if grep -Fq "loads it twice" <<< "$op_out"; then
+    fail "test failed: an inactive opencode.local.json listing was reported as a double load"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode inactive local listing)"
   status=1
 fi
 #     OP-c) names are compared literally, not as regexes: personal-a.b.js
 #           on disk does not match personal-a-b.js in the config.
 printf '//\n' > "$op_cfg/plugins/personal-a.b.js"
 printf '{"plugin":["personal-a-b.js"]}\n' > "$op_cfg/opencode.local.json"
-if op_out="$(op_run)"; then
+if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
   op_expect "plugin names are matched literally (no regex false positive)" "$op_out" \
     "[ok] agent-tools plugin personal-a.b.js in the global plugins dir"
   if grep -Fq "personal-a.b is also listed" <<< "$op_out"; then
