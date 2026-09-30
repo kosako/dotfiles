@@ -210,7 +210,12 @@ else
 fi
 
 section "commands"
-for command_name in git chezmoi brew op node npm corepack mise direnv yq shellcheck shfmt; do
+# Tools this repo's scripts / apply depend on. Each is declared in the
+# software catalog (.chezmoidata/packages.yaml: name / pkg / bin) or is a
+# prerequisite outside it — git (Xcode Command Line Tools), brew (the
+# bootstrap), node / npm / corepack (runtime via mise). test-preflight.sh
+# pins that, so a tool dropped from the catalog cannot keep warning here (#259).
+for command_name in git chezmoi brew op node npm corepack mise direnv yq shellcheck; do
   command_status "$command_name" || true
 done
 

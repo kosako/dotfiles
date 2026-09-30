@@ -199,6 +199,35 @@ else
   pass "broken policy data makes preflight exit non-zero (fail-closed)"
 fi
 
+# Commands section (#259): every tool preflight checks is declared in the
+# software catalog (name / pkg / bin) or is one of the named prerequisites
+# outside it, so a tool dropped from the catalog (shfmt, #53) cannot keep
+# warning "not found" on every machine installed from the catalog.
+require_yq || exit 1
+commands_lines="$(grep -E '^for command_name in .*; do$' "$SCRIPT_DIR/preflight.sh" || true)"
+if [[ "$(grep -c . <<< "$commands_lines")" -ne 1 ]]; then
+  miss "commands section: expected exactly one 'for command_name in ...; do' loop in preflight.sh"
+else
+  commands_list="${commands_lines#for command_name in }"
+  commands_list="${commands_list%; do}"
+  prereqs_outside_catalog=" git brew node npm corepack "
+  commands_checked=0
+  commands_bad=""
+  for command_name in $commands_list; do
+    commands_checked=$((commands_checked + 1))
+    [[ "$prereqs_outside_catalog" == *" $command_name "* ]] && continue
+    declared="$(C="$command_name" yq '[.packages[] | select(.name == strenv(C) or .pkg == strenv(C) or .bin == strenv(C))] | length' "$DOTFILES_ROOT/.chezmoidata/packages.yaml")"
+    [[ "$declared" == "0" ]] && commands_bad+=" $command_name"
+  done
+  if [[ "$commands_checked" -eq 0 ]]; then
+    miss "commands section: parsed an empty command list"
+  elif [[ -n "$commands_bad" ]]; then
+    miss "commands section checks tools that are neither in the catalog nor a named prerequisite:$commands_bad"
+  else
+    pass "commands section: all $commands_checked checked tools are in the catalog or named prerequisites"
+  fi
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "preflight tests passed"
 fi
