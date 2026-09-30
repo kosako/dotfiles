@@ -14,7 +14,8 @@ Claude Code([claude-settings](claude-settings.md))・Codex(`codex-settings`)と�
 | TUI 設定 | `~/.config/opencode/tui.json`(`opencode.json` とは別 file。`OPENCODE_TUI_CONFIG` で path を変えられる) | ❌ 管理外 |
 | 認証(`/connect` で貼った API key・OAuth token) | `~/.local/share/opencode/auth.json` | ❌ 管理外・backup 対象外(1Password が SoR)。Claude 側の secret floor が `Read` を deny |
 | skill / instruction 本体 | agent-tools が `~/.claude/` に配布したもの。skill(`~/.claude/skills/<name>/SKILL.md`)は OpenCode が直接読む。instruction(`~/.claude/agent-tools/CLAUDE.md`)は、OpenCode がユーザー手書きの `~/.claude/CLAUDE.md` の `@` import を辿らないため、1 行目の managed な `instructions` が絶対 path で参照する | ❌ 別 repo の責務・OpenCode 向けの再配布はしない |
-| plugin による hook parity(safe-gh 誘導 / 品質ループ / herdr)、相互レビュー契約への追加 | OpenCode 導入 Phase 2(agent-tools#295) | ❌ 未着手 |
+| agent-tools の plugin(`plugins/personal-*.js`: safe-gh 誘導・品質ループ。OpenCode 導入 Phase 2 = agent-tools#295) | global の plugins dir(`~/.config/opencode/plugins/`)。置けば起動時に自動で読まれ、`opencode.json` への登録は不要(`opencode --pure` で外せる)。safe-gh は実行後に model へ付ける注記(steering)で、止めるのは permission の床。品質ループの結果は人には log(`~/.local/share/opencode/log/opencode.log`)にしか出ない | ❌ 管理外(agent-tools の sync が配置・更新・撤去。dotfiles は doctor で読込の見え方だけを確認) |
+| herdr integration の plugin(`plugins/herdr-agent-state.js`) | herdr の installer(`herdr integration install opencode`)が置く | ❌ 管理外(入れるかは任意。doctor は herdr の見え方を中立表示) |
 
 work / client には配らない(`opencode-settings` module を持たない。claude-settings / codex-settings と同じ)。
 
@@ -73,6 +74,15 @@ work / client には配らない(`opencode-settings` module を持たない。cl
 - `scripts/doctor.sh` の `OpenCode` section(report-only): `opencode` の presence、managed 床の presence
   (module 非 active なら「not managed」)、`auth.json` は**存在のみ**(中身も provider 名も読まない)。
   床の乖離は managed drift section が `chezmoi status` で拾う。
+  agent-tools の plugin(#263)は、`opencode debug config` の `plugin_origins` で **OpenCode が見つけたか**と
+  **二重読込**(同じ plugin 名が global と project、`.js` と `.ts` の複数 origin から来る / 単数形 `plugin/` dir の
+  copy)を確認する。`debug config` は解決済みの設定全体(provider の options や MCP の header に secret が
+  入りうる)を出すので、`plugin_origins` だけを抜き出して表示はしない。`/var/empty` から実行して project の設定を
+  拾わず、plugin SDK(`node_modules/@opencode-ai/plugin`)が既に入っているときだけ動かす(初回起動は npm install を
+  伴うため)。「見つかった」は init の成功ではない(init の throw は user に見えず、1.18.30 の log にも出ない)ので、
+  そう明記する。成功の目印は agent-tools#343 で plugin が log に出す予定。
+  `opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も
+  報告する(`~/.zshrc.local` に export があれば、非対話 shell 由来として中立表示)。
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash の rule map を順序込みで、
   autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を

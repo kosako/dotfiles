@@ -189,9 +189,10 @@ set_capability_all "$optin_root" enableAgentToolsStatus true
 rm -f "$agent_marker"
 if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "agent-tools present; status contract v3" <<< "$at_out" \
-    && grep -Fq "sync conflicts" <<< "$at_out" \
-    && grep -Fq "deployed-but-inactive sync targets" <<< "$at_out" && [[ -e "$agent_marker" ]]; then
-    ok "test passed: opt-in runs status.sh and summarizes (conflict + inactive leftovers flagged)"
+    && grep -Fq "sync conflicts (unmanaged same-name targets; tools: codex)" <<< "$at_out" \
+    && grep -Fq "deployed-but-inactive sync targets (gated entries still on disk; tools: codex;" <<< "$at_out" \
+    && grep -Fxq "[info] - sync targets: 2 (codex 2)" <<< "$at_out" && [[ -e "$agent_marker" ]]; then
+    ok "test passed: opt-in runs status.sh and summarizes (per-tool counts; conflict + inactive leftovers flagged with their tools)"
   else
     printf '%s\n' "$at_out" >&2
     fail "test failed: opt-in summary/conflict/marker missing"
@@ -1701,6 +1702,190 @@ else
   status=1
 fi
 rm -rf "$hl_home"
+
+# OP) OpenCode plugins, OPENCODE_CONFIG and herdr's OpenCode view (#263).
+#     A PATH-front fake opencode answers `debug config` from a fixture file,
+#     records the cwd it ran in, and can fail; the fixture JSON carries a
+#     canary "secret" (an MCP header) that must never reach the report — the
+#     real resolved config can hold provider options / MCP headers. A fake
+#     herdr answers `integration status`. Own HOME; OPENCODE_CONFIG is unset
+#     unless a case sets it. doctor stays exit 0 throughout.
+op_home="$fixture_home/op-home"
+op_fakebin="$fixture_home/opfake"
+op_cfg="$op_home/.config/opencode"
+op_json="$fixture_home/op-config.json"
+op_cwd="$fixture_home/op-cwd"
+op_canary="canary-mcp-header-3e8b"
+mkdir -p "$op_fakebin" "$op_cfg/plugins" "$op_cfg/node_modules/@opencode-ai/plugin"
+cat > "$op_fakebin/opencode" <<SH
+#!/bin/sh
+[ "\$1" = debug ] && [ "\$2" = config ] || exit 0
+pwd -P > "$op_cwd"
+cat "$op_json"
+exit "\${OP_FAKE_RC:-0}"
+SH
+cat > "$op_fakebin/herdr" <<'SH'
+#!/bin/sh
+[ "$1" = integration ] && [ "$2" = status ] || exit 2
+printf '%s\n' "claude: not installed (x)" "codex: not installed (y)" "opencode: not installed (z)"
+SH
+chmod +x "$op_fakebin/opencode" "$op_fakebin/herdr"
+printf '// personal-agent-tools\n' > "$op_cfg/plugins/personal-agent-tools.js"
+op_plugin_spec="file://$op_cfg/plugins/personal-agent-tools.js"
+op_write_json() {
+  printf '{"mcp":{"x":{"headers":{"Authorization":"%s"}}},"plugin_origins":[%s]}\n' "$op_canary" "$1" > "$op_json"
+}
+op_run() {
+  env -u OPENCODE_CONFIG HOME="$op_home" PATH="$op_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1
+}
+op_expect() {
+  local label="$1" out="$2"
+  shift 2
+  local line
+  for line in "$@"; do
+    if ! grep -Fq -- "$line" <<< "$out"; then
+      printf '%s\n' "$out" >&2
+      fail "test failed: $label: missing: $line"
+      status=1
+      return
+    fi
+  done
+  if grep -Fq "$op_canary" <<< "$out"; then
+    fail "test failed: $label: the resolved config leaked into the report"
+    status=1
+    return
+  fi
+  ok "test passed: $label"
+}
+#     OP-a) discovered once from the global plugins dir -> ok with the
+#           honest-label; run from /var/empty; the canary never shows.
+op_write_json "{\"spec\":\"$op_plugin_spec\",\"source\":\"$op_cfg\",\"scope\":\"global\"}"
+rm -f "$op_cwd"
+if op_out="$(op_run)"; then
+  op_expect "OpenCode discovers the agent-tools plugin (global) without leaking the config" "$op_out" \
+    "[ok] agent-tools plugin personal-agent-tools.js discovered by OpenCode (global); a successful init is not verifiable yet (agent-tools#343)"
+  if [[ "$(cat "$op_cwd" 2>/dev/null)" != "$(cd /var/empty && pwd -P)" ]]; then
+    fail "test failed: opencode debug config did not run from /var/empty (a project config could be picked up)"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode discovery)"
+  status=1
+fi
+#     OP-b) the same plugin from two origins -> double-load warning.
+op_write_json "{\"spec\":\"$op_plugin_spec\",\"scope\":\"global\"},{\"spec\":\"file:///repo/.opencode/plugins/personal-agent-tools.ts\",\"scope\":\"project\"}"
+if op_out="$(op_run)"; then
+  op_expect "a plugin resolved from two origins is a double-load warning" "$op_out" \
+    "[warn] agent-tools plugin personal-agent-tools is loaded from 2 origins (personal-agent-tools.js global, personal-agent-tools.ts project) — OpenCode runs it more than once"
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode double load)"
+  status=1
+fi
+#     OP-c) present on disk but not in the resolved config -> warning.
+op_write_json ""
+if op_out="$(op_run)"; then
+  op_expect "a plugin file OpenCode does not pick up is warned" "$op_out" \
+    "[warn] agent-tools plugin personal-agent-tools.js is present but OpenCode's resolved config does not pick it up"
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode not picked up)"
+  status=1
+fi
+#     OP-d) debug config fails -> not checked, never a verdict.
+op_write_json "{\"spec\":\"$op_plugin_spec\",\"scope\":\"global\"}"
+if op_out="$(op_run OP_FAKE_RC=1)"; then
+  op_expect "a failing opencode debug config reports discovery as not checked" "$op_out" \
+    "[info] - agent-tools plugins present (personal-agent-tools.js); discovery not checked: opencode debug config gave no usable answer"
+  if grep -Fq "discovered by OpenCode" <<< "$op_out"; then
+    fail "test failed: a failing debug config must not be adopted as discovered"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode debug config failing)"
+  status=1
+fi
+#     OP-e) plugin SDK not installed -> OpenCode is never run (it would
+#           npm-install first).
+mv "$op_cfg/node_modules" "$op_cfg/node_modules.off"
+rm -f "$op_cwd"
+if op_out="$(op_run)"; then
+  op_expect "without the plugin SDK installed OpenCode is not run" "$op_out" \
+    "discovery not checked: OpenCode has not installed its plugin SDK yet"
+  if [[ -e "$op_cwd" ]]; then
+    fail "test failed: opencode was run although its plugin SDK is not installed"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode SDK absent)"
+  status=1
+fi
+mv "$op_cfg/node_modules.off" "$op_cfg/node_modules"
+#     OP-f) extra copies that OpenCode may load twice (.ts next to .js,
+#           singular plugin/ dir) -> one warning each.
+mkdir -p "$op_cfg/plugin"
+printf '//\n' > "$op_cfg/plugins/personal-agent-tools.ts"
+printf '//\n' > "$op_cfg/plugin/personal-agent-tools.js"
+if op_out="$(op_run)"; then
+  op_expect "extra plugin copies are warned" "$op_out" \
+    "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugins/personal-agent-tools.ts" \
+    "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugin/personal-agent-tools.js"
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode extra copies)"
+  status=1
+fi
+rm -rf "$op_cfg/plugin" "$op_cfg/plugins/personal-agent-tools.ts"
+#     OP-g) OPENCODE_CONFIG against a present opencode.local.json.
+printf '{}\n' > "$op_cfg/opencode.local.json"
+if op_out="$(op_run)"; then
+  op_expect "local config present but OPENCODE_CONFIG unset (no export anywhere) is an action" "$op_out" \
+    "[warn] opencode.local.json exists but OPENCODE_CONFIG is not set — OpenCode ignores the local provider / model / mcp config"
+else
+  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG unset)"
+  status=1
+fi
+printf 'export OPENCODE_CONFIG="$HOME/.config/opencode/opencode.local.json"\n' > "$op_home/.zshrc.local"
+if op_out="$(op_run)"; then
+  op_expect "an export in ~/.zshrc.local that this shell did not load is neutral" "$op_out" \
+    "[info] - OPENCODE_CONFIG is exported in ~/.zshrc.local but not set in this shell"
+else
+  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG exported elsewhere)"
+  status=1
+fi
+if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
+  op_expect "OPENCODE_CONFIG pointing at opencode.local.json is ok" "$op_out" \
+    "[ok] OPENCODE_CONFIG -> opencode.local.json (local provider / model / mcp config is read)"
+else
+  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG ok)"
+  status=1
+fi
+printf '{}\n' > "$op_home/other.json"
+if op_out="$(op_run OPENCODE_CONFIG="$op_home/other.json")"; then
+  op_expect "OPENCODE_CONFIG pointing elsewhere is warned" "$op_out" \
+    "[warn] OPENCODE_CONFIG points to a different file than opencode.local.json — that local config is not read"
+else
+  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG elsewhere)"
+  status=1
+fi
+if op_out="$(op_run OPENCODE_CONFIG="$op_home/missing.json")"; then
+  op_expect "OPENCODE_CONFIG pointing at a missing file is warned" "$op_out" \
+    "[warn] OPENCODE_CONFIG points to a file that does not exist — OpenCode reads no local config"
+else
+  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG missing file)"
+  status=1
+fi
+#     OP-h) herdr's view of its OpenCode integration is shown neutrally
+#           (installing it is the user's call; never an action).
+if op_out="$(op_run)"; then
+  op_expect "herdr's OpenCode integration state is shown as herdr's view" "$op_out" \
+    "[info] - herdr's own view: opencode integration not installed"
+  if grep -Fq "herdr integration install opencode\"" <<< "$op_out" || grep -Fq "\$ herdr integration install opencode" <<< "$op_out"; then
+    fail "test failed: herdr's OpenCode integration must not become an action"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (herdr OpenCode view)"
+  status=1
+fi
+rm -rf "$op_home" "$op_fakebin" "$op_json" "$op_cwd"
 
 # NA) next-actions summary (#227): every warning reported through `action`
 #     is repeated once, numbered, at the end of the run with its steps, and

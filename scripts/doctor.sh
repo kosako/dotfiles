@@ -1014,6 +1014,91 @@ else
   item "opencode credential store absent: $opencode_auth (connect a provider with /connect when needed)"
 fi
 
+# agent-tools' OpenCode plugins (#263, agent-tools#295). A file in the
+# global plugins dir IS the registration (no config entry, no trust gate), so
+# agent-tools owns plugins/personal-*.js end to end and its own doctor checks
+# the files and their marker line; this side checks what OpenCode makes of
+# them (docs/config-ownership.md):
+# - discovery: `opencode debug config` resolves plugin_origins (spec + scope)
+#   without writes (measured: no mtime change under the config / data dirs,
+#   nothing created in the cwd). It prints the whole resolved config —
+#   provider options and MCP headers can hold secrets — so the output is
+#   parsed for plugin_origins only and never echoed. It runs from /var/empty
+#   (empty, outside $HOME): no project config is picked up, and the scope
+#   stays "global" (from / or $HOME the config dir sits under the cwd and is
+#   labelled "local"). It runs only when the plugin SDK is already
+#   installed: on a first start OpenCode npm-installs @opencode-ai/plugin into
+#   the config dir (agent-tools probe M1), which doctor must not trigger.
+#   Discovery is not a successful init: an init that throws is invisible to
+#   the user (probe M2) and 1.18.30 logs nothing about plugin loading, so the
+#   report says so until the plugin logs its own marker (agent-tools#343).
+# - double loading: the same plugin name from two origins (global and
+#   project, .js next to .ts), or a copy in the singular plugin/ dir.
+opencode_config_dir="$HOME/.config/opencode"
+opencode_plugins=()
+for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.js; do
+  [[ -f "$opencode_plugin_file" ]] && opencode_plugins+=("${opencode_plugin_file##*/}")
+done
+for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.ts "$opencode_config_dir"/plugin/personal-*; do
+  [[ -e "$opencode_plugin_file" ]] || continue
+  warn "agent-tools plugin copy that OpenCode may load twice: $opencode_plugin_file (agent-tools deploys only plugins/personal-*.js; remove the extra copy)"
+done
+if [[ "${#opencode_plugins[@]}" -eq 0 ]]; then
+  item "no agent-tools plugin in ~/.config/opencode/plugins (agent-tools sync deploys personal-*.js there)"
+elif ! command -v opencode >/dev/null 2>&1; then
+  item "agent-tools plugins present (${opencode_plugins[*]}); OpenCode not installed, discovery not checked"
+elif [[ ! -d "$opencode_config_dir/node_modules/@opencode-ai/plugin" ]]; then
+  item "agent-tools plugins present (${opencode_plugins[*]}); discovery not checked: OpenCode has not installed its plugin SDK yet (running it would npm-install first — start OpenCode once, then re-run doctor)"
+else
+  bounded_probe sh -c 'cd /var/empty && exec opencode debug config'
+  opencode_origins=""
+  if [[ "$probe_rc" == "0" ]]; then
+    opencode_origins="$(printf '%s' "$probe_lines" | yq -p json '.plugin_origins[]? | ((.spec // "" | sub(".*/"; "")) + " " + (.scope // "unknown"))' 2>/dev/null || true)"
+  fi
+  if [[ "$probe_rc" != "0" ]]; then
+    item "agent-tools plugins present (${opencode_plugins[*]}); discovery not checked: opencode debug config gave no usable answer within ${probe_deadline}s"
+  else
+    for opencode_plugin_name in "${opencode_plugins[@]}"; do
+      opencode_stem="${opencode_plugin_name%.js}"
+      opencode_hits="$(grep -E "^${opencode_stem}\.(js|ts|mjs) " <<< "$opencode_origins" || true)"
+      opencode_hit_count="$(grep -c . <<< "$opencode_hits" || true)"
+      if [[ "$opencode_hit_count" -eq 0 ]]; then
+        warn "agent-tools plugin $opencode_plugin_name is present but OpenCode's resolved config does not pick it up (check plugins/ ownership and --pure; docs/opencode-settings.md)"
+      elif [[ "$opencode_hit_count" -gt 1 ]]; then
+        warn "agent-tools plugin $opencode_stem is loaded from $opencode_hit_count origins ($(tr '\n' ',' <<< "$opencode_hits" | sed 's/,$//; s/,/, /g')) — OpenCode runs it more than once; keep only ~/.config/opencode/plugins/$opencode_plugin_name"
+      else
+        ok "agent-tools plugin $opencode_plugin_name discovered by OpenCode ($(awk '{print $2}' <<< "$opencode_hits")); a successful init is not verifiable yet (agent-tools#343)"
+      fi
+    done
+  fi
+fi
+
+# The local (non-managed) config — provider / model / plugin / mcp — lives in
+# opencode.local.json and is only read when OPENCODE_CONFIG points at it
+# (docs/opencode-settings.md). The export sits in ~/.zshrc.local, so a shell
+# that did not load it starts OpenCode without the local config. Checked
+# against doctor's own environment; the variable's key is looked up in
+# ~/.zshrc.local by name only (the file is never printed).
+opencode_local="$opencode_config_dir/opencode.local.json"
+if [[ -f "$opencode_local" ]]; then
+  if [[ -z "${OPENCODE_CONFIG:-}" ]]; then
+    if grep -q 'OPENCODE_CONFIG' "$HOME/.zshrc.local" 2>/dev/null; then
+      item "OPENCODE_CONFIG is exported in ~/.zshrc.local but not set in this shell — OpenCode started from here would not read opencode.local.json (normal for a non-interactive shell; run doctor from an interactive one to check)"
+    else
+      action "opencode.local.json exists but OPENCODE_CONFIG is not set — OpenCode ignores the local provider / model / mcp config" \
+        "add export OPENCODE_CONFIG=\"\$HOME/.config/opencode/opencode.local.json\" to ~/.zshrc.local (docs/opencode-settings.md)"
+    fi
+  elif [[ "$OPENCODE_CONFIG" -ef "$opencode_local" ]]; then
+    ok "OPENCODE_CONFIG -> opencode.local.json (local provider / model / mcp config is read)"
+  elif [[ -f "$OPENCODE_CONFIG" ]]; then
+    warn "OPENCODE_CONFIG points to a different file than opencode.local.json — that local config is not read"
+  else
+    warn "OPENCODE_CONFIG points to a file that does not exist — OpenCode reads no local config"
+  fi
+elif [[ -n "${OPENCODE_CONFIG:-}" && ! -f "$OPENCODE_CONFIG" ]]; then
+  warn "OPENCODE_CONFIG points to a file that does not exist — OpenCode reads no local config"
+fi
+
 # enforceAiSandbox drives the Claude Code native sandbox block in the managed
 # ~/.claude/settings.json (Bash tool fs+network only; see
 # docs/ai-environment-boundary.md). Reported here because AGENTS.md requires a
@@ -1323,6 +1408,17 @@ else
     item "herdr not on PATH: nothing to check (the software catalog section reports it as declared-missing; this profile does not auto-install)"
   fi
 fi
+# OpenCode (#263): herdr's installer drops its own plugin into OpenCode's
+# global plugins dir (placing the file IS the registration), so dotfiles has
+# no registration to render and enableHerdrIntegration does not reach it.
+# Shown as herdr's view only, where OpenCode is installed; installing it is
+# the user's call (session restore for OpenCode started in herdr panes).
+if command -v opencode >/dev/null 2>&1; then
+  opencode_herdr_state="$(herdr_integration_state opencode)"
+  if [[ -n "$opencode_herdr_state" ]]; then
+    item "herdr's own view: opencode integration $opencode_herdr_state (~/.config/opencode/plugins/herdr-agent-state.js is placed by herdr integration install opencode and not managed by dotfiles; install it if you run OpenCode in herdr panes)"
+  fi
+fi
 
 section "Codex review / worker profiles (report-only)"
 # #264 (agent-tools#339 hand-off): codex-settings renders the Codex profile
@@ -1450,17 +1546,25 @@ else
         item "register: catalog not present"
       fi
 
-      item "sync targets: $(sj '.sync_targets // [] | length')"
+      # Rows carry the target tool (claude-code / codex / opencode since
+      # agent-tools#295; the contract stays v3), so counts and the tools a
+      # finding touches are shown per tool (#263).
+      sync_target_count="$(sj '.sync_targets // [] | length')"
+      if [[ "$sync_target_count" == "0" ]]; then
+        item "sync targets: 0"
+      else
+        item "sync targets: $sync_target_count ($(sj '[.sync_targets[]? | (.tool // "unknown")] | sort | group_by(.) | map(.[0] + " " + (length | tostring)) | join(", ")'))"
+      fi
       if [[ "$(sj '[.sync_targets[]? | select(.state == "conflict")] | length')" != "0" ]]; then
-        warn "agent-tools sync conflicts (unmanaged same-name targets); sync must not change them"
+        warn "agent-tools sync conflicts (unmanaged same-name targets; tools: $(sj '[.sync_targets[]? | select(.state == "conflict") | (.tool // "unknown")] | sort | unique | join(", ")')); sync must not change them"
       fi
       if [[ "$(sj '[.sync_targets[]? | select(.state == "stale")] | length')" != "0" ]]; then
-        action "agent-tools has stale sync targets (generated artifact newer than target)" \
+        action "agent-tools has stale sync targets (generated artifact newer than target; tools: $(sj '[.sync_targets[]? | select(.state == "stale") | (.tool // "unknown")] | sort | unique | join(", ")'))" \
           "re-run the agent-tools sync from $agent_tools_dir (see its README) so the deployed copies match"
       fi
       # v3 (#194): gated-but-still-deployed leftovers are cleanup candidates.
       if [[ "$(sj '[.sync_targets[]? | select(.state == "deployed_but_inactive")] | length')" != "0" ]]; then
-        warn "agent-tools has deployed-but-inactive sync targets (gated entries still on disk; clean up or re-approve)"
+        warn "agent-tools has deployed-but-inactive sync targets (gated entries still on disk; tools: $(sj '[.sync_targets[]? | select(.state == "deployed_but_inactive") | (.tool // "unknown")] | sort | unique | join(", ")'); clean up or re-approve)"
       fi
     fi
     unset -f sj
