@@ -283,19 +283,37 @@ else
   status=1
 fi
 
-# E) Absent agent-tools: report-only warning, exit 0.
+# E) Absent agent-tools: report-only warning on a profile that opted in to its
+#    status (personal: enableAgentToolsStatus=true), exit 0.
 rm -rf "$agent_dir"
 if at_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "agent-tools not present" <<< "$at_out"; then
-    ok "test passed: absent agent-tools reported, doctor exit 0"
+  if grep -Fxq "[warn] agent-tools not present at $agent_dir (not auto-cloned)" <<< "$at_out"; then
+    ok "test passed: absent agent-tools warned on personal (opted in), doctor exit 0"
   else
     printf '%s\n' "$at_out" >&2
-    fail "test failed: absent agent-tools not reported"
+    fail "test failed: absent agent-tools not warned on personal"
     status=1
   fi
 else
   printf '%s\n' "$at_out" >&2
   fail "test failed: doctor must stay exit 0 when agent-tools absent"
+  status=1
+fi
+# E2) The same absence on work (enableAiPolicy=true, enableAgentToolsStatus=
+#     false; agent-tools is not deployed on work machines) is the declared
+#     state: a neutral item, never a warning on every run (#258).
+if at_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[info] - agent-tools not present at $agent_dir (not expected by this profile: enableAgentToolsStatus=false; not auto-cloned)" <<< "$at_out" \
+    && ! grep -Fq "[warn] agent-tools not present" <<< "$at_out"; then
+    ok "test passed: absent agent-tools on work is neutral (no warning)"
+  else
+    printf '%s\n' "$at_out" >&2
+    fail "test failed: absent agent-tools on work was not reported neutrally"
+    status=1
+  fi
+else
+  printf '%s\n' "$at_out" >&2
+  fail "test failed: doctor must stay exit 0 when agent-tools absent (work)"
   status=1
 fi
 
@@ -1572,6 +1590,96 @@ else
   status=1
 fi
 rm -f "$cx_review" "$cx_worker"
+
+# HL) git hook gates wiring that lingers while enableGitHookGates=false (#258).
+#     `chezmoi apply` prunes it only where the git-hook-gates module is active
+#     (template self-gate); on a profile that does not list the module (work,
+#     e.g. after a personal -> work switch, #201) apply never touches it, so
+#     doctor must say so and name the files instead of "run chezmoi apply".
+#     Own HOME (git reads the global config from it) and own fixture copy for
+#     the personal capability flip; git's config-selecting env is cleared.
+hl_root="$fixture_home/.dotfiles-hooklinger"
+copy_repo_fixture "$hl_root"
+set_capability_all "$hl_root" enableGitHookGates false
+hl_home="$fixture_home/hl-home"
+hl_dir="$hl_home/.config/git-hook-gates"
+hl_run() {
+  env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u XDG_CONFIG_HOME GIT_CONFIG_NOSYSTEM=1 \
+    HOME="$hl_home" "$hl_root/scripts/doctor.sh" "$1" 2>&1
+}
+hl_apply_msg="[warn] enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present) — run chezmoi apply to prune it"
+hl_foreign_msg="[warn] enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present), left by another profile — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT remove it (#201); remove it by hand"
+#     HL-a) personal (module active), capability flipped off, a shim left
+#           behind -> apply prunes it, so the apply action stands.
+mkdir -p "$hl_dir/hooks"
+printf '#!/bin/sh\n# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).\n' > "$hl_dir/hooks/pre-commit"
+if hl_out="$(hl_run personal)"; then
+  if grep -Fxq "$hl_apply_msg" <<< "$hl_out" && ! grep -Fq "will NOT remove it" <<< "$hl_out"; then
+    ok "test passed: lingering shim on a module-active profile keeps the chezmoi apply action"
+  else
+    printf '%s\n' "$hl_out" >&2
+    fail "test failed: lingering shim on personal (module active) not reported with the apply action"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (hook gates lingering, personal)"
+  status=1
+fi
+#     HL-b) work (module inactive) with the full managed wiring left by
+#           personal: shims + hooks.gitconfig included from ~/.gitconfig, so
+#           core.hooksPath is live -> hand removal of exactly the files that
+#           exist, plus a confirmation step; never the apply action.
+printf '#!/bin/sh\n' > "$hl_dir/hooks/commit-msg"
+printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hl_dir/hooks.gitconfig"
+printf '[include]\n\tpath = ~/.config/git-hook-gates/hooks.gitconfig\n' > "$hl_home/.gitconfig"
+hl_rm_step="\$ rm -i $(printf '%q' "$hl_dir/hooks.gitconfig") $(printf '%q' "$hl_dir/hooks/pre-commit") $(printf '%q' "$hl_dir/hooks/commit-msg")"
+hl_verify_step="\$ git config --global --includes --show-origin --get core.hooksPath   # confirm nothing is printed"
+if hl_out="$(hl_run work)"; then
+  if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" && ! grep -Fq "$hl_apply_msg" <<< "$hl_out" \
+    && grep -Fq -- "$hl_rm_step" <<< "$hl_out" && grep -Fq -- "$hl_verify_step" <<< "$hl_out"; then
+    ok "test passed: lingering wiring on work (module inactive) names the files to remove, not apply"
+  else
+    printf '%s\n' "$hl_out" >&2
+    fail "test failed: lingering wiring on work was not reported as hand removal of the existing files"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (hook gates lingering, work)"
+  status=1
+fi
+#     HL-c) work with only core.hooksPath set directly in ~/.gitconfig (no
+#           managed file left) -> point at the setting, not at rm or apply.
+rm -rf "$hl_dir"
+printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hl_home/.gitconfig"
+if hl_out="$(hl_run work)"; then
+  if grep -Fxq "[warn] enableGitHookGates=false but global core.hooksPath still points at the managed shim directory, set outside the managed include — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT change it (#201)" <<< "$hl_out" \
+    && ! grep -Fq "\$ rm -i" <<< "$hl_out"; then
+    ok "test passed: a hooksPath set outside the managed include is reported by its setting"
+  else
+    printf '%s\n' "$hl_out" >&2
+    fail "test failed: stray core.hooksPath on work was not reported as expected"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (hook gates stray hooksPath, work)"
+  status=1
+fi
+#     HL-d) work with nothing left -> not wired, no action.
+rm -f "$hl_home/.gitconfig"
+if hl_out="$(hl_run work)"; then
+  if grep -Fxq "[ok] git hook gates not wired (enableGitHookGates=false)" <<< "$hl_out" \
+    && ! grep -Fq "gate wiring lingers" <<< "$hl_out"; then
+    ok "test passed: nothing left on work reports not wired"
+  else
+    printf '%s\n' "$hl_out" >&2
+    fail "test failed: clean work home not reported as not wired"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (hook gates clean, work)"
+  status=1
+fi
+rm -rf "$hl_home"
 
 # NA) next-actions summary (#227): every warning reported through `action`
 #     is repeated once, numbered, at the end of the run with its steps, and

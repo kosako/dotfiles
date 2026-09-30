@@ -71,7 +71,7 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
   止まっている」を最も強い警告にする。capability off で配線が残置していれば
   それも warn する(git-hook-gates module が active な profile で capability を off に
   した場合は apply で prune される。profile 切替で module 自体が非 active になった場合は
-  apply では消えないので、managed-path orphans の案内どおり手で消す。#201)。
+  apply では消えないので手で消す。doctor はこの場合、残っている file を `rm -i` する手順を出す。#201 / #258)。
 - gate は module の `requires` ではなく **template 自己 gate**(鍵が欠けると空
   render → chezmoi が既存 target も削除)。`requires` だと chezmoiignore が既存
   file を prune せず、fail-closed な shim が残置される(#184 の教訓)。off にした
