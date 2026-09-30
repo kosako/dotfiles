@@ -127,6 +127,13 @@ profiles:
       # over to review only (the worker runs with --ignore-user-config).
       codexReviewEffort: xhigh
       codexWorkerEffort: high
+      # #271: service tier for the review profile only. `default` keeps review
+      # off Fast mode (Fast uses 2.5x the credits; measured: codex-cli 0.159.1
+      # sends `default` for gpt-6.1-sol without the "not advertised" warning an
+      # unknown tier gets). The worker needs none: it runs with
+      # --ignore-user-config and re-passes only model / effort. `off` writes
+      # no service_tier line (the config.toml / Codex default applies).
+      codexReviewServiceTier: default
 
   work:
     environmentKind: work
@@ -183,3 +190,4 @@ profiles:
       # agent-tools reads it whenever it exists.
       codexReviewEffort: off
       codexWorkerEffort: off
+      codexReviewServiceTier: off

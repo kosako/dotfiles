@@ -582,14 +582,16 @@ run_ok \
   "enableHerdrIntegration=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
-# codexReviewEffort / codexWorkerEffort (#264) only pick the reasoning effort
-# agent-tools' Codex review / worker run with and grant no install / secret /
-# network privilege, so no value is forbidden for any environmentKind.
+# codexReviewEffort / codexWorkerEffort (#264) and codexReviewServiceTier (#271)
+# only pick the reasoning effort / service tier agent-tools' Codex review /
+# worker run with and grant no install / secret / network privilege, so no
+# value is forbidden for any environmentKind.
 make_fixture
 set_capability_all "$fixture" codexReviewEffort xhigh
 set_capability_all "$fixture" codexWorkerEffort xhigh
+set_capability_all "$fixture" codexReviewServiceTier fast
 run_ok \
-  "codexReviewEffort / codexWorkerEffort are allowed at any value for every environmentKind (not forbidden)" \
+  "codexReviewEffort / codexWorkerEffort / codexReviewServiceTier are allowed at any value for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
 # The fixture helpers themselves must fail closed: a typo'd capability or
@@ -640,7 +642,7 @@ run_fail_contains \
 # Anchor on the LAST capability line so the bogus section lands after the whole
 # capabilities block (update this if a later capability is added below).
 make_fixture
-insert_once "$fixture/.chezmoidata/profiles.yaml" "      codexWorkerEffort: off" "    extraSection:"
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      codexReviewServiceTier: off" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
 run_ok \
   "ignores sections after capabilities" \
