@@ -640,13 +640,15 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 # Anchor on the LAST capability line so the bogus section lands after the whole
-# capabilities block (update this if a later capability is added below).
+# capabilities block (update this if a later capability is added below). That
+# line belongs to the last profile (work), so validate that profile — checking
+# another one would not see the inserted section at all (Codex review, PR #272).
 make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      codexReviewServiceTier: off" "    extraSection:"
 insert_once "$fixture/.chezmoidata/profiles.yaml" "    extraSection:" "      sneakyKey: true"
 run_ok \
   "ignores sections after capabilities" \
-  "$fixture/scripts/validate-policy.sh" personal
+  "$fixture/scripts/validate-policy.sh" work
 
 make_fixture
 : > "$fixture/.chezmoidata/profiles.yaml"

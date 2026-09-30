@@ -270,8 +270,9 @@ Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
 - `~/.codex/agent-tools-worker.config.toml`: worker は `-p` を使わず、preflight が top-level の `model` /
   `model_reasoning_effort` だけを読んで `-c` で渡す。preflight は空行・comment・`key = "<1 行の basic string>"`
   (値は `[A-Za-z0-9._-]+`)以外の行があると fail-closed にするので、file はその形に保つ。
-- 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` は空 render で、apply 済みの
-  file も消える(テンプレート自己 gate)。現状は personal = review `xhigh` + `service_tier = "default"` / worker `high`(#268 / #271)、work = `off`
+- 値は enum capability(effort は `off` / `minimal` / `low` / `medium` / `high` / `xhigh`、review の tier は `off` /
+  `default` / `fast`)。`off` の key は書かない。file が空 render になって apply 済みの file も消える(テンプレート
+  自己 gate)のは、worker は effort が `off`、review は effort と tier の**両方**が `off` のとき。現状は personal = review `xhigh` + `service_tier = "default"` / worker `high`(#268 / #271)、work = `off`
   (codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
 - **中身**: review は effort と `service_tier`(#271。`default` = Fast mode を外す。Fast は Standard の 2.5 倍の
   credit を使う)、worker は effort だけ。どちらも `off` の key は書かず、review は 2 つとも `off` のとき file ごと

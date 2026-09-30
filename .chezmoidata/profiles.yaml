@@ -121,10 +121,12 @@ profiles:
       # profile files ~/.codex/agent-tools-review.config.toml and
       # ~/.codex/agent-tools-worker.config.toml (file names are the
       # agent-tools public contract; content = dotfiles, reader =
-      # agent-tools, Codex never rewrites them). `off` renders nothing, so
-      # review / worker fall back to the user config.toml defaults. Only the
-      # effort is set: both keep the config.toml model; service_tier carries
-      # over to review only (the worker runs with --ignore-user-config).
+      # agent-tools, Codex never rewrites them). `off` writes no effort line;
+      # the worker file (effort only) is then not rendered at all, the review
+      # file only once codexReviewServiceTier (below) is off too — both fall
+      # back to the user config.toml defaults. Both keep the config.toml
+      # model; config.toml's service_tier reaches review only (the worker runs
+      # with --ignore-user-config).
       codexReviewEffort: xhigh
       codexWorkerEffort: high
       # #271: service tier for the review profile only. `default` keeps review

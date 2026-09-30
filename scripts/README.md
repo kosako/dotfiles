@@ -500,8 +500,8 @@ Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、hook capability が全部 false のとき
 apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content と gate の独立性(#139)を
-確認する。Codex review / worker 用 profile file(#264)は、1 行目の managed-by header・設定が
-`model_reasoning_effort = "<capability の値>"` だけであること・全行が worker preflight の top-level の形に収まること、
+確認する。Codex review / worker 用 profile file(#264 / #271)は、1 行目の managed-by header・設定が capability の値
+どおりであること(review は `model_reasoning_effort` と `service_tier`、worker は `model_reasoning_effort` だけ)・全行が worker preflight の top-level の形に収まること、
 値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ること(review は effort と service tier の両方が `off` のとき)、review の各 key が自分の capability が `off` のときだけ消えること(#271)を確認する。
 chezmoi が必要(render job)。
 
