@@ -248,7 +248,7 @@ else
     if [[ -n "$hook_gates_leftovers" ]]; then
       action "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present), left by another profile — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT remove it (#201); remove it by hand" \
         "\$ rm -i$hook_gates_leftovers" \
-        "\$ git config --global --includes --show-origin --get core.hooksPath   # confirm nothing is printed"
+        "\$ git config --global --includes --show-origin --get core.hooksPath   # must no longer point at ~/.config/git-hook-gates/hooks; if it still does, remove that line at the origin shown"
     else
       action "enableGitHookGates=false but global core.hooksPath still points at the managed shim directory, set outside the managed include — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT change it (#201)" \
         "\$ git config --global --includes --show-origin --get core.hooksPath   # find where it is set, then remove that line"

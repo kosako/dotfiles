@@ -1633,7 +1633,7 @@ printf '#!/bin/sh\n' > "$hl_dir/hooks/commit-msg"
 printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hl_dir/hooks.gitconfig"
 printf '[include]\n\tpath = ~/.config/git-hook-gates/hooks.gitconfig\n' > "$hl_home/.gitconfig"
 hl_rm_step="\$ rm -i $(printf '%q' "$hl_dir/hooks.gitconfig") $(printf '%q' "$hl_dir/hooks/pre-commit") $(printf '%q' "$hl_dir/hooks/commit-msg")"
-hl_verify_step="\$ git config --global --includes --show-origin --get core.hooksPath   # confirm nothing is printed"
+hl_verify_step="\$ git config --global --includes --show-origin --get core.hooksPath   # must no longer point at ~/.config/git-hook-gates/hooks; if it still does, remove that line at the origin shown"
 if hl_out="$(hl_run work)"; then
   if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" && ! grep -Fq "$hl_apply_msg" <<< "$hl_out" \
     && grep -Fq -- "$hl_rm_step" <<< "$hl_out" && grep -Fq -- "$hl_verify_step" <<< "$hl_out"; then
@@ -1645,6 +1645,27 @@ if hl_out="$(hl_run work)"; then
   fi
 else
   fail "test failed: doctor must stay exit 0 (hook gates lingering, work)"
+  status=1
+fi
+#     HL-e) work with the shims left but no hooks.gitconfig, while another
+#           origin (here ~/.gitconfig directly) still points core.hooksPath at
+#           the shim directory: rm lists only the shims, and the verification
+#           step is what catches the setting that rm does not remove.
+rm -f "$hl_dir/hooks.gitconfig"
+printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hl_home/.gitconfig"
+hl_rm_shims="\$ rm -i $(printf '%q' "$hl_dir/hooks/pre-commit") $(printf '%q' "$hl_dir/hooks/commit-msg")"
+if hl_out="$(hl_run work)"; then
+  if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" \
+    && grep -Fq -- "$hl_rm_shims" <<< "$hl_out" && ! grep -Fq "hooks.gitconfig" <<< "$(grep -F -- "\$ rm -i" <<< "$hl_out")" \
+    && grep -Fq -- "$hl_verify_step" <<< "$hl_out"; then
+    ok "test passed: shims without hooks.gitconfig list only the shims and keep the hooksPath verification step"
+  else
+    printf '%s\n' "$hl_out" >&2
+    fail "test failed: shims left with hooksPath set elsewhere were not reported as expected"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (hook gates shims + stray hooksPath, work)"
   status=1
 fi
 #     HL-c) work with only core.hooksPath set directly in ~/.gitconfig (no
