@@ -1017,60 +1017,55 @@ fi
 # agent-tools' OpenCode plugins (#263, agent-tools#295). A file in the
 # global plugins dir IS the registration (no config entry, no trust gate), so
 # agent-tools owns plugins/personal-*.js end to end and its own doctor checks
-# the files and their marker line; this side checks what OpenCode makes of
-# them (docs/config-ownership.md):
-# - discovery: `opencode debug config` resolves plugin_origins (spec + scope)
-#   without writes (measured: no mtime change under the config / data dirs,
-#   nothing created in the cwd). It prints the whole resolved config —
-#   provider options and MCP headers can hold secrets — so the output is
-#   parsed for plugin_origins only and never echoed. It runs from /var/empty
-#   (empty, outside $HOME): no project config is picked up, and the scope
-#   stays "global" (from / or $HOME the config dir sits under the cwd and is
-#   labelled "local"). It runs only when the plugin SDK is already
-#   installed: on a first start OpenCode npm-installs @opencode-ai/plugin into
-#   the config dir (agent-tools probe M1), which doctor must not trigger.
-#   Discovery is not a successful init: an init that throws is invisible to
-#   the user (probe M2) and 1.18.30 logs nothing about plugin loading, so the
-#   report says so until the plugin logs its own marker (agent-tools#343).
-# - double loading: the same plugin name from two origins (global and
-#   project, .js next to .ts), or a copy in the singular plugin/ dir.
+# the files and their marker line; this side checks the layout OpenCode will
+# load from (docs/config-ownership.md). Static only: doctor never runs
+# OpenCode — even `opencode debug config` writes its database
+# (~/.local/share/opencode/opencode.db, measured on 1.18.30), which would
+# break doctor's no-side-effects rule. So presence in the global plugins dir
+# is reported, not a successful load; an init that throws is invisible to
+# the user (agent-tools probe M2) and 1.18.30 logs nothing about plugin
+# loading, until the plugin logs its own marker (agent-tools#343).
+# Double loading: a copy OpenCode would also pick up (.ts / .mjs next to the
+# .js, the singular plugin/ dir) or the same plugin name listed in a config
+# file's `plugin` key. Config files can hold secrets (provider options, MCP
+# headers), so only that key is read and nothing from them is printed.
 opencode_config_dir="$HOME/.config/opencode"
 opencode_plugins=()
 for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.js; do
   [[ -f "$opencode_plugin_file" ]] && opencode_plugins+=("${opencode_plugin_file##*/}")
 done
-for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.ts "$opencode_config_dir"/plugin/personal-*; do
+for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.ts "$opencode_config_dir"/plugins/personal-*.mjs "$opencode_config_dir"/plugin/personal-*; do
   [[ -e "$opencode_plugin_file" ]] || continue
   warn "agent-tools plugin copy that OpenCode may load twice: $opencode_plugin_file (agent-tools deploys only plugins/personal-*.js; remove the extra copy)"
 done
 if [[ "${#opencode_plugins[@]}" -eq 0 ]]; then
   item "no agent-tools plugin in ~/.config/opencode/plugins (agent-tools sync deploys personal-*.js there)"
-elif ! command -v opencode >/dev/null 2>&1; then
-  item "agent-tools plugins present (${opencode_plugins[*]}); OpenCode not installed, discovery not checked"
-elif [[ ! -d "$opencode_config_dir/node_modules/@opencode-ai/plugin" ]]; then
-  item "agent-tools plugins present (${opencode_plugins[*]}); discovery not checked: OpenCode has not installed its plugin SDK yet (running it would npm-install first — start OpenCode once, then re-run doctor)"
 else
-  bounded_probe sh -c 'cd /var/empty && exec opencode debug config'
-  opencode_origins=""
-  if [[ "$probe_rc" == "0" ]]; then
-    opencode_origins="$(printf '%s' "$probe_lines" | yq -p json '.plugin_origins[]? | ((.spec // "" | sub(".*/"; "")) + " " + (.scope // "unknown"))' 2>/dev/null || true)"
-  fi
-  if [[ "$probe_rc" != "0" ]]; then
-    item "agent-tools plugins present (${opencode_plugins[*]}); discovery not checked: opencode debug config gave no usable answer within ${probe_deadline}s"
-  else
-    for opencode_plugin_name in "${opencode_plugins[@]}"; do
-      opencode_stem="${opencode_plugin_name%.js}"
-      opencode_hits="$(grep -E "^${opencode_stem}\.(js|ts|mjs) " <<< "$opencode_origins" || true)"
-      opencode_hit_count="$(grep -c . <<< "$opencode_hits" || true)"
-      if [[ "$opencode_hit_count" -eq 0 ]]; then
-        warn "agent-tools plugin $opencode_plugin_name is present but OpenCode's resolved config does not pick it up (check plugins/ ownership and --pure; docs/opencode-settings.md)"
-      elif [[ "$opencode_hit_count" -gt 1 ]]; then
-        warn "agent-tools plugin $opencode_stem is loaded from $opencode_hit_count origins ($(tr '\n' ',' <<< "$opencode_hits" | sed 's/,$//; s/,/, /g')) — OpenCode runs it more than once; keep only ~/.config/opencode/plugins/$opencode_plugin_name"
-      else
-        ok "agent-tools plugin $opencode_plugin_name discovered by OpenCode ($(awk '{print $2}' <<< "$opencode_hits")); a successful init is not verifiable yet (agent-tools#343)"
-      fi
-    done
-  fi
+  # Plugin names listed in the config files OpenCode merges (managed floor,
+  # the local file, whatever OPENCODE_CONFIG points at), basenames only.
+  opencode_listed=""
+  for opencode_cfg_file in "$opencode_config_dir/opencode.json" "$opencode_config_dir/opencode.local.json" "${OPENCODE_CONFIG:-}"; do
+    [[ -n "$opencode_cfg_file" && -f "$opencode_cfg_file" ]] || continue
+    if opencode_cfg_plugins="$(yq -p json -o json '.plugin // [] | map(select(type == "!!str") | sub(".*/"; ""))' "$opencode_cfg_file" 2>/dev/null)" \
+      && opencode_cfg_plugins="$(yq -p json '.[]' <<< "$opencode_cfg_plugins" 2>/dev/null)"; then
+      opencode_listed+="$opencode_cfg_plugins"$'\n'
+    else
+      item "the plugin key of $opencode_cfg_file could not be read (not JSON?); double loading via config not checked (contents never shown)"
+    fi
+  done
+  for opencode_plugin_name in "${opencode_plugins[@]}"; do
+    opencode_stem="${opencode_plugin_name%.js}"
+    opencode_dup=0
+    while IFS= read -r opencode_listed_name; do
+      [[ -n "$opencode_listed_name" ]] || continue
+      [[ "${opencode_listed_name%.*}" == "$opencode_stem" ]] && opencode_dup=1
+    done <<< "$opencode_listed"
+    if [[ "$opencode_dup" -eq 1 ]]; then
+      warn "agent-tools plugin $opencode_stem is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
+    else
+      ok "agent-tools plugin $opencode_plugin_name in the global plugins dir (OpenCode loads it at startup; a successful init is not verifiable yet: doctor does not run OpenCode, agent-tools#343)"
+    fi
+  done
 fi
 
 # The local (non-managed) config — provider / model / plugin / mcp — lives in

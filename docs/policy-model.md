@@ -299,7 +299,7 @@ skill は `~/.claude/skills` を OpenCode が直接読むので再配布しな�
   module 非 active は「not managed」。乖離は managed drift section。
 - **状態**: personal のみ列挙、work は非列挙。plugin による hook parity と相互レビュー契約への追加は
   OpenCode 導入 Phase 2(agent-tools#295)で、plugin は agent-tools が `plugins/personal-*.js` として配る。
-  dotfiles の doctor は OpenCode が plugin を見つけたかと二重読込を確認する(#263)。詳細は [opencode-settings](opencode-settings.md)。
+  dotfiles の doctor は plugins dir の配置と二重読込を静的に確認する(#263。OpenCode は起動しない)。詳細は [opencode-settings](opencode-settings.md)。
 
 ## Git global ignore(`git-ignore` module、#248)
 

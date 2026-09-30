@@ -74,13 +74,13 @@ work / client には配らない(`opencode-settings` module を持たない。cl
 - `scripts/doctor.sh` の `OpenCode` section(report-only): `opencode` の presence、managed 床の presence
   (module 非 active なら「not managed」)、`auth.json` は**存在のみ**(中身も provider 名も読まない)。
   床の乖離は managed drift section が `chezmoi status` で拾う。
-  agent-tools の plugin(#263)は、`opencode debug config` の `plugin_origins` で **OpenCode が見つけたか**と
-  **二重読込**(同じ plugin 名が global と project、`.js` と `.ts` の複数 origin から来る / 単数形 `plugin/` dir の
-  copy)を確認する。`debug config` は解決済みの設定全体(provider の options や MCP の header に secret が
-  入りうる)を出すので、`plugin_origins` だけを抜き出して表示はしない。`/var/empty` から実行して project の設定を
-  拾わず、plugin SDK(`node_modules/@opencode-ai/plugin`)が既に入っているときだけ動かす(初回起動は npm install を
-  伴うため)。「見つかった」は init の成功ではない(init の throw は user に見えず、1.18.30 の log にも出ない)ので、
-  そう明記する。成功の目印は agent-tools#343 で plugin が log に出す予定。
+  agent-tools の plugin(#263)は **静的に**確認する: global の plugins dir(`plugins/personal-*.js`)にあるか、
+  **二重読込**になる配置(`.ts` / `.mjs` の併置、単数形 `plugin/` dir の copy、設定ファイルの `plugin` 欄に同じ
+  plugin 名)が無いか。doctor は OpenCode を起動しない — `opencode debug config` でさえ OpenCode の DB
+  (`~/.local/share/opencode/opencode.db`)に書き込むため(1.18.30 で実測)、doctor の副作用なしの規則に反する。
+  設定ファイルは secret を含みうるので `plugin` 欄だけを読み、中身は表示しない。報告するのは「plugins dir に
+  ある」までで、init の成功ではない(init の throw は user に見えず、1.18.30 の log にも plugin の読込は出ない)。
+  成功の目印は agent-tools#343 で plugin が log に出す予定。
   `opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も
   報告する(`~/.zshrc.local` に export があれば、非対話 shell 由来として中立表示)。
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash の rule map を順序込みで、
