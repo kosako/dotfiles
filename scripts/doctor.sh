@@ -221,7 +221,10 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
 else
   # Disabled is only honest if no wiring lingers from before the flip: a
   # leftover hooksPath/shim pair still routes (or blocks) every commit until
-  # the next apply prunes it (Codex review, PR #197).
+  # it is removed (Codex review, PR #197). The next apply prunes it only where
+  # the git-hook-gates module is active (template self-gate); after a profile
+  # switch the module is unlisted, .chezmoiignore skips the targets and apply
+  # never touches them, so the remedy is removing them by hand (#201, #258).
   hook_gates_lingering=0
   for hook_stage in pre-commit commit-msg; do
     [[ -e "$hook_gates_dir/hooks/$hook_stage" ]] && hook_gates_lingering=1
@@ -234,9 +237,22 @@ else
       "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks") hook_gates_lingering=1 ;;
     esac
   fi
-  if [[ "$hook_gates_lingering" -eq 1 ]]; then
+  if [[ "$hook_gates_lingering" -eq 1 ]] && module_active_for_profile "$profile" git-hook-gates; then
     action "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present) — run chezmoi apply to prune it" \
       "\$ chezmoi apply"
+  elif [[ "$hook_gates_lingering" -eq 1 ]]; then
+    hook_gates_leftovers=""
+    for hook_gates_file in "$hook_gates_dir/hooks.gitconfig" "$hook_gates_dir/hooks/pre-commit" "$hook_gates_dir/hooks/commit-msg"; do
+      [[ -e "$hook_gates_file" ]] && hook_gates_leftovers+=" $(printf '%q' "$hook_gates_file")"
+    done
+    if [[ -n "$hook_gates_leftovers" ]]; then
+      action "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present), left by another profile — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT remove it (#201); remove it by hand" \
+        "\$ rm -i$hook_gates_leftovers" \
+        "\$ git config --global --includes --show-origin --get core.hooksPath   # must no longer point at ~/.config/git-hook-gates/hooks; if it still does, remove that line at the origin shown"
+    else
+      action "enableGitHookGates=false but global core.hooksPath still points at the managed shim directory, set outside the managed include — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT change it (#201)" \
+        "\$ git config --global --includes --show-origin --get core.hooksPath   # find where it is set, then remove that line"
+    fi
   else
     ok "git hook gates not wired (enableGitHookGates=false)"
   fi
@@ -1373,9 +1389,16 @@ if [[ "$(capability_value "$profile" enableAiPolicy)" != "true" ]]; then
 else
   agent_tools_dir="${AGENT_TOOLS:-$HOME/src/agent/agent-tools}"
   agent_tools_status="$agent_tools_dir/scripts/status.sh"
-  if [[ ! -d "$agent_tools_dir" ]]; then
+  agent_tools_status_opt_in="$(capability_value "$profile" enableAgentToolsStatus)"
+  # Absence is only a warning where the profile opted in to agent-tools'
+  # status (it expects a checkout). Elsewhere it is the declared state — work
+  # does not deploy agent-tools at all (profiles.yaml) — so a warn on every run
+  # would bury real warnings (#258).
+  if [[ ! -d "$agent_tools_dir" && "$agent_tools_status_opt_in" == "true" ]]; then
     warn "agent-tools not present at $agent_tools_dir (not auto-cloned)"
-  elif [[ "$(capability_value "$profile" enableAgentToolsStatus)" != "true" ]]; then
+  elif [[ ! -d "$agent_tools_dir" ]]; then
+    item "agent-tools not present at $agent_tools_dir (not expected by this profile: enableAgentToolsStatus=false; not auto-cloned)"
+  elif [[ "$agent_tools_status_opt_in" != "true" ]]; then
     ok "agent-tools present; status read disabled (set enableAgentToolsStatus=true to let doctor run its status.sh)"
   elif [[ ! -x "$agent_tools_status" ]]; then
     warn "agent-tools present but scripts/status.sh is missing or not executable"
