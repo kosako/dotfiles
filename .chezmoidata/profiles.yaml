@@ -123,7 +123,8 @@ profiles:
       # agent-tools public contract; content = dotfiles, reader =
       # agent-tools, Codex never rewrites them). `off` renders nothing, so
       # review / worker fall back to the user config.toml defaults. Only the
-      # effort is set; the model and service_tier stay with config.toml.
+      # effort is set: both keep the config.toml model; service_tier carries
+      # over to review only (the worker runs with --ignore-user-config).
       codexReviewEffort: high
       codexWorkerEffort: medium
 

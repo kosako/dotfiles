@@ -29,7 +29,7 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 
 `.chezmoidata/*.yaml`(profiles / modules / capabilities.schema / packages / backup-paths)の読み取りは shell script 側では mikefarah/yq v4 で行う(chezmoi template 側は Go template が読む)。yq が無い・別 variant の場合は `require_yq` が fail closed する。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない(injection 防止)。
 
-boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型を、引用符なしの小文字 `true` / `false` で指定する。`validate-policy.sh` は型と綴りを検査し、文字列 `"true"` / `"false"`、数値、null に加え、`True` / `FALSE` などの大文字を含む綴りも拒否する。直接の `chezmoi apply` / template 展開は共通 `require-profile` guard でデコード後の型を検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の小文字 boolean `true` だけを許可する。enum の値は従来どおり文字列で指定する。
+boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型を、引用符なしの小文字 `true` / `false` で指定する。`validate-policy.sh` は型と綴りを検査し、文字列 `"true"` / `"false"`、数値、null に加え、`True` / `FALSE` などの大文字を含む綴りも拒否する。直接の `chezmoi apply` / template 展開は共通 `require-profile` guard でデコード後の型を検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の小文字 boolean `true` だけを許可する。enum の値は従来どおり文字列で指定する。enum も `require-profile` が schema の値に含まれるかを検査し、未知の値・型違い・欠落なら直接の apply でも fail する(値をそのまま書く template があるため。#264)。
 
 `packages`(`.chezmoidata/packages.yaml`)は software catalog。各 entry の `source`(brew_formula / brew_cask / npm_global / go_install / mas / manual)と canonical id を宣言する。`validate-policy.sh` が source の妥当性・go_install/mas の pkg 必須・name 重複を fail closed で検査する。
 
@@ -273,9 +273,11 @@ Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
 - 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` は空 render で、apply 済みの
   file も消える(テンプレート自己 gate)。現状は personal = review `high` / worker `medium`、work = `off`
   (codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
-- **中身は effort だけ**: `model` と `service_tier` は置かず `config.toml` の値を引き継ぐ。model の指定
-  (単価の差が大きい)や Fast mode を外す `service_tier` は、消費と受け付ける値を実測してから enum
-  capability を足す形で追加する。
+- **中身は effort だけ**: `model` は置かず、両方とも `config.toml` の値を使う(review は Codex が profile を
+  `config.toml` に重ね、worker は preflight が `config.toml` の top-level から読む)。`service_tier` は review
+  だけが `config.toml` から引き継ぎ、worker は `--ignore-user-config` で起動して再指定しないので効かない。
+  model の指定(単価の差が大きい)や review で Fast mode を外す `service_tier` は、消費と受け付ける値を
+  実測してから enum capability を足す形で追加する。
 - **doctor**: 2 つの file の presence のみ(中身は config 値なので出さない)。module 非 active の profile では
   手置き・他 profile の残置を中立に表示し、`off` 以外の値は dangling として warn。`CODEX_HOME` が
   `~/.codex` 以外を指すと agent-tools はそちらを読むので warn する。

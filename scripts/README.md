@@ -475,6 +475,10 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   `requires:`・schema の `implemented:` に文字列 `"true"` / `"false"`・数値・null・配列・map を置くと、apply が
   型エラーで fail して hook 登録(`~/.claude/settings.json` / `~/.codex/hooks.json`)を作らないこと。両 template の
   execute-template も同じ型エラーで fail すること。
+- typed enum guard(#264): 同じく chezmoi を直接使う場合も、enum capability(`codexReviewEffort` /
+  `codexWorkerEffort` / `npmHardeningMode`)が schema の値以外(未知の文字列・大文字違い・boolean・数値・null・
+  配列・欠落)なら apply が fail して Codex の profile file を作らないこと。両 profile file template の
+  execute-template も同じエラーで fail すること。
 
 chezmoi が必要(CI では version pin して導入する)。
 
