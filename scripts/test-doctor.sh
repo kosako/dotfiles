@@ -1842,6 +1842,16 @@ else
   fail "test failed: doctor must stay exit 0 (OpenCode unreadable config)"
   status=1
 fi
+#     OP-d2) the same broken file as the ACTIVE config (OPENCODE_CONFIG points
+#            at it) -> the active branch also reports "not checked".
+if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
+  op_expect "an unreadable active config reports the double-load check as not done" "$op_out" \
+    "[info] - the plugin key of $op_cfg/opencode.local.json could not be read (not JSON?); double loading via config not checked (contents never shown)" \
+    "$op_ok_line"
+else
+  fail "test failed: doctor must stay exit 0 (OpenCode unreadable active config)"
+  status=1
+fi
 rm -f "$op_cfg/opencode.local.json"
 #     OP-e) no agent-tools plugin -> neutral item.
 mv "$op_cfg/plugins/personal-agent-tools.js" "$op_cfg/personal-agent-tools.js.off"
