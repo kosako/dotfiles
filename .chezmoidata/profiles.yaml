@@ -125,8 +125,8 @@ profiles:
       # review / worker fall back to the user config.toml defaults. Only the
       # effort is set: both keep the config.toml model; service_tier carries
       # over to review only (the worker runs with --ignore-user-config).
-      codexReviewEffort: high
-      codexWorkerEffort: medium
+      codexReviewEffort: xhigh
+      codexWorkerEffort: high
 
   work:
     environmentKind: work

@@ -373,7 +373,7 @@ fi
 
 section "codex review / worker profile files (#264)"
 
-# 6) Committed personal: codexReviewEffort=high / codexWorkerEffort=medium, so
+# 6) Committed personal: codexReviewEffort=xhigh / codexWorkerEffort=high, so
 #    both agent-tools profile files render. The file names are agent-tools'
 #    public contract (agent-tools#339). Pinned: the first line is the
 #    managed-by header (doctor's managed-path orphans rely on it after a
@@ -403,8 +403,8 @@ check_codex_profile_file() {
     ok "test passed: $label profile file renders the header and exactly: $expected_setting"
   fi
 }
-check_codex_profile_file review "$review_profile_file" 'model_reasoning_effort = "high"'
-check_codex_profile_file worker "$worker_profile_file" 'model_reasoning_effort = "medium"'
+check_codex_profile_file review "$review_profile_file" 'model_reasoning_effort = "xhigh"'
+check_codex_profile_file worker "$worker_profile_file" 'model_reasoning_effort = "high"'
 
 # Enum capabilities, so the value is written with strenv (flip_personal_capability
 # in test-lib.sh parses booleans).
@@ -418,13 +418,13 @@ set_personal_enum() {
 effort_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-effort.XXXXXX")"
 tmp_roots+=("$effort_src")
 make_flipped_source "$effort_src"
-set_personal_enum "$effort_src/src" codexReviewEffort xhigh
-set_personal_enum "$effort_src/src" codexWorkerEffort low
+set_personal_enum "$effort_src/src" codexReviewEffort low
+set_personal_enum "$effort_src/src" codexWorkerEffort minimal
 effort_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-effort-home.XXXXXX")"
 tmp_roots+=("$effort_root")
 if render_personal_into "$effort_src/src" "$effort_root"; then
-  check_codex_profile_file "review (xhigh)" "$effort_root/home/.codex/agent-tools-review.config.toml" 'model_reasoning_effort = "xhigh"'
-  check_codex_profile_file "worker (low)" "$effort_root/home/.codex/agent-tools-worker.config.toml" 'model_reasoning_effort = "low"'
+  check_codex_profile_file "review (low)" "$effort_root/home/.codex/agent-tools-review.config.toml" 'model_reasoning_effort = "low"'
+  check_codex_profile_file "worker (minimal)" "$effort_root/home/.codex/agent-tools-worker.config.toml" 'model_reasoning_effort = "minimal"'
 else
   fail "test failed: personal render with other effort values failed"
   status=1
