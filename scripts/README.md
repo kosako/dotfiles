@@ -59,7 +59,7 @@ unknown profile / module / capability や capability enum の不正値は policy
 
 ## preflight.sh
 
-導入前の危険検知を行う。確認する内容は次のとおり: system(arch・macOS version・Xcode Command Line Tools)、既存 home file(`~/.gitconfig` / `~/.npmrc`)、shell config の apply impact(`shell-extra` module が active な profile で `~/.zshenv` / `~/.zshrc` / `~/.zprofile` / `~/.config/starship.toml` が既にあれば apply が置換する warn と退避先の案内)、ssh config の apply impact(`ssh-1password` module が active な profile で `~/.ssh/config` が既にあれば apply が置換する warn。`~/.ssh/config.local` は存在のみで中身は読まない)、`~/.config` の権限(0700 でなければ apply が 0700 に変える warn)、既存 Git config(`~/.config/git/config`、context 別 identity file の有無、global identity の設定有無。値は表示しない)、global gitignore(`git-ignore` module が active な profile で `~/.config/git/ignore` が既にあれば apply が置換する warn — git は global excludes を 1 file しか読まないので host 固有 pattern は `.git/info/exclude` へ。`core.excludesFile` が global / system に設定済みなら managed file が読まれない warn、明示的に空なら「global excludes を読まない」warn。値は表示しない、#248)、git hook gates の apply impact(`enableGitHookGates=true` の profile で agent-tools deploy の 4 script が揃っているか — 欠けていれば apply は commit gate を武装しない warn — と、global `core.hooksPath` が managed 以外に設定済みかどうか。値は表示しない)、必要 command(catalog に宣言された tool と、catalog 外の前提 git / brew / node / npm / corepack だけ。#259)、Homebrew、dotfiles root の存在と書き込み可否、標準 project root。
+導入前の危険検知を行う。確認する内容は次のとおり: system(arch・macOS version・Xcode Command Line Tools)、既存 home file(`~/.gitconfig` / `~/.npmrc`)、shell config の apply impact(`shell-extra` module が active な profile で `~/.zshenv` / `~/.zshrc` / `~/.zprofile` / `~/.config/starship.toml` が既にあれば apply が置換する warn と退避先の案内)、ssh config の apply impact(`ssh-1password` module が active な profile で `~/.ssh/config` が既にあれば apply が置換する warn。`~/.ssh/config.local` は存在のみで中身は読まない)、`~/.config` の権限(0700 でなければ apply が 0700 に変える warn)、既存 Git config(`~/.config/git/config`、context 別 identity file の有無、global identity の設定有無。値は表示しない)、global gitignore(`git-ignore` module が active な profile で `~/.config/git/ignore` が既にあれば apply が置換する warn — git は global excludes を 1 file しか読まないので host 固有 pattern は `.git/info/exclude` へ。`core.excludesFile` が global / system に設定済みなら managed file が読まれない warn、明示的に空なら「global excludes を読まない」warn。値は表示しない、#248)、herdr config の apply impact(`herdr-config` module が active な profile で `~/.config/herdr/config.toml` が既にあれば apply が置換する warn — herdr は config を 1 file しか読まず `.local` が無いので、host 固有の設定は managed file に入れる。中身は読まない、#261)、git hook gates の apply impact(`enableGitHookGates=true` の profile で agent-tools deploy の 4 script が揃っているか — 欠けていれば apply は commit gate を武装しない warn — と、global `core.hooksPath` が managed 以外に設定済みかどうか。値は表示しない)、必要 command(catalog に宣言された tool と、catalog 外の前提 git / brew / node / npm / corepack だけ。#259)、Homebrew、dotfiles root の存在と書き込み可否、標準 project root。
 副作用は持たない。既存 file や command 不足の warning は report-only として exit 0 のままにする。
 
 ```sh
@@ -93,6 +93,7 @@ policy validation が失敗した場合は exit 1。
 - GitHub injection guard(report-only): secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
+- herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ file かは `-ef` で比べる)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
 - Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` / `codexReviewServiceTier` が配る
   `~/.codex/agent-tools-{review,worker}.config.toml` の **presence のみ**(中身は config 値なので出さない)。
   codex-settings が active な profile では、値があるのに file が無い / `off` なのに file が残る(agent-tools は読み続ける)を
@@ -118,7 +119,7 @@ policy validation が失敗した場合は exit 1。`--actions-only` 以外の `
 まとまる(global gitignore の欠損 / pattern drift、git hook gates の hooksPath 未設定 / lingering、
 identity reset の欠損、identity file の不在 / partial / 値の無い key、private-backup の不完全な捕捉、
 managed-path orphan、managed drift、Codex projects trust の stale / home 全体、OpenCode の permission 床の
-欠損、herdr integration の body 不在 / outdated / work 機での未導入、agent-tools の dirty / stale)。
+欠損、herdr integration の body 不在 / outdated / work 機での未導入、herdr config の欠損 / `herdr config check` の不合格、agent-tools の dirty / stale)。
 判断が要る warning(catalog 外 package 等)は warn のまま。
 `--actions-only` は `[fail]` と summary 以外を mute するだけで、doctor はファイルを書かない(report-only)。
 手順行も key-name-only / secret を出さない規律の対象。
@@ -131,6 +132,7 @@ managed-path orphan、managed drift、Codex projects trust の stale / home 全�
 git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
 `core.excludesFile` が設定済み・明示的な空値のときの warn(値は出さない)、work の left-as-is、不在時の ok。
 `env -i` で hermetic に回す、#248)/
+herdr config の apply impact(既存 `~/.config/herdr/config.toml` の置換 warn、work の left-as-is、不在時の ok、#261)/
 policy validation 失敗時のみ非 0 / commands 節が確認する tool がすべて catalog(name / pkg / bin)か
 catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)、をカバーする。
 
@@ -290,6 +292,10 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
   outdated・needs repair / status が非ゼロ exit(出力を採用しない)/ hang(期限で process tree ごと回収)/
   probe 稼働中に doctor を SIGTERM(trap で回収・rc 143)/ cap off の module active・inactive 別の表示 /
   module 除去の dangling。fake herdr は ok・fail・hang・interrupt・ok-nonl の mode を持つ。
+- herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、present + exit 0 → ok /
+  exit 1 → action / missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
+  空値)と `XDG_CONFIG_HOME` の振り替え → warn / `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)は同じ file なので ok /
+  work → not managed。どの run も `env -i` で hermetic。
 - 1Password(#231): fake op の signed in(ok 1 行だけ)/ signed out(既存 warn)/ hang(期限で process tree
   ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
   stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・
@@ -537,6 +543,14 @@ throwaway repo に対して `env -i` の throwaway HOME で `git status` を回�
 で判定源が managed file であることも確認)。chezmoi と git が必要(render job)。実 home や実 global
 git config には触れない。
 
+## test-herdr-config.sh
+
+herdr-config module(#261)を検証する。personal で `~/.config/herdr/config.toml` が apply され work では
+されないこと(work が持つ自前の config は byte 単位で不変)、1 行目の managed-by header、TOML として parse でき
+設定値が pin どおりであること(`[ui.toast] delivery = "system"` を含む。key を sort して比べる)、mode が file 0644 /
+directory 0755 であること(既存 host の初回 apply で権限を変えない)、隣に置いた `session.json` と log が apply で
+変わらないこと(herdr の実行時状態には触れない)。chezmoi と yq が必要(render job)。実 home には触れない。
+
 ## test-git-hook-gates.sh
 
 git-hook-gates module(#196)の配線内容と武装条件を検証する。武装の条件は、capability(意図)と、destination に
@@ -578,4 +592,4 @@ chezmoi は不要(CI では render job で実行)。
 他 script から source される共通 helper。
 data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)、global excludes の解決(`git_excludes_file_setting`: global > system・`GIT_CONFIG_NOSYSTEM` 尊重・unset / empty / path / error の 4 状態、`git_default_excludes_file`: XDG 既定。doctor と preflight が共有、#248)を提供する。ほかに、BSD/GNU をまたぐ octal mode 取得(`file_mode`)、doctor / preflight が共有する policy ゲート(`run_policy_validation`)と標準 project roots 報告(`report_standard_project_roots`)、catalog source → package manager の対応表(`manager_present`。installer と catalog drift 報告の単一 source)を持つ。
 
-policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
+policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。

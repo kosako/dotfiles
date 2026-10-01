@@ -16,6 +16,10 @@ modules:
     description: AI agent の local-only file を global gitignore で全 repo から除外する(#248・agent-tools#253 の packet 規約)。managed file は git 既定の global excludes(~/.config/git/ignore。core.excludesFile 未設定のときだけ読まれる)で、agent packet `.agent-packets/` と Claude Code の project local settings `**/.claude/settings.local.json` を持つ。repo ごとの .gitignore は fail-safe で、第一防衛はこの global(忘れた repo の `git add -A` で private な packet が乗らない)。managed な ~/.gitconfig は core.excludesFile を pin しない(明示値は host 自身の excludesFile を黙って上書きするため)。git は global excludes を 1 file しか読まないので .local は無く、host 固有の除外は各 repo の .git/info/exclude に置く。work は非列挙(agent-tools の packet を書く運用が無く、会社 Mac の既存 global ignore を diff 無しで置換しないため。採用するなら preflight で既存 file を確認してから module を列挙する)。
     paths:
       - .config/git/ignore
+  herdr-config:
+    description: herdr の config(#261)。managed な ~/.config/herdr/config.toml に UI の設定と組み込み通知の配信先([ui.toast] delivery = "system"。herdr の既定は off)を置く。agent-tools の herdr 運用(worker の完了を OS の通知で知る)はこの file を dotfiles の管轄として前提にする。herdr は config を 1 file だけ読み(HERDR_CONFIG_PATH > $XDG_CONFIG_HOME/herdr/config.toml > ~/.config/herdr/config.toml)、include や .local の層は無いので、host 固有の設定は managed file に入れるか持たない。~/.config/herdr/ の他の file(session.json・log・socket)は herdr の実行時状態で管理しない(allowlist なので宣言した 1 file だけが入る)。work は非列挙(会社 Mac の既存 file を diff 無しで置換しないため。採用するなら preflight で既存 file を確認してから module を列挙する)。
+    paths:
+      - .config/herdr/config.toml
   supply-chain-git:
     description: Git credential 漏洩防止と remote URL 検査。
   supply-chain-npm:

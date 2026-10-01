@@ -1,0 +1,21 @@
+# Managed by chezmoi from kosako/dotfiles (herdr-config module, #261).
+# herdr reads exactly one config file: HERDR_CONFIG_PATH if set, else
+# $XDG_CONFIG_HOME/herdr/config.toml if set, else this one. There is no
+# include or .local layer, so a host-only setting goes here or nowhere.
+# `herdr config check` validates the file (on a parse error herdr silently
+# runs on ALL defaults); a running server picks up an applied change on
+# `herdr server reload-config`. See docs/herdr-config.md.
+
+onboarding = false
+
+[ui]
+agent_panel_sort = "priority"
+show_agent_labels_on_pane_borders = true
+
+[ui.toast]
+# Built-in notifications as OS notifications. herdr's default is "off";
+# agent-tools' herdr operations count on this to hear about a finished worker.
+delivery = "system"
+
+[experimental]
+switch_ascii_input_source_in_prefix = true

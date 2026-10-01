@@ -153,6 +153,9 @@ jobs:
       - name: git-ignore (global gitignore) gating and behaviour tests
         run: ./scripts/test-git-ignore.sh
 
+      - name: herdr config gating and content tests
+        run: ./scripts/test-herdr-config.sh
+
       - name: git hook gates wiring tests
         run: ./scripts/test-git-hook-gates.sh
 

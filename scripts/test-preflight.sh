@@ -187,6 +187,36 @@ else
   miss "personal with no global ignore must report the absent/creates ok line"
 fi
 
+# 5c. herdr-config apply impact (#261): personal manages
+#     ~/.config/herdr/config.toml, so an existing one warns (herdr reads one
+#     file, no .local: fold host-only settings into the managed file); work
+#     does not list the module: left-as-is item; absent: ok line.
+hc_home="$fixture_home/herdr"
+mkdir -p "$hc_home/.config/herdr"
+printf '[ui]\nagent_panel_sort = "spaces"\n' > "$hc_home/.config/herdr/config.toml"
+if pf_out="$(HOME="$hc_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+  && grep -Fq "exists: $hc_home/.config/herdr/config.toml — apply (herdr-config) replaces it; herdr reads one config file (no .local), so diff first and fold host-only settings into the managed file" <<< "$pf_out"; then
+  pass "herdr-config: an existing herdr config warns that apply replaces it (no .local)"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "personal with an existing herdr config must warn that apply replaces it"
+fi
+if pf_out="$(HOME="$hc_home" "$SCRIPT_DIR/preflight.sh" work 2>&1)" \
+  && grep -Fq "exists: $hc_home/.config/herdr/config.toml — not managed for profile work (left as-is)" <<< "$pf_out" \
+  && ! grep -Fq "apply (herdr-config) replaces it" <<< "$pf_out"; then
+  pass "herdr-config: work leaves an existing herdr config as-is"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "work must report the existing herdr config as left-as-is, not replaced"
+fi
+if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+  && grep -Fq "absent: $empty_home/.config/herdr/config.toml (apply creates the managed herdr config)" <<< "$pf_out"; then
+  pass "herdr-config: absent herdr config is an ok line (apply creates it)"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "personal with no herdr config must report the absent/creates ok line"
+fi
+
 # 6. The only non-zero path: a failing policy validation aborts (a broken
 #    profiles.yaml in a repo copy — the mutation is fail-closed because the
 #    exit-1 assertion itself would fail on a no-op).
