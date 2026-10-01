@@ -22,8 +22,8 @@ set -euo pipefail
 # agent-tools-deployed personal-safe-gh-hook; enableQualityLoopHooks (ON for
 # personal) -> exactly one PostToolUse/Edit|Write hook (personal-fast-edit-check)
 # and one matcher-less Stop hook (personal-changed-scope-qa); enableHerdrIntegration
-# (ON for personal, #225) -> exactly one SessionStart/* command hook in the
-# shape herdr's installer emits (bash '<home>/.claude/hooks/herdr-agent-state.sh'
+# (ON for personal, #225) -> exactly one SessionStart command hook in the
+# shape herdr's installer emits (matcher ^(startup|resume|clear|compact|fork)$, herdr 0.9.3 / #274) (bash '<home>/.claude/hooks/herdr-agent-state.sh'
 # session, timeout 10); each capability adds exactly its own events, and all
 # three false -> no hooks key at all.
 # Renders into throwaway destinations; never touches the real home directory.
@@ -258,11 +258,13 @@ section "claude settings hook registration (#137 / #199 / #225)"
 #     (#137); PostToolUse / matcher Edit|Write / one command hook ->
 #     personal-fast-edit-check and a matcher-less Stop / one command hook ->
 #     personal-changed-scope-qa (#199; Stop takes no matcher in Claude Code);
-#     SessionStart / matcher "*" / one command hook in the exact shape herdr's
-#     installer emits — `bash '<home>/.claude/hooks/herdr-agent-state.sh'
-#     session`, timeout 10 (#225; herdr matches an existing hook by the
-#     command string, so any deviation would make `herdr integration install
-#     claude` add a duplicate entry).
+#     SessionStart / matcher "^(startup|resume|clear|compact|fork)$" / one command hook in
+#     the exact shape herdr's installer emits — `bash
+#     '<home>/.claude/hooks/herdr-agent-state.sh' session`, timeout 10 (#225;
+#     since herdr 0.9.3 / integration v10 the installer compares the WHOLE
+#     entry with its canonical one and replaces a legacy "*" entry, so any
+#     deviation — the matcher included — makes `herdr integration install
+#     claude` rewrite the managed registration; #274).
 #     Every agent-tools body is the agent-tools-deployed absolute path
 #     (agent-tools#146 stable-path contract). Pinned as an exact set (event
 #     set, matcher, hook count, type, full command path, timeouts), not just
@@ -313,9 +315,9 @@ session_inner_len="$(yq -p json '.hooks.SessionStart[0].hooks | length' "$off_fi
 session_type="$(yq -p json '.hooks.SessionStart[0].hooks[0].type' "$off_file")"
 session_cmd="$(yq -p json '.hooks.SessionStart[0].hooks[0].command' "$off_file")"
 session_timeout="$(yq -p json '.hooks.SessionStart[0].hooks[0].timeout // "absent"' "$off_file")"
-if [[ "$session_len" == "1" && "$session_matcher" == "*" && "$session_inner_len" == "1" \
+if [[ "$session_len" == "1" && "$session_matcher" == "^(startup|resume|clear|compact|fork)$" && "$session_inner_len" == "1" \
   && "$session_type" == "command" && "$session_cmd" == "$expected_session_cmd" && "$session_timeout" == "10" ]]; then
-  ok "test passed: committed personal registers one SessionStart/* hook in herdr's installer shape (bash '<home>/.claude/hooks/herdr-agent-state.sh' session, timeout 10)"
+  ok "test passed: committed personal registers one SessionStart hook in herdr 0.9.3's installer shape (matcher ^(startup|resume|clear|compact|fork)$, bash '<home>/.claude/hooks/herdr-agent-state.sh' session, timeout 10)"
 else
   fail "test failed: herdr SessionStart registration wrong (len=$session_len matcher=$session_matcher inner=$session_inner_len type=$session_type cmd=$session_cmd timeout=$session_timeout)"
   status=1

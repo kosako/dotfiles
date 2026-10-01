@@ -26,11 +26,15 @@
          it, at herdr's per-agent location (<home>/.claude/hooks/ for Claude,
          <home>/.codex/ flat for Codex — herdr v0.9.0 `integration status`).
          The entry is rendered in EXACTLY the shape that installer emits —
-         command `bash '<path>' session`, timeout 10, matcher "*" on Claude
-         and none on Codex (herdr matches an existing hook by type=command +
-         the command string, src/integration/config_edit.rs
-         ensure_command_hook) — so the installer recognizes the managed
-         registration and adds no duplicate (measured: settings.json stays
+         command `bash '<path>' session`, timeout 10, matcher
+         "^(startup|resume|clear|compact|fork)$" on Claude (herdr 0.9.3,
+         integration v10; #274) and none on Codex. On Claude herdr compares
+         the WHOLE entry with its canonical one (src/integration/
+         claude_settings.rs) and replaces a legacy "*" entry, so the matcher
+         must follow herdr's; on Codex it matches by type=command + the
+         command string (src/integration/config_edit.rs ensure_command_hook)
+         — so the installer recognizes the managed registration and adds no
+         duplicate (measured: settings.json stays
          byte-identical; Codex re-serializes hooks.json with the same
          content, which the next apply restores).
        Every agent-tools body is deployed at the stable path
@@ -95,7 +99,7 @@
     "SessionStart": [
       {
 {{- if $herdrClaude }}
-        "matcher": "*",
+        "matcher": "^(startup|resume|clear|compact|fork)$",
 {{- end }}
         "hooks": [
           {
