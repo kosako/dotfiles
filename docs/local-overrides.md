@@ -122,6 +122,10 @@ local 値は、managed file に焼かず **`~/.config/dotfiles/clone-contexts.lo
 (chezmoi 管理外・非コミット)に置く。会社 org 名を public repo に入れないための seam。
 
 - 行形式: `<owner> <context-path>`(例: `<会社org> work/<会社org>`)。`#` 行はコメント。
+- repo を名指しする `<owner>/<repo> <context-path>` 行も書ける(例: `kosako/agent-tools agent`、
+  #260)。managed の `github.com/kosako` → `personal` より先に評価されるので、kosako の
+  agent project を `~/src/agent` に振れる。解決順の全体は
+  [directory-convention](directory-convention.md) の「clone(gclone)」。
 - 共通原則どおり managed 側はこの file が無くても壊れない(未マッチは対話確認 or
   fail-closed 中断に倒れる)。
 - **`backup-paths.yaml`(category `git`)に載せ**、暗号化バックアップ(#60)の対象にする。

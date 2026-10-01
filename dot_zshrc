@@ -211,12 +211,18 @@ claude-update() {
 
 # Clone into the directory convention (~/src/<context>/<repo>, #140) without
 # deciding placement by hand (#177). Context resolution is fail-closed:
-#   1. github.com/kosako -> personal (managed rule; the owner name is already
+#   1. ~/.config/dotfiles/clone-contexts.local — "<owner>/<repo> <context-path>"
+#      lines name one repo and win over the managed rule, so a kosako repo can
+#      go to agent (#260) while every other kosako repo stays personal
+#   2. github.com/kosako -> personal (managed rule; the owner name is already
 #      public in this repo, same stance as the hasconfig identity rule, #52)
-#   2. ~/.config/dotfiles/clone-contexts.local — "<owner> <context-path>" lines
+#   3. ~/.config/dotfiles/clone-contexts.local — "<owner> <context-path>" lines
 #      (machine-local, never committed: company org names stay out of this
 #      public repo; see docs/local-overrides.md)
-#   3. no match: ask on a TTY, abort otherwise (never a silent default)
+#   4. no match: ask on a TTY, abort otherwise (never a silent default)
+# Local lines match on the owner / repo names only (not the host), first match
+# wins within each line kind, and a repo line beats an owner line whatever the
+# order in the file.
 # -n resolves and prints the destination without cloning (used by the test).
 # --- gclone begin ---
 gclone() {
@@ -247,22 +253,29 @@ gclone() {
     print -u2 -- "gclone: cannot parse owner/repo from: $url"
     return 2
   fi
-  local ctx=""
+  local ctx="" repo_ctx="" owner_ctx=""
   local map="$HOME/.config/dotfiles/clone-contexts.local"
-  if [[ "$host" == "github.com" && "$owner" == "kosako" ]]; then
-    ctx="personal"
-  elif [[ -r "$map" ]]; then
-    local m_owner m_ctx m_extra
-    while read -r m_owner m_ctx m_extra; do
-      [[ -z "$m_owner" || "$m_owner" == \#* ]] && continue
+  if [[ -r "$map" ]]; then
+    local m_key m_ctx m_extra
+    while read -r m_key m_ctx m_extra; do
+      [[ -z "$m_key" || "$m_key" == \#* ]] && continue
       # Exactly two fields: a malformed line (missing or extra fields) never
-      # resolves a context — it falls through to the fail-closed abort below.
+      # resolves a context — it falls through to the next rule, and finally
+      # to the fail-closed abort below.
       [[ -z "$m_ctx" || -n "$m_extra" ]] && continue
-      if [[ "$m_owner" == "$owner" ]]; then
-        ctx="$m_ctx"
-        break
+      if [[ -z "$repo_ctx" && "$m_key" == "$owner/$repo" ]]; then
+        repo_ctx="$m_ctx"
+      elif [[ -z "$owner_ctx" && "$m_key" == "$owner" ]]; then
+        owner_ctx="$m_ctx"
       fi
     done < "$map"
+  fi
+  if [[ -n "$repo_ctx" ]]; then
+    ctx="$repo_ctx"
+  elif [[ "$host" == "github.com" && "$owner" == "kosako" ]]; then
+    ctx="personal"
+  else
+    ctx="$owner_ctx"
   fi
   if [[ -z "$ctx" ]]; then
     if [[ -t 0 && -t 2 ]]; then

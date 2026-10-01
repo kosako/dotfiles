@@ -51,14 +51,19 @@ Git config では `user.useConfigOnly = true` を使い、known directory 外で
 新しい repo は managed な `~/.zshrc` の `gclone <git-url>` で clone する(#177)。clone 先の
 context を fail-closed に解決して `~/src/<context>/<repo>` に置くので、配置を手で考えない:
 
-1. `github.com/kosako` → `personal`(managed ルール)
-2. 非追跡の `~/.config/dotfiles/clone-contexts.local`(`<owner> <context-path>` 行形式)の
-   マッチ。会社 org はここ(各マシンの local)にだけ書く([local-overrides](local-overrides.md))
-3. どれにも当たらなければ TTY で確認、非対話なら中断(黙って既定に倒さない)
+1. 非追跡の `~/.config/dotfiles/clone-contexts.local` の `<owner>/<repo> <context-path>` 行
+   (repo を名指しする行)のマッチ(#260)
+2. `github.com/kosako` → `personal`(managed ルール)
+3. 同じ file の `<owner> <context-path>` 行(owner 単位の行)のマッチ。会社 org はここ
+   (各マシンの local)にだけ書く([local-overrides](local-overrides.md))
+4. どれにも当たらなければ TTY で確認、非対話なら中断(黙って既定に倒さない)
 
-`github.com/kosako` の repo は、agent project(例: agent-tools)も含めて規則 1 で `personal` に
-解決される(`clone-contexts.local` では上書きできない)。`~/src/agent` に置く `github.com/kosako` の
-repo は `gclone` を使わずに手で clone する。
+`github.com/kosako` の repo は既定で `personal` に解決される。agent project(例: agent-tools)を
+`~/src/agent` に置くときは、`clone-contexts.local` に `kosako/agent-tools agent` のように
+repo を名指しする行を書く。名指しした repo だけが規則 1 で `agent` になり、他の
+`github.com/kosako` の repo は `personal` のまま。owner 単位の行(`kosako agent` など)は
+規則 2 より後なので、`github.com/kosako` の解決を変えない。照合は owner / repo 名だけで
+host は見ない。repo を名指しする行は、file 内の順序に関係なく owner 単位の行より優先する。
 
 ghq は不採用(2026-07-05、#177): `<root>/<host>/<owner>/<repo>` layout の強制がこの
 context 階層(identity の `includeIf gitdir` が依存)と衝突し、remote を持たない sandbox を
