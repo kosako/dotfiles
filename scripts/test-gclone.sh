@@ -101,6 +101,15 @@ run_gclone "repo line beats earlier owner line" 0 "$fixture_home/src/sandbox/spe
   -n https://github.com/acme/special
 run_gclone "owner line still maps the owner's other repos" 0 "$fixture_home/src/work/acme/tool" \
   -n https://github.com/acme/tool
+# First match wins within each line kind: a later duplicate key never
+# overrides the earlier line (owner lines kept this from the old `break`;
+# repo lines get the same rule).
+printf 'acme sandbox\nkosako/agentish sandbox\n' \
+  >> "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "first owner line wins over a later duplicate" 0 "$fixture_home/src/work/acme/tool" \
+  -n https://github.com/acme/tool
+run_gclone "first repo line wins over a later duplicate" 0 "$fixture_home/src/agent/agentish" \
+  -n https://github.com/kosako/agentish
 
 # 3. Fail closed: unmapped owner without a TTY aborts, prints nothing.
 run_gclone "unmapped owner aborts (no TTY)" 1 "" \

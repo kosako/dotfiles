@@ -62,8 +62,10 @@ context を fail-closed に解決して `~/src/<context>/<repo>` に置くので
 `~/src/agent` に置くときは、`clone-contexts.local` に `kosako/agent-tools agent` のように
 repo を名指しする行を書く。名指しした repo だけが規則 1 で `agent` になり、他の
 `github.com/kosako` の repo は `personal` のまま。owner 単位の行(`kosako agent` など)は
-規則 2 より後なので、`github.com/kosako` の解決を変えない。照合は owner / repo 名だけで
-host は見ない。repo を名指しする行は、file 内の順序に関係なく owner 単位の行より優先する。
+規則 2 より後なので、`github.com/kosako` の解決を変えない。照合は owner / repo 名の
+大文字・小文字を区別する完全一致で、host は見ない。同じ種類の行が複数当たるときは
+file の先頭に近い行が勝つ。repo を名指しする行は、file 内の順序に関係なく owner 単位の行より
+優先する。
 
 ghq は不採用(2026-07-05、#177): `<root>/<host>/<owner>/<repo>` layout の強制がこの
 context 階層(identity の `includeIf gitdir` が依存)と衝突し、remote を持たない sandbox を
