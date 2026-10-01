@@ -722,9 +722,13 @@ cp "$DOTFILES_ROOT/private_dot_config/herdr/config.toml" "$hc_managed"
 # HC-1) present, herdr config check passes -> ok.
 write_fake_herdr_config_check 0
 hc_check "accepted -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal
-# HC-2) present, herdr config check fails -> action naming the command.
+# HC-2) present, herdr config check fails -> an ACTION naming the command:
+#       the step line appears only in the next-actions summary, so a plain
+#       warn would fail here (and drop out of --actions-only; Codex review).
 write_fake_herdr_config_check 1
-hc_check "rejected -> action" "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" personal
+hc_expect "rejected -> action with the herdr config check step in next actions" personal -- \
+  "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" \
+  "        \$ herdr config check"
 write_fake_herdr_config_check 0
 # HC-3) missing -> action whose steps are mkdir then apply, consecutive and %q-escaped.
 rm -f "$hc_managed"
