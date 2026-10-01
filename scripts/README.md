@@ -93,7 +93,7 @@ policy validation が失敗した場合は exit 1。
 - GitHub injection guard(report-only): secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
-- herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ file かは `-ef` で比べる)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
+- herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ綴りか、両方あれば `-ef` で同じ file と判定。presence とは独立に warn し、欠損時の action は読み先がずれていれば「既定値で動く」と断定しない。ずれていれば検証もしない)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
 - Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` / `codexReviewServiceTier` が配る
   `~/.codex/agent-tools-{review,worker}.config.toml` の **presence のみ**(中身は config 値なので出さない)。
   codex-settings が active な profile では、値があるのに file が無い / `off` なのに file が残る(agent-tools は読み続ける)を
@@ -294,8 +294,10 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
   module 除去の dangling。fake herdr は ok・fail・hang・interrupt・ok-nonl の mode を持つ。
 - herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、present + exit 0 → ok /
   exit 1 → action / missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
-  空値)と `XDG_CONFIG_HOME` の振り替え → warn / `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)は同じ file なので ok /
-  work → not managed。どの run も `env -i` で hermetic。
+  空値)と `XDG_CONFIG_HOME`(別 dir・空値)の振り替え → warn で、present なら検証しない(fake は exit 1 を返すので、
+  走れば action が出る)、missing なら redirect warn と「既定値」と断定しない missing action の両方 /
+  `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)は present でも missing でも同じ file 扱い / work → not managed。どの run も
+  `env -i` で hermetic。
 - 1Password(#231): fake op の signed in(ok 1 行だけ)/ signed out(既存 warn)/ hang(期限で process tree
   ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
   stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・

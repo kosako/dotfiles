@@ -31,7 +31,8 @@ managed file `~/.config/herdr/config.toml`(source: `private_dot_config/herdr/con
 - 読むのは **1 file だけ**: `HERDR_CONFIG_PATH` が**設定されていれば**その path、なければ
   `XDG_CONFIG_HOME` が設定されていれば `$XDG_CONFIG_HOME/herdr/config.toml`、どちらも無ければ
   `~/.config/herdr/config.toml`。変数は**空でも「設定あり」**として扱われる(`HERDR_CONFIG_PATH=""` なら
-  どの file も読まず、全部既定値)。
+  どの file も読まず全部既定値、`XDG_CONFIG_HOME=""` なら herdr の cwd からの相対 path
+  `herdr/config.toml` を読む)。
 - include や `.local` の層は無い。host 固有の設定は managed file に入れるか、持たない
   ([local-overrides](local-overrides.md))。
 - **parse error のとき herdr は黙って全部既定値で動く**(`; using defaults`)。たとえば新しい herdr が
@@ -53,13 +54,16 @@ managed file `~/.config/herdr/config.toml`(source: `private_dot_config/herdr/con
 - `preflight`(apply 前): module active で `~/.config/herdr/config.toml` が**既にある**と「apply が置換する。
   `.local` は無いので host 固有の設定は managed file に入れる」の warn(中身は読まない)。非 active profile
   では left-as-is の item。
-- `doctor`(apply 後、「herdr config」section): 次の順に見る。
-  1. managed file が無い → action(`mkdir -p ~/.config` と `chezmoi apply` の手順)。
-  2. doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指す(空の
-     `HERDR_CONFIG_PATH` を含む)→ warn。同じ file かは文字列ではなく `-ef` で比べる
-     (`XDG_CONFIG_HOME=~/.config/` のような末尾 `/` は別扱いしない)。
-  3. `herdr config check` を期限付き(`bounded_probe`)で実行し、exit 0 なら ok、それ以外は action。
-     herdr が PATH に無い・期限内に答えない場合は「未確認」の ok。herdr の出力は表示しない。
+- `doctor`(apply 後、「herdr config」section): 次の 2 つを**独立に**見る。
+  1. 読み先: doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指す(空の値を
+     含む)→ warn。同じ file かは、同じ綴り(`XDG_CONFIG_HOME` の末尾 `/` は落とす)か、両方あれば `-ef` で
+     判定する。
+  2. managed file: 無い → action(`mkdir -p ~/.config` と `chezmoi apply` の手順)。読み先がずれていなければ
+     「herdr は全部既定値で動く」と書き、ずれていれば「ずれを直すまで効かない」と書く(別の file が通知を
+     設定している場合もあるので、既定値とは断定しない)。ある → 読み先がずれていれば検証しない
+     (`herdr config check` は別の file を読むため)。ずれていなければ `herdr config check` を期限付き
+     (`bounded_probe`)で実行し、exit 0 なら ok、それ以外は action。herdr が PATH に無い・期限内に
+     答えない場合は「未確認」の ok。herdr の出力は表示しない。
   - 中身の drift(live file を手で変えた等)は managed drift section が出す。
 
 ## 検証
