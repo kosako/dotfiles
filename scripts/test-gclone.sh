@@ -82,6 +82,35 @@ run_gclone "mapped owner -> mapped context" 0 "$fixture_home/src/work/acme/tool"
 run_gclone "managed rule wins over mapping" 0 "$fixture_home/src/personal/foo" \
   -n https://github.com/kosako/foo
 
+# 2b. Repo lines (#260): "<owner>/<repo> <context>" names one repo and wins
+#     over the managed rule, so a kosako agent project can go to agent; owner
+#     lines still lose to it, and every other kosako repo stays personal. The
+#     repo line for acme is written AFTER the acme owner line on purpose: a
+#     repo line beats an owner line whatever the order in the file.
+printf 'kosako sandbox\nkosako/agentish agent\nacme/special sandbox\n' \
+  >> "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "repo line wins over managed rule (https)" 0 "$fixture_home/src/agent/agentish" \
+  -n https://github.com/kosako/agentish
+run_gclone "repo line wins over managed rule (scp .git)" 0 "$fixture_home/src/agent/agentish" \
+  -n git@github.com:kosako/agentish.git
+run_gclone "unnamed kosako repo stays personal" 0 "$fixture_home/src/personal/foo" \
+  -n https://github.com/kosako/foo
+run_gclone "kosako owner line never beats managed rule" 0 "$fixture_home/src/personal/other" \
+  -n ssh://git@github.com/kosako/other
+run_gclone "repo line beats earlier owner line" 0 "$fixture_home/src/sandbox/special" \
+  -n https://github.com/acme/special
+run_gclone "owner line still maps the owner's other repos" 0 "$fixture_home/src/work/acme/tool" \
+  -n https://github.com/acme/tool
+# First match wins within each line kind: a later duplicate key never
+# overrides the earlier line (owner lines kept this from the old `break`;
+# repo lines get the same rule).
+printf 'acme sandbox\nkosako/agentish sandbox\n' \
+  >> "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "first owner line wins over a later duplicate" 0 "$fixture_home/src/work/acme/tool" \
+  -n https://github.com/acme/tool
+run_gclone "first repo line wins over a later duplicate" 0 "$fixture_home/src/agent/agentish" \
+  -n https://github.com/kosako/agentish
+
 # 3. Fail closed: unmapped owner without a TTY aborts, prints nothing.
 run_gclone "unmapped owner aborts (no TTY)" 1 "" \
   -n https://github.com/stranger/tool
@@ -89,12 +118,18 @@ run_gclone "unmapped owner aborts (no TTY)" 1 "" \
 # 4. A mapping that escapes ~/src is rejected (no path traversal), and a
 #    malformed mapping line (extra fields) never resolves — it falls through
 #    to the fail-closed abort instead of cloning into "work/bad extra".
-printf 'evil ../../etc\nbad work/bad extra\n' \
+printf 'evil ../../etc\nbad work/bad extra\nkosako/evil ../x\nkosako/bad agent extra\n' \
   >> "$fixture_home/.config/dotfiles/clone-contexts.local"
 run_gclone "traversal context rejected" 2 "" \
   -n https://github.com/evil/tool
 run_gclone "malformed mapping line falls through to abort" 1 "" \
   -n https://github.com/bad/tool
+run_gclone "traversal repo-line context rejected" 2 "" \
+  -n https://github.com/kosako/evil
+# A malformed repo line never resolves either; kosako then falls through to
+# the managed rule (personal), never to the line's "agent".
+run_gclone "malformed repo line falls through to managed rule" 0 "$fixture_home/src/personal/bad" \
+  -n https://github.com/kosako/bad
 
 # 5. Existing destination aborts (never clobbers).
 mkdir -p "$fixture_home/src/personal/exists"
