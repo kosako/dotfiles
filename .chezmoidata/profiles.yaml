@@ -121,12 +121,21 @@ profiles:
       # profile files ~/.codex/agent-tools-review.config.toml and
       # ~/.codex/agent-tools-worker.config.toml (file names are the
       # agent-tools public contract; content = dotfiles, reader =
-      # agent-tools, Codex never rewrites them). `off` renders nothing, so
-      # review / worker fall back to the user config.toml defaults. Only the
-      # effort is set: both keep the config.toml model; service_tier carries
-      # over to review only (the worker runs with --ignore-user-config).
+      # agent-tools, Codex never rewrites them). `off` writes no effort line;
+      # the worker file (effort only) is then not rendered at all, the review
+      # file only once codexReviewServiceTier (below) is off too — both fall
+      # back to the user config.toml defaults. Both keep the config.toml
+      # model; config.toml's service_tier reaches review only (the worker runs
+      # with --ignore-user-config).
       codexReviewEffort: xhigh
       codexWorkerEffort: high
+      # #271: service tier for the review profile only. `default` keeps review
+      # off Fast mode (Fast uses 2.5x the credits; measured: codex-cli 0.159.1
+      # sends `default` for gpt-6.1-sol without the "not advertised" warning an
+      # unknown tier gets). The worker needs none: it runs with
+      # --ignore-user-config and re-passes only model / effort. `off` writes
+      # no service_tier line (the config.toml / Codex default applies).
+      codexReviewServiceTier: default
 
   work:
     environmentKind: work
@@ -183,3 +192,4 @@ profiles:
       # agent-tools reads it whenever it exists.
       codexReviewEffort: off
       codexWorkerEffort: off
+      codexReviewServiceTier: off

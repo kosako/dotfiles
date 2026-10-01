@@ -93,7 +93,7 @@ policy validation が失敗した場合は exit 1。
 - GitHub injection guard(report-only): secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
-- Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` が配る
+- Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` / `codexReviewServiceTier` が配る
   `~/.codex/agent-tools-{review,worker}.config.toml` の **presence のみ**(中身は config 値なので出さない)。
   codex-settings が active な profile では、値があるのに file が無い / `off` なのに file が残る(agent-tools は読み続ける)を
   apply 手順つきの action にし、非 active な profile では手置き・他 profile の残置を中立に表示して `off` 以外の値を
@@ -477,7 +477,7 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   型エラーで fail して hook 登録(`~/.claude/settings.json` / `~/.codex/hooks.json`)を作らないこと。両 template の
   execute-template も同じ型エラーで fail すること。
 - typed enum guard(#264): 同じく chezmoi を直接使う場合も、enum capability(`codexReviewEffort` /
-  `codexWorkerEffort` / `npmHardeningMode`)が schema の値以外(未知の文字列・大文字違い・boolean・数値・null・
+  `codexWorkerEffort` / `codexReviewServiceTier` / `npmHardeningMode`)が schema の値以外(未知の文字列・大文字違い・boolean・数値・null・
   配列・欠落)なら apply が fail して Codex の profile file を作らないこと。両 profile file template の
   execute-template も同じエラーで fail すること。
 
@@ -500,9 +500,9 @@ Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、hook capability が全部 false のとき
 apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content と gate の独立性(#139)を
-確認する。Codex review / worker 用 profile file(#264)は、1 行目の managed-by header・設定が
-`model_reasoning_effort = "<capability の値>"` だけであること・全行が worker preflight の top-level の形に収まること、
-値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ることを確認する。
+確認する。Codex review / worker 用 profile file(#264 / #271)は、1 行目の managed-by header・設定が capability の値
+どおりであること(review は `model_reasoning_effort` と `service_tier`、worker は `model_reasoning_effort` だけ)・全行が worker preflight の top-level の形に収まること、
+値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ること(review は effort と service tier の両方が `off` のとき)、review の各 key が自分の capability が `off` のときだけ消えること(#271)を確認する。
 chezmoi が必要(render job)。
 
 ## test-opencode-settings.sh

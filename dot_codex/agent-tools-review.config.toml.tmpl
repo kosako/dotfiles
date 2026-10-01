@@ -10,22 +10,31 @@
        Codex never rewrites it — unlike the codex-owned config.toml, which
        dotfiles does not manage.
 
-       Only the reasoning effort is set (the value is the codexReviewEffort
-       enum, validated by validate-policy): the model and service_tier come
-       from config.toml. A new key here would also layer onto every review
-       run, so add one deliberately.
+       Two keys, each from its own enum capability (validated by
+       validate-policy and the require-profile guard): the reasoning effort
+       (codexReviewEffort) and the service tier (codexReviewServiceTier, #271:
+       `default` keeps review off Fast mode). Either one set to `off` writes
+       no line and lets config.toml decide; the model always comes from
+       config.toml. A new key here would also layer onto every review run, so
+       add one deliberately.
 
        Gating (template self-gate, NOT a module `requires` — #184 lesson):
-       codexReviewEffort=off renders EMPTY and chezmoi removes the managed
+       both capabilities `off` renders EMPTY and chezmoi removes the managed
        target, so review falls back to the config.toml defaults. Active for
        profiles that list the codex-settings module (personal). The
        managed-by header lets doctor's managed-path orphans flag a copy left
        behind by a profile switch (#201). */ -}}
 {{- $effort := index $caps "codexReviewEffort" -}}
-{{- if ne $effort "off" -}}
+{{- $tier := index $caps "codexReviewServiceTier" -}}
+{{- if or (ne $effort "off") (ne $tier "off") -}}
 # Managed by chezmoi from kosako/dotfiles (codex-settings, #264).
 # Codex profile for agent-tools' personal-codex-review (codex exec -p
-# agent-tools-review): layered over ~/.codex/config.toml. Effort only; the
-# model and service_tier come from config.toml.
+# agent-tools-review): layered over ~/.codex/config.toml. The model, and any
+# key not set here, comes from config.toml.
+{{ if ne $effort "off" -}}
 model_reasoning_effort = "{{ $effort }}"
+{{ end -}}
+{{ if ne $tier "off" -}}
+service_tier = "{{ $tier }}"
+{{ end -}}
 {{ end -}}

@@ -258,7 +258,7 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
-## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264)
+## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort` / `codexReviewServiceTier`、#264 / #271)
 
 agent-tools の `personal-codex-review` と `personal-codex-worker` が使う Codex の reasoning effort を、
 対話の既定(`~/.codex/config.toml`)と分けて軽くするための profile file を `codex-settings` module が配る
@@ -270,14 +270,18 @@ Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
 - `~/.codex/agent-tools-worker.config.toml`: worker は `-p` を使わず、preflight が top-level の `model` /
   `model_reasoning_effort` だけを読んで `-c` で渡す。preflight は空行・comment・`key = "<1 行の basic string>"`
   (値は `[A-Za-z0-9._-]+`)以外の行があると fail-closed にするので、file はその形に保つ。
-- 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` は空 render で、apply 済みの
-  file も消える(テンプレート自己 gate)。現状は personal = review `xhigh` / worker `high`(#268)、work = `off`
+- 値は enum capability(effort は `off` / `minimal` / `low` / `medium` / `high` / `xhigh`、review の tier は `off` /
+  `default` / `fast`)。`off` の key は書かない。file が空 render になって apply 済みの file も消える(テンプレート
+  自己 gate)のは、worker は effort が `off`、review は effort と tier の**両方**が `off` のとき。現状は personal = review `xhigh` + `service_tier = "default"` / worker `high`(#268 / #271)、work = `off`
   (codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
-- **中身は effort だけ**: `model` は置かず、両方とも `config.toml` の値を使う(review は Codex が profile を
-  `config.toml` に重ね、worker は preflight が `config.toml` の top-level から読む)。`service_tier` は review
-  だけが `config.toml` から引き継ぎ、worker は `--ignore-user-config` で起動して再指定しないので効かない。
-  model の指定(単価の差が大きい)や review で Fast mode を外す `service_tier` は、消費と受け付ける値を
-  実測してから enum capability を足す形で追加する。
+- **中身**: review は effort と `service_tier`(#271。`default` = Fast mode を外す。Fast は Standard の 2.5 倍の
+  credit を使う)、worker は effort だけ。どちらも `off` の key は書かず、review は 2 つとも `off` のとき file ごと
+  配らない。`model` は置かず、両方とも `config.toml` の値を使う(review は Codex が profile を `config.toml` に
+  重ね、worker は preflight が `config.toml` の top-level から読む)。worker は `--ignore-user-config` で起動し
+  preflight が model / effort しか再指定しないので、`config.toml` の `service_tier` は届かず、worker 用 file に
+  書いても効かない(Fast は掛からない)。`service_tier = "default"` は codex-cli 0.159.1・gpt-6.1-sol で実測: 未知の
+  tier は「not advertised as supported … will be omitted from requests」と警告されて外されるが、`default` は
+  警告なく送られる。model の指定(単価の差が大きい)は、消費を見てから enum capability で足す。
 - **doctor**: 2 つの file の presence のみ(中身は config 値なので出さない)。module 非 active の profile では
   手置き・他 profile の残置を中立に表示し、`off` 以外の値は dangling として warn。`CODEX_HOME` が
   `~/.codex` 以外を指すと agent-tools はそちらを読むので warn する。
@@ -389,8 +393,12 @@ corepackMode:
   enable: 手動で corepack enable 済みの前提で、doctor が pnpm / yarn の shim を確認する(dotfiles は corepack enable を実行しない)
 
 codexReviewEffort / codexWorkerEffort:
-  off: profile file を配らない(agent-tools は config.toml の既定を使う)
-  minimal | low | medium | high | xhigh: その値の model_reasoning_effort を書いた profile file を配る
+  off: effort の key を書かない(worker は file ごと配らない。agent-tools は config.toml の既定を使う)
+  minimal | low | medium | high | xhigh: その値の model_reasoning_effort を書く
+
+codexReviewServiceTier:
+  off: service_tier の key を書かない(config.toml / Codex の既定)
+  default | fast: review 用 profile file にその値の service_tier を書く(default = Fast mode を使わない)
 ```
 
 ## Initial Profiles

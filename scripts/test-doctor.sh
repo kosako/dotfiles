@@ -1550,12 +1550,12 @@ cx_expect() {
   fi
   ok "test passed: $label"
 }
-#     CX-a) committed personal (review=xhigh, worker=high), files missing ->
+#     CX-a) committed personal (review=xhigh + tier default, worker=high), files missing ->
 #           one action per file naming the apply target.
 rm -f "$cx_review" "$cx_worker"
 if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
   cx_expect "profile files missing on personal are actions" "$cx_out" \
-    "[warn] codexReviewEffort=xhigh but $cx_review is missing — personal-codex-review falls back to the config.toml defaults" \
+    "[warn] codexReviewEffort=xhigh, codexReviewServiceTier=default but $cx_review is missing — personal-codex-review falls back to the config.toml defaults" \
     "[warn] codexWorkerEffort=high but $cx_worker is missing — personal-codex-worker falls back to the config.toml defaults"
 else
   fail "test failed: doctor must stay exit 0 (Codex profiles, missing)"
@@ -1567,7 +1567,7 @@ printf 'model_reasoning_effort = "%s"\n' "$cx_canary" > "$cx_review"
 printf 'model_reasoning_effort = "%s"\n' "$cx_canary" > "$cx_worker"
 if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
   cx_expect "profile files present on personal are ok (presence only)" "$cx_out" \
-    "[ok] codexReviewEffort=xhigh; $cx_review present (read by personal-codex-review)" \
+    "[ok] codexReviewEffort=xhigh, codexReviewServiceTier=default; $cx_review present (read by personal-codex-review)" \
     "[ok] codexWorkerEffort=high; $cx_worker present (read by personal-codex-worker)"
 else
   fail "test failed: doctor must stay exit 0 (Codex profiles, present)"
@@ -1576,11 +1576,12 @@ fi
 #     CX-c) codex-settings active but the capability off while a file
 #           lingers -> action (agent-tools still reads it until apply).
 set_capability_all "$cx_root" codexReviewEffort off
+set_capability_all "$cx_root" codexReviewServiceTier off
 rm -f "$cx_worker"
 set_capability_all "$cx_root" codexWorkerEffort off
 if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
   cx_expect "capability off with a lingering file is an action; off without a file is ok" "$cx_out" \
-    "[warn] codexReviewEffort=off but $cx_review exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
+    "[warn] codexReviewEffort=off, codexReviewServiceTier=off but $cx_review exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
     "[ok] codexWorkerEffort=off; no worker profile file (personal-codex-worker uses the config.toml defaults)"
 else
   fail "test failed: doctor must stay exit 0 (Codex profiles, off)"

@@ -91,3 +91,10 @@ capabilities:
       - medium
       - high
       - xhigh
+  codexReviewServiceTier:
+    type: enum
+    implemented: true
+    values:
+      - off
+      - default
+      - fast
