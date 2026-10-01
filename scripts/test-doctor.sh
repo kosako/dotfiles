@@ -623,6 +623,167 @@ cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
 gi_check work "[ok] global gitignore not managed (git-ignore module inactive for profile work)" "work -> not managed"
 rm -rf "$gi_home"
 
+# herdr config report (herdr-config module, #261). doctor stays report-only
+# / exit 0 and must tell apart: managed file present and accepted by `herdr
+# config check` (ok), rejected by it (action naming the command — herdr then
+# runs on all defaults), missing (action naming mkdir + apply), redirected by
+# HERDR_CONFIG_PATH (to another file, or SET BUT EMPTY: herdr then reads no
+# file) or by XDG_CONFIG_HOME (set but empty: a cwd-relative path) — a warn
+# judged independently of presence, so a missing file under a redirect gets
+# both lines and no "built-in defaults" claim (Codex review, PR #273), and a
+# present one is not validated (the check would read the other file) — while
+# the same directory spelled with a trailing slash is the same file, not a
+# redirect, present or missing; and the module-inactive profile (work). `herdr config check` comes from a PATH-front fake whose exit
+# status the case sets (the real herdr may or may not be on PATH). Every run
+# is hermetic (`env -i`), so the developer shell's HERDR_CONFIG_PATH /
+# XDG_CONFIG_HOME cannot leak in.
+hc_home="$fixture_home/hc"
+hc_managed="$hc_home/.config/herdr/config.toml"
+hc_fakebin="$fixture_home/hcfake"
+mkdir -p "$hc_fakebin"
+# write_fake_herdr_config_check RC — `herdr config check` exits RC; anything
+# else (the integration section's `herdr integration status`) exits 0 silently.
+write_fake_herdr_config_check() {
+  cat > "$hc_fakebin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = config ] && [ "\$2" = check ]; then exit $1; fi
+exit 0
+SH
+  chmod +x "$hc_fakebin/herdr"
+}
+# hc_run PROFILE [VAR=value...] — doctor output in hc_out; returns doctor's status.
+hc_run() {
+  local profile="$1"
+  shift
+  hc_out="$(env -i PATH="$hc_fakebin:$PATH" HOME="$hc_home" "$@" "$SCRIPT_DIR/doctor.sh" "$profile" 2>&1)"
+}
+# hc_check LABEL EXPECT_LINE PROFILE [VAR=value...]
+hc_check() {
+  local label="$1" expect="$2"
+  shift 2
+  if hc_run "$@"; then
+    if grep -Fxq -- "$expect" <<< "$hc_out"; then
+      ok "test passed: herdr config $label"
+    else
+      printf '%s\n' "$hc_out" >&2
+      fail "test failed: herdr config $label: expected the exact line '$expect'"
+      status=1
+    fi
+  else
+    printf '%s\n' "$hc_out" >&2
+    fail "test failed: doctor must stay exit 0 (herdr config $label)"
+    status=1
+  fi
+}
+# hc_expect LABEL PROFILE [VAR=value...] -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
+# One doctor run; every EXPECT_LINE must appear as an exact line and, after a
+# lone "!", no ABSENT_SUBSTRING may appear anywhere.
+hc_expect() {
+  local label="$1" run_args=() want=() absent=() mode=run arg missing=""
+  shift
+  for arg in "$@"; do
+    case "$mode:$arg" in
+      run:--) mode=want ;;
+      run:*) run_args+=("$arg") ;;
+      want:!) mode=absent ;;
+      want:*) want+=("$arg") ;;
+      absent:*) absent+=("$arg") ;;
+    esac
+  done
+  if ! hc_run "${run_args[@]}"; then
+    printf '%s\n' "$hc_out" >&2
+    fail "test failed: doctor must stay exit 0 (herdr config $label)"
+    status=1
+    return
+  fi
+  for arg in "${want[@]}"; do
+    grep -Fxq -- "$arg" <<< "$hc_out" || missing="${missing}expected line: $arg"$'\n'
+  done
+  for arg in "${absent[@]:-}"; do
+    [[ -z "$arg" ]] && continue
+    if grep -Fq -- "$arg" <<< "$hc_out"; then missing="${missing}unexpected: $arg"$'\n'; fi
+  done
+  if [[ -z "$missing" ]]; then
+    ok "test passed: herdr config $label"
+  else
+    printf '%s\n%s' "$hc_out" "$missing" >&2
+    fail "test failed: herdr config $label"
+    status=1
+  fi
+}
+hc_redirect_line() {
+  printf '%s' "[warn] herdr config: HERDR_CONFIG_PATH or XDG_CONFIG_HOME in this environment points herdr at '$1', not the managed $hc_managed — the managed settings (including [ui.toast] delivery) are not in effect for a herdr started from here"
+}
+hc_missing_defaults="[warn] herdr config missing: $hc_managed (herdr-config module) — herdr runs on its built-in defaults, so agent state changes raise no OS notification ([ui.toast] delivery defaults to off)"
+hc_missing_redirected="[warn] herdr config missing: $hc_managed (herdr-config module) — restoring it takes effect only once the redirect above is gone"
+rm -rf "$hc_home"
+mkdir -p "$hc_home/.config/herdr"
+cp "$DOTFILES_ROOT/private_dot_config/herdr/config.toml" "$hc_managed"
+# HC-1) present, herdr config check passes -> ok.
+write_fake_herdr_config_check 0
+hc_check "accepted -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal
+# HC-2) present, herdr config check fails -> an ACTION naming the command:
+#       the step line appears only in the next-actions summary, so a plain
+#       warn would fail here (and drop out of --actions-only; Codex review).
+write_fake_herdr_config_check 1
+hc_expect "rejected -> action with the herdr config check step in next actions" personal -- \
+  "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" \
+  "        \$ herdr config check"
+write_fake_herdr_config_check 0
+# HC-3) missing -> action whose steps are mkdir then apply, consecutive and %q-escaped.
+rm -f "$hc_managed"
+if hc_run personal \
+  && grep -Fxq -- "$hc_missing_defaults" <<< "$hc_out" \
+  && ! grep -Fq "points herdr at" <<< "$hc_out" \
+  && steps_consecutive "$hc_out" "        \$ mkdir -p $(printf '%q' "$hc_home/.config")" \
+    "        \$ chezmoi apply $(printf '%q' "$hc_home/.config/herdr") $(printf '%q' "$hc_managed")"; then
+  ok "test passed: herdr config missing -> action with mkdir then apply steps"
+else
+  printf '%s\n' "${hc_out:-<no output>}" >&2
+  fail "test failed: herdr config missing -> expected the action line and the mkdir step immediately followed by the apply step"
+  status=1
+fi
+# HC-3b) missing AND redirected: the redirect is reported on its own and the
+#        missing action drops the "built-in defaults" claim (the other file
+#        may set delivery) for "takes effect only once the redirect is gone"
+#        — to another file, and to nothing (set but empty).
+hc_expect "missing + HERDR_CONFIG_PATH elsewhere -> redirect warn and redirect-aware missing action" \
+  personal HERDR_CONFIG_PATH="$hc_home/other.toml" -- \
+  "$(hc_redirect_line "$hc_home/other.toml")" "$hc_missing_redirected" ! "built-in defaults"
+hc_expect "missing + HERDR_CONFIG_PATH empty -> redirect warn and redirect-aware missing action" \
+  personal HERDR_CONFIG_PATH= -- \
+  "$(hc_redirect_line "")" "$hc_missing_redirected" ! "built-in defaults"
+# HC-3c) missing with XDG_CONFIG_HOME naming ~/.config with a trailing slash:
+#        the same location (no -ef possible while the file is missing), so no
+#        redirect warn and the plain missing action.
+hc_expect "missing + XDG_CONFIG_HOME=~/.config/ -> plain missing action, no redirect" \
+  personal XDG_CONFIG_HOME="$hc_home/.config/" -- "$hc_missing_defaults" ! "points herdr at"
+cp "$DOTFILES_ROOT/private_dot_config/herdr/config.toml" "$hc_managed"
+# HC-4) present but redirected: warn, and herdr config check is NOT run (it
+#       would validate the other file) — the fake would fail it, so a run
+#       would show the did-not-pass action. To another file, to nothing (set
+#       but empty), by XDG_CONFIG_HOME, and by an empty XDG_CONFIG_HOME
+#       (herdr then reads herdr/config.toml relative to its cwd).
+write_fake_herdr_config_check 1
+hc_not_checked="[info] - herdr config: managed $hc_managed present (validity not checked: herdr reads another file here)"
+hc_expect "redirected by HERDR_CONFIG_PATH -> warn, check not run" \
+  personal HERDR_CONFIG_PATH="$hc_home/other.toml" -- \
+  "$(hc_redirect_line "$hc_home/other.toml")" "$hc_not_checked" ! "did not pass"
+hc_expect "HERDR_CONFIG_PATH set but empty -> warn, check not run" \
+  personal HERDR_CONFIG_PATH= -- "$(hc_redirect_line "")" "$hc_not_checked" ! "did not pass"
+hc_expect "redirected by XDG_CONFIG_HOME -> warn, check not run" \
+  personal XDG_CONFIG_HOME="$hc_home/xdg" -- \
+  "$(hc_redirect_line "$hc_home/xdg/herdr/config.toml")" "$hc_not_checked" ! "did not pass"
+hc_expect "XDG_CONFIG_HOME set but empty -> warn naming the cwd-relative path" \
+  personal XDG_CONFIG_HOME= -- "$(hc_redirect_line "herdr/config.toml")" "$hc_not_checked"
+write_fake_herdr_config_check 0
+# HC-5) XDG_CONFIG_HOME naming ~/.config with a trailing slash is the same
+#       file, so no redirect warning and the check runs.
+hc_check "XDG_CONFIG_HOME=~/.config/ is the managed file -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal XDG_CONFIG_HOME="$hc_home/.config/"
+# HC-6) work does not list the module -> not managed, whatever is on disk.
+hc_check "work -> not managed" "[ok] herdr config not managed (herdr-config module inactive for profile work)" work
+rm -rf "$hc_home" "$hc_fakebin"
+
 # SSH 1Password agent report (enable1PasswordSSH, issue #17). doctor stays
 # report-only / exit 0 and must reflect both the active and the dangling
 # (capability true but ssh-1password module inactive) cases. Throwaway repo

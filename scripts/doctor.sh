@@ -1441,6 +1441,83 @@ if command -v opencode >/dev/null 2>&1; then
   fi
 fi
 
+section "herdr config (report-only)"
+# herdr-config module (#261): the managed ~/.config/herdr/config.toml carries
+# the UI preferences and the built-in notification delivery ([ui.toast]
+# delivery; herdr's own default is off) that agent-tools' herdr operations
+# count on to hear about a finished worker. herdr reads exactly one file:
+# HERDR_CONFIG_PATH if SET (even empty: then none, all defaults), else
+# $XDG_CONFIG_HOME/herdr/config.toml if SET (even empty: then herdr/config.toml
+# relative to herdr's cwd), else this one
+# (measured, herdr 0.9.0) — so a variable in this environment can leave the
+# managed file unread. The redirect is judged on its own, BEFORE presence: a
+# missing managed file under a redirect does not mean "all defaults" (the
+# other file may set delivery), and restoring it alone does not bring it
+# into effect (Codex review, PR #273). Same file means the same spelling
+# (trailing slashes of XDG_CONFIG_HOME dropped) or, when both exist, -ef.
+# Validity comes from herdr itself: on a parse error (a value a newer herdr
+# no longer accepts) it silently runs on ALL defaults, and `herdr config
+# check` exits non-zero for that and for unknown keys (measured: it reads
+# the file and writes nothing). It runs through bounded_probe, so an absent
+# or hung herdr is "not checked"; its output is not shown (contents-blind).
+# Drift of the managed file is the managed drift section's job. The rest of
+# ~/.config/herdr (session.json, logs, sockets) is herdr's runtime state
+# and never managed.
+herdr_config="$HOME/.config/herdr/config.toml"
+if module_active_for_profile "$profile" herdr-config; then
+  if [[ -n "${HERDR_CONFIG_PATH+set}" ]]; then
+    herdr_config_read="$HERDR_CONFIG_PATH"
+  elif [[ -n "${XDG_CONFIG_HOME+set}" ]]; then
+    if [[ -z "$XDG_CONFIG_HOME" ]]; then
+      # Empty: herdr joins onto it, i.e. a path relative to its cwd (measured).
+      herdr_config_read="herdr/config.toml"
+    else
+      herdr_xdg="$XDG_CONFIG_HOME"
+      while [[ "$herdr_xdg" == */ ]]; do herdr_xdg="${herdr_xdg%/}"; done
+      herdr_config_read="$herdr_xdg/herdr/config.toml"
+    fi
+  else
+    herdr_config_read="$herdr_config"
+  fi
+  if [[ "$herdr_config_read" == "$herdr_config" || "$herdr_config_read" -ef "$herdr_config" ]]; then
+    herdr_config_redirected=0
+  else
+    herdr_config_redirected=1
+    warn "herdr config: HERDR_CONFIG_PATH or XDG_CONFIG_HOME in this environment points herdr at '$herdr_config_read', not the managed $herdr_config — the managed settings (including [ui.toast] delivery) are not in effect for a herdr started from here"
+  fi
+  if [[ ! -f "$herdr_config" ]]; then
+    if [[ "$herdr_config_redirected" -eq 0 ]]; then
+      herdr_config_missing_effect="herdr runs on its built-in defaults, so agent state changes raise no OS notification ([ui.toast] delivery defaults to off)"
+    else
+      herdr_config_missing_effect="restoring it takes effect only once the redirect above is gone"
+    fi
+    action "herdr config missing: $herdr_config (herdr-config module) — $herdr_config_missing_effect" \
+      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
+      "\$ chezmoi apply $(printf '%q' "$HOME/.config/herdr") $(printf '%q' "$herdr_config")"
+  elif [[ "$herdr_config_redirected" -eq 1 ]]; then
+    # herdr config check would validate the other file, not the managed one.
+    item "herdr config: managed $herdr_config present (validity not checked: herdr reads another file here)"
+  elif ! command -v herdr >/dev/null 2>&1; then
+    ok "herdr config: managed $herdr_config present (validity not checked: herdr not on PATH)"
+  else
+    bounded_probe herdr config check
+    case "$probe_rc" in
+      0)
+        ok "herdr config: managed $herdr_config present and accepted by herdr config check"
+        ;;
+      "")
+        ok "herdr config: managed $herdr_config present (validity not checked: herdr config check gave no answer in time)"
+        ;;
+      *)
+        action "herdr config: herdr config check did not pass for the managed $herdr_config (exit $probe_rc) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" \
+          "\$ herdr config check"
+        ;;
+    esac
+  fi
+else
+  ok "herdr config not managed (herdr-config module inactive for profile $profile)"
+fi
+
 section "Codex review / worker profiles (report-only)"
 # #264 (agent-tools#339 hand-off): codex-settings renders the Codex profile
 # files that agent-tools' personal-codex-review (`codex exec -p

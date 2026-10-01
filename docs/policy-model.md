@@ -320,6 +320,21 @@ git は global excludes を 1 file しか読まないので `.local` は無く�
 - 実挙動(`.gitignore` の無い repo で `git status` に出ない)は `test-git-ignore.sh` が throwaway HOME で
   pin する。詳細は [git-ignore](git-ignore.md)。
 
+## herdr config(`herdr-config` module、#261)
+
+herdr の config `~/.config/herdr/config.toml`(UI の設定と組み込み通知の配信先 `[ui.toast] delivery`)を
+managed にする。agent-tools の herdr 運用は worker の完了を OS の通知で知る前提で、この file を
+dotfiles の管轄として扱う(herdr の既定の delivery は `off`)。同じ dir の `session.json`・log・socket は
+herdr の実行時状態で管理しない。herdr は 1 file しか読まない(`HERDR_CONFIG_PATH` > `$XDG_CONFIG_HOME/herdr/config.toml` >
+`~/.config/herdr/config.toml`)ので `.local` は無い。
+
+- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work は非列挙(会社 Mac の既存 config を
+  diff 無しで置換しないため。採用は preflight で既存を見てから)。
+- **doctor**: managed file の presence、環境変数による読み先のずれ、`herdr config check`(期限付き。parse error の
+  とき herdr は黙って全部既定値で動くため)。**preflight**: 既存 file の置換 warn(中身は読まない)。
+- 設定値と apply の範囲(隣の file に触れない)は `test-herdr-config.sh` が pin する。詳細は
+  [herdr-config](herdr-config.md)。
+
 ## dormant capability の扱い(残す基準)
 
 宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ

@@ -82,6 +82,23 @@ else
   ok "absent: $HOME/.ssh/config"
 fi
 
+section "herdr config (apply impact)"
+# When herdr-config is active (#261), apply replaces ~/.config/herdr/config.toml
+# with the managed version. herdr reads exactly one config file — no include
+# or .local layer — so a host-only setting must be folded into the managed
+# file (or dropped) before apply. Existence only; the file is never read
+# here. See docs/herdr-config.md.
+herdr_config="$HOME/.config/herdr/config.toml"
+if module_active_for_profile "$profile" herdr-config; then
+  if [[ -e "$herdr_config" ]]; then
+    warn "exists: $herdr_config — apply (herdr-config) replaces it; herdr reads one config file (no .local), so diff first and fold host-only settings into the managed file (see docs/herdr-config.md)"
+  else
+    ok "absent: $herdr_config (apply creates the managed herdr config)"
+  fi
+elif [[ -e "$herdr_config" ]]; then
+  item "exists: $herdr_config — not managed for profile $profile (left as-is)"
+fi
+
 section "config directory permission"
 # private_dot_config makes chezmoi manage ~/.config itself at 0700.
 # On an existing host where ~/.config is 0755, the first apply changes

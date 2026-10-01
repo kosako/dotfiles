@@ -30,6 +30,12 @@ profiles:
       # the packet convention is agent-tools', and a work machine's existing
       # global ignore must not be replaced without a diff (preflight warns).
       - git-ignore
+      # #261: managed herdr config (~/.config/herdr/config.toml): UI
+      # preferences and OS-notification delivery, which agent-tools' herdr
+      # operations count on (herdr's default delivery is off). Module-gated,
+      # personal only: a work machine's existing herdr config must not be
+      # replaced without a diff (preflight warns).
+      - herdr-config
     capabilities:
       installPackages: true
       installGuiApps: true

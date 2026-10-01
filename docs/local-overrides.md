@@ -162,6 +162,17 @@ zsh の末尾 source や SSH の末尾 Include に当たる合成の仕組みが
 - 共通原則どおり doctor / preflight は file の**存在と pattern 行**しか見ない(値を持つ file ではない)。
   詳細は [git-ignore](git-ignore.md)。
 
+## herdr config: managed-only(local 無し、#261)
+
+managed な `~/.config/herdr/config.toml`(`herdr-config` module)にも **local override file が無い**。herdr は
+config を **1 file しか読まず**(`HERDR_CONFIG_PATH` > `$XDG_CONFIG_HOME/herdr/config.toml` >
+`~/.config/herdr/config.toml`)、include や合成の仕組みを持たないため。
+
+- host 固有の設定は managed file に入れるか、持たない。`HERDR_CONFIG_PATH` で別 file を読ませると managed
+  file は丸ごと読まれなくなる(doctor が warn する)。
+- doctor / preflight は file の**存在**と `herdr config check` の結果しか見ない(中身は表示しない)。
+  詳細は [herdr-config](herdr-config.md)。
+
 ## 決定記録
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で
