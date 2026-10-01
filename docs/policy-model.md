@@ -218,10 +218,12 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   `herdr integration status` が current / outdated を判定するので、dotfiles は配布しない
   (agent-tools の hook と同じ分界。[config-ownership](config-ownership.md))。
 - **installer と同一形で render する**: `bash '<abs path>' session`・`timeout: 10`・Claude は
-  matcher `*`・Codex は matcher なし(herdr v0.9.0 `src/integration/config_edit.rs` の
-  `ensure_command_hook` は `type=command` と `command` 文字列の一致で「登録済み」と判定する)。
+  matcher `^(startup|resume|clear|compact|fork)$`・Codex は matcher なし。Claude は herdr 0.9.3(integration
+  v10)から **entry 全体**を canonical と比べ(`src/integration/claude_settings.rs`)、旧形の matcher `*` の
+  entry は置き換える(#274)ので、matcher まで herdr に合わせる。Codex は `type=command` と `command`
+  文字列の一致で「登録済み」と判定する(`src/integration/config_edit.rs` の `ensure_command_hook`)。
   これにより `herdr integration install claude` は managed settings.json を **byte 不変**で
-  通し(実測)、`install codex` は hooks.json を同内容で整形し直すだけ(次の `chezmoi apply`
+  通し(0.9.3 で実測)、`install codex` は hooks.json を同内容で整形し直すだけ(次の `chezmoi apply`
   が managed の整形に戻す)。apply → install でも install → apply でも最終状態は同じ。
 - **極性**: 安全強化型ではないが権限も付与しない(install / secret / network 系ではない)
   ので `environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。

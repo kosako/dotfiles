@@ -52,7 +52,8 @@
        the user-owned ~/.config/agent-tools/checks.local.json.
 
        enableHerdrIntegration (#225, agent-tools#252 hand-off) registers
-       herdr's SessionStart hook (matcher "*") the same way, with the body
+       herdr's SessionStart hook (matcher "^(startup|resume|clear|compact|fork)$", herdr
+       0.9.3 / #274) the same way, with the body
        owned by herdr instead of agent-tools: `herdr integration install
        claude` writes ~/.claude/hooks/herdr-agent-state.sh, and the entry is
        rendered in exactly the shape that installer emits, so it recognizes
