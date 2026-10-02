@@ -296,6 +296,77 @@ else
   miss "restore did not back up the displaced file"
 fi
 
+# 14b. New restore parents, including intermediate directories, must be
+#      private even when the caller uses umask 022 (issue #282).
+parent_stage="$fixture_home/stage-parent-mode"
+parent_dst="$fixture_home/restore-parent-mode"
+parent_archive="$fixture_home/out/parent-mode.age"
+parent_path=".ssh/conf.d/config.local"
+mkdir -p "$parent_stage/files/.ssh/conf.d" "$parent_dst"
+printf 'Host private\n' > "$parent_stage/files/$parent_path"
+chmod 644 "$parent_stage/files/$parent_path"
+sum="$(shasum -a 256 "$parent_stage/files/$parent_path" | awk '{print $1}')"
+SUM="$sum" P="$parent_path" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": strenv(P), "mode": "644", "size": 13, "sha256": strenv(SUM)}]
+}' > "$parent_stage/manifest.json"
+make_archive "$parent_stage" "$parent_archive"
+if out="$(umask 022; run restore --in "$parent_archive" --identity "$fixture_home/keys/id.txt" \
+  --target-home "$parent_dst" --apply 2>&1)" \
+  && cmp -s "$parent_stage/files/$parent_path" "$parent_dst/$parent_path" \
+  && [[ "$(file_mode "$parent_dst/$parent_path")" == "644" ]]; then
+  pass "restore creates the nested file with its recorded mode"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore failed to create the nested file with its recorded mode"
+fi
+for parent in .ssh .ssh/conf.d .local .local/state .local/state/dotfiles; do
+  mode="$(file_mode "$parent_dst/$parent" 2>/dev/null)" || mode=missing
+  if [[ "$mode" == "700" ]]; then
+    pass "new restore parent $parent is 0700"
+  else
+    miss "new restore parent $parent must be 0700, got $mode"
+  fi
+done
+
+# 14c. Existing 0755 parents stay unchanged; displaced files get private
+#      parents at every level below the unique backup directory.
+for parent in .ssh .ssh/conf.d .local .local/state .local/state/dotfiles; do
+  chmod 755 "$parent_dst/$parent"
+done
+printf 'LOCAL EDIT\n' > "$parent_dst/$parent_path"
+if out="$(umask 022; run restore --in "$parent_archive" --identity "$fixture_home/keys/id.txt" \
+  --target-home "$parent_dst" --apply 2>&1)" \
+  && cmp -s "$parent_stage/files/$parent_path" "$parent_dst/$parent_path"; then
+  pass "restore overwrites the nested file under existing parents"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore failed to overwrite the nested file under existing parents"
+fi
+for parent in .ssh .ssh/conf.d .local .local/state .local/state/dotfiles; do
+  mode="$(file_mode "$parent_dst/$parent" 2>/dev/null)" || mode=missing
+  if [[ "$mode" == "755" ]]; then
+    pass "existing restore parent $parent stays 0755"
+  else
+    miss "existing restore parent $parent must stay 0755, got $mode"
+  fi
+done
+parent_saved="$(find "$parent_dst/.local/state/dotfiles" -name config.local -type f)"
+if [[ -f "$parent_saved" && "$(cat "$parent_saved")" == "LOCAL EDIT" ]]; then
+  parent_backup="${parent_saved%/"$parent_path"}"
+  for parent in "$parent_backup" "$parent_backup/.ssh" "$parent_backup/.ssh/conf.d"; do
+    mode="$(file_mode "$parent" 2>/dev/null)" || mode=missing
+    if [[ "$mode" == "700" ]]; then
+      pass "displaced-file parent ${parent##*/} is 0700"
+    else
+      miss "displaced-file parent ${parent##*/} must be 0700, got $mode"
+    fi
+  done
+else
+  miss "restore did not preserve the displaced nested file"
+fi
+
 # 15. restore --skip-existing preserves existing files and restores missing ones.
 printf 'KEEP ME\n' > "$rdst/.zshrc.local"
 rm "$rdst/.zprofile.local"
