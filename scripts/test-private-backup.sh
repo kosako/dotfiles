@@ -296,13 +296,16 @@ else
   miss "restore did not back up the displaced file"
 fi
 
-# 15. restore --skip-existing leaves existing files untouched.
+# 15. restore --skip-existing preserves existing files and restores missing ones.
 printf 'KEEP ME\n' > "$rdst/.zshrc.local"
-run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply --skip-existing >/dev/null 2>&1 || true
-if [[ "$(cat "$rdst/.zshrc.local")" == "KEEP ME" ]]; then
-  pass "restore --skip-existing leaves existing files untouched"
+rm "$rdst/.zprofile.local"
+if out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply --skip-existing 2>&1)" \
+  && [[ "$(cat "$rdst/.zshrc.local")" == "KEEP ME" ]] \
+  && cmp -s "$fixture_home/.zprofile.local" "$rdst/.zprofile.local"; then
+  pass "restore --skip-existing preserves existing files and restores missing ones"
 else
-  miss "restore --skip-existing overwrote an existing file"
+  printf '%s\n' "$out" >&2
+  miss "restore --skip-existing must succeed, preserve existing files and restore missing ones"
 fi
 
 # 16. restore refuses to write through a symlinked parent (escape defence).
@@ -727,11 +730,14 @@ else
   miss "restore did not displace the existing supplement"
 fi
 printf 'KEEP LIST\n' > "$cus_dst/$sup_rel"
-run restore --in "$cus_home/c.age" --identity "$fixture_home/keys/id.txt" --target-home "$cus_dst" --apply --skip-existing >/dev/null 2>&1 || true
-if [[ "$(cat "$cus_dst/$sup_rel")" == "KEEP LIST" ]]; then
-  pass "restore --skip-existing leaves an existing supplement untouched"
+rm "$cus_dst/lists/note"
+if out="$(run restore --in "$cus_home/c.age" --identity "$fixture_home/keys/id.txt" --target-home "$cus_dst" --apply --skip-existing 2>&1)" \
+  && [[ "$(cat "$cus_dst/$sup_rel")" == "KEEP LIST" ]] \
+  && cmp -s "$cus_home/lists/note" "$cus_dst/lists/note"; then
+  pass "restore --skip-existing preserves the supplement and restores missing payload"
 else
-  miss "restore --skip-existing overwrote the existing supplement"
+  printf '%s\n' "$out" >&2
+  miss "restore --skip-existing must succeed, preserve the supplement and restore missing payload"
 fi
 
 # A supplement that declares its own path is captured once: the canonical
