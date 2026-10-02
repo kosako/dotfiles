@@ -261,7 +261,12 @@ gclone() {
   local map="$HOME/.config/dotfiles/clone-contexts.local"
   if [[ -r "$map" ]]; then
     local m_key m_ctx m_extra
-    while read -r m_key m_ctx m_extra; do
+    # `read` returns non-zero at an EOF without a newline even though it has
+    # filled the fields, so a last line written without one (printf, some
+    # editors) would be dropped and the managed rule would win silently
+    # (#281). The `|| [[ -n "$m_key" ]]` keeps that line; a bare EOF clears
+    # the fields, which ends the loop.
+    while read -r m_key m_ctx m_extra || [[ -n "$m_key" ]]; do
       [[ -z "$m_key" || "$m_key" == \#* ]] && continue
       # Exactly two fields: a malformed line (missing or extra fields) never
       # resolves a context — it falls through to the next rule, and finally
