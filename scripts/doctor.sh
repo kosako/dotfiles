@@ -905,7 +905,7 @@ report_codex_rules_probes() {
 
 report_codex_projects_trust() {
   local codex_config trusted_paths trusted_path trusted_total
-  # [projects] trust watch: parse ONLY [projects."<path>"] section headers and
+  # [projects] trust watch: parse ONLY quoted [projects] path headers and
   # the trust_level key inside each section (an entry can be "untrusted" —
   # only trusted ones matter). config.toml also carries MCP server env blocks
   # that may hold secrets, so nothing else is read or echoed (key-name-only
@@ -914,14 +914,18 @@ report_codex_projects_trust() {
   if [[ -f "$codex_config" ]]; then
     # Tolerate the valid TOML spellings codex may write: optional whitespace
     # around `=` (compact `trust_level="trusted"` included) and single-quoted
-    # literal strings. A parse/read failure must surface as an INCOMPLETE
-    # scan, never as "0 trusted" (fail-open false-clean).
+    # literal strings. Headers accept double/single-quoted keys and trailing
+    # comments; escaped double-quoted keys and other unsupported forms must
+    # surface as an INCOMPLETE scan, as must any parse/read failure, never as
+    # "0 trusted" (fail-open false-clean).
     if trusted_paths="$(awk '
-      /^[[:space:]]*\[projects\."/ {
+      /^[[:space:]]*\[projects\./ {
         p = $0
-        sub(/^[[:space:]]*\[projects\."/, "", p)
-        sub(/"\][[:space:]]*$/, "", p)
-        current = p
+        sub(/^[[:space:]]*\[projects\./, "", p)
+        if (p !~ /^("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*\][[:space:]]*(#.*)?$/) exit 1
+        quote = substr(p, 1, 1)
+        p = substr(p, 2)
+        current = substr(p, 1, index(p, quote) - 1)
         next
       }
       /^[[:space:]]*\[/ { current = "" ; next }
