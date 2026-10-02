@@ -15,7 +15,7 @@ Mac 用のポータブル開発環境を [chezmoi](https://www.chezmoi.io/) で�
 - credential 入りの remote URL を push してしまう。
 - AI agent が触ってよい範囲が曖昧なまま広がる。
 
-この repository は、これらを**設定の作りからして起きにくく**する。判定の基準は「project をどの directory に置いたか」(`~/src/<context>/`)。
+この repository は、これらを**設定の作りからして起きにくく**する。project の置き場所(`~/src/<context>/`)で自動的に切り替わるのは Git identity で、secret access・install・AI agent の権限は machine の profile で決まる(下の「ディレクトリ規約」と [docs/policy-model.md](docs/policy-model.md))。
 
 ## いま管理しているもの
 
@@ -76,7 +76,7 @@ environmentKind は飾りラベルではない。`validate-policy.sh` が、環�
 
 ## ディレクトリ規約
 
-開発 project はここに置く。この階層が Git identity・secret access・install policy・AI agent policy の判定基準になる。
+開発 project はここに置く。この階層を Git identity・secret access・install policy・AI agent policy の判定基準にする。ただし配置で自動的に切り替わるのは Git identity(下記の `includeIf "gitdir:..."`)だけで、secret access・install・AI agent の権限は machine の profile の capability で決まる([docs/policy-model.md](docs/policy-model.md))。directory ごとの AI の扱いは [docs/ai-policy.md](docs/ai-policy.md) の「Directory Policy」に従う運用上の基準である。
 
 ```text
 ~/src/personal/<repo>
