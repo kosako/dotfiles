@@ -141,6 +141,25 @@ run_gclone "garbage url rejected" 2 "" -n "not-a-url"
 run_gclone "deep https path rejected" 2 "" -n https://github.com/kosako/foo/tree/main
 run_gclone "missing url is usage error" 2 "" -n
 
+# 7. A last line without a trailing newline still counts (#281): `read` fails
+#    at that EOF after filling the fields, so a plain `while read` dropped the
+#    line and a kosako repo line silently lost to the managed rule. The file is
+#    rewritten here (printf without "\n" at the end) so each case's line is the
+#    unterminated one.
+printf 'acme work/acme\nkosako/lastline agent' \
+  > "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "unterminated last repo line still wins" 0 "$fixture_home/src/agent/lastline" \
+  -n https://github.com/kosako/lastline
+printf 'kosako/lastline agent\nlastowner sandbox' \
+  > "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "unterminated last owner line still maps" 0 "$fixture_home/src/sandbox/tool" \
+  -n https://github.com/lastowner/tool
+# An unterminated malformed line is still malformed: it never resolves.
+printf 'kosako/lastline agent\nlastbad work/x extra' \
+  > "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "unterminated malformed last line falls through to abort" 1 "" \
+  -n https://github.com/lastbad/tool
+
 if [[ "$status" -eq 0 ]]; then
   ok "gclone tests passed"
 fi

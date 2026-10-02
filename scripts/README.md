@@ -579,7 +579,8 @@ config.local の解決)を確認する。chezmoi が必要(render job)。
 dot_zshrc の `gclone` helper(#177)をマーカー抽出 + fixture HOME + `zsh -f` で検証する。
 実 clone はしない(`-n` の解決のみ)。context 解決の順序(local の repo 行 → managed の
 kosako ルール → local の owner 行 → fail-closed 中断。#260)、URL 3 形式(https / ssh:// / scp)の parse、
-path traversal 拒否、既存 dest の非破壊を固定する。zsh が必要(validate job、apt で導入)。
+path traversal 拒否、既存 dest の非破壊、末尾改行の無い最終行も 1 行として読むこと(#281)を固定する。
+zsh が必要(validate job、apt で導入)。
 
 ## test-starship.sh
 
