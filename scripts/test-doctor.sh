@@ -99,7 +99,15 @@ fi
 
 # A file without the managed-by header is never an orphan.
 printf 'registry-noise=1\n' > "$fixture_home/.npmrc"
-if HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work 2>&1 | grep -Fq "$orphan_marker"; then
+# Capture before matching so an early grep exit cannot mask an orphan via SIGPIPE.
+doctor_rc=0
+output="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" work 2>&1)" || doctor_rc=$?
+if [[ "$doctor_rc" -ne 0 ]]; then
+  printf '%s\n' "$output" >&2
+  fail "test failed: doctor must stay exit 0 for a headerless file (got $doctor_rc)"
+  status=1
+elif grep -Fq "$orphan_marker" <<< "$output"; then
+  printf '%s\n' "$output" >&2
   fail "test failed: headerless file must not be reported as orphan"
   status=1
 else
