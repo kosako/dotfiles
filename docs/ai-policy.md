@@ -19,8 +19,10 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 原則(全 tool 共通):
 
 - **read(ローカル完結・読み取り)は無確認で許可してよい**。Codex baseline の allow は
-  read 系サブコマンド(`gh pr view/list/diff/checks`、`gh issue view/list`、`gh auth status`)と
-  ローカル git 操作(`commit/add/checkout`)のみ。`git clone` も allow に**入れない**
+  read 系サブコマンド(`gh pr view/list/diff/checks`、`gh issue view/list`)と
+  ローカル git 操作(`commit/add/checkout`)のみ。`gh auth status` は prefix 一致の allow では
+  token を表示する flag を除外できないため、引数なしも含めて allow から外し都度承認とする。
+  `git clone` も allow に**入れない**
   (任意 remote への network 取得で、URL 自体が injection 下では covert channel になる —
   都度承認)。
 - **マシン外に出る操作(push・PR/issue/comment 作成・release・外部送信)と昇格系

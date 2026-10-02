@@ -11,6 +11,8 @@
        fetches from an arbitrary remote (network egress; the URL itself is a
        covert channel under the injection threat model), so it stays behind
        per-invocation approval.
+       `gh auth status` is not allowed: prefix matching cannot exclude flags
+       that display tokens, so even the bare command stays behind approval.
 
        Why this file is chezmoi-managed (#139 decision): Codex approval grants
        accumulate ("don't ask again" piles up in local state) and the permission
@@ -32,7 +34,6 @@
 prefix_rule(pattern=["git", "commit"], decision="allow")
 prefix_rule(pattern=["git", "add"], decision="allow")
 prefix_rule(pattern=["git", "checkout"], decision="allow")
-prefix_rule(pattern=["gh", "auth", "status"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "view"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "list"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "diff"], decision="allow")

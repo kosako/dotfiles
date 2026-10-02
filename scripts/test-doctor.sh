@@ -2379,10 +2379,13 @@ trust_level = "untrusted"
 trust_level = "trusted"
 TOML
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push,gh pr create" \
+    CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "outward/escalation probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
+  if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status --show-token'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status -t'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth token'" <<< "$aip_out" \
     && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
     && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
     && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
@@ -2411,13 +2414,13 @@ trust_level = "trusted"
 TOML
 aip_probe_log="$fixture_home/.codex-probe-log"
 : > "$aip_probe_log"
-expected_probes=$'curl https://example.invalid\ngh api --method POST repos/o/r/issues\ngh auth login\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nsudo -v\nwget https://example.invalid'
+expected_probes=$'curl https://example.invalid\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nsudo -v\nwget https://example.invalid'
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "no outward/escalation probe is auto-allowed by the live Codex rules" <<< "$aip_out" \
+  if grep -Fq "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules" <<< "$aip_out" \
     && grep -Fq "1 path(s) trusted" <<< "$aip_out" \
-    && ! grep -Fq "outward/escalation probe auto-allowed" <<< "$aip_out" \
+    && ! grep -Fq "outward/escalation/credential-display probe auto-allowed" <<< "$aip_out" \
     && ! grep -Fq "WHOLE home directory" <<< "$aip_out" \
     && ! grep -Fq "stale Codex projects trust" <<< "$aip_out"; then
     ok "test passed: clean Codex permission surface reports ok (no false warns)"
@@ -2427,10 +2430,10 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     status=1
   fi
   if probe_diff="$(diff <(printf '%s\n' "$expected_probes") <(sort "$aip_probe_log"))"; then
-    ok "test passed: doctor evaluated exactly the pinned outward/escalation probe set (27 probes)"
+    ok "test passed: doctor evaluated exactly the pinned outward/escalation/credential-display probe set (30 probes)"
   else
     printf '%s\n' "$probe_diff" >&2
-    fail "test failed: outward/escalation probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"
+    fail "test failed: outward/escalation/credential-display probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"
     status=1
   fi
 else
@@ -2447,7 +2450,7 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     CODEX_FAKE_ALLOWS="" CODEX_FAKE_MODE="fail" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation probe is auto-allowed" <<< "$aip_out"; then
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
     ok "test passed: probe-evaluation failure reports scan INCOMPLETE and suppresses the clean ok (no fail-open false-clean)"
   else
     printf '%s\n' "$aip_out" >&2
@@ -2489,13 +2492,13 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
     aip_actual="unexpected"
     if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out"; then
       aip_actual="incomplete"
-    elif grep -Fq "outward/escalation probe auto-allowed" <<< "$aip_out"; then
+    elif grep -Fq "outward/escalation/credential-display probe auto-allowed" <<< "$aip_out"; then
       aip_actual="allow"
-    elif grep -Fq "no outward/escalation probe is auto-allowed" <<< "$aip_out"; then
+    elif grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
       aip_actual="clean"
     fi
     if [[ "$aip_actual" == "$aip_expected" ]] && ! grep -Fq "CANARY_" <<< "$aip_out" \
-      && { [[ "$aip_expected" == "clean" ]] || ! grep -Fq "no outward/escalation probe is auto-allowed" <<< "$aip_out"; }; then
+      && { [[ "$aip_expected" == "clean" ]] || ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; }; then
       ok "test passed: Codex result $aip_case reports $aip_expected without leaking output"
     else
       fail "test failed: Codex result $aip_case expected $aip_expected, got $aip_actual"
