@@ -142,6 +142,11 @@ _ai_clip_copy() {
 # file synchronously, so there is no concurrent tee to race against the read, nor
 # one that would block when the command backgrounds a job holding the pipe.
 # Output therefore appears after the command finishes rather than streaming.
+# Keep command / temp path / status in this function's positional parameters,
+# and eval in an anonymous function with its own positional parameters. Named
+# locals are dynamically scoped in zsh: assignments in eval could overwrite
+# them and redirect cleanup to an unrelated file (#280). No named locals or
+# subshell are needed, so ordinary variable assignments also persist.
 # Temp file is mktemp 0600 and holds the plain-text output, so it is removed in
 # an `always` block: on a normal exit, a non-zero exit, AND when the command is
 # interrupted (Ctrl-C) — a trailing `rm` alone never ran on SIGINT and left the
@@ -150,22 +155,21 @@ _ai_clip_copy() {
 # but does not change the exit status: callers and the prompt expect the
 # command's. scripts/test-ai-clip.sh drives all of this in an isolated zsh.
 _ai_clip_run() {
-  local cmd="$1" raw rc=1
-  raw="$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" || return 1
+  argv=( "$1" "$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" 1 ) || return 1
   {
-    eval "$cmd" > "$raw" 2>&1
-    rc=$?
-    cat -- "$raw"
+    () { eval "$1" } "$1" > "$2" 2>&1
+    set -- "$1" "$2" "$?"
+    cat -- "$2"
     {
-      print -r -- "\$ $cmd"
-      _ai_clip_strip_ansi < "$raw"
-      print -r -- "[exit status: $rc]"
+      print -r -- "\$ $1"
+      _ai_clip_strip_ansi < "$2"
+      print -r -- "[exit status: $3]"
     } | _ai_clip_copy || print -u2 -- \
       "ai-clip: no clipboard target (set AI_CLIPBOARD_OSC52=1 for remote sessions)"
   } always {
-    rm -f -- "$raw"
+    rm -f -- "$2"
   }
-  return "$rc"
+  return "$3"
 }
 
 # Ctrl-O widget: save the clean command to history (unless it is space-prefixed,
