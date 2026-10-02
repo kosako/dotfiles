@@ -129,7 +129,7 @@ git diff --check
 
 `test-render.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` /
 `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
-(CI では version pin して導入する。render job 所属)。`test-starship.sh` は source の静的検査なので chezmoi は
+(CI では version pin して導入する。render job 所属)。`test-starship.sh` は source の静的検査と Git fixture での条件実行なので chezmoi は
 不要だが、CI では render job で走る。
 `test-npmrc.sh` は両 job で走る(静的検査は validate job、chezmoi が要る rendered-content
 検査は render job で実行される。#150)。

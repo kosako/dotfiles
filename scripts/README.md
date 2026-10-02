@@ -584,11 +584,16 @@ zsh が必要(validate job、apt で導入)。
 
 ## test-starship.sh
 
-`private_dot_config/starship.toml`(template ではない source)を render せずに静的に検証する。identity の実値
+`private_dot_config/starship.toml`(template ではない source)を render せずに検証する。identity の実値
 (`name =` / `email =` の代入や `@`)が含まれないこと、git-identity context が runtime に local の
 `~/.config/git/personal.gitconfig` と照合する形で `custom.git_ctx_personal` / `git_ctx_other` / `git_ctx_none` の
 3 module を定義していること、TOML として parse できること(tomllib。python3 や tomllib が無ければ skip)を確認する。
-chezmoi は不要(CI では render job で実行)。
+さらに source から 3 module の `when` を取り出し、隔離した HOME / Git config と dummy identity の
+git fixture で実行する。personal / 別 email / email 未設定では対応する module だけが成立し、repo 外では
+すべて不成立になることを確認する。host の環境変数・global / system Git config・init template は使わない。
+抽出は tomllib を優先し、無ければ現在の multiline literal を awk で読む(明示的な `shell` 設定や別の
+TOML 記法には tomllib が必要)。実行 shell は module の `shell` 設定、未設定なら `sh` を使う。
+git が必要。chezmoi / starship binary は不要(CI では render job で実行)。
 
 ## lib-policy.sh
 
