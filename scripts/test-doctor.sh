@@ -2412,6 +2412,67 @@ else
   status=1
 fi
 
+# AIP-H) Project headers (#292): both quoted key forms, optional whitespace
+# and trailing comments must preserve the path; unsupported headers make the
+# entire scan INCOMPLETE, even if an earlier entry was parsed successfully.
+cat > "$fixture_home/.codex/config.toml" <<TOML
+[projects.'$fixture_home' ] # whole-home grant
+trust_level = "trusted"
+TOML
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
+  && grep -Fq "edit ~/.codex/config.toml: delete the [projects.\"$fixture_home\"] section" <<< "$aip_out" \
+  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
+  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
+  ok "test passed: single-quoted project header reports the whole-home action (exit 0)"
+else
+  fail "test failed: single-quoted project header must report the whole-home action (exit 0)"
+  status=1
+fi
+
+cat > "$fixture_home/.codex/config.toml" <<TOML
+[projects."$fixture_home/real-project"] # CANARY_HEADER_COMMENT_292
+trust_level = "trusted"
+[mcp_servers.fake.env]
+FAKE_TOKEN = "CANARY_HEADER_ENV_292"
+TOML
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
+  && ! grep -Fq "stale Codex projects trust" <<< "$aip_out" \
+  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
+  ok "test passed: commented project header counts a real trusted path without stale warnings or value leaks (exit 0)"
+else
+  fail "test failed: commented project header must count the real path without stale warnings or value leaks (exit 0)"
+  status=1
+fi
+
+for aip_header in '[projects.bare]' '[projects."/escaped\\path"]' \
+    '[projects."/path".extra]' "[projects.'/path' trailing]" \
+    '[projects."/path"] trailing'; do
+  cat > "$fixture_home/.codex/config.toml" <<TOML
+[projects."$fixture_home/real-project"]
+trust_level = "trusted"
+$aip_header
+trust_level = "trusted"
+[mcp_servers.fake.env]
+FAKE_TOKEN = "CANARY_HEADER_ENV_292"
+TOML
+  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
+    && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
+    && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
+    && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
+    ok "test passed: unsupported project header reports INCOMPLETE without a trusted count (exit 0): $aip_header"
+  else
+    fail "test failed: unsupported project header must report INCOMPLETE without a trusted count (exit 0): $aip_header"
+    status=1
+  fi
+done
+
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log
 #        pins the EXACT probe set (policy-derived contract): a probe silently
