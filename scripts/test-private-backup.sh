@@ -1038,6 +1038,94 @@ else
   miss "backup with a valid free-form category label failed"
 fi
 
+# 29. --out names a file, never a directory (including directory symlinks).
+# Check both marker states and observe mktemp calls so cleanup cannot hide
+# staging created before the usage error.
+out_fakebin="$fixture_home/out-fakebin"
+mkdir -p "$out_fakebin"
+real_mktemp="$(command -v mktemp)"
+cat > "$out_fakebin/mktemp" <<'SH'
+#!/bin/sh
+printf 'called\n' >> "$MKTEMP_CALLS"
+exec "$REAL_MKTEMP" "$@"
+SH
+chmod +x "$out_fakebin/mktemp"
+for out_kind in directory symlink; do
+  for marker_state in absent existing; do
+    out_home="$fixture_home/out-$out_kind-$marker_state"
+    mkdir -p "$out_home/destination"
+    printf 'fixture\n' > "$out_home/.zshrc.local"
+    out_path="$out_home/destination"
+    if [[ "$out_kind" == symlink ]]; then
+      ln -s destination "$out_home/link"
+      out_path="$out_home/link"
+    fi
+    out_marker="$out_home/.local/state/dotfiles/private-backup.json"
+    if [[ "$marker_state" == existing ]]; then
+      mkdir -p "$(dirname "$out_marker")"
+      cp "$marker" "$out_marker"
+    fi
+    out_rc=0
+    out_log="$(HOME="$out_home" REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$out_home/mktemp-calls" \
+      PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+      backup --out "$out_path" --recipient "$recipient" --yes 2>&1)" || out_rc=$?
+    if [[ "$out_rc" -eq 2 ]] && grep -Fq '[fail]' <<< "$out_log" \
+      && [[ ! -e "$out_home/mktemp-calls" && ! -e "$out_path.partial" ]] \
+      && [[ -z "$(find "$out_home/destination" -mindepth 1 -print)" ]]; then
+      pass "--out $out_kind ($marker_state marker) is refused before staging without an archive"
+    else
+      miss "--out $out_kind ($marker_state marker) was not refused before staging (rc=$out_rc)"
+    fi
+    if { [[ "$marker_state" == absent && ! -e "$out_marker" ]]; } \
+      || { [[ "$marker_state" == existing ]] && cmp -s "$marker" "$out_marker"; }; then
+      pass "--out $out_kind preserves the $marker_state marker"
+    else
+      miss "--out $out_kind changed the $marker_state marker"
+    fi
+  done
+done
+
+# 30. An existing regular output file can still be overwritten.
+overwrite_archive="$fixture_home/out/overwrite.age"
+printf 'old content\n' > "$overwrite_archive"
+if run backup --out "$overwrite_archive" --recipient "$recipient" --yes >/dev/null 2>&1 \
+  && run verify --in "$overwrite_archive" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  pass "backup overwrites an existing regular output file with a valid archive"
+else
+  miss "backup failed to overwrite an existing regular output file"
+fi
+
+# 31. A directory appearing after argument validation must not produce a
+# success report or update the marker, even when mv itself succeeds.
+real_mv="$(command -v mv)"
+cat > "$out_fakebin/mv" <<'SH'
+#!/bin/sh
+for last; do :; done
+if [ "$last" = "$RACE_OUT" ]; then
+  mkdir "$RACE_OUT" || exit 1
+fi
+exec "$REAL_MV" "$@"
+SH
+chmod +x "$out_fakebin/mv"
+race_home="$fixture_home/out-race"
+mkdir -p "$race_home/.local/state/dotfiles"
+printf 'fixture\n' > "$race_home/.zshrc.local"
+race_marker="$race_home/.local/state/dotfiles/private-backup.json"
+cp "$marker" "$race_marker"
+race_rc=0
+race_log="$(HOME="$race_home" REAL_MV="$real_mv" RACE_OUT="$race_home/backup.age" \
+  REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$race_home/mktemp-calls" \
+  PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$race_home/backup.age" --recipient "$recipient" --yes 2>&1)" || race_rc=$?
+if [[ "$race_rc" -eq 1 && -f "$race_home/backup.age/backup.age.partial" ]] \
+  && grep -Fq '[fail]' <<< "$race_log" \
+  && ! grep -Fq 'wrote encrypted archive:' <<< "$race_log" \
+  && cmp -s "$marker" "$race_marker"; then
+  pass "backup detects a directory appearing at mv time and preserves the marker"
+else
+  miss "backup reported success or changed the marker after mv into a directory (rc=$race_rc)"
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi

@@ -217,6 +217,10 @@ cmd_backup() {
     usage
     return 2
   fi
+  if [[ -d "$out" ]]; then
+    fail "backup --out must be a file path, not an existing directory: $out"
+    return 2
+  fi
 
   # Runtime gate first: refuse outright where the profile forbids secrets.
   require_secrets_access || return 1
@@ -463,6 +467,10 @@ cmd_backup() {
     return 1
   fi
   mv -f "$partial" "$out"
+  if [[ ! -f "$out" ]]; then
+    fail "encrypted archive is not a regular file at the requested path: $out"
+    return 1
+  fi
   ok "wrote encrypted archive: $out"
 
   # Marker: repo-external, minimal, machine-neutral (basename only; no

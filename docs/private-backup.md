@@ -73,6 +73,7 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
                           [--apply] [--skip-existing] [--target-home DIR]
 ```
 
+- backup の `--out` は file の path を指定し、既存の directory (directory への symlink を含む) は拒否する。
 - recipient は flag か非コミットの `~/.config/dotfiles/private-backup.recipient` から取得。
   無ければ fail-closed(平文や宛先なしのアーカイブを作らない)。公開鍵は repo にコミットしない。
 - identity は `--identity PATH` か `--identity-command CMD`(= #51 の op seam、`op read op://...`
