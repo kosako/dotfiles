@@ -70,6 +70,7 @@ fi
 
 # 4. Reach the installer with only its startup tools on PATH; missing yq
 #    and then missing chezmoi must each produce the intended refusal (exit 1).
+#    The yq refusal must stop before profile resolution can also fail with exit 1.
 fixture_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-install-test.XXXXXX")"
 trap 'rm -rf "$fixture_bin"' EXIT
 minimal_bin="$fixture_bin/minimal"
@@ -79,11 +80,12 @@ for tool in bash dirname; do
 done
 rc=0
 out="$(PATH="$minimal_bin" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
-if [[ "$rc" -eq 1 ]] && grep -Fq '[fail] yq not found; install mikefarah/yq v4' <<< "$out"; then
-  pass "installer refuses missing yq with exit 1 and a dependency diagnostic"
+if [[ "$rc" -eq 1 ]] && grep -Fq '[fail] yq not found; install mikefarah/yq v4' <<< "$out" &&
+    ! grep -Fq '[fail] cannot resolve the machine profile from chezmoi config; refusing.' <<< "$out"; then
+  pass "installer refuses missing yq with exit 1 before profile resolution"
 else
   printf '%s\n' "$out" >&2
-  miss "installer must diagnose missing yq and exit 1 (got $rc)"
+  miss "installer must diagnose missing yq and exit 1 before profile resolution (got $rc)"
 fi
 
 ln -s "$(command -v yq)" "$minimal_bin/yq"
