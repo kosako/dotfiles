@@ -109,6 +109,7 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   退避が発生した場合は実 path が実行結果に表示される)へ move。`--skip-existing` で既存は触らない。
   **symlink 化した親ディレクトリ経由の書き込みを拒否**して HOME 外への escape を防ぐ。退避先が既に存在する
   場合も上書きせず拒否する。verify と同じ展開前 member 検証を共有。
+  restore が新しく作る親 directory は、復元先・退避先・state の途中の階層を含めて **0700** とし、既存 directory の mode は変更しない。
 
 ## 段階
 

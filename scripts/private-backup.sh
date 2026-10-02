@@ -773,13 +773,15 @@ cmd_restore() {
   # reason payload targets are: a symlinked ~/.local (or state/dotfiles)
   # would otherwise redirect the displaced file outside the target tree.
   # mktemp -d gives a unique dir (no same-second collision) at mode 0700.
+  # Scope umask to each mkdir: all new parents must be 0700, while existing
+  # directory modes and the rest of the script's umask stay unchanged.
   local backup_dir=""
   if [[ "$apply" -eq 1 ]]; then
     if path_has_symlinked_parent "$target_home" ".local/state/dotfiles/x"; then
       fail "refusing: backup state path contains a symlink ($target_home/.local/state/dotfiles)"
       return 1
     fi
-    mkdir -p "$target_home/.local/state/dotfiles"
+    (umask 077; mkdir -p "$target_home/.local/state/dotfiles")
     backup_dir="$(mktemp -d "$target_home/.local/state/dotfiles/restore-backup-$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")"
   fi
 
@@ -804,7 +806,7 @@ cmd_restore() {
         continue
       fi
       if [[ "$apply" -eq 1 ]]; then
-        mkdir -p "$(dirname "$backup_dir/$path")"
+        (umask 077; mkdir -p "$(dirname "$backup_dir/$path")")
         if [[ -e "$backup_dir/$path" || -L "$backup_dir/$path" ]]; then
           fail "refusing to overwrite a displaced file: $path"
           return 1
@@ -816,7 +818,7 @@ cmd_restore() {
           fail "could not displace existing target: $path"
           return 1
         fi
-        mkdir -p "$(dirname "$target")"
+        (umask 077; mkdir -p "$(dirname "$target")")
         cp -p "$f" "$target"
       else
         item "would overwrite (existing backed up first): $path"
@@ -824,7 +826,7 @@ cmd_restore() {
       overwritten=$((overwritten + 1))
     else
       if [[ "$apply" -eq 1 ]]; then
-        mkdir -p "$(dirname "$target")"
+        (umask 077; mkdir -p "$(dirname "$target")")
         cp -p "$f" "$target"
       else
         item "would create: $path"
