@@ -11,8 +11,10 @@ set -euo pipefail
 #     audit found it left behind on Ctrl-C (#243);
 #   - the command's own exit status is returned, and a clipboard failure
 #     does not change it;
-#   - the command runs in the CURRENT shell (cd / export persist);
+#   - the command runs in the CURRENT shell (cd / export / source persist);
 #   - the copied text is "$ <command>", the output, "[exit status: N]".
+#   - assignments to wrapper variable names cannot redirect cleanup or
+#     corrupt the copied command/status; ordinary assignments persist (#280).
 #
 # Interrupt semantics (measured, zsh 5.9): in a NON-interactive zsh SIGINT
 # kills the process outright — no cleanup of any kind can run, and that is
@@ -111,6 +113,13 @@ source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 _ai_clip_run 'echo err; false'
 print -r -- "rc=$?"
 ZSH
+cat > "$fixture/cases/assign.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+_ai_clip_run "$(< "$AI_CLIP_FIXTURE/command.txt")"
+print -r -- "rc=$?"
+[[ "$raw" == "$AI_CLIP_FIXTURE/keep.txt" && "$cmd" == changed && "$rc" == 99 ]] \
+  && print assignments-persist
+ZSH
 # Interrupt to the shell itself: the reach marker is written INSIDE the
 # command (so the call demonstrably started), then SIGINT; the statement
 # after the call must not run.
@@ -127,11 +136,30 @@ source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 "$AI_CLIP_FUNC" 'print reached > "$AI_CLIP_FIXTURE/before"; sleep 8'
 print x > "$AI_CLIP_FIXTURE/after"
 ZSH
+cat > "$fixture/cases/interrupt_assign.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+_ai_clip_run 'raw="$AI_CLIP_FIXTURE/keep.txt"; cmd=changed; rc=99; argv=(changed); print reached > "$AI_CLIP_FIXTURE/before"; kill -INT $$'
+print x > "$AI_CLIP_FIXTURE/after"
+ZSH
+cat > "$fixture/cases/pty_assign.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+_ai_clip_run 'raw="$AI_CLIP_FIXTURE/keep.txt"; cmd=changed; rc=99; set -- changed; print reached > "$AI_CLIP_FIXTURE/before"; sleep 8'
+print x > "$AI_CLIP_FIXTURE/after"
+ZSH
 cat > "$fixture/cases/persist.zsh" <<'ZSH'
 source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 cd "$AI_CLIP_FIXTURE/home"
-_ai_clip_run 'cd /; export AI_CLIP_TEST=set'
-print -r -- "$PWD $AI_CLIP_TEST"
+_ai_clip_run 'cd /; export AI_CLIP_TEST=set; source "$AI_CLIP_FIXTURE/sourced.zsh"'
+print -r -- "$PWD $AI_CLIP_TEST $AI_CLIP_SOURCED"
+ZSH
+cat > "$fixture/sourced.zsh" <<'ZSH'
+export AI_CLIP_SOURCED=set
+ZSH
+cat > "$fixture/cases/mktemp_failure.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+mktemp() { return 1; }
+_ai_clip_run 'print reached > "$AI_CLIP_FIXTURE/before"'
+print -r -- "rc=$?"
 ZSH
 cat > "$fixture/cases/noclip.zsh" <<'ZSH'
 source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
@@ -259,6 +287,44 @@ else
 fi
 reset_markers
 
+# Assignments must not change the cleanup path, command line, or real status.
+# Include argv / set -- so positional-parameter implementations also have to
+# isolate the eval scope. Check display (ANSI intact) and copy (ANSI removed).
+for command_status in 0 7; do
+  reset_markers
+  printf 'keep me\n' > "$fixture/keep.txt"
+  rm -f "$fixture/clip.txt"
+  command_line='raw="$AI_CLIP_FIXTURE/keep.txt"; cmd=changed; rc=99; argv=(changed); set -- changed-again; printf "\033[31mpayload\033[0m\n"'
+  command_line+="; (exit $command_status)"
+  printf '%s\n' "$command_line" > "$fixture/command.txt"
+  expected_clip="\$ $command_line"$'\npayload\n'"[exit status: $command_status]"
+  expected_out=$'\033[31mpayload\033[0m\n'"rc=$command_status"$'\nassignments-persist'
+  if out="$(run_case "$with_clip" "" assign _ai_clip_run 2>&1)" \
+    && [[ "$out" == "$expected_out" ]] \
+    && [[ "$(cat "$fixture/clip.txt")" == "$expected_clip" ]] \
+    && [[ "$(cat "$fixture/keep.txt" 2>/dev/null)" == 'keep me' ]] \
+    && [[ "$(leftovers)" == 0 ]]; then
+    ok "test passed: wrapper-name assignments, status $command_status -> existing file intact, temp removed, display/copy/status correct, assignments persist"
+  else
+    printf 'out=%s\nclip=%s\nexisting=%s\nleftovers=%s\n' "$out" \
+      "$(cat "$fixture/clip.txt" 2>/dev/null)" "$(cat "$fixture/keep.txt" 2>/dev/null)" "$(leftovers)" >&2
+    fail "test failed: wrapper-name assignments with status $command_status"
+    status=1
+  fi
+done
+reset_markers
+printf 'keep me\n' > "$fixture/keep.txt"
+run_case "$with_clip" "-i" interrupt_assign _ai_clip_run >/dev/null 2>&1 || true
+if [[ "$(marker_state)" == 'before=yes after=no leftovers=0' \
+  && "$(cat "$fixture/keep.txt" 2>/dev/null)" == 'keep me' ]]; then
+  ok "test passed: wrapper-name assignments then SIGINT -> existing file intact, temp removed"
+else
+  printf '%s\n' "$(marker_state)" >&2
+  fail "test failed: wrapper-name assignments then SIGINT"
+  status=1
+fi
+reset_markers
+
 # 3b) A real Ctrl-C through a pseudo-terminal while an EXTERNAL command
 #     (sleep 8) runs under the helper: the tty delivers SIGINT to the
 #     foreground process group, sleep dies, and the interactive zsh aborts
@@ -272,9 +338,9 @@ if [[ -z "$script_bin" ]]; then
   status=1
 else
   pty_case() {
-    local func="$1" ended reached_at
+    local func="$1" case_name="${2:-pty}" ended reached_at
     reset_markers
-    run_pty pty "$func"
+    run_pty "$case_name" "$func"
     ended="$(date +%s)"
     reached_at="$(cat "$fixture/reached_at" 2>/dev/null || echo 0)"
     printf '%s after_reach_seconds=%s' "$(marker_state)" "$((ended - reached_at))"
@@ -290,15 +356,26 @@ else
     status=1
   fi
   reset_markers
+  printf 'keep me\n' > "$fixture/keep.txt"
+  fixed_result="$(pty_case _ai_clip_run pty_assign)"
+  if [[ "$fixed_result" == before=yes\ after=no\ leftovers=0\ after_reach_seconds=[0-7] \
+    && "$(cat "$fixture/keep.txt" 2>/dev/null)" == 'keep me' ]]; then
+    ok "test passed: wrapper-name assignments then real Ctrl-C -> existing file intact, temp removed"
+  else
+    printf '%s\n' "$fixed_result" >&2
+    fail "test failed: wrapper-name assignments then pty Ctrl-C"
+    status=1
+  fi
+  reset_markers
 fi
 
-# 4) The command runs in the current shell: cd and export persist.
+# 4) The command runs in the current shell: cd, export, and source persist.
 if out="$(run_case "$with_clip" "" persist _ai_clip_run 2>&1)" \
-  && [[ "$out" == "/ set" ]]; then
-  ok "test passed: cd / export inside the command persist in the current shell"
+  && [[ "$out" == "/ set set" ]]; then
+  ok "test passed: cd / export / source inside the command persist in the current shell"
 else
   printf 'out=%s\n' "$out" >&2
-  fail "test failed: cd / export did not persist"
+  fail "test failed: cd / export / source did not persist"
   status=1
 fi
 
@@ -313,6 +390,19 @@ if out="$(run_case "$no_clip" "" noclip _ai_clip_run)" \
 else
   printf 'out=%s\nstderr=%s\nleftovers=%s\n' "$out" "$(cat "$fixture/stderr.txt" 2>/dev/null)" "$(leftovers)" >&2
   fail "test failed: clipboard-failure contract"
+  status=1
+fi
+
+# 6) A failed temp allocation must stop before eval or clipboard access.
+reset_markers
+rm -f "$fixture/clip.txt"
+if out="$(run_case "$with_clip" "" mktemp_failure _ai_clip_run 2>&1)" \
+  && [[ "$out" == 'rc=1' && ! -e "$fixture/before" && ! -e "$fixture/clip.txt" ]] \
+  && [[ "$(leftovers)" == 0 ]]; then
+  ok "test passed: mktemp failure -> status 1, no command execution or copy"
+else
+  printf 'out=%s\n%s\n' "$out" "$(marker_state)" >&2
+  fail "test failed: mktemp-failure contract"
   status=1
 fi
 
