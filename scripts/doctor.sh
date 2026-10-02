@@ -811,8 +811,8 @@ report_codex_rules_probes() {
   if [[ -f "$codex_rules" ]]; then
     ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
     # Rules semantics are delegated to Codex's own engine: a fixed probe list
-    # of outward/escalation commands is evaluated with `codex execpolicy
-    # check` against the LIVE rules file. Grepping rule lines was rejected
+    # of outward/escalation/credential-display commands is evaluated with
+    # `codex execpolicy check` against the LIVE rules file. Grepping rule lines was rejected
     # (Codex review #187): it misses blanket prefixes (["gh","pr"] auto-allows
     # `gh pr create` — the exact 2026-07-02 regression form), multi-line
     # rules, and the omitted-decision default (= allow), and echoing rule
@@ -822,9 +822,9 @@ report_codex_rules_probes() {
     if command -v codex >/dev/null 2>&1; then
       # Policy-derived probe set: every outward-action / escalation family the
       # Approval Required list in docs/ai-policy.md names, plus the raw-write
-      # escape hatches (gh api POST, gh secret). Keep in sync with the pin in
-      # test-doctor.sh (the fake-shim log asserts this exact set so a dropped
-      # probe fails the test).
+      # escape hatches (gh api POST, gh secret) and credential-display commands.
+      # Keep in sync with the pin in test-doctor.sh (the fake-shim log asserts
+      # this exact set so a dropped probe fails the test).
       outward_probes=(
         "git push"
         "git clone https://example.invalid/repo"
@@ -850,6 +850,9 @@ report_codex_rules_probes() {
         "gh api --method POST repos/o/r/issues"
         "gh secret set"
         "gh auth login"
+        "gh auth status --show-token"
+        "gh auth status -t"
+        "gh auth token"
         "sudo -v"
         "curl https://example.invalid"
         "wget https://example.invalid"
@@ -872,7 +875,7 @@ report_codex_rules_probes() {
             case "$decision" in
               allow)
                 outward_allowed=$((outward_allowed + 1))
-                warn "outward/escalation probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
+                warn "outward/escalation/credential-display probe auto-allowed by live Codex rules: '$probe' (revoke the covering allow rule or move it behind approval; apply resets to the baseline)"
                 ;;
               prompt|forbidden|no-match) ;;
               *) probe_failures=$((probe_failures + 1)) ;;
@@ -890,7 +893,7 @@ report_codex_rules_probes() {
       if [[ "$probe_failures" -gt 0 ]]; then
         warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error or invalid result — broken rules file or incompatible codex?); do NOT read this as clean"
       elif [[ "$outward_allowed" -eq 0 ]]; then
-        ok "no outward/escalation probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
+        ok "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
       fi
     else
       item "codex CLI not found; rules-semantics probe skipped (baseline presence still verified above)"
