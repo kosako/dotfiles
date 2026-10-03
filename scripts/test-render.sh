@@ -482,7 +482,7 @@ section "typed enum guards (direct chezmoi, without validate-policy)"
 # The Codex profile files (#264) write the enum value verbatim, so an unknown,
 # mistyped or missing value must stop the apply in require-profile rather than
 # reach a rendered file. npmHardeningMode shows the guard is generic.
-for enum_cap in codexReviewEffort codexWorkerEffort codexReviewServiceTier npmHardeningMode; do
+for enum_cap in codexReviewEffort codexWorkerEffort npmHardeningMode; do
   for invalid_enum in '"turbo"' '"HIGH"' true 0 null '[]' missing; do
     make_root
     make_flipped_source "$root"

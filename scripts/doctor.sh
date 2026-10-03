@@ -1527,19 +1527,18 @@ fi
 
 section "Codex review / worker profiles (report-only)"
 # #264 (agent-tools#339 hand-off): codex-settings renders the Codex profile
-# files that agent-tools' personal-codex-review (`codex exec -p
-# agent-tools-review`) and personal-codex-worker (its preflight reads the
-# top-level model / effort) pick up whenever they exist; without them both use
-# the config.toml defaults. PRESENCE only — the contents are config values
+# files that agent-tools' personal-codex-review and personal-codex-worker pick
+# up whenever they exist (both read only the top-level model / effort and
+# re-pass them with -c, agent-tools#358); without them both use the
+# config.toml defaults. PRESENCE only — the contents are config values
 # and stay out of the report; drift of a managed file is the managed drift
 # section's job. agent-tools looks in $CODEX_HOME when it is set, while
 # chezmoi always renders into ~/.codex, so a diverging CODEX_HOME is flagged.
-# The review file carries two keys (effort, and the service tier since
-# #271) and exists while either capability is not off; the worker file
-# carries the effort only.
+# Each file carries the effort only, from its own capability (the review
+# file's service tier went with #299: nothing reads it any more).
 for codex_profile_kind in review worker; do
   case "$codex_profile_kind" in
-    review) codex_profile_caps=(codexReviewEffort codexReviewServiceTier) ;;
+    review) codex_profile_caps=(codexReviewEffort) ;;
     worker) codex_profile_caps=(codexWorkerEffort) ;;
   esac
   codex_profile_state=""

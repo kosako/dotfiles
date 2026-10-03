@@ -2,39 +2,34 @@
 {{- $caps := index .profiles .profile "capabilities" -}}
 {{- /* Codex profile file for agent-tools' personal-codex-review (#264,
        agent-tools#339 hand-off). The file name is agent-tools' public
-       contract: when ~/.codex/agent-tools-review.config.toml exists, the
-       review launcher adds `codex exec -p agent-tools-review` and Codex
-       layers this whole file over the user config.toml (Codex errors on a
-       missing profile, so agent-tools passes -p only when the file exists).
+       contract. The review is NOT started with -p (agent-tools#358): it runs
+       with --ignore-user-config, reads only the top-level `model` /
+       `model_reasoning_effort` of this file (over the same keys in
+       config.toml) and re-passes them with -c, so no other key — a service
+       tier included — ever reaches the review (#299). It parses with the
+       worker preflight's reader, which fails closed (the review stops as
+       BLOCKED) on anything but blank lines, comments and
+       `bare_key = "<one-line basic string>"` with values in
+       [A-Za-z0-9._-]+ — keep this file in that shape.
        Content = dotfiles (per-profile value), reader = agent-tools, and
        Codex never rewrites it — unlike the codex-owned config.toml, which
        dotfiles does not manage.
 
-       Two keys, each from its own enum capability (validated by
-       validate-policy and the require-profile guard): the reasoning effort
-       (codexReviewEffort) and the service tier (codexReviewServiceTier, #271:
-       `default` keeps review off Fast mode). Either one set to `off` writes
-       no line and lets config.toml decide; the model always comes from
-       config.toml. A new key here would also layer onto every review run, so
-       add one deliberately.
+       Only the reasoning effort is set (the value is the codexReviewEffort
+       enum, validated by validate-policy and the require-profile guard): the
+       model comes from config.toml.
 
        Gating (template self-gate, NOT a module `requires` — #184 lesson):
-       both capabilities `off` renders EMPTY and chezmoi removes the managed
-       target, so review falls back to the config.toml defaults. Active for
-       profiles that list the codex-settings module (personal). The
-       managed-by header lets doctor's managed-path orphans flag a copy left
-       behind by a profile switch (#201). */ -}}
+       codexReviewEffort=off renders EMPTY and chezmoi removes the managed
+       target, so review falls back to the config.toml top-level values.
+       Active for profiles that list the codex-settings module (personal).
+       The managed-by header lets doctor's managed-path orphans flag a copy
+       left behind by a profile switch (#201). */ -}}
 {{- $effort := index $caps "codexReviewEffort" -}}
-{{- $tier := index $caps "codexReviewServiceTier" -}}
-{{- if or (ne $effort "off") (ne $tier "off") -}}
+{{- if ne $effort "off" -}}
 # Managed by chezmoi from kosako/dotfiles (codex-settings, #264).
-# Codex profile for agent-tools' personal-codex-review (codex exec -p
-# agent-tools-review): layered over ~/.codex/config.toml. The model, and any
-# key not set here, comes from config.toml.
-{{ if ne $effort "off" -}}
+# Profile for agent-tools' personal-codex-review: it reads only the top-level
+# model / model_reasoning_effort here. Effort only; the model comes from
+# ~/.codex/config.toml.
 model_reasoning_effort = "{{ $effort }}"
-{{ end -}}
-{{ if ne $tier "off" -}}
-service_tier = "{{ $tier }}"
-{{ end -}}
 {{ end -}}
