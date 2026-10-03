@@ -7,10 +7,13 @@
        `model_reasoning_effort` of this file (over the same keys in
        config.toml) and re-passes them with -c, so no other key — a service
        tier included — ever reaches the review (#299). It parses with the
-       worker preflight's reader, which fails closed (the review stops as
-       BLOCKED) on anything but blank lines, comments and
-       `bare_key = "<one-line basic string>"` with values in
-       [A-Za-z0-9._-]+ — keep this file in that shape.
+       worker preflight's reader (no TOML parser): only the lines before the
+       first table header count, each must be blank, a comment or
+       `bare_key = <one-line scalar or flat array>`, and `model` /
+       `model_reasoning_effort` must each appear once as a one-line basic
+       string with a value in [A-Za-z0-9._-]+; anything else fails closed
+       (the review stops as BLOCKED). Keep this file to comments and the
+       single `model_reasoning_effort = "<value>"` line.
        Content = dotfiles (per-profile value), reader = agent-tools, and
        Codex never rewrites it — unlike the codex-owned config.toml, which
        dotfiles does not manage.

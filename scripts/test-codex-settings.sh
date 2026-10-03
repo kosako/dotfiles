@@ -380,10 +380,10 @@ section "codex review / worker profile files (#264)"
 #    profile switch, #201), the settings are exactly the capabilities' values
 #    (effort only, in both — the model stays with config.toml, and the review
 #    file carries no service tier since #299: agent-tools reads only the
-#    top-level model / effort), and every line fits the worker preflight's
-#    conservative top-level shape (blank / comment / bare_key =
-#    "[A-Za-z0-9._-]+"); anything else makes the worker preflight fail closed
-#    and the review BLOCKED (both read with it, agent-tools#358).
+#    top-level model / effort), and every setting line keeps to the narrow
+#    `bare_key = "[A-Za-z0-9._-]+"` shape — a subset of what the shared reader
+#    (worker preflight; review too since agent-tools#358) accepts for model /
+#    effort, so neither the worker preflight nor the review fails closed on it.
 review_profile_file="${home:-}/.codex/agent-tools-review.config.toml"
 worker_profile_file="${home:-}/.codex/agent-tools-worker.config.toml"
 check_codex_profile_file() {

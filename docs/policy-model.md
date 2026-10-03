@@ -270,9 +270,12 @@ Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
 - `~/.codex/agent-tools-review.config.toml` / `~/.codex/agent-tools-worker.config.toml`: review も worker も
   `-p` を使わず `--ignore-user-config` で起動し、`config.toml` の top-level を base に、この file の top-level の
   `model` / `model_reasoning_effort` だけを key ごとに重ねて `-c` で渡す(review は agent-tools#358 からこの形)。
-  **他の key は読まれない**(例: `service_tier` を書いても review にも worker にも効かない)。読み手は
-  空行・comment・`key = "<1 行の basic string>"`(値は `[A-Za-z0-9._-]+`)以外の行があると fail-closed に
-  する(worker は preflight で止まり、review は BLOCKED)ので、file はその形に保つ。
+  **他の key は読まれない**(例: `service_tier` を書いても review にも worker にも効かない)。読み手(worker の
+  preflight と同じ。TOML parser は持たない)が読むのは最初の table header より前だけで、そこから先の行は無視する
+  (table の中に effort を書いても効かない)。その範囲の各行は空行・comment・`bare_key = <1 行で閉じる scalar か
+  平坦な配列>` のどれかでなければならず、`model` / `model_reasoning_effort` は 1 行の basic string(値は
+  `[A-Za-z0-9._-]+`)で 1 回だけ。外れると fail-closed にする(worker は preflight で止まり、review は BLOCKED)。
+  dotfiles が配る file はさらに狭く、comment と `model_reasoning_effort = "<値>"` の 1 行だけにしている。
 - 値は enum capability(`off` / `minimal` / `low` / `medium` / `high` / `xhigh`)。`off` なら file が空 render に
   なり、apply 済みの file も消える(テンプレート自己 gate)。現状は personal = review `xhigh` / worker `high`
   (#268)、work = `off`(codex-settings が非列挙。work で置くかどうかと値は plan / 課金の違いを見て別に決める)。
