@@ -373,16 +373,17 @@ fi
 
 section "codex review / worker profile files (#264)"
 
-# 6) Committed personal: codexReviewEffort=xhigh + codexReviewServiceTier=default
-#    (#271) / codexWorkerEffort=high, so
+# 6) Committed personal: codexReviewEffort=xhigh / codexWorkerEffort=high, so
 #    both agent-tools profile files render. The file names are agent-tools'
 #    public contract (agent-tools#339). Pinned: the first line is the
 #    managed-by header (doctor's managed-path orphans rely on it after a
 #    profile switch, #201), the settings are exactly the capabilities' values
-#    (review: effort + service tier; worker: effort only — the model stays
-#    with config.toml), and every line fits the worker preflight's conservative
-#    top-level shape (blank / comment / bare_key = "[A-Za-z0-9._-]+"); anything
-#    else makes the worker preflight fail closed.
+#    (effort only, in both — the model stays with config.toml, and the review
+#    file carries no service tier since #299: agent-tools reads only the
+#    top-level model / effort), and every setting line keeps to the narrow
+#    `bare_key = "[A-Za-z0-9._-]+"` shape — a subset of what the shared reader
+#    (worker preflight; review too since agent-tools#358) accepts for model /
+#    effort, so neither the worker preflight nor the review fails closed on it.
 review_profile_file="${home:-}/.codex/agent-tools-review.config.toml"
 worker_profile_file="${home:-}/.codex/agent-tools-worker.config.toml"
 check_codex_profile_file() {
@@ -404,7 +405,7 @@ check_codex_profile_file() {
     ok "test passed: $label profile file renders the header and exactly: $expected_setting"
   fi
 }
-check_codex_profile_file review "$review_profile_file" $'model_reasoning_effort = "xhigh"\nservice_tier = "default"'
+check_codex_profile_file review "$review_profile_file" 'model_reasoning_effort = "xhigh"'
 check_codex_profile_file worker "$worker_profile_file" 'model_reasoning_effort = "high"'
 
 # Enum capabilities, so the value is written with strenv (flip_personal_capability
@@ -415,17 +416,16 @@ set_personal_enum() {
 }
 
 # 7) The values come from the capabilities, not the template: other enum
-#    values render verbatim, per file and per key.
+#    values render verbatim, per file.
 effort_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-effort.XXXXXX")"
 tmp_roots+=("$effort_src")
 make_flipped_source "$effort_src"
 set_personal_enum "$effort_src/src" codexReviewEffort low
 set_personal_enum "$effort_src/src" codexWorkerEffort minimal
-set_personal_enum "$effort_src/src" codexReviewServiceTier fast
 effort_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-effort-home.XXXXXX")"
 tmp_roots+=("$effort_root")
 if render_personal_into "$effort_src/src" "$effort_root"; then
-  check_codex_profile_file "review (low, fast)" "$effort_root/home/.codex/agent-tools-review.config.toml" $'model_reasoning_effort = "low"\nservice_tier = "fast"'
+  check_codex_profile_file "review (low)" "$effort_root/home/.codex/agent-tools-review.config.toml" 'model_reasoning_effort = "low"'
   check_codex_profile_file "worker (minimal)" "$effort_root/home/.codex/agent-tools-worker.config.toml" 'model_reasoning_effort = "minimal"'
 else
   fail "test failed: personal render with other effort values failed"
@@ -434,9 +434,9 @@ fi
 
 # 8) off removes an already-applied file (template self-gate prunes the managed
 #    target; a `requires:` gate would leave it lingering, #184), and each file
-#    rides on its own capabilities: turning one file's capabilities all off
-#    keeps the other file and the rest of the module (hooks.json / rules
-#    baseline). The review file needs both of its capabilities off.
+#    rides on its own capability: turning one file's capability off keeps
+#    the other file and the rest of the module (hooks.json / rules
+#    baseline).
 # check_codex_profile_off KIND OTHER_KIND CAP...
 check_codex_profile_off() {
   local kind="$1" other_kind="$2"
@@ -473,30 +473,8 @@ check_codex_profile_off() {
     status=1
   fi
 }
-check_codex_profile_off review worker codexReviewEffort codexReviewServiceTier
+check_codex_profile_off review worker codexReviewEffort
 check_codex_profile_off worker review codexWorkerEffort
-
-# 9) The review file carries each key only while its capability is not off,
-#    and exists while either one is set (#271).
-check_codex_review_keys() {
-  local label="$1" effort="$2" tier="$3" expected="$4"
-  local src root
-  src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-keys.XXXXXX")"
-  tmp_roots+=("$src")
-  make_flipped_source "$src"
-  set_personal_enum "$src/src" codexReviewEffort "$effort"
-  set_personal_enum "$src/src" codexReviewServiceTier "$tier"
-  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-keys-home.XXXXXX")"
-  tmp_roots+=("$root")
-  if render_personal_into "$src/src" "$root"; then
-    check_codex_profile_file "$label" "$root/home/.codex/agent-tools-review.config.toml" "$expected"
-  else
-    fail "test failed: personal render for $label failed"
-    status=1
-  fi
-}
-check_codex_review_keys "review (effort off, tier default)" off default 'service_tier = "default"'
-check_codex_review_keys "review (effort high, tier off)" high off 'model_reasoning_effort = "high"'
 
 if [[ "$status" -eq 0 ]]; then
   ok "codex settings tests passed"
