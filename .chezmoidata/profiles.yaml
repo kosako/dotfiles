@@ -36,6 +36,13 @@ profiles:
       # personal only: a work machine's existing herdr config must not be
       # replaced without a diff (preflight warns).
       - herdr-config
+      # #301 (agent-tools#385 hand-off): managed usage-reader config
+      # (~/.config/agent-tools/usage-reader.json): the argv agent-tools'
+      # fixed wrapper personal-usage-reader runs to read the remaining usage
+      # budget (tacho status --json, the statusLine's CLI). Module-gated,
+      # personal only: a work machine has no tacho yet, and without the file
+      # agent-tools runs with "no usage reader".
+      - agent-tools-usage-reader
     capabilities:
       installPackages: true
       installGuiApps: true

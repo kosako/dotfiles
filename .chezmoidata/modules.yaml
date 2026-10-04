@@ -20,6 +20,10 @@ modules:
     description: herdr の config(#261)。managed な ~/.config/herdr/config.toml に UI の設定と組み込み通知の配信先([ui.toast] delivery = "system"。herdr の既定は off)を置く。agent-tools の herdr 運用(worker の完了を OS の通知で知る)はこの file を dotfiles の管轄として前提にする。herdr は config を 1 file だけ読み(HERDR_CONFIG_PATH > $XDG_CONFIG_HOME/herdr/config.toml > ~/.config/herdr/config.toml)、include や .local の層は無いので、host 固有の設定は managed file に入れるか持たない。~/.config/herdr/ の他の file(session.json・log・socket)は herdr の実行時状態で管理しない(allowlist なので宣言した 1 file だけが入る)。work は非列挙(会社 Mac の既存 file を diff 無しで置換しないため。採用するなら preflight で既存 file を確認してから module を列挙する)。
     paths:
       - .config/herdr/config.toml
+  agent-tools-usage-reader:
+    description: agent-tools の残量の読み取り口の設定(#301)。managed な ~/.config/agent-tools/usage-reader.json に、agent-tools が配る固定の wrapper personal-usage-reader が起動する argv(statusLine と同じ tacho の status --json)を置く。file 名と key(argv / timeout_sec のみ)は agent-tools の公開契約(agent-tools#385)で、中身は dotfiles・読むのは agent-tools・agent-tools は作らず書き換えない(#264 の Codex profile file と同じ分担)。strict な JSON で知らない key は不正なので managed-by header は置けず、managed-path orphans の走査には掛からない。置かない machine では「読み取り口なし」(割当は残量を見ず、sweep は規模を広げない)
+    paths:
+      - .config/agent-tools/usage-reader.json
   supply-chain-git:
     description: Git credential 漏洩防止と remote URL 検査。
   supply-chain-npm:

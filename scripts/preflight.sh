@@ -99,6 +99,23 @@ elif [[ -e "$herdr_config" ]]; then
   item "exists: $herdr_config — not managed for profile $profile (left as-is)"
 fi
 
+section "agent-tools usage reader (apply impact)"
+# When agent-tools-usage-reader is active (#301), apply replaces
+# ~/.config/agent-tools/usage-reader.json with the managed version. agent-tools'
+# wrapper reads that one file (no .local layer), so a hand-placed reader
+# should be compared before apply. Existence only; the file is never read
+# here. See docs/agent-tools-usage-reader.md.
+usage_reader_config="$HOME/.config/agent-tools/usage-reader.json"
+if module_active_for_profile "$profile" agent-tools-usage-reader; then
+  if [[ -e "$usage_reader_config" || -L "$usage_reader_config" ]]; then
+    warn "exists: $usage_reader_config — apply (agent-tools-usage-reader) replaces it; agent-tools reads this one file (no .local), so diff first (see docs/agent-tools-usage-reader.md)"
+  else
+    ok "absent: $usage_reader_config (apply creates the managed usage reader config)"
+  fi
+elif [[ -e "$usage_reader_config" || -L "$usage_reader_config" ]]; then
+  item "exists: $usage_reader_config — not managed for profile $profile (left as-is)"
+fi
+
 section "config directory permission"
 # private_dot_config makes chezmoi manage ~/.config itself at 0700.
 # On an existing host where ~/.config is 0755, the first apply changes

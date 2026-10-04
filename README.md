@@ -45,6 +45,7 @@ personal project として段階的に作っている。現時点の実装状況
 | herdr integration hook 配線(SessionStart → herdr-agent-state.sh、実体は `herdr integration install` が配置・版管理、[docs/policy-model.md](docs/policy-model.md) の「herdr integration」) | 実装済み・実機適用済み(personal のみ、#225) |
 | Git global ignore(AI agent の local-only file `.agent-packets/` / `.claude/settings.local.json` を全 repo から除外、[docs/git-ignore.md](docs/git-ignore.md)) | 実装済み・実機適用済み(personal のみ、#248) |
 | herdr config(UI の設定と OS 通知の配信先、[docs/herdr-config.md](docs/herdr-config.md)) | 実装済み・実機適用済み(personal のみ、#261) |
+| agent-tools の残量の読み取り口の設定(`usage-reader.json`、[docs/agent-tools-usage-reader.md](docs/agent-tools-usage-reader.md)) | 実装済み・実機適用済み(personal のみ、#301) |
 
 「実機適用済み」は、現時点でこの author の Mac 上で managed file が実際に稼働しているという意味(実機の状態は repo からは検証できないので、この列は運用記録。repo 側で機械検証されるのは managed template と render / test の整合まで)。VS Code は未使用のため管理しない(#16。dormant 配線も #145 で削除)。SSH の移行手順は [docs/ssh.md](docs/ssh.md)。
 
@@ -218,6 +219,7 @@ chezmoi execute-template --source ~/dotfiles '{{ .profile }}'                 # 
     - [git-identity.md](docs/git-identity.md) — Git identity の分離と SSH 署名。
     - [git-ignore.md](docs/git-ignore.md) — AI agent の local-only file を除外する global gitignore。
     - [herdr-config.md](docs/herdr-config.md) — herdr の config(UI の設定と OS 通知の配信先)。
+    - [agent-tools-usage-reader.md](docs/agent-tools-usage-reader.md) — agent-tools の残量の読み取り口の設定(`usage-reader.json`)。
     - [git-hook-gates.md](docs/git-hook-gates.md) — commit 境界 gate の配線(実体は agent-tools)。
     - [ssh.md](docs/ssh.md) — `~/.ssh/config` と 1Password SSH agent。
     - [shell.md](docs/shell.md) — zsh と starship(shell-extra)。

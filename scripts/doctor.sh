@@ -1578,6 +1578,149 @@ if [[ -n "${CODEX_HOME:-}" && "${CODEX_HOME%/}" != "$HOME/.codex" ]]; then
   warn "CODEX_HOME is set to $CODEX_HOME: agent-tools reads the review / worker profile files from there, but chezmoi renders them into ~/.codex"
 fi
 
+section "agent-tools usage reader (report-only)"
+# agent-tools-usage-reader module (#301, agent-tools#385 hand-off): the managed
+# ~/.config/agent-tools/usage-reader.json holds the argv that agent-tools'
+# fixed wrapper personal-usage-reader runs (no shell, cwd /) to read the
+# remaining usage budget; without the file agent-tools runs with "no usage
+# reader" (assignment ignores the budget, the maintenance sweep stays small).
+# The wrapper reads ${XDG_CONFIG_HOME:-$HOME/.config}/agent-tools/... but uses
+# XDG_CONFIG_HOME only when it is an absolute path, while chezmoi renders into
+# ~/.config — so an absolute XDG_CONFIG_HOME elsewhere is a redirect (same
+# file: same spelling after dropping trailing slashes, or -ef).
+# STATIC only: doctor never runs the wrapper or the reader (the reader may
+# write a cache; doctor stays side-effect free), so "ok" means the file has
+# the contract's shape and argv[0] is executable, not that a read succeeded.
+# The shape check follows the wrapper's rules (Codex review, PR #302: control
+# characters in argv; timeout_sec read from its raw literal, since yq turns
+# 20.0 / 2e1 into an int while the wrapper's JSON parser keeps them Float and
+# rejects them), yet the wrapper stays the authority (duplicate keys or
+# invalid UTF-8, for instance, are not modelled). Contents-blind: fixed
+# phrases only, never a value. The file is strict JSON with no room for a
+# managed-by header, so the managed-path orphan scan cannot see it.
+usage_reader_config="$HOME/.config/agent-tools/usage-reader.json"
+# usage_reader_problem FILE — a fixed phrase for the first way FILE breaks the
+# usage-reader contract (agent-tools' docs/boundary-with-dotfiles.md), or
+# nothing when its shape holds.
+usage_reader_problem() {
+  local file="$1" timeout argv0
+  if ! yq -p json -o json '.' "$file" >/dev/null 2>&1; then
+    printf 'is not valid JSON'
+    return 0
+  fi
+  if [[ "$(yq -p json -o json -r '. | tag' "$file" 2>/dev/null)" != "!!map" ]]; then
+    printf 'is not a JSON object'
+    return 0
+  fi
+  if [[ "$(yq -p json -o json -r '[keys[] | select(. != "argv" and . != "timeout_sec")] | length' "$file" 2>/dev/null)" != "0" ]]; then
+    printf 'has a key other than argv / timeout_sec'
+    return 0
+  fi
+  if [[ "$(yq -p json -o json -r '(.argv | tag) == "!!seq" and (.argv | length) > 0 and (.argv | all_c(tag == "!!str"))' "$file" 2>/dev/null)" != "true" ]]; then
+    printf 'needs argv as a non-empty array of strings'
+    return 0
+  fi
+  # \p{Cc}, not [[:cntrl:]]: Go's POSIX class is ASCII-only, while the
+  # wrapper (Ruby) also rejects the C1 controls U+0080..U+009F.
+  if [[ "$(yq -p json -o json -r '[.argv[] | select(test("\\p{Cc}"))] | length' "$file" 2>/dev/null)" != "0" ]]; then
+    printf 'has a control character in an argv element'
+    return 0
+  fi
+  if [[ "$(yq -p json -o json -r 'has("timeout_sec")' "$file" 2>/dev/null)" == "true" ]]; then
+    # The tag rules out an array / object / string / bool around a number
+    # (the stripping below would otherwise turn [20] into 20). Every argv
+    # element is a string by now and timeout_sec is the only other key, so
+    # with the string literals removed only timeout_sec's literal is left —
+    # its raw spelling, which yq would have normalized (20.0 / 2e1 -> int).
+    timeout=""
+    if [[ "$(yq -p json -o json -r '.timeout_sec | tag' "$file" 2>/dev/null)" == "!!int" ]]; then
+      timeout="$(sed -E 's/"([^"\\]|\\.)*"//g' "$file" | tr -d '{}[],: \t\r\n')"
+    fi
+    if [[ ! "$timeout" =~ ^[0-9]{1,3}$ ]] || (( 10#$timeout < 1 || 10#$timeout > 120 )); then
+      printf 'needs timeout_sec as an integer from 1 to 120'
+      return 0
+    fi
+  fi
+  argv0="$(yq -p json -o json -r '.argv[0]' "$file" 2>/dev/null)"
+  if [[ "$argv0" != /* ]]; then
+    printf 'needs argv[0] as an absolute path'
+  elif [[ ! -f "$argv0" || ! -x "$argv0" ]]; then
+    printf 'names an argv[0] that is not an executable regular file here'
+  fi
+}
+# Where the wrapper reads, whatever the profile (it does not know profiles).
+usage_reader_read="$usage_reader_config"
+if [[ "${XDG_CONFIG_HOME:-}" == /* ]]; then
+  usage_reader_xdg="$XDG_CONFIG_HOME"
+  while [[ "$usage_reader_xdg" == */ ]]; do usage_reader_xdg="${usage_reader_xdg%/}"; done
+  usage_reader_read="$usage_reader_xdg/agent-tools/usage-reader.json"
+fi
+if [[ "$usage_reader_read" == "$usage_reader_config" || "$usage_reader_read" -ef "$usage_reader_config" ]]; then
+  usage_reader_redirected=0
+else
+  usage_reader_redirected=1
+fi
+if module_active_for_profile "$profile" agent-tools-usage-reader; then
+  if [[ "$usage_reader_redirected" -eq 1 ]]; then
+    warn "usage reader: XDG_CONFIG_HOME in this environment points agent-tools at '$usage_reader_read', not the managed $usage_reader_config — an agent started from here does not use the managed usage reader"
+  fi
+  # Under a redirect the wrapper reads the other file, so a broken or missing
+  # managed file says nothing about what agent-tools reads (Codex review,
+  # PR #302): the effect is only "takes effect once the redirect is gone".
+  if [[ "$usage_reader_redirected" -eq 0 ]]; then
+    usage_reader_broken_effect="personal-usage-reader fails (exit 2), so agent-tools reads no budget"
+    usage_reader_missing_effect="agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)"
+  else
+    usage_reader_broken_effect="fixing it takes effect only once the redirect above is gone"
+    usage_reader_missing_effect="restoring it takes effect only once the redirect above is gone"
+  fi
+  if [[ ! -e "$usage_reader_config" && ! -L "$usage_reader_config" ]]; then
+    action "usage reader config missing: $usage_reader_config (agent-tools-usage-reader module) — $usage_reader_missing_effect" \
+      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
+      "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+  elif [[ ! -e "$usage_reader_config" ]]; then
+    # A dangling symlink: the wrapper follows it, finds nothing and treats
+    # the config as absent (exit 3), not as invalid (Codex review R3, PR #302).
+    action "usage reader config $usage_reader_config is a symlink to nothing — $usage_reader_missing_effect" \
+      "\$ rm -i $(printf '%q' "$usage_reader_config")   # the dangling link" \
+      "\$ chezmoi apply $(printf '%q' "$usage_reader_config")"
+  elif [[ ! -f "$usage_reader_config" ]]; then
+    action "usage reader config $usage_reader_config is not a regular file — $usage_reader_broken_effect" \
+      "\$ mv -i $(printf '%q' "$usage_reader_config") $(printf '%q' "$usage_reader_config.bak")   # keep it aside" \
+      "\$ chezmoi apply $(printf '%q' "$usage_reader_config")"
+  else
+    usage_reader_why="$(usage_reader_problem "$usage_reader_config")"
+    case "$usage_reader_why" in
+      "")
+        ok "usage reader config $usage_reader_config present; shape per the agent-tools contract and argv[0] executable (not run: doctor does not execute the reader)"
+        ;;
+      "names an argv[0] that is not an executable regular file here")
+        action "usage reader config $usage_reader_config $usage_reader_why — $usage_reader_broken_effect; the managed argv names tacho under ~/go/bin (software catalog, go_install)" \
+          "\$ ./scripts/install-packages.sh   # dry-run first; --apply installs the catalog's tacho"
+        ;;
+      *)
+        action "usage reader config $usage_reader_config $usage_reader_why — $usage_reader_broken_effect" \
+          "\$ chezmoi apply $(printf '%q' "$usage_reader_config")   # restores the managed content"
+        ;;
+    esac
+  fi
+else
+  # Not managed here: report what is on disk, and claim what agent-tools
+  # reads only when no redirect makes that another file (Codex review, PR #302).
+  if [[ "$usage_reader_redirected" -eq 0 ]]; then
+    usage_reader_reads_note="agent-tools' personal-usage-reader reads it whenever it exists"
+    usage_reader_none_note="agent-tools runs with no usage reader"
+  else
+    usage_reader_reads_note="XDG_CONFIG_HOME points agent-tools at '$usage_reader_read' here instead"
+    usage_reader_none_note="XDG_CONFIG_HOME points agent-tools at '$usage_reader_read' here"
+  fi
+  if [[ -e "$usage_reader_config" || -L "$usage_reader_config" ]]; then
+    item "$usage_reader_config present but not managed for this profile (hand-placed?); $usage_reader_reads_note"
+  else
+    ok "no usage reader config (not managed for this profile; $usage_reader_none_note)"
+  fi
+fi
+
 section "agent-tools (report-only)"
 # Report-only companion check. dotfiles never clones/pulls/syncs
 # agent-tools. Presence is reported whenever enableAiPolicy=true, but running

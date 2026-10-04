@@ -792,6 +792,217 @@ hc_check "XDG_CONFIG_HOME=~/.config/ is the managed file -> ok" "[ok] herdr conf
 hc_check "work -> not managed" "[ok] herdr config not managed (herdr-config module inactive for profile work)" work
 rm -rf "$hc_home" "$hc_fakebin"
 
+# UR) agent-tools usage reader (agent-tools-usage-reader module, #301).
+#     doctor stays report-only / exit 0 and checks the managed
+#     ~/.config/agent-tools/usage-reader.json STATICALLY (it never runs the
+#     reader): missing -> action naming mkdir + apply; the contract's shape
+#     (JSON object, only argv / timeout_sec, argv non-empty strings,
+#     timeout_sec an integer 1..120, argv[0] absolute) broken -> action with
+#     the apply step; argv[0] not an executable regular file -> action naming
+#     the catalog install; not a regular file -> action; an absolute
+#     XDG_CONFIG_HOME elsewhere -> redirect warn (a relative one is ignored,
+#     as the wrapper does; ~/.config/ with a trailing slash is the same
+#     file); work (module inactive) -> neutral. A canary in argv must never
+#     reach the report (contents-blind), and neither the reader nor a wrapper
+#     in the fixture HOME may ever run (each leaves a marker if it does —
+#     doctor must stay side-effect free; Codex review, PR #302). Every run is
+#     hermetic (`env -i`).
+ur_home="$fixture_home/ur"
+ur_config="$ur_home/.config/agent-tools/usage-reader.json"
+ur_reader="$ur_home/go/bin/tacho"
+ur_canary="canary-usage-reader-7f3c"
+# ur_expect LABEL PROFILE [VAR=value...] -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
+# One doctor run; every EXPECT_LINE must appear as an exact line and, after a
+# lone "!", no ABSENT_SUBSTRING may appear anywhere. The canary never may.
+ur_expect() {
+  local label="$1" run_args=() want=() absent=("$ur_canary") mode=run arg missing="" out
+  shift
+  for arg in "$@"; do
+    case "$mode:$arg" in
+      run:--) mode=want ;;
+      run:*) run_args+=("$arg") ;;
+      want:!) mode=absent ;;
+      want:*) want+=("$arg") ;;
+      absent:*) absent+=("$arg") ;;
+    esac
+  done
+  if ! out="$(env -i PATH="$PATH" HOME="$ur_home" "${run_args[@]:1}" "$SCRIPT_DIR/doctor.sh" "${run_args[0]}" 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    fail "test failed: doctor must stay exit 0 (usage reader $label)"
+    status=1
+    return
+  fi
+  for arg in "${want[@]}"; do
+    grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n'
+  done
+  for arg in "${absent[@]}"; do
+    if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi
+  done
+  if [[ -z "$missing" ]]; then
+    ok "test passed: usage reader $label"
+  else
+    printf '%s\n%s' "$out" "$missing" >&2
+    fail "test failed: usage reader $label"
+    status=1
+  fi
+}
+# ur_write JSON — the config file's whole content.
+ur_write() {
+  mkdir -p "$(dirname "$ur_config")"
+  printf '%s\n' "$1" > "$ur_config"
+}
+ur_broken() {
+  printf '%s' "[warn] usage reader config $ur_config $1 — personal-usage-reader fails (exit 2), so agent-tools reads no budget"
+}
+ur_apply_step="        \$ chezmoi apply $(printf '%q' "$ur_config")   # restores the managed content"
+ur_valid="{\"argv\": [\"$ur_reader\", \"$ur_canary\", \"--json\"], \"timeout_sec\": 20}"
+ur_ok="[ok] usage reader config $ur_config present; shape per the agent-tools contract and argv[0] executable (not run: doctor does not execute the reader)"
+ur_missing="[warn] usage reader config missing: $ur_config (agent-tools-usage-reader module) — agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)"
+ur_redirect_line() {
+  printf '%s' "[warn] usage reader: XDG_CONFIG_HOME in this environment points agent-tools at '$1', not the managed $ur_config — an agent started from here does not use the managed usage reader"
+}
+ur_ran="$fixture_home/ur-ran"
+rm -rf "$ur_home" "$ur_ran"
+mkdir -p "$(dirname "$ur_reader")" "$ur_home/.claude/agent-tools/scripts" "$ur_ran"
+# write_ur_marker_script PATH NAME — an executable that only records it ran.
+write_ur_marker_script() {
+  printf '#!/bin/sh\n: > %q\nexit 0\n' "$ur_ran/$2" > "$1"
+  chmod +x "$1"
+}
+write_ur_marker_script "$ur_reader" reader
+write_ur_marker_script "$ur_home/.claude/agent-tools/scripts/personal-usage-reader" wrapper
+# UR-1) missing -> action whose steps are mkdir then apply, consecutive and %q-escaped.
+if ur_out="$(env -i PATH="$PATH" HOME="$ur_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fxq -- "$ur_missing" <<< "$ur_out" \
+  && ! grep -Fq "points agent-tools at" <<< "$ur_out" \
+  && steps_consecutive "$ur_out" "        \$ mkdir -p $(printf '%q' "$ur_home/.config")" \
+    "        \$ chezmoi apply $(printf '%q' "$ur_home/.config/agent-tools") $(printf '%q' "$ur_config")"; then
+  ok "test passed: usage reader missing -> action with mkdir then apply steps"
+else
+  printf '%s\n' "${ur_out:-<no output>}" >&2
+  fail "test failed: usage reader missing -> expected the action line and the mkdir step immediately followed by the apply step"
+  status=1
+fi
+# UR-1b) missing while an absolute XDG_CONFIG_HOME points elsewhere: the
+#        redirect is reported and the missing action does not claim the
+#        "no usage reader" effect (the other file may hold one).
+ur_expect "missing + XDG_CONFIG_HOME elsewhere -> redirect warn and redirect-aware missing action" \
+  personal XDG_CONFIG_HOME="$ur_home/xdg" -- \
+  "$(ur_redirect_line "$ur_home/xdg/agent-tools/usage-reader.json")" \
+  "[warn] usage reader config missing: $ur_config (agent-tools-usage-reader module) — restoring it takes effect only once the redirect above is gone" \
+  ! "assignment ignores the remaining budget"
+# UR-2) the managed shape, an executable argv[0] -> ok, values never shown; the
+#       timeout bounds 1 and 120 and an absent timeout_sec are accepted.
+ur_write "$ur_valid"
+ur_expect "valid -> ok" personal -- "$ur_ok"
+ur_write "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 1}"
+ur_expect "timeout_sec 1 -> ok" personal -- "$ur_ok"
+ur_write "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 120}"
+ur_expect "timeout_sec 120 -> ok" personal -- "$ur_ok"
+ur_write "{\"argv\": [\"$ur_reader\"]}"
+ur_expect "no timeout_sec -> ok (the wrapper's default)" personal -- "$ur_ok"
+# UR-2b) XDG_CONFIG_HOME naming ~/.config with a trailing slash is the same
+#        file; a relative XDG_CONFIG_HOME is ignored (as the wrapper does).
+ur_write "$ur_valid"
+ur_expect "XDG_CONFIG_HOME=~/.config/ -> same file, ok" personal XDG_CONFIG_HOME="$ur_home/.config/" -- \
+  "$ur_ok" ! "points agent-tools at"
+ur_expect "relative XDG_CONFIG_HOME -> ignored, ok" personal XDG_CONFIG_HOME="rel/config" -- \
+  "$ur_ok" ! "points agent-tools at"
+# UR-2c) broken managed file under a redirect: the wrapper reads the other
+#        file, so the action must not claim it fails (Codex review, PR #302).
+ur_write "{\"argv\": [\"$ur_reader\"], \"note\": 1}"
+ur_expect "broken managed file + XDG_CONFIG_HOME elsewhere -> redirect-aware action" \
+  personal XDG_CONFIG_HOME="$ur_home/xdg" -- \
+  "$(ur_redirect_line "$ur_home/xdg/agent-tools/usage-reader.json")" \
+  "[warn] usage reader config $ur_config has a key other than argv / timeout_sec — fixing it takes effect only once the redirect above is gone" \
+  ! "personal-usage-reader fails"
+# UR-3) each way the shape breaks the contract -> its fixed phrase and the apply step.
+ur_shape_case() {
+  local label="$1" content="$2" phrase="$3"
+  ur_write "$content"
+  ur_expect "$label" personal -- "$(ur_broken "$phrase")" "$ur_apply_step"
+}
+ur_shape_case "not JSON -> action" "{\"argv\": [\"$ur_reader\"" "is not valid JSON"
+ur_shape_case "JSON array -> action" "[\"$ur_reader\"]" "is not a JSON object"
+ur_shape_case "unknown key -> action" "{\"argv\": [\"$ur_reader\"], \"note\": \"$ur_canary\"}" "has a key other than argv / timeout_sec"
+ur_shape_case "missing argv -> action" "{\"timeout_sec\": 20}" "needs argv as a non-empty array of strings"
+ur_shape_case "empty argv -> action" "{\"argv\": []}" "needs argv as a non-empty array of strings"
+ur_shape_case "non-string argv element -> action" "{\"argv\": [\"$ur_reader\", 1]}" "needs argv as a non-empty array of strings"
+ur_shape_case "timeout_sec 0 -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 0}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec 121 -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 121}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec as a string -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": \"20\"}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "fractional timeout_sec -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 20.5}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "negative timeout_sec -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": -5}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "huge timeout_sec (no arithmetic overflow) -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 99999999999999999999}" "needs timeout_sec as an integer from 1 to 120"
+# yq reads 20.0 / 2e1 as an int; the wrapper's JSON parser keeps them Float
+# and rejects them, so doctor judges the raw literal (Codex review, PR #302).
+ur_shape_case "timeout_sec 20.0 -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 20.0}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec 2e1 -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": 2e1}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "newline in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"status\\n\"]}" "has a control character in an argv element"
+ur_shape_case "tab in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"st\\tatus\"]}" "has a control character in an argv element"
+ur_shape_case "NUL in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"st\\u0000atus\"]}" "has a control character in an argv element"
+# C1 controls count too (the wrapper's Ruby [[:cntrl:]] is Unicode Cc; Go's
+# POSIX class is ASCII-only — Codex review R2, PR #302).
+ur_shape_case "C1 control (U+0085) in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"st\\u0085atus\"]}" "has a control character in an argv element"
+# A number wrapped in an array / object, and a bool: not an integer, although
+# the raw-literal stripping alone would leave 20 (Codex review R2, PR #302).
+ur_shape_case "timeout_sec [20] -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": [20]}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec {\"x\": 20} -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": {\"x\": 20}}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec true -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": true}" "needs timeout_sec as an integer from 1 to 120"
+# Number-like text and escaped quotes inside strings do not count as the
+# timeout literal.
+ur_write "{\"argv\": [\"$ur_reader\", \"q\\\"r 1.5e3\", \"$ur_canary\"], \"timeout_sec\": 20}"
+ur_expect "number-like text and an escaped quote in argv -> ok" personal -- "$ur_ok"
+ur_shape_case "relative argv[0] -> action" "{\"argv\": [\"go/bin/tacho\", \"$ur_canary\"]}" "needs argv[0] as an absolute path"
+# UR-4) argv[0] not executable here (the reader is not installed) -> action
+#       pointing at the software catalog, not at apply.
+ur_write "$ur_valid"
+chmod -x "$ur_reader"
+ur_expect "argv[0] not executable -> install action" personal -- \
+  "[warn] usage reader config $ur_config names an argv[0] that is not an executable regular file here — personal-usage-reader fails (exit 2), so agent-tools reads no budget; the managed argv names tacho under ~/go/bin (software catalog, go_install)" \
+  "        \$ ./scripts/install-packages.sh   # dry-run first; --apply installs the catalog's tacho"
+rm -f "$ur_reader"
+ur_expect "argv[0] absent -> install action" personal -- \
+  "[warn] usage reader config $ur_config names an argv[0] that is not an executable regular file here — personal-usage-reader fails (exit 2), so agent-tools reads no budget; the managed argv names tacho under ~/go/bin (software catalog, go_install)"
+# UR-5) something other than a regular file at the path -> action.
+rm -f "$ur_config"
+mkdir -p "$ur_config"
+ur_expect "directory at the path -> action" personal -- \
+  "[warn] usage reader config $ur_config is not a regular file — personal-usage-reader fails (exit 2), so agent-tools reads no budget"
+rm -rf "$ur_config"
+# UR-5b) a dangling symlink: the wrapper treats it as absent (exit 3), so the
+#        action says "no usage reader", not that the wrapper fails (Codex
+#        review R3, PR #302).
+ln -s "$ur_home/nowhere.json" "$ur_config"
+ur_expect "dangling symlink -> absent-like action, no exit-2 claim" personal -- \
+  "[warn] usage reader config $ur_config is a symlink to nothing — agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)" \
+  "        \$ rm -i $(printf '%q' "$ur_config")   # the dangling link" \
+  ! "personal-usage-reader fails"
+rm -f "$ur_config"
+# UR-6) work does not list the module: a hand-placed file is neutral, none is
+#       ok — and under a redirect neither claims what agent-tools reads
+#       (Codex review R2, PR #302).
+ur_expect "work, no file -> ok" work -- \
+  "[ok] no usage reader config (not managed for this profile; agent-tools runs with no usage reader)"
+ur_expect "work, no file + XDG_CONFIG_HOME elsewhere -> ok naming the other file" work XDG_CONFIG_HOME="$ur_home/xdg" -- \
+  "[ok] no usage reader config (not managed for this profile; XDG_CONFIG_HOME points agent-tools at '$ur_home/xdg/agent-tools/usage-reader.json' here)" \
+  ! "runs with no usage reader"
+ur_write "$ur_valid"
+ur_expect "work, hand-placed file -> neutral item" work -- \
+  "[info] - $ur_config present but not managed for this profile (hand-placed?); agent-tools' personal-usage-reader reads it whenever it exists" \
+  ! "personal-usage-reader fails"
+ur_expect "work, hand-placed file + XDG_CONFIG_HOME elsewhere -> neutral item naming the other file" work XDG_CONFIG_HOME="$ur_home/xdg" -- \
+  "[info] - $ur_config present but not managed for this profile (hand-placed?); XDG_CONFIG_HOME points agent-tools at '$ur_home/xdg/agent-tools/usage-reader.json' here instead" \
+  ! "reads it whenever it exists"
+# UR-7) across every run above, doctor executed neither the reader nor the wrapper.
+if [[ -z "$(ls -A "$ur_ran")" ]]; then
+  ok "test passed: usage reader: doctor never ran the reader or the wrapper"
+else
+  fail "test failed: usage reader: doctor ran $(ls -A "$ur_ran" | tr '\n' ' ')(doctor must stay side-effect free)"
+  status=1
+fi
+rm -rf "$ur_home" "$ur_ran"
+
 # SSH 1Password agent report (enable1PasswordSSH, issue #17). doctor stays
 # report-only / exit 0 and must reflect both the active and the dangling
 # (capability true but ssh-1password module inactive) cases. Throwaway repo
