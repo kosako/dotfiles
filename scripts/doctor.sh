@@ -1669,18 +1669,21 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
   # PR #302): the effect is only "takes effect once the redirect is gone".
   if [[ "$usage_reader_redirected" -eq 0 ]]; then
     usage_reader_broken_effect="personal-usage-reader fails (exit 2), so agent-tools reads no budget"
+    usage_reader_missing_effect="agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)"
   else
     usage_reader_broken_effect="fixing it takes effect only once the redirect above is gone"
+    usage_reader_missing_effect="restoring it takes effect only once the redirect above is gone"
   fi
   if [[ ! -e "$usage_reader_config" && ! -L "$usage_reader_config" ]]; then
-    if [[ "$usage_reader_redirected" -eq 0 ]]; then
-      usage_reader_missing_effect="agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)"
-    else
-      usage_reader_missing_effect="restoring it takes effect only once the redirect above is gone"
-    fi
     action "usage reader config missing: $usage_reader_config (agent-tools-usage-reader module) — $usage_reader_missing_effect" \
       "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
       "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+  elif [[ ! -e "$usage_reader_config" ]]; then
+    # A dangling symlink: the wrapper follows it, finds nothing and treats
+    # the config as absent (exit 3), not as invalid (Codex review R3, PR #302).
+    action "usage reader config $usage_reader_config is a symlink to nothing — $usage_reader_missing_effect" \
+      "\$ rm -i $(printf '%q' "$usage_reader_config")   # the dangling link" \
+      "\$ chezmoi apply $(printf '%q' "$usage_reader_config")"
   elif [[ ! -f "$usage_reader_config" ]]; then
     action "usage reader config $usage_reader_config is not a regular file — $usage_reader_broken_effect" \
       "\$ mv -i $(printf '%q' "$usage_reader_config") $(printf '%q' "$usage_reader_config.bak")   # keep it aside" \

@@ -970,6 +970,15 @@ mkdir -p "$ur_config"
 ur_expect "directory at the path -> action" personal -- \
   "[warn] usage reader config $ur_config is not a regular file — personal-usage-reader fails (exit 2), so agent-tools reads no budget"
 rm -rf "$ur_config"
+# UR-5b) a dangling symlink: the wrapper treats it as absent (exit 3), so the
+#        action says "no usage reader", not that the wrapper fails (Codex
+#        review R3, PR #302).
+ln -s "$ur_home/nowhere.json" "$ur_config"
+ur_expect "dangling symlink -> absent-like action, no exit-2 claim" personal -- \
+  "[warn] usage reader config $ur_config is a symlink to nothing — agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)" \
+  "        \$ rm -i $(printf '%q' "$ur_config")   # the dangling link" \
+  ! "personal-usage-reader fails"
+rm -f "$ur_config"
 # UR-6) work does not list the module: a hand-placed file is neutral, none is
 #       ok — and under a redirect neither claims what agent-tools reads
 #       (Codex review R2, PR #302).

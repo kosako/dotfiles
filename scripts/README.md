@@ -102,7 +102,8 @@ policy validation が失敗した場合は exit 1。
 - agent-tools usage reader(report-only): `agent-tools-usage-reader` module が active な profile で managed
   `~/.config/agent-tools/usage-reader.json` を**静的に**確認する(wrapper も読み取り口も実行しない。読み取り口は cache を
   書くことがあるため)。doctor を実行した環境の絶対 path の `XDG_CONFIG_HOME` が別の場所を指せば warn(相対・空は wrapper
-  と同じく無視)、無ければ `mkdir -p ~/.config` → `chezmoi apply` の action、regular file でなければ action、agent-tools の
+  と同じく無視)、無ければ `mkdir -p ~/.config` → `chezmoi apply` の action、指す先の無い symlink なら無いときと同じ扱いの action
+  (wrapper は exit 3 = 読み取り口なしにする)、regular file でなければ action、agent-tools の
   契約の形(JSON object・key は `argv` / `timeout_sec` だけ・`argv` は空でない文字列の配列で制御文字なし・`timeout_sec` は
   1〜120 の整数で字面で判定・`argv[0]` は絶対 path)を外れれば外れ方を固定の文言で示す apply の action、`argv[0]` が
   実行できる regular file でなければ tacho の導入(`install-packages.sh`)の action(読み先がずれていれば、どちらも
@@ -313,7 +314,8 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
   (JSON でない・object でない・知らない key・`argv` の欠落 / 空 / 文字列以外 / 改行・tab・NUL・C1 制御文字(U+0085)を含む
   要素・`timeout_sec` の 0 / 121 / 文字列 / 小数 / 負 / 桁あふれ / `20.0` / `2e1` / `[20]` / object / bool・相対の `argv[0]`)→ それぞれの固定の文言と apply の手順の
   action / string の中の数字らしい字面と escape した引用符は ok / `argv[0]` が実行できない・無い → install の action /
-  regular file でない → action / 絶対 path の `XDG_CONFIG_HOME` が別の場所 → redirect warn(missing でも形の外れでも
+  regular file でない → action / 指す先の無い symlink → 「読み取り口なし」の action(wrapper は exit 3 にするので失敗とは
+  書かない)/ 絶対 path の `XDG_CONFIG_HOME` が別の場所 → redirect warn(missing でも形の外れでも
   「ずれを直すまで効かない」の action で、wrapper の失敗とは断定しない)、相対の `XDG_CONFIG_HOME` と `~/.config/`
   (末尾 `/`)は同じ file 扱い / work → 手置きは中立の item、無ければ ok(読み先がずれていれば、どちらも「wrapper が読む」
   「読み取り口なし」と断定せず、ずれた先を示す)。`argv` の canary が出力に出ないこと。fixture の

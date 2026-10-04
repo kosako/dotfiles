@@ -55,7 +55,8 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
   1. 読み先: doctor を実行した環境の `XDG_CONFIG_HOME` が絶対 path で別の場所を指す → warn(相対・空は
      wrapper と同じく無視。同じ file かは、末尾 `/` を落とした同じ綴りか `-ef` で判定)。
   2. managed file: 無い → action(`mkdir -p ~/.config` と `chezmoi apply` の手順。読み先がずれていれば
-     「ずれを直すまで効かない」と書く)。regular file でない → action。ある → 契約の形(JSON object・
+     「ずれを直すまで効かない」と書く)。指す先の無い symlink → 無いときと同じ扱いの action(wrapper は辿った先が
+     無いと「読み取り口なし」(exit 3) にする)。regular file でない → action。ある → 契約の形(JSON object・
      key は `argv` / `timeout_sec` だけ・`argv` は空でない文字列の配列で制御文字を含まない・`timeout_sec` は
      1〜120 の整数・`argv[0]` は絶対 path)を外れていれば、外れ方を固定の文言で示す action(手順は
      `chezmoi apply`。読み先がずれていれば「ずれを直すまで効かない」と書き、wrapper が失敗するとは断定しない)。
