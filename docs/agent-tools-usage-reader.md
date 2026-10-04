@@ -55,11 +55,13 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
      wrapper と同じく無視。同じ file かは、末尾 `/` を落とした同じ綴りか `-ef` で判定)。
   2. managed file: 無い → action(`mkdir -p ~/.config` と `chezmoi apply` の手順。読み先がずれていれば
      「ずれを直すまで効かない」と書く)。regular file でない → action。ある → 契約の形(JSON object・
-     key は `argv` / `timeout_sec` だけ・`argv` は空でない文字列の配列・`timeout_sec` は 1〜120 の整数・
-     `argv[0]` は絶対 path)を外れていれば、外れ方を固定の文言で示す action(手順は `chezmoi apply`)。
+     key は `argv` / `timeout_sec` だけ・`argv` は空でない文字列の配列で制御文字を含まない・`timeout_sec` は
+     1〜120 の整数・`argv[0]` は絶対 path)を外れていれば、外れ方を固定の文言で示す action(手順は
+     `chezmoi apply`。読み先がずれていれば「ずれを直すまで効かない」と書き、wrapper が失敗するとは断定しない)。
      `argv[0]` が実行できる regular file でなければ、tacho の導入(`install-packages.sh`)を示す action。
      すべて満たせば ok。
-  - 形の確認は best effort(yq では `20` と `20.0` を区別できない等)で、厳密な規則の正本は wrapper。
+  - `timeout_sec` は書かれた字面で判定する(yq は `20.0` や `2e1` を整数に正規化するが、wrapper の JSON parser は
+    Float として読み拒否するため)。それでも重複した key や不正な UTF-8 などは真似ておらず、厳密な規則の正本は wrapper。
     ok は「形が契約どおりで `argv[0]` が実行できる」の意味で、実際に残量を読めたかは確かめていない。
   - 表示は固定の文言だけで、設定の値(path や引数)は出さない。中身の drift は managed drift section が出す。
 
