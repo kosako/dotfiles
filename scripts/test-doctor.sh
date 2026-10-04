@@ -941,6 +941,14 @@ ur_shape_case "timeout_sec 2e1 -> action" "{\"argv\": [\"$ur_reader\"], \"timeou
 ur_shape_case "newline in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"status\\n\"]}" "has a control character in an argv element"
 ur_shape_case "tab in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"st\\tatus\"]}" "has a control character in an argv element"
 ur_shape_case "NUL in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"st\\u0000atus\"]}" "has a control character in an argv element"
+# C1 controls count too (the wrapper's Ruby [[:cntrl:]] is Unicode Cc; Go's
+# POSIX class is ASCII-only — Codex review R2, PR #302).
+ur_shape_case "C1 control (U+0085) in an argv element -> action" "{\"argv\": [\"$ur_reader\", \"st\\u0085atus\"]}" "has a control character in an argv element"
+# A number wrapped in an array / object, and a bool: not an integer, although
+# the raw-literal stripping alone would leave 20 (Codex review R2, PR #302).
+ur_shape_case "timeout_sec [20] -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": [20]}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec {\"x\": 20} -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": {\"x\": 20}}" "needs timeout_sec as an integer from 1 to 120"
+ur_shape_case "timeout_sec true -> action" "{\"argv\": [\"$ur_reader\"], \"timeout_sec\": true}" "needs timeout_sec as an integer from 1 to 120"
 # Number-like text and escaped quotes inside strings do not count as the
 # timeout literal.
 ur_write "{\"argv\": [\"$ur_reader\", \"q\\\"r 1.5e3\", \"$ur_canary\"], \"timeout_sec\": 20}"
@@ -962,13 +970,21 @@ mkdir -p "$ur_config"
 ur_expect "directory at the path -> action" personal -- \
   "[warn] usage reader config $ur_config is not a regular file — personal-usage-reader fails (exit 2), so agent-tools reads no budget"
 rm -rf "$ur_config"
-# UR-6) work does not list the module: a hand-placed file is neutral, none is ok.
+# UR-6) work does not list the module: a hand-placed file is neutral, none is
+#       ok — and under a redirect neither claims what agent-tools reads
+#       (Codex review R2, PR #302).
 ur_expect "work, no file -> ok" work -- \
   "[ok] no usage reader config (not managed for this profile; agent-tools runs with no usage reader)"
+ur_expect "work, no file + XDG_CONFIG_HOME elsewhere -> ok naming the other file" work XDG_CONFIG_HOME="$ur_home/xdg" -- \
+  "[ok] no usage reader config (not managed for this profile; XDG_CONFIG_HOME points agent-tools at '$ur_home/xdg/agent-tools/usage-reader.json' here)" \
+  ! "runs with no usage reader"
 ur_write "$ur_valid"
 ur_expect "work, hand-placed file -> neutral item" work -- \
   "[info] - $ur_config present but not managed for this profile (hand-placed?); agent-tools' personal-usage-reader reads it whenever it exists" \
   ! "personal-usage-reader fails"
+ur_expect "work, hand-placed file + XDG_CONFIG_HOME elsewhere -> neutral item naming the other file" work XDG_CONFIG_HOME="$ur_home/xdg" -- \
+  "[info] - $ur_config present but not managed for this profile (hand-placed?); XDG_CONFIG_HOME points agent-tools at '$ur_home/xdg/agent-tools/usage-reader.json' here instead" \
+  ! "reads it whenever it exists"
 # UR-7) across every run above, doctor executed neither the reader nor the wrapper.
 if [[ -z "$(ls -A "$ur_ran")" ]]; then
   ok "test passed: usage reader: doctor never ran the reader or the wrapper"

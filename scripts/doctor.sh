@@ -1620,15 +1620,22 @@ usage_reader_problem() {
     printf 'needs argv as a non-empty array of strings'
     return 0
   fi
-  if [[ "$(yq -p json -o json -r '[.argv[] | select(test("[[:cntrl:]]"))] | length' "$file" 2>/dev/null)" != "0" ]]; then
+  # \p{Cc}, not [[:cntrl:]]: Go's POSIX class is ASCII-only, while the
+  # wrapper (Ruby) also rejects the C1 controls U+0080..U+009F.
+  if [[ "$(yq -p json -o json -r '[.argv[] | select(test("\\p{Cc}"))] | length' "$file" 2>/dev/null)" != "0" ]]; then
     printf 'has a control character in an argv element'
     return 0
   fi
   if [[ "$(yq -p json -o json -r 'has("timeout_sec")' "$file" 2>/dev/null)" == "true" ]]; then
-    # Every argv element is a string by now and timeout_sec is the only other
-    # key, so with the string literals removed only timeout_sec's literal is
-    # left — its raw spelling, which yq would have normalized.
-    timeout="$(sed -E 's/"([^"\\]|\\.)*"//g' "$file" | tr -d '{}[],: \t\r\n')"
+    # The tag rules out an array / object / string / bool around a number
+    # (the stripping below would otherwise turn [20] into 20). Every argv
+    # element is a string by now and timeout_sec is the only other key, so
+    # with the string literals removed only timeout_sec's literal is left —
+    # its raw spelling, which yq would have normalized (20.0 / 2e1 -> int).
+    timeout=""
+    if [[ "$(yq -p json -o json -r '.timeout_sec | tag' "$file" 2>/dev/null)" == "!!int" ]]; then
+      timeout="$(sed -E 's/"([^"\\]|\\.)*"//g' "$file" | tr -d '{}[],: \t\r\n')"
+    fi
     if [[ ! "$timeout" =~ ^[0-9]{1,3}$ ]] || (( 10#$timeout < 1 || 10#$timeout > 120 )); then
       printf 'needs timeout_sec as an integer from 1 to 120'
       return 0
@@ -1641,17 +1648,20 @@ usage_reader_problem() {
     printf 'names an argv[0] that is not an executable regular file here'
   fi
 }
+# Where the wrapper reads, whatever the profile (it does not know profiles).
+usage_reader_read="$usage_reader_config"
+if [[ "${XDG_CONFIG_HOME:-}" == /* ]]; then
+  usage_reader_xdg="$XDG_CONFIG_HOME"
+  while [[ "$usage_reader_xdg" == */ ]]; do usage_reader_xdg="${usage_reader_xdg%/}"; done
+  usage_reader_read="$usage_reader_xdg/agent-tools/usage-reader.json"
+fi
+if [[ "$usage_reader_read" == "$usage_reader_config" || "$usage_reader_read" -ef "$usage_reader_config" ]]; then
+  usage_reader_redirected=0
+else
+  usage_reader_redirected=1
+fi
 if module_active_for_profile "$profile" agent-tools-usage-reader; then
-  usage_reader_read="$usage_reader_config"
-  if [[ "${XDG_CONFIG_HOME:-}" == /* ]]; then
-    usage_reader_xdg="$XDG_CONFIG_HOME"
-    while [[ "$usage_reader_xdg" == */ ]]; do usage_reader_xdg="${usage_reader_xdg%/}"; done
-    usage_reader_read="$usage_reader_xdg/agent-tools/usage-reader.json"
-  fi
-  if [[ "$usage_reader_read" == "$usage_reader_config" || "$usage_reader_read" -ef "$usage_reader_config" ]]; then
-    usage_reader_redirected=0
-  else
-    usage_reader_redirected=1
+  if [[ "$usage_reader_redirected" -eq 1 ]]; then
     warn "usage reader: XDG_CONFIG_HOME in this environment points agent-tools at '$usage_reader_read', not the managed $usage_reader_config — an agent started from here does not use the managed usage reader"
   fi
   # Under a redirect the wrapper reads the other file, so a broken or missing
@@ -1692,10 +1702,19 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
     esac
   fi
 else
-  if [[ -e "$usage_reader_config" || -L "$usage_reader_config" ]]; then
-    item "$usage_reader_config present but not managed for this profile (hand-placed?); agent-tools' personal-usage-reader reads it whenever it exists"
+  # Not managed here: report what is on disk, and claim what agent-tools
+  # reads only when no redirect makes that another file (Codex review, PR #302).
+  if [[ "$usage_reader_redirected" -eq 0 ]]; then
+    usage_reader_reads_note="agent-tools' personal-usage-reader reads it whenever it exists"
+    usage_reader_none_note="agent-tools runs with no usage reader"
   else
-    ok "no usage reader config (not managed for this profile; agent-tools runs with no usage reader)"
+    usage_reader_reads_note="XDG_CONFIG_HOME points agent-tools at '$usage_reader_read' here instead"
+    usage_reader_none_note="XDG_CONFIG_HOME points agent-tools at '$usage_reader_read' here"
+  fi
+  if [[ -e "$usage_reader_config" || -L "$usage_reader_config" ]]; then
+    item "$usage_reader_config present but not managed for this profile (hand-placed?); $usage_reader_reads_note"
+  else
+    ok "no usage reader config (not managed for this profile; $usage_reader_none_note)"
   fi
 fi
 

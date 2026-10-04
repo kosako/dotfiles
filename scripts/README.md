@@ -310,12 +310,13 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
   `env -i` で hermetic。
 - agent-tools の残量の読み取り口(#301): fixture の HOME に fake の実行ファイルを置き、missing → `mkdir -p` →
   `chezmoi apply` の連続 2 step の action / 契約どおりの形(`timeout_sec` の 1・120・省略を含む)→ ok / 形の外れ
-  (JSON でない・object でない・知らない key・`argv` の欠落 / 空 / 文字列以外 / 改行・tab・NUL を含む要素・`timeout_sec` の
-  0 / 121 / 文字列 / 小数 / 負 / 桁あふれ / `20.0` / `2e1`・相対の `argv[0]`)→ それぞれの固定の文言と apply の手順の
+  (JSON でない・object でない・知らない key・`argv` の欠落 / 空 / 文字列以外 / 改行・tab・NUL・C1 制御文字(U+0085)を含む
+  要素・`timeout_sec` の 0 / 121 / 文字列 / 小数 / 負 / 桁あふれ / `20.0` / `2e1` / `[20]` / object / bool・相対の `argv[0]`)→ それぞれの固定の文言と apply の手順の
   action / string の中の数字らしい字面と escape した引用符は ok / `argv[0]` が実行できない・無い → install の action /
   regular file でない → action / 絶対 path の `XDG_CONFIG_HOME` が別の場所 → redirect warn(missing でも形の外れでも
   「ずれを直すまで効かない」の action で、wrapper の失敗とは断定しない)、相対の `XDG_CONFIG_HOME` と `~/.config/`
-  (末尾 `/`)は同じ file 扱い / work → 手置きは中立の item、無ければ ok。`argv` の canary が出力に出ないこと。fixture の
+  (末尾 `/`)は同じ file 扱い / work → 手置きは中立の item、無ければ ok(読み先がずれていれば、どちらも「wrapper が読む」
+  「読み取り口なし」と断定せず、ずれた先を示す)。`argv` の canary が出力に出ないこと。fixture の
   reader と wrapper は実行されると marker を残し、全 run の後に marker が無いこと(doctor は実行しない)。どの run も
   `env -i` で hermetic。
 - 1Password(#231): fake op の signed in(ok 1 行だけ)/ signed out(既存 warn)/ hang(期限で process tree

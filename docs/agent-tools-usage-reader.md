@@ -43,7 +43,8 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
   導入と合わせて改めて列挙を決める(手で置いた file も wrapper は読む)。
 - module 列挙だけで gate する(capability は無い。herdr-config / git-ignore と同型)。managed-by の見出しが
   無いので、profile 切替で非 active になった残置は managed-path orphan scan では拾えない(#201 の残置と同じ
-  扱い。doctor の非 active profile の表示が「在る」ことだけを中立に出す)。
+  扱い。doctor の非 active profile の表示が「在る」ことだけを中立に出す。`XDG_CONFIG_HOME` で読み先がずれて
+  いれば、wrapper が読むのはその先だと示す)。
 
 ## doctor / preflight
 
