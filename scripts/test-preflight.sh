@@ -217,6 +217,36 @@ else
   miss "personal with no herdr config must report the absent/creates ok line"
 fi
 
+# 5d. agent-tools-usage-reader apply impact (#301): personal manages
+#     ~/.config/agent-tools/usage-reader.json, so an existing one warns
+#     (agent-tools reads that one file, no .local: diff first); work does not
+#     list the module: left-as-is item; absent: ok line.
+ur_home="$fixture_home/usage-reader"
+mkdir -p "$ur_home/.config/agent-tools"
+printf '{"argv": ["/usr/bin/true"]}\n' > "$ur_home/.config/agent-tools/usage-reader.json"
+if pf_out="$(HOME="$ur_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+  && grep -Fq "exists: $ur_home/.config/agent-tools/usage-reader.json — apply (agent-tools-usage-reader) replaces it; agent-tools reads this one file (no .local), so diff first" <<< "$pf_out"; then
+  pass "agent-tools-usage-reader: an existing usage reader config warns that apply replaces it"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "personal with an existing usage reader config must warn that apply replaces it"
+fi
+if pf_out="$(HOME="$ur_home" "$SCRIPT_DIR/preflight.sh" work 2>&1)" \
+  && grep -Fq "exists: $ur_home/.config/agent-tools/usage-reader.json — not managed for profile work (left as-is)" <<< "$pf_out" \
+  && ! grep -Fq "apply (agent-tools-usage-reader) replaces it" <<< "$pf_out"; then
+  pass "agent-tools-usage-reader: work leaves an existing usage reader config as-is"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "work must report the existing usage reader config as left-as-is, not replaced"
+fi
+if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+  && grep -Fq "absent: $empty_home/.config/agent-tools/usage-reader.json (apply creates the managed usage reader config)" <<< "$pf_out"; then
+  pass "agent-tools-usage-reader: absent usage reader config is an ok line (apply creates it)"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "personal with no usage reader config must report the absent/creates ok line"
+fi
+
 # 6. The only non-zero path: a failing policy validation aborts (a broken
 #    profiles.yaml in a repo copy — the mutation is fail-closed because the
 #    exit-1 assertion itself would fail on a no-op).

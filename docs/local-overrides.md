@@ -177,6 +177,17 @@ config を **1 file しか読まず**(`HERDR_CONFIG_PATH` > `$XDG_CONFIG_HOME/he
 - doctor / preflight は file の**存在**と `herdr config check` の結果しか見ない(中身は表示しない)。
   詳細は [herdr-config](herdr-config.md)。
 
+## agent-tools の残量の読み取り口: managed-only(local 無し、#301)
+
+managed な `~/.config/agent-tools/usage-reader.json`(`agent-tools-usage-reader` module)にも **local override
+file が無い**。agent-tools の wrapper `personal-usage-reader` は `${XDG_CONFIG_HOME:-$HOME/.config}/agent-tools/`
+の **1 file しか読まず**(`XDG_CONFIG_HOME` は絶対 path のときだけ)、知らない key も受け付けないため。
+
+- machine ごとの差は template の `{{ .chezmoi.homeDir }}` で吸収する。読み取り口そのものを変えたいときは
+  managed file(template)を直す。
+- doctor は file の形と `argv[0]` が実行できることだけを静的に見て、読み取り口は実行しない(値も表示しない)。
+  preflight は存在だけを見る。詳細は [agent-tools-usage-reader](agent-tools-usage-reader.md)。
+
 ## 決定記録
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で

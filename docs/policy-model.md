@@ -338,6 +338,22 @@ herdr の実行時状態で管理しない。herdr は 1 file しか読まない
 - 設定値と apply の範囲(隣の file に触れない)は `test-herdr-config.sh` が pin する。詳細は
   [herdr-config](herdr-config.md)。
 
+## agent-tools の残量の読み取り口(`agent-tools-usage-reader` module、#301)
+
+agent-tools の割当と maintenance sweep が残量を読むための設定 `~/.config/agent-tools/usage-reader.json` を
+managed にする(agent-tools#385 の hand-off)。agent-tools が配る固定の wrapper `personal-usage-reader` がこの
+file の `argv` を shell を通さず起動する。file 名と key(`argv` / `timeout_sec` だけ)は agent-tools の公開契約で、
+中身は dotfiles・読むのは agent-tools・agent-tools は作らず書き換えない(#264 の Codex profile file と同じ分担)。
+中身は statusLine と同じ tacho の `status --json`(path は `{{ .chezmoi.homeDir }}/go/bin`)。
+
+- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work は非列挙(会社機に tacho がまだ無い)。
+  置かない machine では agent-tools は「読み取り口なし」で動く。
+- strict な JSON で知らない key は不正なので、managed-by の見出しを置けない(managed-path orphans の対象外)。
+- **doctor**: 静的な確認だけ(読み取り口は実行しない): `XDG_CONFIG_HOME` による読み先のずれ、presence、
+  契約の形、`argv[0]` が実行できる regular file か。**preflight**: 既存 file の置換 warn(中身は読まない)。
+- 中身と apply の範囲は `test-agent-tools-usage-reader.sh` が pin する。詳細は
+  [agent-tools-usage-reader](agent-tools-usage-reader.md)。
+
 ## dormant capability の扱い(残す基準)
 
 宣言だけで実装が無い capability を schema に置いてよいのは、次の**両方**を満たすときだけ

@@ -1,0 +1,24 @@
+{{- /* Usage-reader config for agent-tools (#301, agent-tools#385 hand-off).
+       agent-tools' fixed wrapper personal-usage-reader (deployed under
+       <tool home>/agent-tools/scripts/) reads
+       ${XDG_CONFIG_HOME:-$HOME/.config}/agent-tools/usage-reader.json and runs
+       its argv without a shell (cwd /, stdin /dev/null) to read the
+       remaining usage budget that agent-tools' assignment and maintenance
+       sweep size their work by. The file name and the keys are agent-tools'
+       public contract (docs/boundary-with-dotfiles.md there): a JSON object
+       with `argv` (required; non-empty strings, argv[0] an absolute path to
+       an executable regular file) and `timeout_sec` (optional; integer
+       1..120, default 20) ONLY — an unknown key makes the wrapper fail, so
+       this file carries no managed-by header (doctor's managed-path orphan
+       scan cannot see it). Content = dotfiles, reader = agent-tools, and
+       agent-tools never creates or rewrites it.
+
+       The reader is the statusLine's CLI, tacho (software catalog,
+       go_install), at the same {{ .chezmoi.homeDir }}/go/bin path the
+       managed statusLine uses. toJson escapes the home path for JSON.
+       Gated by the module list (personal only); without the file
+       agent-tools runs with "no usage reader". */ -}}
+{
+  "argv": [{{ printf "%s/go/bin/tacho" .chezmoi.homeDir | toJson }}, "status", "--json"],
+  "timeout_sec": 20
+}
