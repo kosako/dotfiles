@@ -173,3 +173,8 @@ secret ではないが repo にはコミットしない)。
 - marker・manifest に絶対 home path / host 名 / private list path を入れない。
 - 復元チェーンの循環を避ける: 復元に必要な op 設定 / 1Password sign-in 材料を
   アーカイブにだけ置かない。新マシンで最初に手動で用意するものを docs に固定する。
+- **前提: restore するのは自分の管理下で作り、保管した archive だけ**。age は機密性を与えるが送り手を認証しない
+  (recipient は公開鍵なので、recipient を知っていれば、この identity で復号できる archive を誰でも作れる)。
+  スクリプトが確かめるのは中身の path の安全性と manifest との整合で、archive を誰が作ったかは確かめない。
+  出所が確かでない archive(人から受け取ったもの、他者が書ける場所に置いてあったもの)は restore しない。
+  署名は入れない(鍵の管理が増え、復元の手順の循環も重くなるため。#317)。
