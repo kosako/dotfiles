@@ -78,8 +78,8 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
        呼び出しも `bounded_probe` で期限付き(5 秒)にする。
      - exit 0 → ok。exit 2 → wrapper の理由の 1 行(接頭辞 `personal-usage-reader: ` を外し、制御文字を除く)を
        添えた action。手順は `chezmoi apply` と、理由が実行ファイルなら tacho の導入(`install-packages.sh`)。読み先が
-       ずれていれば「ずれを直すまで効かない」と書き、wrapper が失敗するとは断定しない。それ以外の exit や期限切れ →
-       未確認の warn。
+       ずれていれば「ずれを直すまで効かない」と書き、wrapper が失敗するとは断定しない。exit 3(設定 file が無い。
+       doctor が有無を確かめた後に消えた)→ 無いときと同じ手順の action。それ以外の exit や期限切れ → 未確認の warn。
   - ok は「`--check` が受け入れた」の意味で、実際に残量を読めたかは確かめていない。
   - 表示するのは doctor の固定の文言と、wrapper の理由の 1 行だけ。理由に設定の中身と path が出ないことは
     agent-tools の契約(`docs/boundary-with-dotfiles.md`)。中身の drift は managed drift section が出す。

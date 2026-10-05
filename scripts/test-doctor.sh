@@ -1033,12 +1033,26 @@ ur_expect "rejected + XDG_CONFIG_HOME elsewhere -> redirect-aware action" \
   "[warn] usage reader config $ur_config rejected by personal-usage-reader --check (unknown key in the config) — fixing it takes effect only once the redirect above is gone" \
   ! "personal-usage-reader fails"
 ur_asked_check "rejected + XDG_CONFIG_HOME elsewhere -> --check run" yes
-# UR-4) any other --check exit (3 = no config file, though doctor saw one) is
-#       not a verdict on the file -> not checked.
+# UR-4) --check exit 3 is the contract's "no config file" (the file went away
+#       after doctor's presence check) -> the missing action with the same
+#       mkdir then apply steps (Codex review R1, PR #324).
 ur_fake 0 "$ur_usage" 3 "personal-usage-reader: no config file"
-ur_expect "--check exit 3 -> not checked" personal -- \
-  "[warn] $ur_unchecked: personal-usage-reader --check exited 3, neither its accept (0) nor its reject (2)" \
-  ! "$ur_ok" ! "rejected by"
+if ur_out="$(env -i PATH="$PATH" HOME="$ur_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fxq -- "[warn] usage reader config $ur_config absent per personal-usage-reader --check (exit 3), though doctor found it a moment earlier — agent-tools runs with no usage reader (assignment ignores the remaining budget; the maintenance sweep stays small)" <<< "$ur_out" \
+  && steps_consecutive "$ur_out" "        \$ mkdir -p $(printf '%q' "$ur_home/.config")" \
+    "        \$ chezmoi apply $(printf '%q' "$ur_home/.config/agent-tools") $(printf '%q' "$ur_config")" \
+  && ! grep -Fq "contract not checked" <<< "$ur_out"; then
+  ok "test passed: usage reader --check exit 3 -> missing action with mkdir then apply steps"
+else
+  printf '%s\n' "${ur_out:-<no output>}" >&2
+  fail "test failed: usage reader --check exit 3 -> expected the absent action and the mkdir step immediately followed by the apply step"
+  status=1
+fi
+# UR-4b) an exit outside the contract (0 / 2 / 3) is no verdict -> not checked.
+ur_fake 0 "$ur_usage" 1
+ur_expect "--check exit 1 -> not checked" personal -- \
+  "[warn] $ur_unchecked: personal-usage-reader --check exited 1, outside its contract (0 / 2 / 3)" \
+  ! "$ur_ok" ! "rejected by" ! "absent per"
 # UR-5) a wrapper that predates --check (--help without [--check], or no
 #       --help at all) -> not checked, the sync step, and --check never run
 #       (it would read as "invalid").

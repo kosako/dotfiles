@@ -1778,10 +1778,14 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
     usage_reader_broken_effect="fixing it takes effect only once the redirect above is gone"
     usage_reader_missing_effect="restoring it takes effect only once the redirect above is gone"
   fi
+  # Restores a missing file; also where --check finds none (exit 3).
+  usage_reader_restore_steps=(
+    "\$ mkdir -p $(printf '%q' "$HOME/.config")"
+    "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+  )
   if [[ ! -e "$usage_reader_config" && ! -L "$usage_reader_config" ]]; then
     action "usage reader config missing: $usage_reader_config (agent-tools-usage-reader module) — $usage_reader_missing_effect" \
-      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
-      "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+      "${usage_reader_restore_steps[@]}"
   elif [[ ! -e "$usage_reader_config" ]]; then
     # A dangling symlink: the wrapper follows it, finds nothing and treats
     # the config as absent (exit 3), not as invalid (Codex review R3, PR #302).
@@ -1829,11 +1833,17 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
               "\$ chezmoi apply $(printf '%q' "$usage_reader_config")   # restores the managed content" \
               "\$ ./scripts/install-packages.sh   # when the reason is the executable: dry-run first; --apply installs the catalog's tacho, the managed argv[0] under ~/go/bin"
             ;;
+          3)
+            # The contract's "no config file" (Codex review R1, PR #324): the
+            # file went away after the presence check above, so it is missing.
+            action "usage reader config $usage_reader_config absent per personal-usage-reader --check (exit 3), though doctor found it a moment earlier — $usage_reader_missing_effect" \
+              "${usage_reader_restore_steps[@]}"
+            ;;
           "")
             warn "$usage_reader_unchecked: personal-usage-reader --check gave no answer within ${probe_deadline}s (the probe was killed)"
             ;;
           *)
-            warn "$usage_reader_unchecked: personal-usage-reader --check exited $probe_rc, neither its accept (0) nor its reject (2)"
+            warn "$usage_reader_unchecked: personal-usage-reader --check exited $probe_rc, outside its contract (0 / 2 / 3)"
             ;;
         esac
       fi

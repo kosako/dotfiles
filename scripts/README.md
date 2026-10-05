@@ -108,8 +108,8 @@ policy validation が失敗した場合は exit 1。
   `~/.claude/agent-tools/scripts/personal-usage-reader` の `--help` の 1 行目に `[--check]` があることを確かめてから
   `--check` を `XDG_CONFIG_HOME` を外して(= managed file に対して)`bounded_probe` で呼ぶ。exit 0 → ok、
   exit 2 → wrapper の理由の 1 行(制御文字は除く)を添えた action(手順は `chezmoi apply` と、理由が実行ファイルなら
-  tacho の導入 `install-packages.sh`。読み先がずれていれば「ずれを直すまで効かない」と書く)、それ以外の exit・
-  期限切れ → 未確認の warn。opt-in なし → 未確認の item、wrapper の未配備・`--check` 非対応の旧版 → 未確認で
+  tacho の導入 `install-packages.sh`。読み先がずれていれば「ずれを直すまで効かない」と書く)、exit 3(有無の確認の
+  後に消えた)→ 無いときと同じ手順の action、それ以外の exit・期限切れ → 未確認の warn。opt-in なし → 未確認の item、wrapper の未配備・`--check` 非対応の旧版 → 未確認で
   agent-tools の sync を示す action、`--help` が失敗する(起動できない wrapper もありうる)→ 未確認の warn。設定の値は表示しない。非 active な profile では手置きの file を中立に表示する(#301)。
 - agent-tools(report-only): `~/src/agent/agent-tools`(既定。`AGENT_TOOLS` env で override 可)の presence を表示し(不在は `enableAgentToolsStatus=true` の profile だけ warn。false の profile — agent-tools を配備しない work — では想定どおりの状態として中立表示。#258)、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --root <checkout> --json`。root は常に明示的に pin する — #73 当時の status.sh は `--root` 省略時に cwd を検査して空 repo を偽報告した。agent-tools#305 以降の既定は script 自身の repo)を実行して安全な summary を出す。sync targets は tool ごとの件数(claude-code / codex / opencode)と、conflict / stale / deployed_but_inactive がどの tool の行かも出す(#263)。clone / pull / sync はしない。
 - network tunnels: `allowNetworkTunnels` と tunnel tool の存在。
@@ -334,7 +334,8 @@ query だけを実機で実行する(書き込みはしない)。
   1 行目・理由を control file で決める)を置き、missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action /
   `--check` exit 0 → ok(JSON でない file でも wrapper が受ければ ok = doctor は形を自分で判定しない)/ exit 2 →
   wrapper の名前の接頭辞を外した理由つきの action と apply → install の連続 2 step(理由の ESC・CR は除く。理由が
-  無ければ括弧なし)/ exit 3 → 未確認の warn / `--help` に `[--check]` が無い旧版 → 未確認と sync の action /
+  無ければ括弧なし)/ exit 3 → `mkdir -p` → `chezmoi apply` の連続 2 step の
+  欠損の action / 契約の外の exit(1)→ 未確認の warn / `--help` に `[--check]` が無い旧版 → 未確認と sync の action /
   `--help` が失敗する(exit 127)→ 旧版とは断定しない未確認の warn。どちらも `--check` は呼ばない / wrapper が実行できない・無い → 未配備の action / opt-in なし(opt-out の
   repo の写し)→ 未確認の item で wrapper を一度も呼ばない / regular file でない → action / 指す先の無い symlink →
   「読み取り口なし」の action(wrapper は exit 3 にするので失敗とは書かない)。どちらも `--check` は呼ばない / 絶対
