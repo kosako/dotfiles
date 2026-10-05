@@ -919,128 +919,53 @@ report_codex_rules_probes() {
 }
 
 report_codex_projects_trust() {
-  local codex_config trusted_paths trusted_path trusted_total
-  # [projects] trust watch: parse ONLY quoted [projects] path headers and
-  # the trust_level key inside each section (an entry can be "untrusted" —
-  # only trusted ones matter). config.toml also carries MCP server env blocks
-  # that may hold secrets, so nothing else is read or echoed (key-name-only
-  # discipline, same as the #148 token scan).
+  local codex_config projects_kind trusted_paths trusted_path trusted_total
+  # [projects] trust watch: which project paths config.toml marks
+  # trust_level = "trusted" (an entry can be "untrusted" — only trusted ones
+  # matter). The file is read with yq's TOML decoder (#309): every valid
+  # spelling — header tables, a [projects] table, inline tables, dotted or
+  # quoted keys, escapes, multi-line strings — means what TOML says, which a
+  # line-based scan could not keep up with (it counted valid trust as zero,
+  # #292 / #309). Only the trusted project KEYS (paths) leave yq; config.toml
+  # also carries MCP server env blocks that may hold secrets, so no value is
+  # ever echoed and yq's errors are discarded (key-name-only discipline, same
+  # as the #148 token scan). Anything that does not read as a map of project
+  # tables — a TOML error, projects as a string or an array, a trusted key
+  # with a control character — is an INCOMPLETE scan, never "0 trusted".
   codex_config="$HOME/.codex/config.toml"
-  if [[ -f "$codex_config" ]]; then
-    # Tolerate the valid TOML spellings codex may write: optional whitespace
-    # around `=` (compact `trust_level="trusted"` included) and single-quoted
-    # literal strings. Headers accept double/single-quoted keys and trailing
-    # comments; escaped double-quoted keys and other unsupported forms must
-    # surface as an INCOMPLETE scan, as must any parse/read failure, never as
-    # "0 trusted" (fail-open false-clean).
-    # Every other spelling that can grant project trust exits 1 too, so the
-    # scan never counts zero for a form it cannot read (#309, the rest of
-    # #292's contract): a non-canonical table name (a [projects] table, a
-    # spaced / quoted / array name), a ROOT key projects.* / "projects" (an
-    # inline table or dotted key before the first table header — inside
-    # another table the same key is that table's own), a trust_level that is
-    # not the plain one-line form inside a project section, and an escape
-    # inside a double-quoted key or table name at the root or in a project
-    # section (TOML escapes are not decoded here). scan() walks each line
-    # character by character — basic and literal strings (with escapes),
-    # multi-line strings across lines, comments, and the bracket depth of a
-    # value (a multi-line array) — so a line that starts inside a multi-line
-    # string or inside a value continued from an earlier line is skipped as
-    # a whole, and a quote or backslash inside a comment, a literal string
-    # or a value means nothing.
-    if trusted_paths="$(awk '
-      function scan(s, st,    i, n, c) {
-        n = length(s); i = 1
-        while (i <= n) {
-          c = substr(s, i, 1)
-          if (st == "mlb") {
-            if (c == "\\") { i += 2; continue }
-            if (substr(s, i, 3) == "\"\"\"") { st = ""; i += 3; continue }
-            i++; continue
-          }
-          if (st == "mll") {
-            if (substr(s, i, 3) == "\047\047\047") { st = ""; i += 3; continue }
-            i++; continue
-          }
-          if (c == "#") break
-          if (c == "=") seen_eq = 1
-          if (seen_eq || vdepth > 0) {
-            if (c == "[" || c == "{") vdepth++
-            else if ((c == "]" || c == "}") && vdepth > 0) vdepth--
-          }
-          if (substr(s, i, 3) == "\"\"\"") { st = "mlb"; i += 3; continue }
-          if (substr(s, i, 3) == "\047\047\047") { st = "mll"; i += 3; continue }
-          if (c == "\"") {
-            i++
-            while (i <= n) {
-              c = substr(s, i, 1)
-              if (c == "\\") { if (!seen_eq && vdepth == 0) key_escape = 1; i += 2; continue }
-              if (c == "\"") break
-              i++
-            }
-            i++; continue
-          }
-          if (c == "\047") {
-            i++
-            while (i <= n && substr(s, i, 1) != "\047") i++
-            i++; continue
-          }
-          i++
-        }
-        return st
-      }
-      {
-        start_ml = in_ml
-        start_depth = vdepth
-        key_escape = 0; seen_eq = 0
-        in_ml = scan($0, in_ml)
-      }
-      start_ml != "" || start_depth > 0 { next }
-      /^[[:space:]]*\[/ && key_escape { exit 1 }
-      /^[[:space:]]*\[/ && $0 !~ /^[[:space:]]*\[projects\./ && $0 ~ /^[[:space:]]*\[+[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[].]/ { exit 1 }
-      !seen_header && /^[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[.=]/ { exit 1 }
-      !seen_header && key_escape { exit 1 }
-      /^[[:space:]]*\[projects\./ {
-        seen_header = 1
-        p = $0
-        sub(/^[[:space:]]*\[projects\./, "", p)
-        if (p !~ /^("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*\][[:space:]]*(#.*)?$/) exit 1
-        quote = substr(p, 1, 1)
-        p = substr(p, 2)
-        current = substr(p, 1, index(p, quote) - 1)
-        next
-      }
-      /^[[:space:]]*\[/ { seen_header = 1; current = "" ; next }
-      current != "" && $0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("trusted"|'\''trusted'\'')[[:space:]]*(#.*)?$/ {
-        print current
-        current = ""
-        next
-      }
-      current != "" && key_escape { exit 1 }
-      current != "" && $0 ~ /^[[:space:]]*("trust_level"|'\''trust_level'\''|trust_level)[[:space:]]*[.=]/ {
-        if ($0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*(#.*)?$/) next
-        exit 1
-      }
-    ' "$codex_config" 2>/dev/null)"; then
-      trusted_total=0
-      while IFS= read -r trusted_path; do
-        [[ -z "$trusted_path" ]] && continue
-        trusted_total=$((trusted_total + 1))
-        if [[ "$trusted_path" == "$HOME" ]]; then
-          action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
-            "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section (or set trust_level to untrusted)"
-        elif [[ ! -d "$trusted_path" ]]; then
-          action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
-            "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section"
-        fi
-      done <<< "$trusted_paths"
-      item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, project headers + trust_level scanned only)"
-    else
-      warn "projects-trust scan INCOMPLETE: could not parse ~/.codex/config.toml project headers; do NOT read this as zero trusted"
-    fi
-  else
+  if [[ ! -f "$codex_config" ]]; then
     item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
+    return 0
   fi
+  trusted_paths=""
+  if ! projects_kind="$(yq -p toml -o json -r '.projects | kind' "$codex_config" 2>/dev/null)"; then
+    projects_kind="unreadable"
+  elif [[ "$projects_kind" == scalar ]]; then
+    [[ "$(yq -p toml -o json -r '.projects == null' "$codex_config" 2>/dev/null)" == true ]] && projects_kind="absent"
+  fi
+  if [[ "$projects_kind" == map ]]; then
+    if ! trusted_paths="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | .[].key' "$codex_config" 2>/dev/null)" \
+      || [[ "$(yq -p toml -o json -r '.projects | to_entries | map(select((.value.trust_level == "trusted") and (.key | test("[[:cntrl:]]")))) | length' "$codex_config" 2>/dev/null)" != 0 ]]; then
+      projects_kind="unreadable"
+    fi
+  fi
+  if [[ "$projects_kind" != map && "$projects_kind" != absent ]]; then
+    warn "projects-trust scan INCOMPLETE: could not read the projects table of ~/.codex/config.toml; do NOT read this as zero trusted"
+    return 0
+  fi
+  trusted_total=0
+  while IFS= read -r trusted_path; do
+    [[ -z "$trusted_path" ]] && continue
+    trusted_total=$((trusted_total + 1))
+    if [[ "$trusted_path" == "$HOME" ]]; then
+      action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
+        "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section (or set trust_level to untrusted)"
+    elif [[ ! -d "$trusted_path" ]]; then
+      action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
+        "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section"
+    fi
+  done <<< "$trusted_paths"
+  item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml read with yq's TOML decoder, project keys only)"
 }
 
 section "AI policy"

@@ -2850,9 +2850,10 @@ else
   status=1
 fi
 
-for aip_header in '[projects.bare]' '[projects."/escaped\\path"]' \
-    '[projects."/path".extra]' "[projects.'/path' trailing]" \
-    '[projects."/path"] trailing'; do
+# Headers that are TOML syntax errors make the whole file unreadable: INCOMPLETE.
+# (Valid spellings such as [projects.bare] are counted — see the trust form
+# cases below.)
+for aip_header in "[projects.'/path' trailing]" '[projects."/path"] trailing'; do
   cat > "$fixture_home/.codex/config.toml" <<TOML
 [projects."$fixture_home/real-project"]
 trust_level = "trusted"
@@ -2867,21 +2868,23 @@ TOML
     && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
     && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
     && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
-    ok "test passed: unsupported project header reports INCOMPLETE without a trusted count (exit 0): $aip_header"
+    ok "test passed: a header that is a TOML syntax error reports INCOMPLETE without a trusted count (exit 0): $aip_header"
   else
-    fail "test failed: unsupported project header must report INCOMPLETE without a trusted count (exit 0): $aip_header"
+    fail "test failed: a header that is a TOML syntax error must report INCOMPLETE without a trusted count (exit 0): $aip_header"
     status=1
   fi
 done
 
-# Every other spelling that can grant project trust is INCOMPLETE too, never
-# "0 trusted" (#309, the rest of #292's contract). Each case writes the whole
-# config line by line (printf '%s\n', so a TOML escape such as _ stays
-# literal): ROOT forms come before the first table header — after a header
-# the same key would belong to that table — and every config also carries a
-# real trusted project and an MCP env canary that must never be printed.
+# The scan reads config.toml with a TOML parser (yq, #309), so every valid
+# spelling of a project table counts as TOML says — a [projects] table,
+# inline tables, dotted / quoted / escaped keys, multi-line strings — and only
+# what does not read as a map of project tables (a TOML error, projects as a
+# string or an array, a trusted key with a control character) is INCOMPLETE,
+# never "0 trusted". Each case writes the whole config line by line (printf
+# '%s\n', so a TOML escape such as j stays literal), with a real trusted
+# project and an MCP env canary that must never be printed.
 aip_real_header="[projects.\"$fixture_home/real-project\"]"
-aip_bs='\'   # one backslash: the escape cases below spell TOML \uXXXX escapes with it
+aip_bs='\'   # one backslash: the escape cases spell TOML escapes (u006a = j) with it
 # aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
 aip_trust_case() {
   local label="$1" expect="$2"
@@ -2897,6 +2900,7 @@ aip_trust_case() {
     status=1
   elif [[ "$expect" == incomplete ]]; then
     if grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
+      && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
       && ! grep -Fq "Codex projects trust:" <<< "$aip_out"; then
       ok "test passed: trust form reports INCOMPLETE without a trusted count: $label"
     else
@@ -2905,37 +2909,44 @@ aip_trust_case() {
     fi
   elif grep -Fq "Codex projects trust: $expect path(s) trusted" <<< "$aip_out" \
     && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
-    ok "test passed: trust form keeps the normal count ($expect): $label"
+    ok "test passed: trust form counts as TOML says ($expect): $label"
   else
-    fail "test failed: trust form must keep the normal count ($expect), not INCOMPLETE: $label"
+    fail "test failed: trust form must count as TOML says ($expect), not INCOMPLETE or another count: $label"
     status=1
   fi
 }
-aip_trust_case "root inline table" incomplete \
+# Valid spellings that grant trust: counted with the real project (2).
+aip_trust_case "root inline table" 2 \
   'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
-aip_trust_case "root dotted key" incomplete \
+aip_trust_case "root dotted key" 2 \
   'projects."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
-aip_trust_case "escaped root key" incomplete \
+aip_trust_case "escaped root key" 2 \
   "\"pro${aip_bs}u006aects\".\"/x\".trust_level = \"trusted\"" "$aip_real_header" 'trust_level = "trusted"'
-aip_trust_case "[projects] table" incomplete \
+aip_trust_case "[projects] table" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '[projects]' '"/x" = { trust_level = "trusted" }'
-aip_trust_case "spaced table name" incomplete \
+aip_trust_case "spaced table name" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '[ projects."/x" ]' 'trust_level = "trusted"'
-aip_trust_case "quoted table name" incomplete \
+aip_trust_case "quoted table name" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '["projects"."/x"]' 'trust_level = "trusted"'
-aip_trust_case "escaped table name" incomplete \
+aip_trust_case "escaped table name" 2 \
   "$aip_real_header" 'trust_level = "trusted"' "[\"pro${aip_bs}u006aects\".\"/x\"]" 'trust_level = "trusted"'
-aip_trust_case "array of tables" incomplete \
-  "$aip_real_header" 'trust_level = "trusted"' '[[projects]]' 'path = "/x"'
-aip_trust_case "quoted trust_level key" incomplete \
+aip_trust_case "bare project key" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects.bare]' 'trust_level = "trusted"'
+aip_trust_case "escaped backslash in a project key" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/escaped${aip_bs}${aip_bs}path\"]" 'trust_level = "trusted"'
+aip_trust_case "quoted trust_level key" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' '"trust_level" = "trusted"'
-aip_trust_case "escaped trust_level key" incomplete \
+aip_trust_case "escaped trust_level key" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' "\"trust${aip_bs}u005flevel\" = \"trusted\""
-aip_trust_case "multi-line trust_level" incomplete \
+aip_trust_case "multi-line trust_level" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' 'trust_level = """trusted"""'
-# ... while keys and tables that merely contain the word, the same key inside
-# another table, multi-line strings whose text looks like a [projects] table,
-# and an untrusted entry with a comment keep the normal count.
+aip_trust_case "root projects key after a multi-line array" 2 \
+  'arr = [' '  "a",' ']' 'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
+# ... while trust_level in a sub-table, look-alike keys and tables, the same
+# key inside another table, string contents that look like tables, comments,
+# escapes in values or other tables' names, and an untrusted entry do not.
+aip_trust_case "trust_level in a sub-table of a project" 1 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/path".extra]' 'trust_level = "trusted"'
 aip_trust_case "look-alike keys and tables" 1 \
   'project_doc_max_bytes = 32768' "$aip_real_header" 'trust_level = "trusted"' \
   '[profiles.projects]' 'model = "m"' '[projects."/y"]' 'trust_level = "untrusted" # note'
@@ -2945,26 +2956,32 @@ aip_trust_case "multi-line basic string with table-like text" 1 \
   'developer_instructions = """' '[projects]' 'projects = 1' '"""' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "multi-line literal string with table-like text" 1 \
   "notes = '''" '[projects]' "'''" "$aip_real_header" 'trust_level = "trusted"'
-# Quotes and backslashes only count inside strings (Codex review R2, PR #312):
-# a triple quote in a comment opens nothing, an escaped quote does not close a
-# multi-line string, and a backslash in a header comment, in a literal
-# (single-quoted) header or in a value is not a key escape.
 aip_trust_case "triple quote inside a comment" 1 \
   '# a """ example in a comment' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "escaped quotes inside a multi-line string" 1 \
   'developer_instructions = """' "say ${aip_bs}\"\"\"hi" '[projects]' '"""' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "multi-line string closed by four quotes inside an array" 1 \
+  'notify = ["sh", "-c", """echo "done""""]' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "escaped quotes in a multi-line array value" 1 \
+  'notify = [' '  "sh",' '  "-c",' "  \"printf '%s' ${aip_bs}\"done${aip_bs}\"\"," ']' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "backslash in a header comment" 1 \
   "$aip_real_header # C:${aip_bs}work" 'trust_level = "trusted"'
+aip_trust_case "escape in another table's name" 1 \
+  "[mcp_servers.\"demo${aip_bs}u002dserver\"]" 'command = "x"' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "backslash in a literal header and in a value" 2 \
   "$aip_real_header" 'trust_level = "trusted"' "[projects.'/tmp/project${aip_bs}name']" 'trust_level = "trusted"' \
   '[mcp_servers.demo.env]' "PATHX = \"C:${aip_bs}${aip_bs}dir\""
-# A value continued over several lines (a multi-line array) is not a key:
-# escaped quotes in its elements keep the normal count (Codex review R3,
-# PR #312), while a root `projects` key after the array closes is still read.
-aip_trust_case "escaped quotes in a multi-line array value" 1 \
-  'notify = [' '  "sh",' '  "-c",' "  \"printf '%s' ${aip_bs}\"done${aip_bs}\"\"," ']' "$aip_real_header" 'trust_level = "trusted"'
-aip_trust_case "root projects key after a multi-line array" incomplete \
-  'arr = [' '  "a",' ']' 'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "no projects at all" 0 \
+  '[profiles.default]' 'model = "m"'
+# What does not read as a map of project tables is INCOMPLETE.
+aip_trust_case "TOML syntax error" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' 'this is not toml'
+aip_trust_case "projects as a string" incomplete \
+  'projects = "everything"'
+aip_trust_case "projects as an array of tables" incomplete \
+  '[[projects]]' 'path = "/x"' 'trust_level = "trusted"'
+aip_trust_case "a trusted key with a control character" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/a${aip_bs}nb\"]" 'trust_level = "trusted"'
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log

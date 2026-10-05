@@ -375,11 +375,10 @@ query だけを実機で実行する(書き込みはしない)。
   not installed・outdated なら `herdr integration install <agent>` の action、current なら info、herdr 不在
   は catalog section への pointer。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
-  engine 失敗は INCOMPLETE、`config.toml` の projects trust は header + trust_level のみ scan。対応する header の形以外で
-  trust を与えうる書き方(`[projects]` table、空白・quote・配列・escape を含む table 名、最初の header より前の projects の
-  inline table / dotted key、project の section の中の quote された / escape を含む / 1 行でない trust_level)は INCOMPLETE。
-  単語を含むだけの key / table、他の table の中の同名の key、複数行文字列の中身、コメントや literal 文字列や値の中の
-  引用符・backslash、複数行の配列の値の続きの行は、従来どおり数えを変えない(行を文字単位で走査する、#309)。
+  engine 失敗は INCOMPLETE、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
+  取り出す(値は出さない、#309)。正当な書き方(`[projects]` table・inline table・dotted / quote / escape を含む key・
+  複数行文字列)は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key に制御文字、の
+  ときだけ INCOMPLETE(0 件とは言わない)。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
