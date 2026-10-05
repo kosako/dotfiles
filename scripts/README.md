@@ -563,7 +563,7 @@ capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の�
 30 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
 足して計 31 件。#136 で credential-store 読取 4 件、#234 で OpenCode の `auth.json`、#315 で gh token の表示と
 keychain の password の読み出し・dump・export を option の置き方の違いも含めて追加)、1Password の CLI 全体の無条件 ask(#315)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
-取り込んだ global preference キーの保持、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
+取り込んだ global preference キーの保持、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
 chezmoi が必要(render job)。
 

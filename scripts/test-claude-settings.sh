@@ -125,6 +125,21 @@ else
   status=1
 fi
 
+# 3b) Third-party plugin marketplaces (#317): every extraKnownMarketplaces entry
+#     pins its source to a ref (a tag — Claude Code's marketplace source takes
+#     no commit sha, and a default-branch name would not pin anything) and sets
+#     autoUpdate false explicitly (the settings value wins over the /plugin
+#     toggle), so a plugin changes only through a PR that moves the ref
+#     (docs/update-policy.md).
+mkt_count="$(yq -p json '.extraKnownMarketplaces // {} | length' "$off_file")"
+mkt_unpinned="$(yq -p json '.extraKnownMarketplaces // {} | to_entries | .[] | select((.value.source.ref // "") == "" or (.value.source.ref // "" | test("^(main|master|HEAD)$")) or .value.autoUpdate != false) | .key' "$off_file")"
+if [[ "$mkt_count" -ge 1 && -z "$mkt_unpinned" ]]; then
+  ok "test passed: every third-party plugin marketplace ($mkt_count) pins source.ref and sets autoUpdate=false"
+else
+  fail "test failed: plugin marketplace not pinned or auto-updating (count=$mkt_count): ${mkt_unpinned:-<none declared>}"
+  status=1
+fi
+
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
