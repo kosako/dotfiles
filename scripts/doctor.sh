@@ -821,7 +821,7 @@ fi
 # report-only — every path ends in ok/item/warn (return 0), so the plain
 # calls below are set -e safe without || true.
 report_codex_rules_probes() {
-  local codex_rules_dir codex_rules rules_file rules_name rules_args unmanaged_rules rules_listing_complete
+  local codex_rules_dir codex_rules rules_file rules_name rules_args unmanaged_rules rules_listing_complete rules_dir_error
   local outward_probes outward_allowed probe_failures probe verdict decision
   codex_rules_dir="$HOME/.codex/rules"
   codex_rules="$codex_rules_dir/default.rules"
@@ -836,9 +836,22 @@ report_codex_rules_probes() {
   # layers are loaded by Codex too but not seen here.
   rules_args=()
   unmanaged_rules=()
-  if [[ -e "$codex_rules_dir" && ! -d "$codex_rules_dir" ]]; then
-    warn "Codex rules path is not a directory (~/.codex/rules): Codex cannot read its rules dir; rules-semantics scan INCOMPLETE; do NOT read this as clean"
-    return 0
+  # Only a CONFIRMED absence is "no rules": Codex treats NotFound (incl. a
+  # dangling symlink) as empty, but any other failure to resolve the dir
+  # (not a directory, permission denied — also on a parent a symlink points
+  # into —, a symlink loop) is a read_dir error there. `test -e` /
+  # `-d` collapse all of those into "absent", and BSD `ls -L` silently falls
+  # back to the link itself, so the errno is read from the builtin cd in a
+  # subshell (follows the link; the C locale keeps the message stable; the
+  # raw error, which carries the path, is never echoed).
+  if ! rules_dir_error="$( (LC_ALL=C; cd -P -- "$codex_rules_dir") 2>&1 )"; then
+    case "$rules_dir_error" in
+      *"No such file or directory"*) ;;
+      *)
+        warn "Codex rules dir could not be opened (~/.codex/rules — not a directory, permission denied or a symlink loop; Codex fails to read it too): rules-semantics scan INCOMPLETE; do NOT read this as clean"
+        return 0
+        ;;
+    esac
   fi
   if [[ -d "$codex_rules_dir" ]]; then
     # The listing must be COMPLETE: a find that prints some entries and then
@@ -867,7 +880,7 @@ report_codex_rules_probes() {
       fi
     )
     if [[ "$rules_listing_complete" -ne 1 ]]; then
-      warn "Codex rules dir could not be listed completely (~/.codex/rules — unreadable, or the listing failed): rules-semantics scan INCOMPLETE; do NOT read this as clean"
+      warn "Codex rules dir could not be listed completely (~/.codex/rules — the listing failed partway): rules-semantics scan INCOMPLETE; do NOT read this as clean"
       return 0
     fi
   fi

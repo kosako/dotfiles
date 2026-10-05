@@ -3206,7 +3206,7 @@ if [[ "$(id -u)" != "0" ]]; then
   chmod 000 "$aip_rules_dir"
   if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
       "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
+    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
     && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
     ok "test passed: an unreadable rules dir reports the scan INCOMPLETE (no false clean)"
   else
@@ -3272,12 +3272,56 @@ mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 : > "$aip_rules_dir"
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex rules path is not a directory (~/.codex/rules)" <<< "$aip_out" \
+  && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
   && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
   ok "test passed: a non-directory rules path reports the scan INCOMPLETE"
 else
   printf '%s\n' "$aip_out" >&2
   fail "test failed: a non-directory rules path was not reported as INCOMPLETE"
+  status=1
+fi
+rm -f "$aip_rules_dir"
+mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+
+# AIP-11) Only a confirmed absence is "no rules": ~/.codex/rules a symlink into
+#         a parent without search permission is a read error for Codex, so it
+#         must be INCOMPLETE — `test -e` alone would call it absent and report
+#         only "not applied yet". Skipped as root.
+if [[ "$(id -u)" != "0" ]]; then
+  mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+  mkdir -p "$fixture_home/locked-parent"
+  mv "$fixture_home/.codex/rules-real" "$fixture_home/locked-parent/rules"
+  ln -s "$fixture_home/locked-parent/rules" "$aip_rules_dir"
+  chmod 000 "$fixture_home/locked-parent"
+  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: a rules dir behind an unsearchable parent is INCOMPLETE, not absent"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: an unresolvable rules dir was read as absent"
+    status=1
+  fi
+  chmod 755 "$fixture_home/locked-parent"
+  rm -f "$aip_rules_dir"
+  mv "$fixture_home/locked-parent/rules" "$aip_rules_dir"
+  rmdir "$fixture_home/locked-parent"
+fi
+
+# AIP-12) A dangling ~/.codex/rules symlink IS a confirmed absence (Codex's
+#         NotFound -> no rules): "not applied yet", not INCOMPLETE.
+mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+ln -s "$fixture_home/.codex/rules-gone" "$aip_rules_dir"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+  && ! grep -Fq "Codex rules dir could not be" <<< "$aip_out"; then
+  ok "test passed: a dangling rules dir symlink is a confirmed absence (not applied, not INCOMPLETE)"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a dangling rules dir symlink was not treated as absent"
   status=1
 fi
 rm -f "$aip_rules_dir"
