@@ -3434,7 +3434,7 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
           && ! grep -Fq "[ok] go install target" <<< "$go_out" \
           && grep -Fq "go install target is $fixture_home/toolchain/bin, not ~/go/bin" <<< "$go_only" \
           && grep -Fq "chezmoi apply $fixture_home/.config/mise/config.toml $fixture_home/.zshenv" <<< "$go_only" \
-          && grep -Fq "exec zsh -l" <<< "$go_only" && go_ok=1
+          && grep -Fq "\$ exec env -u GOBIN -u GOPATH zsh -l" <<< "$go_only" && go_ok=1
         ;;
       no-path)
         grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
@@ -3464,6 +3464,15 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
   fi
 done
 rm -rf "${go_fakebin:?}"
+# The new-shell step must actually drop an inherited GOBIN / GOPATH (a plain
+# `exec zsh -l` keeps exported values): check that this env(1) honors the
+# `-u` form the action prints, with a probe in place of the shell.
+if [[ "$(GOBIN=/inherited/bin GOPATH=/inherited env -u GOBIN -u GOPATH sh -c 'printf "%s:%s" "${GOBIN-unset}" "${GOPATH-unset}"')" == "unset:unset" ]]; then
+  ok "test passed: the action's env -u GOBIN -u GOPATH form drops inherited values here"
+else
+  fail "test failed: env -u GOBIN -u GOPATH did not drop inherited values"
+  status=1
+fi
 
 # NPM-A) A broken npm (shim without a runtime) must not kill the doctor:
 # report-only means warn + skip, exit 0 (#144).

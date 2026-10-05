@@ -374,7 +374,7 @@ query だけを実機で実行する(書き込みはしない)。
   空白 path)/ drift 手順の path が ` M x` でも `~/x` / work 機(module 非 active)で fake herdr が
   not installed・outdated なら `herdr integration install <agent>` の action、current なら info、herdr 不在
   は catalog section への pointer。
-- go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が action(`--actions-only` に mise config の apply と新しい shell の手順が出る)、
+- go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が action(`--actions-only` に mise config の apply と、継承した GOBIN / GOPATH を外す `exec env -u GOBIN -u GOPATH zsh -l` の手順が出る。その形で継承値が消えることも確認)、
   `go env` の失敗は「確かめられない」の warn(ok を出さない)、PATH に `~/go/bin` が無ければ info(`go env` が
   失敗したときも出す)、末尾 slash の HOME でも一致。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、

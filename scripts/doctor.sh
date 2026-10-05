@@ -527,7 +527,7 @@ report_go_install_target() {
     # tool already sitting in the old one.
     action "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
       "\$ chezmoi apply $(printf '%q' "$home_dir/.config/mise/config.toml") $(printf '%q' "$home_dir/.zshenv")   # leaves GOBIN unset; ~/go/bin on PATH" \
-      "\$ exec zsh -l   # a new shell, without the GOBIN an already activated mise exported" \
+      "\$ exec env -u GOBIN -u GOPATH zsh -l   # a new shell: an exported GOBIN / GOPATH is inherited otherwise (go.set_gobin only stops mise from setting it)" \
       "# and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local); then re-run doctor"
   fi
 }
