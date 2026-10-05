@@ -26,22 +26,32 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     OpenCode の `auth.json`)/ `.env` 系を deny(`.env.example` は allow)。SSH 鍵と credential store は
     Claude の secret floor(`Read` 側 6 件)と同じ集合。`.env` 系の deny は Claude では secret floor ではなく
     `enforceAiSandbox` 連動の human-legit gate(personal では off)に当たるので、この点は OpenCode の床の方が厳しい。
+    **read の deny は read tool にだけ効く**: OpenCode の `grep` は正規表現に、`glob` は pattern に当てる別の permission で、
+    path の deny に従わない(OpenCode の docs)。project の外の path はどの tool でも `external_directory`(下記、ask)が
+    掛かるが、**project の中の `.env` などは grep で読める**。home を project root にして OpenCode を起動しない(#315)。
   - `bash`: `*` allow の上に、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
     **ask**。GitHub CLI は **`gh *` を既定 ask** にし、read 系の subcommand(`pr view|list|diff|checks|status`、
     `issue view|list|status`、`repo view`、`release view|list`、`run view|list`、`workflow view|list`、
     `label list`、`gist view|list`、`search`、`status`、bare の `auth status`、`--version` / `version` / `help`)だけを
     allow に戻す(#240: mutation を列挙する方式では `gh issue edit` / `gh pr close` / `gh api -XPOST` などが
     allow-all に落ちた。`gh api` は method に関わらず ask — 短縮 flag `-XPOST` / `-ftitle=x` は flag 照合を
-    すり抜け、GraphQL は read でも POST を使う)。deny(env dump `env` / `printenv`、`gh secret` /
-    `gh api *secrets*`、token 表示 `gh auth token` / `gh auth status --show-token` / `-t`、`cat ~/.ssh/*`)は
-    **map の末尾**に置く(last-match-wins で、後続の広い ask に deny を弱めさせないため)。
+    すり抜け、GraphQL は read でも POST を使う)。1Password の CLI は **`op` の全 subcommand を ask**(`op read` /
+    `op item get` / `op run` などの読み出し系は global option をどこにでも置けるので、subcommand の列挙ではなく program
+    単位にする。人が指示する場面があるので deny にしない、#315)。deny(env dump `env` / `printenv`、`gh secret` /
+    `gh api *secrets*`、token 表示 `gh auth token` / `gh auth status --show-token` / `-t` / `-at` と、`auth` の前か直後に
+    option を置いた `gh auth`(`gh -* auth *` / `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)、
+    `cat ~/.ssh/*`、keychain の password の読み出し・dump・
+    export `security find-generic-password` / `find-internet-password` / `dump-keychain` / `export`(`-q` などの前置
+    option を挟む形も。#315))は **map の末尾**に置く(last-match-wins で、
+    後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
     `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。read の allow は原則
     「完全一致」と「`… *`(space 付き)」の 2 本 1 組で命令名を区切る(`gh status*` のような space なしの allow だと
     `gh status-token` のような alias 名まで通る。ask / deny は過剰一致しても安全側なので space なし `*` のまま)。
     例外: `gh search` は `gh search *` だけで bare の `gh search` は ask。`gh auth status` / `gh --version` /
     `gh version` は完全一致だけ。
-  - `external_directory` / `doom_loop` は OpenCode 既定(ask)のまま。
+  - `external_directory` は managed な床で `ask` に固定する(#315。OpenCode の既定も ask だが、read の deny が
+    効かない grep / glob に対する project の外の守りなので、既定に任せない)。`doom_loop` は OpenCode 既定(ask)のまま。
 - **`autoupdate: false`**: 起動時の本体の自動更新を止める([update-policy](update-policy.md))。更新は catalog の
   source(brew)で意図的に行う。起動時の DL がすべて止まるわけではない: plugin を設定していなくても、OpenCode は
   config dir(`~/.config/opencode/` など)へ `@opencode-ai/plugin` を npm install する(`package.json` / `node_modules` が
@@ -90,4 +100,5 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
-  こと(secret floor 13 件 + personal 既定の `mcp__github` で計 14 件の deny を順序込みで exact pin)。
+  こと(secret floor 30 件 + personal 既定の `mcp__github` で計 31 件の deny と、1Password の CLI 全体の ask 1 件を
+  順序込みで exact pin。#315)。
