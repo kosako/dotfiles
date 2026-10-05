@@ -20,7 +20,7 @@ CLI usage error: exit 2
 
 `[warn]` は現状報告または注意喚起であり、それだけでは失敗扱いにしない。
 unknown profile / module / capability や capability enum の不正値は policy violation として fail closed する。
-`doctor.sh` / `preflight.sh` は冒頭の policy validation が失敗した場合のみ exit 1 で、それ以外は warning があっても常に exit 0(report-only)。`doctor.sh` の未知 option(`--actions-only` 以外の `-` 始まり)だけは usage error として exit 2 で report を走らせない(#227)。
+`doctor.sh` / `preflight.sh` は冒頭の policy validation が失敗した場合のみ exit 1 で、それ以外は warning があっても常に exit 0(report-only)。`doctor.sh` の未知 option(`--actions-only` 以外の `-` 始まり)と、`preflight.sh` の `-` 始まりの引数・2 つ目の引数だけは usage error として exit 2 で report を走らせない(#227 / #309。validate-policy の `-h` / `--all` などに素通しすると、その文字列を profile 名にした report が誤った clean で終わるため)。
 
 ## validate-policy.sh
 
@@ -76,7 +76,7 @@ policy validation が失敗した場合は exit 1。
 - chezmoi: chezmoi の version と source directory。
 - Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 2 つを見る。
   - Git signing: `enableGitSigning` の SSH 署名 mechanism が managed か、capability true で module inactive の dangling か。
-  - global gitignore: `git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定 — と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない(#248)。
+  - global gitignore: `git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定(末尾の `/` はすべて落とし、`-ef` でも同じ file と判定する、#309)— と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない(#248)。
 - git hook gates(report-only): `enableGitHookGates` が true で module が active なら、shim 2 本(`~/.config/git-hook-gates/hooks/pre-commit` / `commit-msg`)が実行可能に置かれているか、global `core.hooksPath`(`--includes` 付きで読む)が managed shim directory を指すか(別の値なら値は出さずに warn)、agent-tools deploy 4 本(dispatcher + gate 3 本)が揃っているかを report する。配線済みなのに deploy が欠けていれば commit が fail-closed で止まる旨を warn し、`core.hooksPath` が未設定なら action。capability true で module inactive なら dangling として warn。capability=false で shim / hooksPath が残っていれば action(lingering)。git-hook-gates module が active な profile では apply で除去する手順、module が非 active な profile(profile 切替後の残置。#201)では apply が触れないので、残っている file を `rm -i` で消す手順と、`core.hooksPath` が managed shim directory を指さなくなったかの確認(まだ指すなら表示された設定元の行を消す)を出す(managed file が無く `core.hooksPath` だけが残るときは設定元を探す手順。#258)。`--no-verify` と repo-local `core.hooksPath` で迂回できる best-effort である旨も表示する(#196 / #239。詳細は `docs/git-hook-gates.md`)。
 - Git identity contexts: `git-profile` module が active な profile では、managed な identity reset `~/.config/git-profile/identity-reset.gitconfig` の presence を見る — 中身は見ない。無ければ、context file の無い非 personal repo で personal pattern に一致する remote が personal identity を継承して commit 拒否にならないので、`mkdir -p ~/.config` → `chezmoi apply`(dir と file)を action にする(#241)。各 context の identity file が存在するか、意図的に未設定かも見る。存在する file は `user.name` / `user.email` の有無だけを見て partial を action 化し、値の無い key(`=` なし。git が identity 全体を拒否する)は別の action、git が parse できない file は warn — 値は出さない。partial は managed な identity reset が塞げない唯一の状態なので doctor が主な検出手段になる(#202)。
 - Git remote URLs: credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない。
@@ -87,8 +87,8 @@ policy validation が失敗した場合は exit 1。
 - SSH (1Password agent): `enable1PasswordSSH` の managed `~/.ssh/config` が active か dangling か。
 - private-backup(report-only): public baseline の各 target の存在と、marker からのバックアップ有無・最終日時と、捕捉が完全かどうか(`capture: complete`。#242 以前の marker は `unknown`)を表示する。`capture_incomplete=true` なら warn とし、読めない entry を直してから再 backup する手順を next actions に出す(#242)。backup 未実行は allowSecretsAccess=true の profile でのみ warn — false の profile は backup 実行自体を拒否する設計なので中立表示(#174)。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない。
 - managed-path orphans: managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出。宣言済み **file** path のみ検査し、その祖先の directory(allowlist が親として通すだけ、#207)の下には再帰しない — セッションログ等の header 引用を偽 orphan にしない(#174)。
-- managed drift(report-only): `chezmoi status` の乖離を report-only で warn。enforce profile では `~/.npmrc` の `_authToken` 行の有無をキー名のみで scan — 値は読まない・出さない — と managed-by header の有無も報告(#148)。
-- AI policy: `enableAiPolicy` / `enableAiTools` の現状。codex-settings が active な profile では Codex 権限面も監視 — managed rules baseline の presence と、**外向き/昇格 probe(push・PR/issue/comment 作成・release・sudo・auth login・clone・curl 等の固定リスト)を `codex execpolicy check` で live rules に評価**し auto-allow を warn(行 grep は blanket prefix・複数行 rule・decision 省略の既定 allow を見逃し、rule 行 echo は任意文字列由来の secret を漏らしうるため不採用 — doctor は rules file を読まず path を codex に渡すだけ・echo するのは自前の probe 文字列のみ。codex CLI 不在時は skip を明示)、`config.toml` の `[projects]` trust は **section header の path と trust_level のみ** scan(MCP env 等の他内容は読まない・#148 と同じキー名限定規律)し、trusted な home root と実在しない path の残骸を warn(#139)。 見出しは `[projects."path"]` / `[projects.'path']`(閉じ引用符後の空白・行末コメント可)を読み、二重引用符内の escape など、それ以外の `[projects.` で始まる形式は INCOMPLETE とする。
+- managed drift(report-only): `chezmoi status` の乖離を report-only で warn。`chezmoi status` が失敗したとき、chezmoi の config が無ければ未初期化の item、あれば config / template の error(apply も壊れている)として `chezmoi status` を示す action(#309)。enforce profile では `~/.npmrc` の `_authToken` 行の有無をキー名のみで scan — 値は読まない・出さない — と managed-by header の有無も報告(#148)。
+- AI policy: `enableAiPolicy` / `enableAiTools` の現状。codex-settings が active な profile では Codex 権限面も監視 — managed rules baseline の presence と、**外向き/昇格 probe(push・PR/issue/comment 作成・release・sudo・auth login・clone・curl 等の固定リスト)を `codex execpolicy check` で live rules に評価**し auto-allow を warn(行 grep は blanket prefix・複数行 rule・decision 省略の既定 allow を見逃し、rule 行 echo は任意文字列由来の secret を漏らしうるため不採用 — doctor は rules file を読まず path を codex に渡すだけ・echo するのは自前の probe 文字列のみ。codex CLI 不在時は skip を明示)、`config.toml` の `[projects]` trust は yq の TOML parser で読み、`trust_level = "trusted"` の project の **key(path)だけ**を取り出す(設定値は出さない・yq の error も捨てる、#148 と同じキー名限定規律)。trusted な home root と実在しない path の残骸を warn(#139)。正当な書き方は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key が空か制御文字を含む、のときは INCOMPLETE(0 件とは言わない、#292 / #309)。
 - OpenCode(report-only): `opencode` の presence、`opencode-settings` module が active な profile では managed な permission 床 `~/.config/opencode/opencode.json` の presence — 無ければ apply 手順の action、非 active なら not managed。credential store `~/.local/share/opencode/auth.json` は**存在のみ**で中身も provider 名も読まない(#234)。agent-tools の plugin(`plugins/personal-*.js`)は静的に、global の plugins dir にあるか(init の成功までは保証しないと明記)と二重読込(`.ts` / `.mjs` の併置・単数形 `plugin/` dir・OpenCode が読む設定 — managed の床と `OPENCODE_CONFIG` の指す file — の `plugin` 欄に同じ名前。読まれていない `opencode.local.json` だけなら注記)を報告する — OpenCode は起動しない(`opencode debug config` でさえ DB に書き込むため)、設定ファイルは `plugin` 欄だけを読み表示しない。`opencode.local.json` があるのに `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も報告する(#263)。この section の末尾に enforceAiSandbox(sandbox ブロックと human-legit write gate の live state)の行も出る。
 - GitHub injection guard(report-only): secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
@@ -139,6 +139,7 @@ managed-path orphan、managed drift、Codex projects trust の stale / home 全�
 `preflight.sh` の report-only 契約と apply-impact 警告を fixture HOME で検証する(#150)。
 空 home の exit 0 / shell-extra・ssh-1password の replace 警告と override pointer /
 非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
+`-` 始まりの引数(`-h` / `--all` / `--list-profiles` など)と 2 つ目の引数を exit 2 で拒否し report を走らせない(#309)/
 git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
 `core.excludesFile` が設定済み・明示的な空値のときの warn(値は出さない)、work の left-as-is、不在時の ok。
 `env -i` で hermetic に回す、#248)/
@@ -296,8 +297,8 @@ query だけを実機で実行する(書き込みはしない)。
 
 - managed-path orphan: header があり現 profile で管理対象でない file が warning / 管理対象の
   profile では orphan にならない / header 無しは対象外 / 宣言した file の祖先の directory の下に再帰しない(#174 / #207)。
-- managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は「not initialized」の
-  item で skip(いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
+- managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は、chezmoi の config が無ければ
+  「not initialized」の item で skip、あれば `chezmoi status` を示す action(#309。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
   managed-by header の欠落も warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
   warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ /
@@ -308,7 +309,8 @@ query だけを実機で実行する(書き込みはしない)。
   なら unknown になること(#242)。
 - global gitignore(#248): managed file を git が読んでいれば ok / 不在は `mkdir -p` → `chezmoi apply` の action /
   `core.excludesFile`(global、または system だけの設定)や `XDG_CONFIG_HOME` で別の file に振り替わっていれば
-  warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視)/ 明示的な空値は「global excludes を読まない」warn /
+  warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視。`XDG_CONFIG_HOME` が `~/.config//` や `~/.config` への symlink なら同じ
+  file として ok、#309)/ 明示的な空値は「global excludes を読まない」warn /
   config が読めなければ「不明」の warn / pattern 行の欠落は drift の action / work は not managed。どの run も
   `env -i` で hermetic。
 - git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling。
@@ -373,7 +375,10 @@ query だけを実機で実行する(書き込みはしない)。
   not installed・outdated なら `herdr integration install <agent>` の action、current なら info、herdr 不在
   は catalog section への pointer。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
-  engine 失敗は INCOMPLETE、`config.toml` の projects trust は header + trust_level のみ scan。
+  engine 失敗は INCOMPLETE、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
+  取り出す(値は出さない、#309)。正当な書き方(`[projects]` table・inline table・dotted / quote / escape を含む key・
+  複数行文字列)は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key が空か制御文字を含む、
+  のときだけ INCOMPLETE(0 件とは言わない)。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。

@@ -638,6 +638,14 @@ gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads;
 rm -f "$gi_home/system.gitconfig"
 # GI-3d) XDG_CONFIG_HOME moves git's default location away from ~/.config.
 gi_check personal "[warn] global gitignore: git reads $gi_home/xdg/git/ignore, not the managed $gi_managed (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect" "redirected by XDG_CONFIG_HOME -> warn" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/xdg"
+# GI-3d2) ... but XDG_CONFIG_HOME naming ~/.config itself is the managed file,
+#         however it is spelled: with repeated trailing slashes, or through a
+#         symlink to ~/.config (-ef) — no false redirect warn (#309).
+gi_ok="[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
+gi_check personal "$gi_ok" "XDG_CONFIG_HOME=~/.config// is the managed file -> ok" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/.config//"
+ln -s "$gi_home/.config" "$gi_home/config-alias"
+gi_check personal "$gi_ok" "XDG_CONFIG_HOME through a symlink to ~/.config is the managed file -> ok" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/config-alias"
+rm -f "$gi_home/config-alias"
 # GI-3e) explicitly EMPTY core.excludesFile: git reads no global excludes file
 #        at all (measured: .agent-packets/x.md shows up in git status), so
 #        falling back to the default path would be a false ok (Codex must).
@@ -2815,7 +2823,7 @@ TOML
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
   && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
-  && grep -Fq "edit ~/.codex/config.toml: delete the [projects.\"$fixture_home\"] section" <<< "$aip_out" \
+  && grep -Fq "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)" <<< "$aip_out" \
   && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
   && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
   ok "test passed: single-quoted project header reports the whole-home action (exit 0)"
@@ -2842,9 +2850,10 @@ else
   status=1
 fi
 
-for aip_header in '[projects.bare]' '[projects."/escaped\\path"]' \
-    '[projects."/path".extra]' "[projects.'/path' trailing]" \
-    '[projects."/path"] trailing'; do
+# Headers that are TOML syntax errors make the whole file unreadable: INCOMPLETE.
+# (Valid spellings such as [projects.bare] are counted — see the trust form
+# cases below.)
+for aip_header in "[projects.'/path' trailing]" '[projects."/path"] trailing'; do
   cat > "$fixture_home/.codex/config.toml" <<TOML
 [projects."$fixture_home/real-project"]
 trust_level = "trusted"
@@ -2859,12 +2868,124 @@ TOML
     && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
     && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
     && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
-    ok "test passed: unsupported project header reports INCOMPLETE without a trusted count (exit 0): $aip_header"
+    ok "test passed: a header that is a TOML syntax error reports INCOMPLETE without a trusted count (exit 0): $aip_header"
   else
-    fail "test failed: unsupported project header must report INCOMPLETE without a trusted count (exit 0): $aip_header"
+    fail "test failed: a header that is a TOML syntax error must report INCOMPLETE without a trusted count (exit 0): $aip_header"
     status=1
   fi
 done
+
+# The scan reads config.toml with a TOML parser (yq, #309), so every valid
+# spelling of a project table counts as TOML says — a [projects] table,
+# inline tables, dotted / quoted / escaped keys, multi-line strings — and only
+# what does not read as a map of project tables (a TOML error, projects as a
+# string or an array, a trusted key with a control character) is INCOMPLETE,
+# never "0 trusted". Each case writes the whole config line by line (printf
+# '%s\n', so a TOML escape such as j stays literal), with a real trusted
+# project and an MCP env canary that must never be printed.
+aip_real_header="[projects.\"$fixture_home/real-project\"]"
+aip_bs='\'   # one backslash: the escape cases spell TOML escapes (u006a = j) with it
+# aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
+aip_trust_case() {
+  local label="$1" expect="$2"
+  shift 2
+  printf '%s\n' "$@" '[mcp_servers.fake.env]' 'FAKE_TOKEN = "CANARY_FORM_ENV_309"' \
+    > "$fixture_home/.codex/config.toml"
+  if ! aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+    fail "test failed: doctor must stay exit 0 (trust form: $label)"
+    status=1
+  elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
+    fail "test failed: trust form $label leaked a config value"
+    status=1
+  elif [[ "$expect" == incomplete ]]; then
+    if grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
+      && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
+      && ! grep -Fq "Codex projects trust:" <<< "$aip_out"; then
+      ok "test passed: trust form reports INCOMPLETE without a trusted count: $label"
+    else
+      fail "test failed: trust form must report INCOMPLETE without a trusted count: $label"
+      status=1
+    fi
+  elif grep -Fq "Codex projects trust: $expect path(s) trusted" <<< "$aip_out" \
+    && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
+    ok "test passed: trust form counts as TOML says ($expect): $label"
+  else
+    fail "test failed: trust form must count as TOML says ($expect), not INCOMPLETE or another count: $label"
+    status=1
+  fi
+}
+# Valid spellings that grant trust: counted with the real project (2).
+aip_trust_case "root inline table" 2 \
+  "projects = { \"/x\" = { trust_level = \"trusted\" }, \"$fixture_home/real-project\" = { trust_level = \"trusted\" } }"
+aip_trust_case "root dotted key" 2 \
+  'projects."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "escaped root key" 2 \
+  "\"pro${aip_bs}u006aects\".\"/x\".trust_level = \"trusted\"" "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "[projects] table" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects]' '"/x" = { trust_level = "trusted" }'
+aip_trust_case "spaced table name" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[ projects."/x" ]' 'trust_level = "trusted"'
+aip_trust_case "quoted table name" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '["projects"."/x"]' 'trust_level = "trusted"'
+aip_trust_case "escaped table name" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' "[\"pro${aip_bs}u006aects\".\"/x\"]" 'trust_level = "trusted"'
+aip_trust_case "bare project key" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects.bare]' 'trust_level = "trusted"'
+aip_trust_case "escaped backslash in a project key" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/escaped${aip_bs}${aip_bs}path\"]" 'trust_level = "trusted"'
+aip_trust_case "quoted trust_level key" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' '"trust_level" = "trusted"'
+aip_trust_case "escaped trust_level key" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' "\"trust${aip_bs}u005flevel\" = \"trusted\""
+aip_trust_case "multi-line trust_level" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' 'trust_level = """trusted"""'
+aip_trust_case "root projects key after a multi-line array" 2 \
+  'arr = [' '  "a",' ']' "projects = { \"/x\" = { trust_level = \"trusted\" }, \"$fixture_home/real-project\" = { trust_level = \"trusted\" } }"
+# ... while trust_level in a sub-table, look-alike keys and tables, the same
+# key inside another table, string contents that look like tables, comments,
+# escapes in values or other tables' names, and an untrusted entry do not.
+aip_trust_case "trust_level in a sub-table of a project" 1 \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/path".extra]' 'trust_level = "trusted"'
+aip_trust_case "look-alike keys and tables" 1 \
+  'project_doc_max_bytes = 32768' "$aip_real_header" 'trust_level = "trusted"' \
+  '[profiles.projects]' 'model = "m"' '[projects."/y"]' 'trust_level = "untrusted" # note'
+aip_trust_case "projects key inside an MCP env table" 1 \
+  "$aip_real_header" 'trust_level = "trusted"' '[mcp_servers.demo.env]' 'projects = "demo"'
+aip_trust_case "multi-line basic string with table-like text" 1 \
+  'developer_instructions = """' '[projects]' 'projects = 1' '"""' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "multi-line literal string with table-like text" 1 \
+  "notes = '''" '[projects]' "'''" "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "triple quote inside a comment" 1 \
+  '# a """ example in a comment' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "escaped quotes inside a multi-line string" 1 \
+  'developer_instructions = """' "say ${aip_bs}\"\"\"hi" '[projects]' '"""' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "multi-line string closed by four quotes inside an array" 1 \
+  'notify = ["sh", "-c", """echo "done""""]' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "escaped quotes in a multi-line array value" 1 \
+  'notify = [' '  "sh",' '  "-c",' "  \"printf '%s' ${aip_bs}\"done${aip_bs}\"\"," ']' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "backslash in a header comment" 1 \
+  "$aip_real_header # C:${aip_bs}work" 'trust_level = "trusted"'
+aip_trust_case "escape in another table's name" 1 \
+  "[mcp_servers.\"demo${aip_bs}u002dserver\"]" 'command = "x"' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "backslash in a literal header and in a value" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.'/tmp/project${aip_bs}name']" 'trust_level = "trusted"' \
+  '[mcp_servers.demo.env]' "PATHX = \"C:${aip_bs}${aip_bs}dir\""
+aip_trust_case "no projects at all" 0 \
+  '[profiles.default]' 'model = "m"'
+# What does not read as a map of project tables is INCOMPLETE.
+aip_trust_case "TOML syntax error" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' 'this is not toml'
+aip_trust_case "projects as a string" incomplete \
+  'projects = "everything"'
+aip_trust_case "projects as an array of tables" incomplete \
+  '[[projects]]' 'path = "/x"' 'trust_level = "trusted"'
+aip_trust_case "an empty trusted key" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects.""]' 'trust_level = "trusted"'
+aip_trust_case "a trusted key with a C1 control character" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/tmp/a${aip_bs}u0085b\"]" 'trust_level = "trusted"'
+aip_trust_case "a trusted key with a control character" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/a${aip_bs}nb\"]" 'trust_level = "trusted"'
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log
@@ -3129,7 +3250,7 @@ dr_home="$fixture_home/drift"
 mkdir -p "$dr_home"
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n//registry.npmjs.org/:_authToken=secret-placeholder-value\n' \
   > "$dr_home/.npmrc"
-if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "npmrc contains 1 _authToken line" <<< "$dr_out" \
     && ! grep -Fq "secret-placeholder-value" <<< "$dr_out"; then
     ok "test passed: npmrc token line warned by count, value never echoed"
@@ -3154,7 +3275,7 @@ else
   drift_skip="chezmoi not found; skipping drift check"
 fi
 printf 'ignore-scripts=true\n' > "$dr_home/.npmrc"
-if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
     && grep -Fq "$drift_skip" <<< "$dr_out"; then
     ok "test passed: missing managed-by header warned; uninitialized home skips the status check"
@@ -3222,7 +3343,7 @@ else
 fi
 
 if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
-  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 XDG_CONFIG_HOME='' \
   "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "chezmoi not initialized for this home; skipping drift check" <<< "$dr_out"; then
     ok "test passed: a failing chezmoi status is skipped, doctor stays exit 0"
@@ -3236,6 +3357,30 @@ else
   fail "test failed: doctor must stay exit 0 when chezmoi status fails"
   status=1
 fi
+
+# ... but with a chezmoi config in this home, a failing status is a config /
+# template error (e.g. an unknown profile) that also breaks apply: an action
+# naming `chezmoi status`, never the neutral not-initialized skip (#309).
+mkdir -p "$dr_home/.config/chezmoi"
+printf '[data]\nprofile = "persnal"\n' > "$dr_home/.config/chezmoi/chezmoi.toml"
+if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 XDG_CONFIG_HOME='' \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] chezmoi status failed although this home has a chezmoi config — a config or template error (e.g. an unknown profile) also breaks chezmoi apply; drift is not checked until it is fixed" <<< "$dr_out" \
+    && grep -Fxq "        \$ chezmoi status   # read the error, then fix the config or the template" <<< "$dr_out" \
+    && ! grep -Fq "chezmoi not initialized for this home" <<< "$dr_out"; then
+    ok "test passed: a failing chezmoi status with a config present is an action, not the not-initialized skip"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: a failing status with a chezmoi config must be an action naming chezmoi status"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 when chezmoi status fails with a config present"
+  status=1
+fi
+rm -rf "$dr_home/.config/chezmoi"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"

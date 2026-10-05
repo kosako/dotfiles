@@ -5,6 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
+# Arguments: [PROFILE]. A dash-word is rejected HERE, before the validator
+# sees it: validate-policy takes -h / --all / --list-profiles as its own
+# options and exits 0, after which the report would run against a profile
+# named "-h" and close as a false clean (#309; doctor guards the same way,
+# PR #228). A second argument is rejected too rather than silently dropped.
+if [[ $# -gt 1 ]]; then
+  fail "too many arguments (usage: preflight.sh [PROFILE])"
+  exit 2
+fi
+case "${1:-}" in
+  -*)
+    fail "unknown option: $1 (usage: preflight.sh [PROFILE])"
+    exit 2
+    ;;
+esac
 profile="${1:-personal}"
 
 section "preflight profile: $profile"

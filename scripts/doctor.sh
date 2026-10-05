@@ -122,7 +122,7 @@ if command -v git >/dev/null 2>&1; then
       warn "global gitignore: git cannot read its global/system config (core.excludesFile lookup failed), so whether the managed $managed_ignore is in effect is unknown — fix the config error first (git config --global --list / git config --system --list)"
     elif [[ "$excludes_setting" == empty ]]; then
       warn "global gitignore: core.excludesFile is explicitly empty (global or system config), so git reads NO global excludes file — the managed $managed_ignore is not in effect; unset the key to restore git's default location"
-    elif [[ "$effective_ignore" != "$managed_ignore" ]]; then
+    elif [[ "$effective_ignore" != "$managed_ignore" && ! "$effective_ignore" -ef "$managed_ignore" ]]; then
       warn "global gitignore: git reads $effective_ignore, not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
     else
       missing_ignore_patterns=""
@@ -761,8 +761,23 @@ section "managed drift (report-only)"
 if ! command -v chezmoi >/dev/null 2>&1; then
   warn "chezmoi not found; skipping drift check"
 elif ! drift_status="$(chezmoi status 2>/dev/null)"; then
-  # No initialized config in this HOME (e.g. test fixtures, pre-bootstrap).
-  item "chezmoi not initialized for this home; skipping drift check"
+  # Without a chezmoi config file this home is simply not initialized (test
+  # fixtures, pre-bootstrap). With one, the failure is a config / template
+  # error (a profile typo, a broken template) that also breaks apply, so it
+  # must not read as a neutral skip (#309). The error text is not echoed:
+  # the command step shows it.
+  chezmoi_config_dir="$HOME/.config/chezmoi"
+  [[ "${XDG_CONFIG_HOME:-}" == /* ]] && chezmoi_config_dir="$XDG_CONFIG_HOME/chezmoi"
+  chezmoi_config_found=0
+  for chezmoi_config_ext in toml yaml yml json jsonc; do
+    [[ -f "$chezmoi_config_dir/chezmoi.$chezmoi_config_ext" ]] && chezmoi_config_found=1
+  done
+  if [[ "$chezmoi_config_found" -eq 1 ]]; then
+    action "chezmoi status failed although this home has a chezmoi config — a config or template error (e.g. an unknown profile) also breaks chezmoi apply; drift is not checked until it is fixed" \
+      "\$ chezmoi status   # read the error, then fix the config or the template"
+  else
+    item "chezmoi not initialized for this home; skipping drift check"
+  fi
 else
   drift_lines=0
   while IFS= read -r line; do
@@ -904,55 +919,62 @@ report_codex_rules_probes() {
 }
 
 report_codex_projects_trust() {
-  local codex_config trusted_paths trusted_path trusted_total
-  # [projects] trust watch: parse ONLY quoted [projects] path headers and
-  # the trust_level key inside each section (an entry can be "untrusted" —
-  # only trusted ones matter). config.toml also carries MCP server env blocks
-  # that may hold secrets, so nothing else is read or echoed (key-name-only
-  # discipline, same as the #148 token scan).
+  local codex_config projects_kind trusted_paths trusted_path trusted_total trusted_count
+  # [projects] trust watch: which project paths config.toml marks
+  # trust_level = "trusted" (an entry can be "untrusted" — only trusted ones
+  # matter). The file is read with yq's TOML decoder (#309): every valid
+  # spelling — header tables, a [projects] table, inline tables, dotted or
+  # quoted keys, escapes, multi-line strings — means what TOML says, which a
+  # line-based scan could not keep up with (it counted valid trust as zero,
+  # #292 / #309). Only the trusted project KEYS (paths) leave yq; config.toml
+  # also carries MCP server env blocks that may hold secrets, so no value is
+  # ever echoed and yq's errors are discarded (key-name-only discipline, same
+  # as the #148 token scan). Anything that does not read as a map of project
+  # tables — a TOML error, projects as a string or an array, a trusted key
+  # that is empty or has a control character (\p{Cc}, C1 included: one path
+  # per output line could not carry it) — is an INCOMPLETE scan, never
+  # "0 trusted". The remedy names the path, not a TOML spelling: the entry may
+  # be a header table, an inline table or a dotted key.
   codex_config="$HOME/.codex/config.toml"
-  if [[ -f "$codex_config" ]]; then
-    # Tolerate the valid TOML spellings codex may write: optional whitespace
-    # around `=` (compact `trust_level="trusted"` included) and single-quoted
-    # literal strings. Headers accept double/single-quoted keys and trailing
-    # comments; escaped double-quoted keys and other unsupported forms must
-    # surface as an INCOMPLETE scan, as must any parse/read failure, never as
-    # "0 trusted" (fail-open false-clean).
-    if trusted_paths="$(awk '
-      /^[[:space:]]*\[projects\./ {
-        p = $0
-        sub(/^[[:space:]]*\[projects\./, "", p)
-        if (p !~ /^("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*\][[:space:]]*(#.*)?$/) exit 1
-        quote = substr(p, 1, 1)
-        p = substr(p, 2)
-        current = substr(p, 1, index(p, quote) - 1)
-        next
-      }
-      /^[[:space:]]*\[/ { current = "" ; next }
-      current != "" && $0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("trusted"|'\''trusted'\'')[[:space:]]*(#.*)?$/ {
-        print current
-        current = ""
-      }
-    ' "$codex_config" 2>/dev/null)"; then
-      trusted_total=0
-      while IFS= read -r trusted_path; do
-        [[ -z "$trusted_path" ]] && continue
-        trusted_total=$((trusted_total + 1))
-        if [[ "$trusted_path" == "$HOME" ]]; then
-          action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
-            "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section (or set trust_level to untrusted)"
-        elif [[ ! -d "$trusted_path" ]]; then
-          action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
-            "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section"
-        fi
-      done <<< "$trusted_paths"
-      item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml, project headers + trust_level scanned only)"
-    else
-      warn "projects-trust scan INCOMPLETE: could not parse ~/.codex/config.toml project headers; do NOT read this as zero trusted"
-    fi
-  else
+  if [[ ! -f "$codex_config" ]]; then
     item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
+    return 0
   fi
+  trusted_paths=""
+  trusted_count=0
+  if ! projects_kind="$(yq -p toml -o json -r '.projects | kind' "$codex_config" 2>/dev/null)"; then
+    projects_kind="unreadable"
+  elif [[ "$projects_kind" == scalar ]]; then
+    [[ "$(yq -p toml -o json -r '.projects == null' "$codex_config" 2>/dev/null)" == true ]] && projects_kind="absent"
+  fi
+  if [[ "$projects_kind" == map ]]; then
+    if ! trusted_paths="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | .[].key' "$codex_config" 2>/dev/null)" \
+      || ! trusted_count="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | length' "$codex_config" 2>/dev/null)" \
+      || [[ "$(yq -p toml -o json -r '.projects | to_entries | map(select((.value.trust_level == "trusted") and ((.key == "") or (.key | test("\\p{Cc}"))))) | length' "$codex_config" 2>/dev/null)" != 0 ]]; then
+      projects_kind="unreadable"
+    fi
+  fi
+  if [[ "$projects_kind" != map && "$projects_kind" != absent ]]; then
+    warn "projects-trust scan INCOMPLETE: could not read the projects table of ~/.codex/config.toml; do NOT read this as zero trusted"
+    return 0
+  fi
+  trusted_total=0
+  while IFS= read -r trusted_path; do
+    [[ -z "$trusted_path" ]] && continue
+    trusted_total=$((trusted_total + 1))
+    if [[ "$trusted_path" == "$HOME" ]]; then
+      action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
+        "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)"
+    elif [[ ! -d "$trusted_path" ]]; then
+      action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
+        "edit ~/.codex/config.toml: remove the project entry for this path"
+    fi
+  done <<< "$trusted_paths"
+  if [[ "$projects_kind" == map && "$trusted_total" != "$trusted_count" ]]; then
+    warn "projects-trust scan INCOMPLETE: could not read the projects table of ~/.codex/config.toml; do NOT read this as zero trusted"
+    return 0
+  fi
+  item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml read with yq's TOML decoder, project keys only)"
 }
 
 section "AI policy"
