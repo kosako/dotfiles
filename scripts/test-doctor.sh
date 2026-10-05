@@ -842,8 +842,9 @@ rm -rf "$hc_home" "$hc_fakebin"
 #     enableAgentToolsStatus opt-in doctor asks the deployed wrapper's --help
 #     whether it knows [--check], then runs --check with XDG_CONFIG_HOME
 #     removed (the managed file, even under a redirect) and maps exit 0 -> ok,
-#     2 -> action with the reason line, anything else -> not checked; no
-#     opt-in, no wrapper, or an older wrapper -> not checked. An absolute
+#     2 -> action with the reason line, 3 -> the missing action, an exit
+#     outside that contract -> not checked; no opt-in, no wrapper, or an
+#     older wrapper -> not checked. An absolute
 #     XDG_CONFIG_HOME elsewhere -> redirect warn (a relative one is ignored,
 #     as the wrapper does; ~/.config/ with a trailing slash, or a symlink to
 #     it, is the same file); work (module inactive) -> neutral. The wrapper

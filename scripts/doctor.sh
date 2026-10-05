@@ -621,8 +621,9 @@ trap 'probe_cleanup; trap - TERM; kill -TERM $$' TERM
 # read carries the remaining deadline. A read that fails while the deadline
 # has not produced the status line is the deadline (bash 3.2's read -t
 # returns 1 there, 4+ returns >128, so neither status is relied on): the
-# tree is killed and nothing is adopted. Only a clean exit 0 with its status
-# line seen is adopted.
+# tree is killed and nothing is adopted. Only output whose status line was
+# seen is adopted: a clean exit 0, or a non-zero exit whose output the probed
+# command's contract defines (the usage reader's exit 2 reason line).
 bounded_probe() {
   local started remaining line
   probe_rc=""
