@@ -36,10 +36,11 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     allow に戻す(#240: mutation を列挙する方式では `gh issue edit` / `gh pr close` / `gh api -XPOST` などが
     allow-all に落ちた。`gh api` は method に関わらず ask — 短縮 flag `-XPOST` / `-ftitle=x` は flag 照合を
     すり抜け、GraphQL は read でも POST を使う)。1Password の読み出し系(`op read` / `op item get` / `op run` /
-    `op inject` / `op document get`)も **ask**(人が指示する場面があるので deny にしない、#315)。deny(env dump
-    `env` / `printenv`、`gh secret` / `gh api *secrets*`、token 表示 `gh auth token` / `gh auth status --show-token` /
-    `-t`、`cat ~/.ssh/*`、keychain の password の読み出し・dump・export `security find-generic-password` /
-    `find-internet-password` / `dump-keychain` / `export`(#315))は **map の末尾**に置く(last-match-wins で、
+    `op inject` / `op document get`。`--account` などの global option を前に置く形も)も **ask**(人が指示する場面が
+    あるので deny にしない、#315)。deny(env dump `env` / `printenv`、`gh secret` / `gh api *secrets*`、token 表示
+    `gh auth token` / `gh auth status --show-token` / `-t` / `-at`、`cat ~/.ssh/*`、keychain の password の読み出し・dump・
+    export `security find-generic-password` / `find-internet-password` / `dump-keychain` / `export`(`-q` などの前置
+    option を挟む形も。#315))は **map の末尾**に置く(last-match-wins で、
     後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
     `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。read の allow は原則
@@ -97,5 +98,5 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
-  こと(secret floor 22 件 + personal 既定の `mcp__github` で計 23 件の deny と、1Password の読み出し系の ask 5 件を
+  こと(secret floor 28 件 + personal 既定の `mcp__github` で計 29 件の deny と、1Password の読み出し系の ask 10 件を
   順序込みで exact pin。#315)。

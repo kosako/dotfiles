@@ -128,24 +128,26 @@ fi
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
-#    (22 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
+#    (28 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
 #    credential-store files — gh OAuth token, AWS keys, ~/.netrc, Codex
 #    auth.json — joined in #136, OpenCode auth.json in #234; the credential
-#    display forms `gh auth token` / `gh auth status --show-token|-t` and the
-#    keychain password read / dump / export in #315, symmetric with OpenCode)
-#    and gateGitHubMcp is ON (Phase 2), so the deny is exactly those 23 (the
+#    display forms `gh auth token` / `gh auth status --show-token|-t|-at` and
+#    the keychain password read / dump / export, each also behind leading
+#    `security` options, in #315, symmetric with OpenCode) and gateGitHubMcp
+#    is ON (Phase 2), so the deny is exactly those 29 (the
 #    floor present even with enforceAiSandbox off is the core of Phase 2 task
-#    B). The ask block is the 1Password read family alone (#315: human-directed
+#    B). The ask block is the 1Password read family alone, each with and
+#    without leading global options such as --account (#315: human-directed
 #    uses exist, so approval rather than deny). We pin the EXACT ordered
 #    arrays, not length + a few representatives: this is a security-boundary
 #    regression test, so it must catch a floor matcher being swapped for
 #    another (which would keep the length).
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(security find-generic-password *)\nBash(security find-internet-password *)\nBash(security dump-keychain*)\nBash(security export *)\nmcp__github'
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nmcp__github'
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
-expected_ask=$'Bash(op read *)\nBash(op item get *)\nBash(op run *)\nBash(op inject*)\nBash(op document get *)'
+expected_ask=$'Bash(op read *)\nBash(op * read *)\nBash(op item get *)\nBash(op * item get *)\nBash(op run *)\nBash(op * run *)\nBash(op inject*)\nBash(op * inject*)\nBash(op document get *)\nBash(op * document get *)'
 ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + github MCP (23, ordered); ask is exactly the 1Password read family (enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + github MCP (29, ordered); ask is exactly the 1Password read family (10, ordered; enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -170,17 +172,18 @@ fi
 #    deny; release and branch-protection need approval (ask). The floor entries
 #    (ssh / env reads) are present regardless. Context-gated writes (merge/PR/
 #    comment/label/push ai/*) are intentionally NOT here (Phase 2 hook).
-if grep -Fq '"Bash(git push * main)"' "$on_file" \
-  && grep -Fq '"Bash(git push * master)"' "$on_file" \
-  && grep -Fq '"Read(//**/.env*)"' "$on_file" \
-  && grep -Fq '"Bash(cat *.env*)"' "$on_file" \
-  && grep -Fq '"Bash(printenv)"' "$on_file" \
-  && grep -Fq '"Read(~/.ssh/**)"' "$on_file" \
-  && grep -Fq '"Bash(gh release create *)"' "$on_file" \
-  && grep -Fq '"Bash(gh api *protection*)"' "$on_file"; then
-  ok "test passed: enforceAiSandbox=true adds human-legit gate (main/master push, .env read) + ask (release/protection) atop the secret floor"
+#    Pinned as the EXACT ordered arrays (the unconditional floor of section 4
+#    followed by the gated entries), so losing a floor entry or the 1Password
+#    ask in this state is caught too, not only in the committed render.
+expected_deny_on="$expected_deny"$'\nBash(cat *.env*)\nRead(//**/.env*)\nBash(git push * main)\nBash(git push * master)'
+expected_ask_on="$expected_ask"$'\nBash(gh release create *)\nBash(gh release delete *)\nBash(gh release edit *)\nBash(gh api *protection*)\nBash(gh api *rulesets*)'
+actual_deny_on="$(yq -p json '.permissions.deny[]' "$on_file")"
+actual_ask_on="$(yq -p json '.permissions.ask[]' "$on_file" 2>/dev/null || true)"
+if [[ "$actual_deny_on" == "$expected_deny_on" && "$actual_ask_on" == "$expected_ask_on" ]]; then
+  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the 1Password read family + release/protection as ask (ordered)"
 else
-  fail "test failed: enforceAiSandbox=true missing expected write deny/ask matchers"
+  fail "test failed: enforceAiSandbox=true deny/ask unexpected; deny / ask were:"
+  printf '%s\n' "$actual_deny_on" "---" "$actual_ask_on" >&2
   status=1
 fi
 # merge/PR/comment/label must NOT be statically gated in Phase 1 (left to the hook).

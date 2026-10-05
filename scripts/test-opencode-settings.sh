@@ -109,10 +109,10 @@ fi
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
 #    bare command fall through to the allow-all base (Codex review, PR #235).
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop read*=ask\nop item get*=ask\nop run*=ask\nop inject*=ask\nop document get*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity export*=deny'
+expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop read*=ask\nop * read*=ask\nop item get*=ask\nop * item get*=ask\nop run*=ask\nop * run*=ask\nop inject*=ask\nop * inject*=ask\nop document get*=ask\nop * document get*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 11 ask incl. gh default and the 1Password read family, 44 read allow-backs as exact + '... *' pairs, 14 deny last incl. keychain password read / dump / export; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 16 ask incl. gh default and the 1Password read family with and without leading global options, 44 read allow-backs as exact + '... *' pairs, 19 deny last incl. the gh token display bundle -at and keychain password read / dump / export with and without leading options; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -272,6 +272,9 @@ deny	gh auth status --show-token
 deny	gh auth status -t
 deny	gh auth status --hostname github.com -t
 deny	gh auth status --hostname github.com --show-token
+deny	gh auth status -at
+deny	gh auth status --hostname github.com -at
+ask	gh auth status -a
 ask	gh auth status --hostname github.com
 deny	env
 deny	env FOO=1 gh pr create
@@ -313,13 +316,25 @@ ask	op item get x --reveal
 ask	op run -- env
 ask	op inject -i tpl.env
 ask	op document get x
+ask	op --account my read op://vault/item/field
+ask	op --account=my item get x --reveal
+ask	op --account my run -- env
+ask	op --account my inject -i tpl.env
+ask	op --account my document get x
 allow	op whoami
 allow	op item list
+allow	op --account my whoami
+allow	op --account my item list
 deny	security find-generic-password -s gh:github.com -w
 deny	security find-internet-password -s example.invalid -g
 deny	security dump-keychain
 deny	security export -k login.keychain
+deny	security -q find-generic-password -s gh:github.com -w
+deny	security -v find-internet-password -s example.invalid -g
+deny	security -q dump-keychain -d
+deny	security -q export -k login.keychain
 allow	security find-identity -v -p codesigning
+allow	security -q find-identity -v -p codesigning
 allow	git status
 allow	git commit -m x
 allow	git fetch origin
