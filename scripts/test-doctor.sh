@@ -2823,7 +2823,7 @@ TOML
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
   && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
-  && grep -Fq "edit ~/.codex/config.toml: delete the [projects.\"$fixture_home\"] section" <<< "$aip_out" \
+  && grep -Fq "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)" <<< "$aip_out" \
   && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
   && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
   ok "test passed: single-quoted project header reports the whole-home action (exit 0)"
@@ -2982,6 +2982,8 @@ aip_trust_case "projects as an array of tables" incomplete \
   '[[projects]]' 'path = "/x"' 'trust_level = "trusted"'
 aip_trust_case "an empty trusted key" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' '[projects.""]' 'trust_level = "trusted"'
+aip_trust_case "a trusted key with a C1 control character" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/tmp/a${aip_bs}u0085b\"]" 'trust_level = "trusted"'
 aip_trust_case "a trusted key with a control character" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/a${aip_bs}nb\"]" 'trust_level = "trusted"'
 

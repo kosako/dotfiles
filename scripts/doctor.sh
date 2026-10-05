@@ -931,8 +931,10 @@ report_codex_projects_trust() {
   # ever echoed and yq's errors are discarded (key-name-only discipline, same
   # as the #148 token scan). Anything that does not read as a map of project
   # tables — a TOML error, projects as a string or an array, a trusted key
-  # that is empty or has a control character (one path per output line could
-  # not carry it) — is an INCOMPLETE scan, never "0 trusted".
+  # that is empty or has a control character (\p{Cc}, C1 included: one path
+  # per output line could not carry it) — is an INCOMPLETE scan, never
+  # "0 trusted". The remedy names the path, not a TOML spelling: the entry may
+  # be a header table, an inline table or a dotted key.
   codex_config="$HOME/.codex/config.toml"
   if [[ ! -f "$codex_config" ]]; then
     item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
@@ -948,7 +950,7 @@ report_codex_projects_trust() {
   if [[ "$projects_kind" == map ]]; then
     if ! trusted_paths="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | .[].key' "$codex_config" 2>/dev/null)" \
       || ! trusted_count="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | length' "$codex_config" 2>/dev/null)" \
-      || [[ "$(yq -p toml -o json -r '.projects | to_entries | map(select((.value.trust_level == "trusted") and ((.key == "") or (.key | test("[[:cntrl:]]"))))) | length' "$codex_config" 2>/dev/null)" != 0 ]]; then
+      || [[ "$(yq -p toml -o json -r '.projects | to_entries | map(select((.value.trust_level == "trusted") and ((.key == "") or (.key | test("\\p{Cc}"))))) | length' "$codex_config" 2>/dev/null)" != 0 ]]; then
       projects_kind="unreadable"
     fi
   fi
@@ -962,10 +964,10 @@ report_codex_projects_trust() {
     trusted_total=$((trusted_total + 1))
     if [[ "$trusted_path" == "$HOME" ]]; then
       action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
-        "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section (or set trust_level to untrusted)"
+        "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)"
     elif [[ ! -d "$trusted_path" ]]; then
       action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
-        "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section"
+        "edit ~/.codex/config.toml: remove the project entry for this path"
     fi
   done <<< "$trusted_paths"
   if [[ "$projects_kind" == map && "$trusted_total" != "$trusted_count" ]]; then
