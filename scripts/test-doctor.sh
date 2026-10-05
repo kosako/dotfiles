@@ -114,10 +114,11 @@ else
   ok "test passed: headerless file ignored"
 fi
 
-# False-positive guard (#174): unrelated tool data under a declared
-# DIRECTORY path that merely quotes the header (Claude Code session logs,
-# paste-cache) must not be scanned at all — directory declarations are
-# .chezmoiignore gate plumbing, not managed files.
+# False-positive guard (#174): unrelated tool data under the ancestor
+# directory of a declared file (~/.claude, which .chezmoiignore lets through
+# only as the parent of ~/.claude/settings.json, #207) that merely quotes the
+# header (Claude Code session logs, paste-cache) must not be scanned at all —
+# only declared file paths are inspected.
 mkdir -p "$fixture_home/.claude/projects"
 printf 'transcript quoting: Managed by chezmoi from kosako/dotfiles\n' \
   > "$fixture_home/.claude/projects/session.jsonl"
@@ -126,10 +127,10 @@ for fp_profile in personal work; do
   # when grep matches early and the condition reads as "no match" (#143).
   fp_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" "$fp_profile" 2>&1)"
   if grep -Fq "projects/session.jsonl" <<< "$fp_out"; then
-    fail "test failed: $fp_profile must not report session data under a dir declaration"
+    fail "test failed: $fp_profile must not report session data under the ancestor directory of a declared file"
     status=1
   else
-    ok "test passed: session data under dir declaration ignored ($fp_profile)"
+    ok "test passed: session data under the ancestor directory of a declared file ignored ($fp_profile)"
   fi
 done
 
