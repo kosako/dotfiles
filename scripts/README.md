@@ -100,15 +100,17 @@ policy validation が失敗した場合は exit 1。
   apply 手順つきの action にし、非 active な profile では手置き・他 profile の残置を中立に表示して `off` 以外の値を
   dangling として warn する。`CODEX_HOME` が `~/.codex` 以外を指すと agent-tools はそちらを読むので warn(#264)。
 - agent-tools usage reader(report-only): `agent-tools-usage-reader` module が active な profile で managed
-  `~/.config/agent-tools/usage-reader.json` を**静的に**確認する(wrapper も読み取り口も実行しない。読み取り口は cache を
-  書くことがあるため)。doctor を実行した環境の絶対 path の `XDG_CONFIG_HOME` が別の場所を指せば warn(相対・空は wrapper
-  と同じく無視)、無ければ `mkdir -p ~/.config` → `chezmoi apply` の action、指す先の無い symlink なら無いときと同じ扱いの action
-  (wrapper は exit 3 = 読み取り口なしにする)、regular file でなければ action、agent-tools の
-  契約の形(JSON object・key は `argv` / `timeout_sec` だけ・`argv` は空でない文字列の配列で制御文字なし・`timeout_sec` は
-  1〜120 の整数で字面で判定・`argv[0]` は絶対 path)を外れれば外れ方を固定の文言で示す apply の action、`argv[0]` が
-  実行できる regular file でなければ tacho の導入(`install-packages.sh`)の action(読み先がずれていれば、どちらも
-  「ずれを直すまで効かない」と書く)。値は表示しない。厳密な規則の正本は wrapper。非 active な profile では手置きの
-  file を中立に表示する(#301)。
+  `~/.config/agent-tools/usage-reader.json` を確認する(読み取り口は実行しない。読み取り口は cache を書くことがあるため)。
+  doctor を実行した環境の絶対 path の `XDG_CONFIG_HOME` が別の場所を指せば warn(相対・空は wrapper と同じく無視)、
+  無ければ `mkdir -p ~/.config` → `chezmoi apply` の action、指す先の無い symlink なら無いときと同じ扱いの action
+  (wrapper は exit 3 = 読み取り口なしにする)、regular file でなければ action。regular file なら、契約に合うかは
+  wrapper が判定する(#303): `enableAgentToolsStatus=true` の opt-in の下でだけ、配備済みの
+  `~/.claude/agent-tools/scripts/personal-usage-reader` の `--help` の 1 行目に `[--check]` があることを確かめてから
+  `--check` を `XDG_CONFIG_HOME` を外して(= managed file に対して)`bounded_probe` で呼ぶ。exit 0 → ok、
+  exit 2 → wrapper の理由の 1 行(制御文字は除く)を添えた action(手順は `chezmoi apply` と、理由が実行ファイルなら
+  tacho の導入 `install-packages.sh`。読み先がずれていれば「ずれを直すまで効かない」と書く)、exit 3(有無の確認の
+  後に消えた)→ 無いときと同じ手順の action、それ以外の exit・期限切れ → 未確認の warn。opt-in なし → 未確認の item、wrapper の未配備・`--check` 非対応の旧版 → 未確認で
+  agent-tools の sync を示す action、`--help` が失敗する(起動できない wrapper もありうる)→ 未確認の warn。設定の値は表示しない。非 active な profile では手置きの file を中立に表示する(#301)。
 - agent-tools(report-only): `~/src/agent/agent-tools`(既定。`AGENT_TOOLS` env で override 可)の presence を表示し(不在は `enableAgentToolsStatus=true` の profile だけ warn。false の profile — agent-tools を配備しない work — では想定どおりの状態として中立表示。#258)、`enableAgentToolsStatus=true` の opt-in 時のみ status contract(`scripts/status.sh --root <checkout> --json`。root は常に明示的に pin する — #73 当時の status.sh は `--root` 省略時に cwd を検査して空 repo を偽報告した。agent-tools#305 以降の既定は script 自身の repo)を実行して安全な summary を出す。sync targets は tool ごとの件数(claude-code / codex / opencode)と、conflict / stale / deployed_but_inactive がどの tool の行かも出す(#263)。clone / pull / sync はしない。
 - network tunnels: `allowNetworkTunnels` と tunnel tool の存在。
 - project roots: project root の状態。
@@ -129,7 +131,7 @@ policy validation が失敗した場合は exit 1。`--actions-only` 以外の `
 まとまる(global gitignore の欠損 / pattern drift、git hook gates の hooksPath 未設定 / lingering、
 identity reset の欠損、identity file の不在 / partial / 値の無い key、private-backup の不完全な捕捉、
 managed-path orphan、managed drift、Codex projects trust の stale / home 全体、OpenCode の permission 床の
-欠損、herdr integration の body 不在 / outdated / work 機での未導入、herdr config の欠損 / `herdr config check` の不合格、残量の読み取り口の設定の欠損 / 形の外れ / `argv[0]` の不在、agent-tools の dirty / stale)。
+欠損、herdr integration の body 不在 / outdated / work 機での未導入、herdr config の欠損 / `herdr config check` の不合格、残量の読み取り口の設定の欠損 / `--check` の不合格 / wrapper の未配備・旧版、agent-tools の dirty / stale)。
 判断が要る warning(catalog 外 package 等)は warn のまま。
 `--actions-only` は `[fail]` と summary 以外を mute するだけで、doctor はファイルを書かない(report-only)。
 手順行も key-name-only / secret を出さない規律の対象。
@@ -328,18 +330,21 @@ query だけを実機で実行する(書き込みはしない)。
   走れば action が出る)、missing なら redirect warn と「既定値」と断定しない missing action の両方 /
   `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)と `~/.config` への symlink(`-ef`、#307)は同じ file 扱い / work → not managed。どの run も
   `env -i` で hermetic。
-- agent-tools の残量の読み取り口(#301): fixture の HOME に fake の実行ファイルを置き、missing → `mkdir -p` →
-  `chezmoi apply` の連続 2 step の action / 契約どおりの形(`timeout_sec` の 1・120・省略を含む)→ ok / 形の外れ
-  (JSON でない・object でない・知らない key・`argv` の欠落 / 空 / 文字列以外 / 改行・tab・NUL・C1 制御文字(U+0085)を含む
-  要素・`timeout_sec` の 0 / 121 / 文字列 / 小数 / 負 / 桁あふれ / `20.0` / `2e1` / `[20]` / object / bool・相対の `argv[0]`)→ それぞれの固定の文言と apply の手順の
-  action / string の中の数字らしい字面と escape した引用符は ok / `argv[0]` が実行できない・無い → install の action /
-  regular file でない → action / 指す先の無い symlink → 「読み取り口なし」の action(wrapper は exit 3 にするので失敗とは
-  書かない)/ 絶対 path の `XDG_CONFIG_HOME` が別の場所 → redirect warn(missing でも形の外れでも
-  「ずれを直すまで効かない」の action で、wrapper の失敗とは断定しない)、相対の `XDG_CONFIG_HOME` と `~/.config/`
-  (末尾 `/`)と `~/.config` への symlink(`-ef`、#307)は同じ file 扱い / work → 手置きは中立の item、無ければ ok(読み先がずれていれば、どちらも「wrapper が読む」
-  「読み取り口なし」と断定せず、ずれた先を示す)。`argv` の canary が出力に出ないこと。fixture の
-  reader と wrapper は実行されると marker を残し、全 run の後に marker が無いこと(doctor は実行しない)。どの run も
-  `env -i` で hermetic。
+- agent-tools の残量の読み取り口(#301 / #303): fixture の HOME に fake の wrapper(`--help` と `--check` の exit・
+  1 行目・理由を control file で決める)を置き、missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action /
+  `--check` exit 0 → ok(JSON でない file でも wrapper が受ければ ok = doctor は形を自分で判定しない)/ exit 2 →
+  wrapper の名前の接頭辞を外した理由つきの action と apply → install の連続 2 step(理由の ESC・CR は除く。理由が
+  無ければ括弧なし)/ exit 3 → `mkdir -p` → `chezmoi apply` の連続 2 step の
+  欠損の action / 契約の外の exit(1)→ 未確認の warn / `--help` に `[--check]` が無い旧版 → 未確認と sync の action /
+  `--help` が失敗する(exit 127)→ 旧版とは断定しない未確認の warn。どちらも `--check` は呼ばない / wrapper が実行できない・無い → 未配備の action / opt-in なし(opt-out の
+  repo の写し)→ 未確認の item で wrapper を一度も呼ばない / regular file でない → action / 指す先の無い symlink →
+  「読み取り口なし」の action(wrapper は exit 3 にするので失敗とは書かない)。どちらも `--check` は呼ばない / 絶対
+  path の `XDG_CONFIG_HOME` が別の場所 → redirect warn(missing でも `--check` の不合格でも「ずれを直すまで効かない」の
+  action で、wrapper の失敗とは断定しない)、相対の `XDG_CONFIG_HOME` と `~/.config/`(末尾 `/`)と `~/.config` への
+  symlink(`-ef`、#307)は同じ file 扱い / work → 手置きは中立の item、無ければ ok(読み先がずれていれば、どちらも
+  「wrapper が読む」「読み取り口なし」と断定せず、ずれた先を示す)。設定の canary が出力に出ないこと。fixture の
+  reader は実行されると、wrapper は `--help` / `--check` 以外で呼ばれるか `--check` が `XDG_CONFIG_HOME` を見ると
+  marker を残し、全 run の後に marker が無いこと。どの run も `env -i` で hermetic。
 - 1Password(#231): fake op の signed in(ok 1 行だけ)/ signed out(既存 warn)/ hang(期限で process tree
   ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
   stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・

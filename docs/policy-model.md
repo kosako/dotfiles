@@ -349,8 +349,9 @@ file の `argv` を shell を通さず起動する。file 名と key(`argv` / `t
 - **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work は非列挙(会社機に tacho がまだ無い)。
   置かない machine では agent-tools は「読み取り口なし」で動く。
 - strict な JSON で知らない key は不正なので、managed-by の見出しを置けない(managed-path orphans の対象外)。
-- **doctor**: 静的な確認だけ(読み取り口は実行しない): `XDG_CONFIG_HOME` による読み先のずれ、presence、
-  契約の形、`argv[0]` が実行できる regular file か。**preflight**: 既存 file の置換 warn(中身は読まない)。
+- **doctor**(読み取り口は実行しない): `XDG_CONFIG_HOME` による読み先のずれ、presence、契約に合うか(規則は
+  写さず、`enableAgentToolsStatus=true` の opt-in の下で agent-tools の wrapper の `--check` に判定させる。#303)。
+  **preflight**: 既存 file の置換 warn(中身は読まない)。
 - 中身と apply の範囲は `test-agent-tools-usage-reader.sh` が pin する。詳細は
   [agent-tools-usage-reader](agent-tools-usage-reader.md)。
 

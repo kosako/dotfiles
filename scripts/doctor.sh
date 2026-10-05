@@ -553,7 +553,8 @@ done
 # rule, set by the herdr section under Codex review (PR #226) and shared
 # here since #231: every such probe runs under one deadline, reads no
 # terminal input, uses no temp file (a failing mktemp must not break the
-# report-only contract), and its output is adopted only on a clean exit 0.
+# report-only contract), and its output is adopted only on a clean exit 0
+# (or an exit status whose output the probed command's contract defines).
 # A command that gives no exit status in time (hung, so killed at the
 # deadline) is reported as "not checked", never as a partial answer read as
 # a definite one; what a prompt non-zero exit means is the caller's call
@@ -565,8 +566,9 @@ done
 # Run CMD with stdin from /dev/null and stderr discarded for at most
 # $probe_deadline seconds. On return, probe_rc holds CMD's exit status ("" when
 # none arrived in time: killed at the deadline) and probe_lines its stdout
-# (newline-terminated lines, blank lines dropped) — meaningful only when
-# probe_rc is 0.
+# (newline-terminated lines, blank lines dropped) — complete only when
+# probe_rc is set; callers adopt it on 0 (the usage reader also reads the
+# reason line of its contract's exit 2).
 probe_deadline=5
 probe_job=""
 probe_launching=0
@@ -619,8 +621,9 @@ trap 'probe_cleanup; trap - TERM; kill -TERM $$' TERM
 # read carries the remaining deadline. A read that fails while the deadline
 # has not produced the status line is the deadline (bash 3.2's read -t
 # returns 1 there, 4+ returns >128, so neither status is relied on): the
-# tree is killed and nothing is adopted. Only a clean exit 0 with its status
-# line seen is adopted.
+# tree is killed and nothing is adopted. Only output whose status line was
+# seen is adopted: a clean exit 0, or a non-zero exit whose output the probed
+# command's contract defines (the usage reader's exit 2 reason line).
 bounded_probe() {
   local started remaining line
   probe_rc=""
@@ -1727,65 +1730,28 @@ section "agent-tools usage reader (report-only)"
 # XDG_CONFIG_HOME only when it is an absolute path, while chezmoi renders into
 # ~/.config — so an absolute XDG_CONFIG_HOME elsewhere is a redirect (same
 # file: same spelling after dropping trailing slashes, or -ef).
-# STATIC only: doctor never runs the wrapper or the reader (the reader may
-# write a cache; doctor stays side-effect free), so "ok" means the file has
-# the contract's shape and argv[0] is executable, not that a read succeeded.
-# The shape check follows the wrapper's rules (Codex review, PR #302: control
-# characters in argv; timeout_sec read from its raw literal, since yq turns
-# 20.0 / 2e1 into an int while the wrapper's JSON parser keeps them Float and
-# rejects them), yet the wrapper stays the authority (duplicate keys or
-# invalid UTF-8, for instance, are not modelled). Contents-blind: fixed
-# phrases only, never a value. The file is strict JSON with no room for a
-# managed-by header, so the managed-path orphan scan cannot see it.
+# Presence (missing / a symlink to nothing / not a regular file) is
+# dotfiles' own check. Whether a present file meets the contract is the
+# wrapper's call (#303, agent-tools#400): doctor runs its --check, which
+# validates the file and argv[0] with the wrapper's own code and never runs
+# the reader (no file written, no child, no network), instead of copying its
+# rules here. That is code from another repo, so it runs only under the
+# enableAgentToolsStatus opt-in (as status.sh in the next section), through
+# bounded_probe, and only once --help's usage line advertises [--check] (an
+# older wrapper takes --check as a usage error, exit 2, indistinguishable
+# from "invalid"; agent-tools' docs/boundary-with-dotfiles.md). "ok" means
+# --check accepted the file, not that a read succeeded. Contents-blind: the
+# contract keeps the config's values and paths out of the wrapper's one-line
+# reason, the only thing of its output shown. The file is strict JSON with no
+# room for a managed-by header, so the managed-path orphan scan cannot see it.
 usage_reader_config="$HOME/.config/agent-tools/usage-reader.json"
-# usage_reader_problem FILE — a fixed phrase for the first way FILE breaks the
-# usage-reader contract (agent-tools' docs/boundary-with-dotfiles.md), or
-# nothing when its shape holds.
-usage_reader_problem() {
-  local file="$1" timeout argv0
-  if ! yq -p json -o json '.' "$file" >/dev/null 2>&1; then
-    printf 'is not valid JSON'
-    return 0
-  fi
-  if [[ "$(yq -p json -o json -r '. | tag' "$file" 2>/dev/null)" != "!!map" ]]; then
-    printf 'is not a JSON object'
-    return 0
-  fi
-  if [[ "$(yq -p json -o json -r '[keys[] | select(. != "argv" and . != "timeout_sec")] | length' "$file" 2>/dev/null)" != "0" ]]; then
-    printf 'has a key other than argv / timeout_sec'
-    return 0
-  fi
-  if [[ "$(yq -p json -o json -r '(.argv | tag) == "!!seq" and (.argv | length) > 0 and (.argv | all_c(tag == "!!str"))' "$file" 2>/dev/null)" != "true" ]]; then
-    printf 'needs argv as a non-empty array of strings'
-    return 0
-  fi
-  # \p{Cc}, not [[:cntrl:]]: Go's POSIX class is ASCII-only, while the
-  # wrapper (Ruby) also rejects the C1 controls U+0080..U+009F.
-  if [[ "$(yq -p json -o json -r '[.argv[] | select(test("\\p{Cc}"))] | length' "$file" 2>/dev/null)" != "0" ]]; then
-    printf 'has a control character in an argv element'
-    return 0
-  fi
-  if [[ "$(yq -p json -o json -r 'has("timeout_sec")' "$file" 2>/dev/null)" == "true" ]]; then
-    # The tag rules out an array / object / string / bool around a number
-    # (the stripping below would otherwise turn [20] into 20). Every argv
-    # element is a string by now and timeout_sec is the only other key, so
-    # with the string literals removed only timeout_sec's literal is left —
-    # its raw spelling, which yq would have normalized (20.0 / 2e1 -> int).
-    timeout=""
-    if [[ "$(yq -p json -o json -r '.timeout_sec | tag' "$file" 2>/dev/null)" == "!!int" ]]; then
-      timeout="$(sed -E 's/"([^"\\]|\\.)*"//g' "$file" | tr -d '{}[],: \t\r\n')"
-    fi
-    if [[ ! "$timeout" =~ ^[0-9]{1,3}$ ]] || (( 10#$timeout < 1 || 10#$timeout > 120 )); then
-      printf 'needs timeout_sec as an integer from 1 to 120'
-      return 0
-    fi
-  fi
-  argv0="$(yq -p json -o json -r '.argv[0]' "$file" 2>/dev/null)"
-  if [[ "$argv0" != /* ]]; then
-    printf 'needs argv[0] as an absolute path'
-  elif [[ ! -f "$argv0" || ! -x "$argv0" ]]; then
-    printf 'names an argv[0] that is not an executable regular file here'
-  fi
+usage_reader_wrapper="$HOME/.claude/agent-tools/scripts/personal-usage-reader"
+# usage_reader_run_check — the wrapper's --check on the managed file: without
+# XDG_CONFIG_HOME it reads ~/.config even where a redirect points it
+# elsewhere. Its stdout is empty by contract, so its stderr (the reason line)
+# is what bounded_probe collects.
+usage_reader_run_check() {
+  env -u XDG_CONFIG_HOME "$usage_reader_wrapper" --check 2>&1
 }
 # Where the wrapper reads, whatever the profile (it does not know profiles).
 usage_reader_read="$usage_reader_config"
@@ -1813,10 +1779,14 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
     usage_reader_broken_effect="fixing it takes effect only once the redirect above is gone"
     usage_reader_missing_effect="restoring it takes effect only once the redirect above is gone"
   fi
+  # Restores a missing file; also where --check finds none (exit 3).
+  usage_reader_restore_steps=(
+    "\$ mkdir -p $(printf '%q' "$HOME/.config")"
+    "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+  )
   if [[ ! -e "$usage_reader_config" && ! -L "$usage_reader_config" ]]; then
     action "usage reader config missing: $usage_reader_config (agent-tools-usage-reader module) — $usage_reader_missing_effect" \
-      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
-      "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+      "${usage_reader_restore_steps[@]}"
   elif [[ ! -e "$usage_reader_config" ]]; then
     # A dangling symlink: the wrapper follows it, finds nothing and treats
     # the config as absent (exit 3), not as invalid (Codex review R3, PR #302).
@@ -1828,20 +1798,57 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
       "\$ mv -i $(printf '%q' "$usage_reader_config") $(printf '%q' "$usage_reader_config.bak")   # keep it aside" \
       "\$ chezmoi apply $(printf '%q' "$usage_reader_config")"
   else
-    usage_reader_why="$(usage_reader_problem "$usage_reader_config")"
-    case "$usage_reader_why" in
-      "")
-        ok "usage reader config $usage_reader_config present; shape per the agent-tools contract and argv[0] executable (not run: doctor does not execute the reader)"
-        ;;
-      "names an argv[0] that is not an executable regular file here")
-        action "usage reader config $usage_reader_config $usage_reader_why — $usage_reader_broken_effect; the managed argv names tacho under ~/go/bin (software catalog, go_install)" \
-          "\$ ./scripts/install-packages.sh   # dry-run first; --apply installs the catalog's tacho"
-        ;;
-      *)
-        action "usage reader config $usage_reader_config $usage_reader_why — $usage_reader_broken_effect" \
-          "\$ chezmoi apply $(printf '%q' "$usage_reader_config")   # restores the managed content"
-        ;;
-    esac
+    usage_reader_unchecked="usage reader config $usage_reader_config present; contract not checked"
+    usage_reader_sync_step="re-run the agent-tools sync (see the agent-tools README) so the current personal-usage-reader is deployed"
+    if [[ "$(capability_value "$profile" enableAgentToolsStatus)" != "true" ]]; then
+      item "$usage_reader_unchecked (doctor runs agent-tools' personal-usage-reader --check only under enableAgentToolsStatus=true)"
+    elif [[ ! -f "$usage_reader_wrapper" || ! -x "$usage_reader_wrapper" ]]; then
+      action "$usage_reader_unchecked: agent-tools' personal-usage-reader is not deployed at $usage_reader_wrapper, and nothing reads this config without it" \
+        "$usage_reader_sync_step"
+    else
+      bounded_probe "$usage_reader_wrapper" --help
+      if [[ -z "$probe_rc" ]]; then
+        warn "$usage_reader_unchecked: personal-usage-reader --help gave no answer within ${probe_deadline}s (the probe was killed)"
+      elif [[ "$probe_rc" != 0 ]]; then
+        # Not necessarily an old wrapper: one that cannot run here (its
+        # interpreter missing, say) fails too, and a sync would not help.
+        warn "$usage_reader_unchecked: personal-usage-reader --help exited $probe_rc (it cannot run here, or predates --help)"
+      elif [[ "${probe_lines%%$'\n'*}" != *"[--check]"* ]]; then
+        action "$usage_reader_unchecked: the deployed personal-usage-reader predates --check (agent-tools#400)" \
+          "$usage_reader_sync_step"
+      else
+        bounded_probe usage_reader_run_check
+        case "$probe_rc" in
+          0)
+            ok "usage reader config $usage_reader_config present and accepted by personal-usage-reader --check (the agent-tools contract, argv[0] included; the reader itself not run)"
+            ;;
+          2)
+            # The reason without the wrapper's name prefix, and with any
+            # terminal control stripped: it is another repo's output.
+            usage_reader_reason="$(printf '%s' "${probe_lines%%$'\n'*}" | LC_ALL=C tr -d '[:cntrl:]')"
+            usage_reader_reason="${usage_reader_reason#personal-usage-reader: }"
+            if [[ -n "$usage_reader_reason" ]]; then
+              usage_reader_reason=" ($usage_reader_reason)"
+            fi
+            action "usage reader config $usage_reader_config rejected by personal-usage-reader --check$usage_reader_reason — $usage_reader_broken_effect" \
+              "\$ chezmoi apply $(printf '%q' "$usage_reader_config")   # restores the managed content" \
+              "\$ ./scripts/install-packages.sh   # when the reason is the executable: dry-run first; --apply installs the catalog's tacho, the managed argv[0] under ~/go/bin"
+            ;;
+          3)
+            # The contract's "no config file" (Codex review R1, PR #324): the
+            # file went away after the presence check above, so it is missing.
+            action "usage reader config $usage_reader_config absent per personal-usage-reader --check (exit 3), though doctor found it a moment earlier — $usage_reader_missing_effect" \
+              "${usage_reader_restore_steps[@]}"
+            ;;
+          "")
+            warn "$usage_reader_unchecked: personal-usage-reader --check gave no answer within ${probe_deadline}s (the probe was killed)"
+            ;;
+          *)
+            warn "$usage_reader_unchecked: personal-usage-reader --check exited $probe_rc, outside its contract (0 / 2 / 3)"
+            ;;
+        esac
+      fi
+    fi
   fi
 else
   # Not managed here: report what is on disk, and claim what agent-tools

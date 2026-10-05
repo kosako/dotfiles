@@ -185,7 +185,8 @@ file が無い**。agent-tools の wrapper `personal-usage-reader` は `${XDG_CO
 
 - machine ごとの差は template の `{{ .chezmoi.homeDir }}` で吸収する。読み取り口そのものを変えたいときは
   managed file(template)を直す。
-- doctor は file の形と `argv[0]` が実行できることだけを静的に見て、読み取り口は実行しない(値も表示しない)。
+- doctor は file の有無と、opt-in の下で wrapper の `--check` が契約どおりと判定するか(#303)だけを見て、読み取り口は
+  実行しない(値も表示しない)。
   preflight は存在だけを見る。詳細は [agent-tools-usage-reader](agent-tools-usage-reader.md)。
 
 ## 決定記録
