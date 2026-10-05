@@ -406,6 +406,116 @@ else
   status=1
 fi
 
+# 7) The Ctrl-O widget itself (#307): extract _ai_clip_accept_line from the
+#    managed zshrc and run it in an isolated zsh with zle and `print -s`
+#    stubbed. A non-blank line is saved to history as typed, BUFFER becomes a
+#    space-prefixed wrapper call, and evaluating that wrapper hands the
+#    original line to _ai_clip_run as ONE argument without expanding it (a
+#    command substitution in the line must not run); a space-prefixed line is
+#    not saved; an empty line only accepts. The (qq) quoting and the history
+#    save are what this pins.
+widget_markers="$(grep -c '^_ai_clip_accept_line() {$' "$ZSHRC_SOURCE" || true)"
+if [[ "$widget_markers" != 1 ]]; then
+  fail "widget marker must appear exactly once in $ZSHRC_SOURCE (x$widget_markers)"
+  status=1
+else
+  awk '/^_ai_clip_accept_line\(\) \{$/ { on = 1 } on { print } on && /^}$/ { exit }' \
+    "$ZSHRC_SOURCE" > "$fixture/widget.zsh"
+  cat > "$fixture/cases/widget.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/widget.zsh"
+typeset -ga ZLE_CALLS HIST_SAVED
+zle() { ZLE_CALLS+=("$*") }
+print() {
+  if [[ "$1" == -s ]]; then
+    shift
+    [[ "$1" == -- ]] && shift
+    HIST_SAVED+=("$*")
+  else
+    builtin print "$@"
+  fi
+}
+_ai_clip_run() { builtin print -r -- "args=$# arg1=$1" }
+BUFFER="$AI_CLIP_BUFFER"
+_ai_clip_accept_line
+builtin print -r -- "buffer=$BUFFER"
+builtin print -r -- "hist=${#HIST_SAVED} ${HIST_SAVED[1]-}"
+builtin print -r -- "zle=${(j:,:)ZLE_CALLS}"
+if [[ -n "$BUFFER" ]]; then eval "$BUFFER"; fi
+ZSH
+  # widget_case BUFFER -> the case's output for that command line.
+  widget_case() {
+    env -i HOME="$fixture/home" PATH="$no_clip" AI_CLIP_FIXTURE="$fixture" AI_CLIP_BUFFER="$1" \
+      "$zsh_bin" -f "$fixture/cases/widget.zsh"
+  }
+  # shellcheck disable=SC2016 # the line is literal: it must reach the wrapper unexpanded
+  widget_line='echo a; echo "b c" '\''d'\'' $(builtin print -r -- expanded > "$AI_CLIP_FIXTURE/expanded")'
+  rm -f "$fixture/expanded"
+  if out="$(widget_case "$widget_line")" \
+    && [[ "$out" == *$'\n'"hist=1 $widget_line"$'\n'* ]] \
+    && [[ "$out" == *$'\n'"zle=accept-line"$'\n'* ]] \
+    && [[ "$out" == *$'\n'"args=1 arg1=$widget_line" ]] \
+    && [[ "$(head -n 1 <<< "$out")" == "buffer= _ai_clip_run "* ]] \
+    && [[ ! -e "$fixture/expanded" ]]; then
+    ok "test passed: widget saves the line to history, wraps it space-prefixed, and the wrapper gets it as one unexpanded argument"
+  else
+    printf 'out=%s\nexpanded=%s\n' "$out" "$([[ -e "$fixture/expanded" ]] && echo yes || echo no)" >&2
+    fail "test failed: widget quoting / history contract"
+    status=1
+  fi
+  if out="$(widget_case ' echo secret')" \
+    && [[ "$out" == *$'\n'"hist=0 "$'\n'* ]] \
+    && [[ "$out" == *$'\n'"args=1 arg1= echo secret" ]]; then
+    ok "test passed: a space-prefixed line is run through the wrapper but not saved to history"
+  else
+    printf 'out=%s\n' "$out" >&2
+    fail "test failed: space-prefixed line must not be saved to history"
+    status=1
+  fi
+  if out="$(widget_case '')" \
+    && [[ "$out" == $'buffer=\nhist=0 \nzle=accept-line' ]]; then
+    ok "test passed: an empty line only accepts (no wrapper, nothing saved)"
+  else
+    printf 'out=%s\n' "$out" >&2
+    fail "test failed: empty line contract"
+    status=1
+  fi
+fi
+
+# 8) OSC 52 (#307): with no pbcopy on PATH and AI_CLIPBOARD_OSC52=1, the copy
+#    goes to the terminal as ESC ] 52 ; c ; <base64> BEL on /dev/tty — read
+#    back from script(1)'s typescript of a pseudo-terminal session.
+cat > "$fixture/cases/osc52.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+print -rn -- 'osc payload' | _ai_clip_copy
+print -r -- "rc=$?"
+ZSH
+osc_expected="$(printf '\033]52;c;%s\007' "$(printf '%s' 'osc payload' | base64 | tr -d '\n')")"
+if [[ -z "$script_bin" ]]; then
+  fail "script(1) not found; the OSC 52 case cannot run"
+  status=1
+else
+  osc_ts="$fixture/osc52.typescript"
+  rm -f "$osc_ts"
+  case "$script_flavour" in
+    bsd)
+      env -i HOME="$fixture/home" TMPDIR="$fixture/tmp" AI_CLIPBOARD_OSC52=1 AI_CLIP_FIXTURE="$fixture" \
+        PATH="$no_clip" "$script_bin" -q "$osc_ts" "$zsh_bin" -f "$fixture/cases/osc52.zsh" </dev/null >/dev/null 2>&1 || true
+      ;;
+    util-linux)
+      env -i HOME="$fixture/home" TMPDIR="$fixture/tmp" AI_CLIPBOARD_OSC52=1 AI_CLIP_FIXTURE="$fixture" \
+        PATH="$no_clip" "$script_bin" -q -e -c "$(sq "$zsh_bin") -f $(sq "$fixture/cases/osc52.zsh")" "$osc_ts" </dev/null >/dev/null 2>&1 || true
+      ;;
+  esac
+  if [[ -s "$osc_ts" ]] && LC_ALL=C grep -Fq -- "$osc_expected" "$osc_ts" && LC_ALL=C grep -q 'rc=0' "$osc_ts"; then
+    ok "test passed: with OSC 52 opted in and no pbcopy, the copy reaches the terminal as an OSC 52 sequence"
+  else
+    printf 'typescript:\n' >&2
+    LC_ALL=C od -c "$osc_ts" 2>/dev/null | head -20 >&2
+    fail "test failed: OSC 52 copy did not reach the terminal"
+    status=1
+  fi
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "ai-clip tests passed"
 fi
