@@ -122,7 +122,7 @@ if command -v git >/dev/null 2>&1; then
       warn "global gitignore: git cannot read its global/system config (core.excludesFile lookup failed), so whether the managed $managed_ignore is in effect is unknown — fix the config error first (git config --global --list / git config --system --list)"
     elif [[ "$excludes_setting" == empty ]]; then
       warn "global gitignore: core.excludesFile is explicitly empty (global or system config), so git reads NO global excludes file — the managed $managed_ignore is not in effect; unset the key to restore git's default location"
-    elif [[ "$effective_ignore" != "$managed_ignore" ]]; then
+    elif [[ "$effective_ignore" != "$managed_ignore" && ! "$effective_ignore" -ef "$managed_ignore" ]]; then
       warn "global gitignore: git reads $effective_ignore, not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
     else
       missing_ignore_patterns=""
@@ -761,8 +761,23 @@ section "managed drift (report-only)"
 if ! command -v chezmoi >/dev/null 2>&1; then
   warn "chezmoi not found; skipping drift check"
 elif ! drift_status="$(chezmoi status 2>/dev/null)"; then
-  # No initialized config in this HOME (e.g. test fixtures, pre-bootstrap).
-  item "chezmoi not initialized for this home; skipping drift check"
+  # Without a chezmoi config file this home is simply not initialized (test
+  # fixtures, pre-bootstrap). With one, the failure is a config / template
+  # error (a profile typo, a broken template) that also breaks apply, so it
+  # must not read as a neutral skip (#309). The error text is not echoed:
+  # the command step shows it.
+  chezmoi_config_dir="$HOME/.config/chezmoi"
+  [[ "${XDG_CONFIG_HOME:-}" == /* ]] && chezmoi_config_dir="$XDG_CONFIG_HOME/chezmoi"
+  chezmoi_config_found=0
+  for chezmoi_config_ext in toml yaml yml json jsonc; do
+    [[ -f "$chezmoi_config_dir/chezmoi.$chezmoi_config_ext" ]] && chezmoi_config_found=1
+  done
+  if [[ "$chezmoi_config_found" -eq 1 ]]; then
+    action "chezmoi status failed although this home has a chezmoi config — a config or template error (e.g. an unknown profile) also breaks chezmoi apply; drift is not checked until it is fixed" \
+      "\$ chezmoi status   # read the error, then fix the config or the template"
+  else
+    item "chezmoi not initialized for this home; skipping drift check"
+  fi
 else
   drift_lines=0
   while IFS= read -r line; do
@@ -918,7 +933,14 @@ report_codex_projects_trust() {
     # comments; escaped double-quoted keys and other unsupported forms must
     # surface as an INCOMPLETE scan, as must any parse/read failure, never as
     # "0 trusted" (fail-open false-clean).
+    # Every other spelling that can grant project trust — a [projects] table,
+    # a spaced / quoted / array table name, a projects.* or "projects" key
+    # (inline table, dotted key), or a trust_level that is not the plain
+    # one-line form inside a project section — exits 1 too: the scan cannot
+    # read it, so it must not count zero (#309, the rest of #292's contract).
     if trusted_paths="$(awk '
+      /^[[:space:]]*\[/ && $0 !~ /^[[:space:]]*\[projects\./ && $0 ~ /^[[:space:]]*\[+[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[].]/ { exit 1 }
+      /^[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[.=]/ { exit 1 }
       /^[[:space:]]*\[projects\./ {
         p = $0
         sub(/^[[:space:]]*\[projects\./, "", p)
@@ -932,6 +954,11 @@ report_codex_projects_trust() {
       current != "" && $0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("trusted"|'\''trusted'\'')[[:space:]]*(#.*)?$/ {
         print current
         current = ""
+        next
+      }
+      current != "" && $0 ~ /^[[:space:]]*("trust_level"|'\''trust_level'\''|trust_level)[[:space:]]*[.=]/ {
+        if ($0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*(#.*)?$/) next
+        exit 1
       }
     ' "$codex_config" 2>/dev/null)"; then
       trusted_total=0

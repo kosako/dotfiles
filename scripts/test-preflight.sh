@@ -247,6 +247,34 @@ else
   miss "personal with no usage reader config must report the absent/creates ok line"
 fi
 
+# 5e. Arguments (#309): a dash-word reaches validate-policy as its own option
+#     (-h / --all / --list-profiles exit 0 there), after which the report would
+#     run against a profile named "-h" and close as a false clean. preflight
+#     must reject it up front with exit 2 and run no report; a second
+#     argument is rejected the same way instead of being dropped.
+for pf_bad in -h --all --list-profiles --bogus; do
+  pf_rc=0
+  pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" "$pf_bad" 2>&1)" || pf_rc=$?
+  if [[ "$pf_rc" -eq 2 ]] \
+    && grep -Fq "unknown option: $pf_bad (usage: preflight.sh [PROFILE])" <<< "$pf_out" \
+    && ! grep -Fq "preflight profile:" <<< "$pf_out"; then
+    pass "arguments: $pf_bad is rejected with exit 2 before any report"
+  else
+    printf 'rc=%s\n%s\n' "$pf_rc" "$pf_out" >&2
+    miss "arguments: $pf_bad must be rejected with exit 2 and no report"
+  fi
+done
+pf_rc=0
+pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal work 2>&1)" || pf_rc=$?
+if [[ "$pf_rc" -eq 2 ]] \
+  && grep -Fq "too many arguments (usage: preflight.sh [PROFILE])" <<< "$pf_out" \
+  && ! grep -Fq "preflight profile:" <<< "$pf_out"; then
+  pass "arguments: a second argument is rejected with exit 2 before any report"
+else
+  printf 'rc=%s\n%s\n' "$pf_rc" "$pf_out" >&2
+  miss "arguments: a second argument must be rejected with exit 2 and no report"
+fi
+
 # 5f. git hook gates apply impact (#307): readiness is judged on all FOUR
 #     agent-tools scripts. A complete deploy with the managed hooksPath reports
 #     ok for each script, the arming and the path; the pre-#281 deploy (the

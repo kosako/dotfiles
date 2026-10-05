@@ -844,12 +844,14 @@ require_secrets_access() {
 
 # git_default_excludes_file — the global excludes file git reads when
 # core.excludesFile is unset: $XDG_CONFIG_HOME/git/ignore if that variable is
-# set and non-empty, else $HOME/.config/git/ignore (git's rule). A trailing
-# slash is stripped so the result compares equal to a chezmoi target path.
+# set and non-empty, else $HOME/.config/git/ignore (git's rule). Trailing
+# slashes are stripped (all of them, #309) so the result compares equal to a
+# chezmoi target path; callers also compare with -ef for other aliases.
 git_default_excludes_file() {
   local xdg="${XDG_CONFIG_HOME:-}"
   [[ -n "$xdg" ]] || xdg="$HOME/.config"
-  printf '%s/git/ignore\n' "${xdg%/}"
+  while [[ "$xdg" == */ ]]; do xdg="${xdg%/}"; done
+  printf '%s/git/ignore\n' "$xdg"
 }
 
 # git_excludes_file_setting — classify core.excludesFile the way git resolves

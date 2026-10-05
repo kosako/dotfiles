@@ -638,6 +638,14 @@ gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads;
 rm -f "$gi_home/system.gitconfig"
 # GI-3d) XDG_CONFIG_HOME moves git's default location away from ~/.config.
 gi_check personal "[warn] global gitignore: git reads $gi_home/xdg/git/ignore, not the managed $gi_managed (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect" "redirected by XDG_CONFIG_HOME -> warn" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/xdg"
+# GI-3d2) ... but XDG_CONFIG_HOME naming ~/.config itself is the managed file,
+#         however it is spelled: with repeated trailing slashes, or through a
+#         symlink to ~/.config (-ef) — no false redirect warn (#309).
+gi_ok="[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
+gi_check personal "$gi_ok" "XDG_CONFIG_HOME=~/.config// is the managed file -> ok" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/.config//"
+ln -s "$gi_home/.config" "$gi_home/config-alias"
+gi_check personal "$gi_ok" "XDG_CONFIG_HOME through a symlink to ~/.config is the managed file -> ok" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/config-alias"
+rm -f "$gi_home/config-alias"
 # GI-3e) explicitly EMPTY core.excludesFile: git reads no global excludes file
 #        at all (measured: .agent-packets/x.md shows up in git status), so
 #        falling back to the default path would be a false ok (Codex must).
@@ -2866,6 +2874,48 @@ TOML
   fi
 done
 
+# Every other spelling that can grant project trust is INCOMPLETE too, never
+# "0 trusted" (#309, the rest of #292's contract): a top-level inline table, a
+# [projects] table, a top-level dotted key, a spaced / quoted / array table
+# name, and a quoted or multi-line trust_level inside a project section.
+aip_forms=(
+  'projects = { "/x" = { trust_level = "trusted" } }'
+  $'[projects]\n"/x" = { trust_level = "trusted" }'
+  'projects."/x".trust_level = "trusted"'
+  $'[ projects."/x" ]\ntrust_level = "trusted"'
+  $'["projects"."/x"]\ntrust_level = "trusted"'
+  $'[[projects]]\npath = "/x"'
+  $'[projects."/x"]\n"trust_level" = "trusted"'
+  $'[projects."/x"]\ntrust_level = """trusted"""'
+)
+for aip_form in "${aip_forms[@]}"; do
+  printf '[projects."%s/real-project"]\ntrust_level = "trusted"\n%s\n[mcp_servers.fake.env]\nFAKE_TOKEN = "CANARY_FORM_ENV_309"\n' \
+    "$fixture_home" "$aip_form" > "$fixture_home/.codex/config.toml"
+  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
+    && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
+    && ! grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
+    ok "test passed: non-header trust form reports INCOMPLETE without a trusted count: ${aip_form%%$'\n'*}"
+  else
+    fail "test failed: non-header trust form must report INCOMPLETE without a trusted count: ${aip_form%%$'\n'*}"
+    status=1
+  fi
+done
+# ... while keys and tables that merely contain the word, and an untrusted
+# entry with a comment, keep the normal count (no over-triggering).
+printf '[projects."%s/real-project"]\ntrust_level = "trusted"\nproject_doc_max_bytes = 32768\n[profiles.projects]\nmodel = "m"\n[projects."/y"]\ntrust_level = "untrusted" # note\n' \
+  "$fixture_home" > "$fixture_home/.codex/config.toml"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
+  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
+  ok "test passed: look-alike keys / tables and an untrusted entry keep the normal count"
+else
+  fail "test failed: look-alike keys / tables must not make the trust scan INCOMPLETE"
+  status=1
+fi
+
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log
 #        pins the EXACT probe set (policy-derived contract): a probe silently
@@ -3222,7 +3272,7 @@ else
 fi
 
 if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
-  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 XDG_CONFIG_HOME='' \
   "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "chezmoi not initialized for this home; skipping drift check" <<< "$dr_out"; then
     ok "test passed: a failing chezmoi status is skipped, doctor stays exit 0"
@@ -3236,6 +3286,30 @@ else
   fail "test failed: doctor must stay exit 0 when chezmoi status fails"
   status=1
 fi
+
+# ... but with a chezmoi config in this home, a failing status is a config /
+# template error (e.g. an unknown profile) that also breaks apply: an action
+# naming `chezmoi status`, never the neutral not-initialized skip (#309).
+mkdir -p "$dr_home/.config/chezmoi"
+printf '[data]\nprofile = "persnal"\n' > "$dr_home/.config/chezmoi/chezmoi.toml"
+if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 XDG_CONFIG_HOME='' \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] chezmoi status failed although this home has a chezmoi config — a config or template error (e.g. an unknown profile) also breaks chezmoi apply; drift is not checked until it is fixed" <<< "$dr_out" \
+    && grep -Fxq "        \$ chezmoi status   # read the error, then fix the config or the template" <<< "$dr_out" \
+    && ! grep -Fq "chezmoi not initialized for this home" <<< "$dr_out"; then
+    ok "test passed: a failing chezmoi status with a config present is an action, not the not-initialized skip"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: a failing status with a chezmoi config must be an action naming chezmoi status"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 when chezmoi status fails with a config present"
+  status=1
+fi
+rm -rf "$dr_home/.config/chezmoi"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
