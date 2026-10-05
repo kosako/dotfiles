@@ -3206,7 +3206,7 @@ if [[ "$(id -u)" != "0" ]]; then
   chmod 000 "$aip_rules_dir"
   if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
       "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir is not readable (~/.codex/rules): rules-semantics scan INCOMPLETE" <<< "$aip_out" \
+    && grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
     && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
     ok "test passed: an unreadable rules dir reports the scan INCOMPLETE (no false clean)"
   else
@@ -3216,6 +3216,72 @@ if [[ "$(id -u)" != "0" ]]; then
   fi
   chmod 755 "$aip_rules_dir"
 fi
+
+# AIP-8) ~/.codex/rules itself a symlink to a directory: Codex's read_dir
+#        follows it, so the listing must too (while still skipping symlinked
+#        entries) — an allow in a sibling there must surface.
+mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+ln -s "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+printf 'prefix_rule(pattern=["git", "push"], decision="allow")\n' > "$fixture_home/.codex/rules-real/extra.rules"
+: > "$aip_rules_log"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+  && grep -Fq "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/extra.rules " <<< "$aip_out" \
+  && [[ "$(LC_ALL=C sort -u "$aip_rules_log")" == $'default.rules\nextra.rules' ]]; then
+  ok "test passed: a symlinked rules dir is followed (its files are probed and named)"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a symlinked rules dir was not followed"
+  status=1
+fi
+rm -f "$aip_rules_dir" "$fixture_home/.codex/rules-real/extra.rules" "$aip_rules_log"
+mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+
+# AIP-9) A listing that prints some entries and then fails must not leave a
+#        subset that reads as clean: a PATH-front find prints default.rules for
+#        the rules dir and exits 1 (any other find call goes to the real one).
+aip_findbin="$fixture_home/findfake"
+mkdir -p "$aip_findbin"
+aip_real_find="$(command -v find)"
+cat > "$aip_findbin/find" <<SH
+#!/bin/sh
+case "\$*" in
+  *"/.codex/rules "*) printf '%s\0' "\$HOME/.codex/rules/default.rules"; exit 1 ;;
+esac
+exec "$aip_real_find" "\$@"
+SH
+chmod +x "$aip_findbin/find"
+if aip_out="$(HOME="$fixture_home" PATH="$aip_findbin:$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: a listing that fails after partial output reports the scan INCOMPLETE (no subset read as clean)"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a partially failed rules listing was read as clean"
+  status=1
+fi
+rm -rf "${aip_findbin:?}"
+
+# AIP-10) ~/.codex/rules exists but is not a directory: Codex cannot read its
+#         rules dir, so the scan is INCOMPLETE, never "not applied" or clean.
+mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+: > "$aip_rules_dir"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex rules path is not a directory (~/.codex/rules)" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: a non-directory rules path reports the scan INCOMPLETE"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a non-directory rules path was not reported as INCOMPLETE"
+  status=1
+fi
+rm -f "$aip_rules_dir"
+mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 
 rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
   "$fixture_home/real-project" "$codex_fakebin" "$aip_probe_log"

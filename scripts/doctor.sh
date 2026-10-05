@@ -821,7 +821,7 @@ fi
 # report-only — every path ends in ok/item/warn (return 0), so the plain
 # calls below are set -e safe without || true.
 report_codex_rules_probes() {
-  local codex_rules_dir codex_rules rules_file rules_name rules_args unmanaged_rules
+  local codex_rules_dir codex_rules rules_file rules_name rules_args unmanaged_rules rules_listing_complete
   local outward_probes outward_allowed probe_failures probe verdict decision
   codex_rules_dir="$HOME/.codex/rules"
   codex_rules="$codex_rules_dir/default.rules"
@@ -836,16 +836,40 @@ report_codex_rules_probes() {
   # layers are loaded by Codex too but not seen here.
   rules_args=()
   unmanaged_rules=()
-  if [[ -d "$codex_rules_dir" && ( ! -r "$codex_rules_dir" || ! -x "$codex_rules_dir" ) ]]; then
-    warn "Codex rules dir is not readable (~/.codex/rules): rules-semantics scan INCOMPLETE; do NOT read this as clean"
+  if [[ -e "$codex_rules_dir" && ! -d "$codex_rules_dir" ]]; then
+    warn "Codex rules path is not a directory (~/.codex/rules): Codex cannot read its rules dir; rules-semantics scan INCOMPLETE; do NOT read this as clean"
     return 0
   fi
   if [[ -d "$codex_rules_dir" ]]; then
+    # The listing must be COMPLETE: a find that prints some entries and then
+    # fails would otherwise leave a subset that reads as clean. The producer
+    # appends an end marker only when both find and sort exit 0 (checked via
+    # PIPESTATUS, so it holds whether or not pipefail / errexit carry into the
+    # process substitution); every real record starts with "$codex_rules_dir/",
+    # so the marker cannot collide with one. -H follows the rules dir itself
+    # when it is a symlink (Codex's read_dir does) but still not a symlinked
+    # entry (Codex skips those).
+    rules_listing_complete=0
     while IFS= read -r -d '' rules_file; do
+      if [[ "$rules_file" == "::rules-listing-complete::" ]]; then
+        rules_listing_complete=1
+        continue
+      fi
       rules_args+=(--rules "$rules_file")
       rules_name="${rules_file##*/}"
       [[ "$rules_name" == "default.rules" ]] || unmanaged_rules+=("$rules_name")
-    done < <(find "$codex_rules_dir" -mindepth 1 -maxdepth 1 -type f -name '*.rules' ! -name '.rules' -print0 2>/dev/null | LC_ALL=C sort -z)
+    done < <(
+      find -H "$codex_rules_dir" -mindepth 1 -maxdepth 1 -type f -name '*.rules' ! -name '.rules' -print0 2>/dev/null \
+        | LC_ALL=C sort -z
+      rules_listing_status="${PIPESTATUS[*]}"
+      if [[ "$rules_listing_status" == "0 0" ]]; then
+        printf '%s\0' "::rules-listing-complete::"
+      fi
+    )
+    if [[ "$rules_listing_complete" -ne 1 ]]; then
+      warn "Codex rules dir could not be listed completely (~/.codex/rules — unreadable, or the listing failed): rules-semantics scan INCOMPLETE; do NOT read this as clean"
+      return 0
+    fi
   fi
   if [[ -L "$codex_rules" ]]; then
     warn "Codex approval-rules baseline is a symlink (~/.codex/rules/default.rules): Codex does not load a symlinked rules file, so the vetted baseline is not in effect (chezmoi apply writes a regular file)"
