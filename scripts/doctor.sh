@@ -933,15 +933,33 @@ report_codex_projects_trust() {
     # comments; escaped double-quoted keys and other unsupported forms must
     # surface as an INCOMPLETE scan, as must any parse/read failure, never as
     # "0 trusted" (fail-open false-clean).
-    # Every other spelling that can grant project trust — a [projects] table,
-    # a spaced / quoted / array table name, a projects.* or "projects" key
-    # (inline table, dotted key), or a trust_level that is not the plain
-    # one-line form inside a project section — exits 1 too: the scan cannot
-    # read it, so it must not count zero (#309, the rest of #292's contract).
+    # Every other spelling that can grant project trust exits 1 too, so the
+    # scan never counts zero for a form it cannot read (#309, the rest of
+    # #292's contract): a non-canonical table name (a [projects] table, a
+    # spaced / quoted / array name), a ROOT key projects.* / "projects" (an
+    # inline table or dotted key before the first table header — inside
+    # another table the same key is that table's own), a trust_level that is
+    # not the plain one-line form inside a project section, and any escaped
+    # quoted key or table name that could spell one of these (TOML escapes
+    # are not decoded here). Multi-line strings are skipped as a whole, so a
+    # string that merely contains a "[projects]" line is not read as a table.
     if trusted_paths="$(awk '
+      in_ml != "" {
+        if (index($0, in_ml) > 0) in_ml = ""
+        next
+      }
+      {
+        probe = $0; n_basic = gsub(/"""/, "", probe)
+        probe = $0; n_literal = gsub(/\047\047\047/, "", probe)
+        if (n_basic % 2 == 1) in_ml = "\"\"\""
+        else if (n_literal % 2 == 1) in_ml = "\047\047\047"
+      }
+      /^[[:space:]]*\[/ && /\\/ { exit 1 }
       /^[[:space:]]*\[/ && $0 !~ /^[[:space:]]*\[projects\./ && $0 ~ /^[[:space:]]*\[+[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[].]/ { exit 1 }
-      /^[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[.=]/ { exit 1 }
+      !seen_header && /^[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[.=]/ { exit 1 }
+      !seen_header && /^[[:space:]]*"[^"]*\\/ { exit 1 }
       /^[[:space:]]*\[projects\./ {
+        seen_header = 1
         p = $0
         sub(/^[[:space:]]*\[projects\./, "", p)
         if (p !~ /^("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*\][[:space:]]*(#.*)?$/) exit 1
@@ -950,12 +968,13 @@ report_codex_projects_trust() {
         current = substr(p, 1, index(p, quote) - 1)
         next
       }
-      /^[[:space:]]*\[/ { current = "" ; next }
+      /^[[:space:]]*\[/ { seen_header = 1; current = "" ; next }
       current != "" && $0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("trusted"|'\''trusted'\'')[[:space:]]*(#.*)?$/ {
         print current
         current = ""
         next
       }
+      current != "" && /^[[:space:]]*"[^"]*\\/ { exit 1 }
       current != "" && $0 ~ /^[[:space:]]*("trust_level"|'\''trust_level'\''|trust_level)[[:space:]]*[.=]/ {
         if ($0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*(#.*)?$/) next
         exit 1

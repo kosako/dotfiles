@@ -2875,46 +2875,75 @@ TOML
 done
 
 # Every other spelling that can grant project trust is INCOMPLETE too, never
-# "0 trusted" (#309, the rest of #292's contract): a top-level inline table, a
-# [projects] table, a top-level dotted key, a spaced / quoted / array table
-# name, and a quoted or multi-line trust_level inside a project section.
-aip_forms=(
-  'projects = { "/x" = { trust_level = "trusted" } }'
-  $'[projects]\n"/x" = { trust_level = "trusted" }'
-  'projects."/x".trust_level = "trusted"'
-  $'[ projects."/x" ]\ntrust_level = "trusted"'
-  $'["projects"."/x"]\ntrust_level = "trusted"'
-  $'[[projects]]\npath = "/x"'
-  $'[projects."/x"]\n"trust_level" = "trusted"'
-  $'[projects."/x"]\ntrust_level = """trusted"""'
-)
-for aip_form in "${aip_forms[@]}"; do
-  printf '[projects."%s/real-project"]\ntrust_level = "trusted"\n%s\n[mcp_servers.fake.env]\nFAKE_TOKEN = "CANARY_FORM_ENV_309"\n' \
-    "$fixture_home" "$aip_form" > "$fixture_home/.codex/config.toml"
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
-    && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
-    ok "test passed: non-header trust form reports INCOMPLETE without a trusted count: ${aip_form%%$'\n'*}"
+# "0 trusted" (#309, the rest of #292's contract). Each case writes the whole
+# config line by line (printf '%s\n', so a TOML escape such as _ stays
+# literal): ROOT forms come before the first table header — after a header
+# the same key would belong to that table — and every config also carries a
+# real trusted project and an MCP env canary that must never be printed.
+aip_real_header="[projects.\"$fixture_home/real-project\"]"
+# aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
+aip_trust_case() {
+  local label="$1" expect="$2"
+  shift 2
+  printf '%s\n' "$@" '[mcp_servers.fake.env]' 'FAKE_TOKEN = "CANARY_FORM_ENV_309"' \
+    > "$fixture_home/.codex/config.toml"
+  if ! aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+    fail "test failed: doctor must stay exit 0 (trust form: $label)"
+    status=1
+  elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
+    fail "test failed: trust form $label leaked a config value"
+    status=1
+  elif [[ "$expect" == incomplete ]]; then
+    if grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
+      && ! grep -Fq "Codex projects trust:" <<< "$aip_out"; then
+      ok "test passed: trust form reports INCOMPLETE without a trusted count: $label"
+    else
+      fail "test failed: trust form must report INCOMPLETE without a trusted count: $label"
+      status=1
+    fi
+  elif grep -Fq "Codex projects trust: $expect path(s) trusted" <<< "$aip_out" \
+    && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
+    ok "test passed: trust form keeps the normal count ($expect): $label"
   else
-    fail "test failed: non-header trust form must report INCOMPLETE without a trusted count: ${aip_form%%$'\n'*}"
+    fail "test failed: trust form must keep the normal count ($expect), not INCOMPLETE: $label"
     status=1
   fi
-done
-# ... while keys and tables that merely contain the word, and an untrusted
-# entry with a comment, keep the normal count (no over-triggering).
-printf '[projects."%s/real-project"]\ntrust_level = "trusted"\nproject_doc_max_bytes = 32768\n[profiles.projects]\nmodel = "m"\n[projects."/y"]\ntrust_level = "untrusted" # note\n' \
-  "$fixture_home" > "$fixture_home/.codex/config.toml"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
-  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
-  ok "test passed: look-alike keys / tables and an untrusted entry keep the normal count"
-else
-  fail "test failed: look-alike keys / tables must not make the trust scan INCOMPLETE"
-  status=1
-fi
+}
+aip_trust_case "root inline table" incomplete \
+  'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "root dotted key" incomplete \
+  'projects."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "escaped root key" incomplete \
+  '"projects"."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "[projects] table" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects]' '"/x" = { trust_level = "trusted" }'
+aip_trust_case "spaced table name" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[ projects."/x" ]' 'trust_level = "trusted"'
+aip_trust_case "quoted table name" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '["projects"."/x"]' 'trust_level = "trusted"'
+aip_trust_case "escaped table name" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '["projects"."/x"]' 'trust_level = "trusted"'
+aip_trust_case "array of tables" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[[projects]]' 'path = "/x"'
+aip_trust_case "quoted trust_level key" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' '"trust_level" = "trusted"'
+aip_trust_case "escaped trust_level key" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' '"trust_level" = "trusted"'
+aip_trust_case "multi-line trust_level" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' 'trust_level = """trusted"""'
+# ... while keys and tables that merely contain the word, the same key inside
+# another table, multi-line strings whose text looks like a [projects] table,
+# and an untrusted entry with a comment keep the normal count.
+aip_trust_case "look-alike keys and tables" 1 \
+  'project_doc_max_bytes = 32768' "$aip_real_header" 'trust_level = "trusted"' \
+  '[profiles.projects]' 'model = "m"' '[projects."/y"]' 'trust_level = "untrusted" # note'
+aip_trust_case "projects key inside an MCP env table" 1 \
+  "$aip_real_header" 'trust_level = "trusted"' '[mcp_servers.demo.env]' 'projects = "demo"'
+aip_trust_case "multi-line basic string with table-like text" 1 \
+  'developer_instructions = """' '[projects]' 'projects = 1' '"""' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "multi-line literal string with table-like text" 1 \
+  "notes = '''" '[projects]' "'''" "$aip_real_header" 'trust_level = "trusted"'
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log
@@ -3179,7 +3208,7 @@ dr_home="$fixture_home/drift"
 mkdir -p "$dr_home"
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n//registry.npmjs.org/:_authToken=secret-placeholder-value\n' \
   > "$dr_home/.npmrc"
-if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "npmrc contains 1 _authToken line" <<< "$dr_out" \
     && ! grep -Fq "secret-placeholder-value" <<< "$dr_out"; then
     ok "test passed: npmrc token line warned by count, value never echoed"
@@ -3204,7 +3233,7 @@ else
   drift_skip="chezmoi not found; skipping drift check"
 fi
 printf 'ignore-scripts=true\n' > "$dr_home/.npmrc"
-if dr_out="$(HOME="$dr_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
     && grep -Fq "$drift_skip" <<< "$dr_out"; then
     ok "test passed: missing managed-by header warned; uninitialized home skips the status check"
