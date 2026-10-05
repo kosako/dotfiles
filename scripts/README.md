@@ -560,9 +560,9 @@ chezmoi が必要(CI では version pin して導入する)。
 
 managed `~/.claude/settings.json` の rendered content を検証する。throwaway repo copy で
 capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の無条件 deny
-28 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
-足して計 29 件。#136 で credential-store 読取 4 件、#234 で OpenCode の `auth.json`、#315 で gh token の表示と
-keychain の password の読み出し・dump・export を前置 option の形も含めて追加)、1Password の読み出し系の無条件 ask 10 件(#315)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
+30 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
+足して計 31 件。#136 で credential-store 読取 4 件、#234 で OpenCode の `auth.json`、#315 で gh token の表示と
+keychain の password の読み出し・dump・export を option の置き方の違いも含めて追加)、1Password の CLI 全体の無条件 ask(#315)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
 取り込んだ global preference キーの保持、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
 chezmoi が必要(render job)。
@@ -584,8 +584,8 @@ chezmoi が必要(render job)。
 managed `~/.config/opencode/opencode.json`(OpenCode の permission 床・#234)の rendered content を検証する。
 `permission.read` / `permission.bash` の rule map を**順序込みで exact pin**(OpenCode は last-match-wins なので
 順序も契約。read = secret floor の deny 6 + `.env` 系、bash = allow-all の上に外向き・昇格と `gh *` の既定 ask と
-1Password の読み出し系の ask 計 16、read 系 `gh` subcommand の allow 戻し 44、末尾に env dump / gh secret・token 表示 /
-ssh 鍵 / keychain の password の読み出し・dump・export の deny 19。#240 / #315)、`permission.external_directory` が `ask`
+1Password の CLI 全体の ask 計 7、read 系 `gh` subcommand の allow 戻し 44、末尾に env dump / gh secret・token 表示 /
+ssh 鍵 / keychain の password の読み出し・dump・export の deny 21。#240 / #315)、`permission.external_directory` が `ask`
 に固定されていること(#315)、
 `autoupdate: false` / `share: "disabled"` / `instructions` が agent-tools の運用ルール 1 件だけ(絶対 path)であること、
 top-level key が `$schema / autoupdate / share / instructions / permission` だけ(provider / model / plugin / mcp / agent を
