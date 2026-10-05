@@ -261,22 +261,24 @@ for pf_hg_script in personal-git-hook-dispatcher personal-public-safety-gate per
   chmod +x "$pf_hg_deploy/$pf_hg_script"
 done
 printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$pf_hg_home/.gitconfig"
-pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || true
+pf_rc=0
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
 pf_missing=""
 for pf_hg_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
   grep -Fxq "[ok] deployed: $pf_hg_deploy/$pf_hg_script" <<< "$pf_out" || pf_missing="$pf_missing $pf_hg_script"
 done
-if [[ -z "$pf_missing" ]] \
+if [[ "$pf_rc" -eq 0 && -z "$pf_missing" ]] \
   && grep -Fxq "[ok] agent-tools deploy complete: apply arms the commit gates (fail-closed on the normal git commit path)" <<< "$pf_out" \
   && grep -Fxq "[ok] global core.hooksPath already points at the managed shim directory" <<< "$pf_out"; then
   pass "git hook gates: a complete deploy with the managed hooksPath is reported ready"
 else
-  printf '%s\nmissing:%s\n' "$pf_out" "$pf_missing" >&2
+  printf 'rc=%s\n%s\nmissing:%s\n' "$pf_rc" "$pf_out" "$pf_missing" >&2
   miss "git hook gates: a complete deploy must report each script, the arming and the managed hooksPath"
 fi
 rm -f "$pf_hg_deploy/personal-git-identity-gate"
-pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || true
-if grep -Fxq "[warn] missing or not executable: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
+pf_rc=0
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
+if [[ "$pf_rc" -eq 0 ]] && grep -Fxq "[warn] missing or not executable: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
   && grep -Fxq "[warn] agent-tools deploy incomplete: apply will NOT arm the commit gates (two-key gate); run agent-tools sync first, then apply again. Do not arm a partial deploy — the dispatcher fails closed and would block every git commit" <<< "$pf_out" \
   && ! grep -Fq "agent-tools deploy complete" <<< "$pf_out"; then
   pass "git hook gates: the pre-#281 deploy (identity gate missing) names it and will not arm"
@@ -296,8 +298,9 @@ printf '[user]\n\tname = %s-name\n\temail = %s@example.invalid\n[core]\n\thooksP
   "$pf_cv_canary" "$pf_cv_canary" "$pf_cv_canary" "$pf_cv_canary" > "$pf_cv_home/.gitconfig"
 printf '{"argv": ["/%s/reader"]}\n' "$pf_cv_canary" > "$pf_cv_home/.config/agent-tools/usage-reader.json"
 printf '[ui]\nagent_panel_sort = "%s"\n' "$pf_cv_canary" > "$pf_cv_home/.config/herdr/config.toml"
-pf_out="$(env -i PATH="$PATH" HOME="$pf_cv_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || true
-if grep -Fxq "[warn] global user.name is set (value not shown)" <<< "$pf_out" \
+pf_rc=0
+pf_out="$(env -i PATH="$PATH" HOME="$pf_cv_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
+if [[ "$pf_rc" -eq 0 ]] && grep -Fxq "[warn] global user.name is set (value not shown)" <<< "$pf_out" \
   && grep -Fxq "[warn] global user.email is set (value not shown)" <<< "$pf_out" \
   && grep -Fxq "[warn] global core.hooksPath is set to something else (value not shown) — apply replaces ~/.gitconfig and the managed include takes over; diff first" <<< "$pf_out" \
   && grep -Fq "core.excludesFile is set (value not shown; global or system config)" <<< "$pf_out" \

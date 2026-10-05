@@ -448,7 +448,7 @@ ZSH
       "$zsh_bin" -f "$fixture/cases/widget.zsh"
   }
   # shellcheck disable=SC2016 # the line is literal: it must reach the wrapper unexpanded
-  widget_line='echo a; echo "b c" '\''d'\'' $(touch "$AI_CLIP_FIXTURE/expanded")'
+  widget_line='echo a; echo "b c" '\''d'\'' $(builtin print -r -- expanded > "$AI_CLIP_FIXTURE/expanded")'
   rm -f "$fixture/expanded"
   if out="$(widget_case "$widget_line")" \
     && [[ "$out" == *$'\n'"hist=1 $widget_line"$'\n'* ]] \

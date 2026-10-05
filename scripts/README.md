@@ -357,7 +357,7 @@ query だけを実機で実行する(書き込みはしない)。
 - Codex review / worker profile(#264 / #299): personal で file 欠損 → apply の action / present → ok(fixture の canary で
   中身の非表示を pin)/ capability が off なのに file が残る → action / work では手置き・欠損を中立に表示し、off 以外の値を
   dangling として warn / `CODEX_HOME` が `~/.codex` 以外(末尾 `/` は同じ扱い)→ warn。
-- Git の節(#307): global の `user.useConfigOnly` / `transfer.credentialsInUrl` が無ければ warn、あれば ok。remote URL の
+- Git の節(#307): global の `user.useConfigOnly=true` / `transfer.credentialsInUrl=die` でなければ warn、そうなら ok。remote URL の
   scan が `~/src` の personal / work / client / sandbox / agent のすべてを巡り、credential らしい userinfo の remote を URL を
   出さずに warn すること(canary で pin)。
 - git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
