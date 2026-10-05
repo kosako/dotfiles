@@ -61,7 +61,30 @@ steps_consecutive() {
 
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
-trap 'rm -rf "$fixture_home"' EXIT
+# Host tools doctor would otherwise launch for real on a developer machine
+# (`op whoami`, `herdr integration status`, codex / opencode probes): hundreds
+# of runs below inherit this PATH, and the real tools are credential-bearing or
+# slow to answer. A PATH-front dir of stubs that record the call and exit 1 —
+# the "tool failed / not usable" branch, which is also what CI (no such tools)
+# exercises — keeps every run hermetic. Sections that need a specific answer
+# put their own fake in front of these, as before (#306). Kept outside the
+# fixture HOME so no section's cleanup removes it.
+host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
+trap 'rm -rf "$fixture_home" "$host_stub_dir"' EXIT
+mkdir -p "$host_stub_dir/bin"
+for host_tool in op herdr codex opencode; do
+  printf '#!/bin/sh\nprintf "%%s\\n" %q >> %q\nexit 1\n' "$host_tool" "$host_stub_dir/calls" \
+    > "$host_stub_dir/bin/$host_tool"
+  chmod +x "$host_stub_dir/bin/$host_tool"
+done
+PATH="$host_stub_dir/bin:$PATH"
+export PATH
+for host_tool in op herdr codex opencode; do
+  if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
+    fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
+    exit 1
+  fi
+done
 
 # A leftover enforce-mode .npmrc, as after switching personal -> work.
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n' \

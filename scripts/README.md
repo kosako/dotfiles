@@ -273,7 +273,10 @@ throwaway destination に実 render し、生成された `~/.npmrc` の内容(h
 ## test-doctor.sh
 
 fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で doctor の各 section を
-検証する。実 home・実 manager・実 codex / herdr には触れない。
+検証する。実 home には触れない。op / herdr / codex / opencode は、冒頭で PATH の先頭に置く stub(呼ばれたら記録して
+exit 1。CI のように tool が無いときと同じ「使えない」側の分岐になる)が受け、実機の tool は起動しない(#306)。fake が
+要る section は、その前に自分の fake を置く。package manager(brew / npm など)は、software catalog の section が読み取りの
+query だけを実機で実行する(書き込みはしない)。
 
 ```sh
 ./scripts/test-doctor.sh
