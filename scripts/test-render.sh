@@ -98,6 +98,28 @@ while IFS= read -r profile; do
     fail "test failed: managed set mismatch for $profile"
     status=1
   fi
+
+  # #305: the managed mise config leaves GOBIN unset, so `go install` (the
+  # catalog's go_install) lands in ~/go/bin, where the statusLine and the
+  # usage reader run tacho; ~/.zshenv appends ~/go/bin to PATH. Checked
+  # wherever those files render.
+  if [[ -f "$root/home/.config/mise/config.toml" ]]; then
+    if [[ "$(yq -p toml -o json '.settings.go.set_gobin' "$root/home/.config/mise/config.toml" 2>/dev/null)" == "false" ]]; then
+      ok "test passed: mise config leaves GOBIN unset (go.set_gobin = false) for $profile"
+    else
+      fail "test failed: mise config does not set go.set_gobin = false for $profile"
+      status=1
+    fi
+  fi
+  if [[ -f "$root/home/.zshenv" ]]; then
+    # shellcheck disable=SC2016 # the literal line, not an expansion
+    if grep -Fxq 'export PATH="$PATH:$HOME/go/bin"' "$root/home/.zshenv"; then
+      ok "test passed: .zshenv appends ~/go/bin to PATH for $profile"
+    else
+      fail "test failed: .zshenv does not append ~/go/bin to PATH for $profile"
+      status=1
+    fi
+  fi
 done < <(known_profiles)
 
 if [[ "$profiles_found" -eq 0 ]]; then

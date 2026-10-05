@@ -14,6 +14,14 @@
 # Do not auto-install missing runtimes when a shim is invoked.
 # Installs happen only via an explicit `mise install`.
 not_found_auto_install = false
+# Leave GOBIN unset so `go install` uses Go's own default,
+# ${GOPATH:-$HOME/go}/bin (= ~/go/bin), not the toolchain's install dir
+# (mise's default when this is unset). The software catalog's go_install
+# tools (install-packages.sh) and the managed paths that run them -- the
+# Claude statusLine and the agent-tools usage reader, both ~/go/bin/tacho --
+# then agree, and a toolchain upgrade does not strand them (#305). ~/.zshenv
+# puts ~/go/bin on PATH.
+go.set_gobin = false
 
 [tools]
 # Baseline runtimes for global tooling. Projects override with exact

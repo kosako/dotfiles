@@ -17,3 +17,9 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 # non-interactive shells; interactive shells re-assert it in ~/.zshrc after
 # `mise activate` / `brew shellenv` (which prepend later). No-op when empty.
 export PATH="$HOME/.local/bin:$PATH"
+
+# Go's default install dir, where the software catalog's go_install tools
+# land (the managed mise config leaves GOBIN unset, #305). Appended, so a
+# go-installed binary never shadows a system or package-manager command.
+# No-op when the dir does not exist.
+export PATH="$PATH:$HOME/go/bin"

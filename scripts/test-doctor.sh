@@ -3377,6 +3377,73 @@ mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
   "$fixture_home/real-project" "$codex_fakebin" "$aip_probe_log"
 
+# GO) go install target (#305): the managed mise config leaves GOBIN unset so
+#     `go install` lands in ~/go/bin, where the statusLine and the usage
+#     reader run tacho. A PATH-front fake go answers `go env GOBIN|GOPATH`
+#     from the environment (or fails), so the cases do not depend on the
+#     host's Go. Any other target warns; a failed query is not checked; PATH
+#     without ~/go/bin is an info line.
+go_fakebin="$fixture_home/gofake"
+mkdir -p "$go_fakebin"
+cat > "$go_fakebin/go" <<'SH'
+#!/bin/sh
+[ "${FAKE_GO_FAIL:-}" = "1" ] && exit 1
+[ "$1" = "env" ] || exit 2
+case "$2" in
+  GOBIN) printf '%s\n' "${FAKE_GOBIN-}" ;;
+  GOPATH) printf '%s\n' "${FAKE_GOPATH-}" ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$go_fakebin/go"
+for go_case in default-gopath explicit-gobin elsewhere no-path query-fails; do
+  go_gobin=""
+  go_gopath="$fixture_home/go"
+  go_path="$go_fakebin:$fixture_home/go/bin:$PATH"
+  go_fail=""
+  case "$go_case" in
+    explicit-gobin) go_gobin="$fixture_home/go/bin" ;;
+    elsewhere) go_gobin="$fixture_home/toolchain/bin" ;;
+    no-path) go_path="$go_fakebin:$PATH" ;;
+    query-fails) go_fail=1 ;;
+  esac
+  if go_out="$(HOME="$fixture_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
+      FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+    go_ok=0
+    case "$go_case" in
+      default-gopath|explicit-gobin)
+        grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
+          && ! grep -Fq "go install target is" <<< "$go_out" \
+          && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+      elsewhere)
+        grep -Fq "[warn] go install target is $fixture_home/toolchain/bin, not ~/go/bin" <<< "$go_out" \
+          && ! grep -Fq "[ok] go install target" <<< "$go_out" && go_ok=1
+        ;;
+      no-path)
+        grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
+          && grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+      query-fails)
+        grep -Fq "[warn] go install target could not be determined" <<< "$go_out" \
+          && ! grep -Fq "[ok] go install target" <<< "$go_out" && go_ok=1
+        ;;
+    esac
+    if [[ "$go_ok" -eq 1 ]]; then
+      ok "test passed: go install target ($go_case) reported as expected"
+    else
+      printf '%s\n' "$go_out" | grep -F 'go' >&2
+      fail "test failed: go install target ($go_case) not reported as expected"
+      status=1
+    fi
+  else
+    printf '%s\n' "$go_out" >&2
+    fail "test failed: doctor must stay exit 0 (go install target, $go_case)"
+    status=1
+  fi
+done
+rm -rf "${go_fakebin:?}"
+
 # NPM-A) A broken npm (shim without a runtime) must not kill the doctor:
 # report-only means warn + skip, exit 0 (#144).
 npm_fakebin="$fixture_home/npmfake"

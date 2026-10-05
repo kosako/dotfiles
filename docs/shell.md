@@ -94,6 +94,8 @@
 
 あわせて `$HOME/.local/bin` も PATH 前置する。native installer で入れた自己更新型 CLI がここに入るため。代表例が native `claude`(Claude Code。npm-global ではなく `claude.ai/install.sh` で導入)で、stray な npm/Homebrew copy より優先される。経緯は [docs/supply-chain-npm.md](supply-chain-npm.md)。ただし `.zshenv` の前置は**非対話 shell 用**で、対話 shell では後から `brew shellenv`(`~/.zprofile`)と `mise activate`(`~/.zshrc`)が PATH を前置して埋もれるため、`~/.zshrc` が `mise activate` の後で `~/.local/bin` を**再前置**して native を優先させる(`~/.zshrc.local` の override より前なので local PATH は引き続き勝つ)。
 
+あわせて `$HOME/go/bin`(`go install` の行き先。managed な mise config が GOBIN を設定させない、#305)を PATH の**末尾**に足す。software catalog の go_install の tool を名前で実行できるようにするためで、末尾なので system や package manager の command を隠さない。詳細は [docs/runtime.md](runtime.md)。
+
 - **最小限に保つ**: 全 zsh 起動で走るので、`.zshenv` には PATH 以外の重い処理・副作用を入れない。
 - **local override は無し**: `.zshenv` は `~/.zshenv.local` を source しない(副作用を避けるため)。machine 固有 PATH は `~/.zshrc.local`(対話)に置く。
 - `MISE_DATA_DIR` を変更している場合は、shims パスをその値に合わせる(既定 `$HOME/.local/share/mise/shims`)。
