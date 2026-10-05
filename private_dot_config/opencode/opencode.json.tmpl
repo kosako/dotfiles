@@ -74,6 +74,7 @@
       "*.env.*": "deny",
       "*.env.example": "allow"
     },
+    "external_directory": "ask",
     "bash": {
       "*": "allow",
       "git push*": "ask",
@@ -126,6 +127,11 @@
       "sudo*": "ask",
       "curl*": "ask",
       "wget*": "ask",
+      "op read*": "ask",
+      "op item get*": "ask",
+      "op run*": "ask",
+      "op inject*": "ask",
+      "op document get*": "ask",
       "cat ~/.ssh/*": "deny",
       "gh secret *": "deny",
       "gh api *secrets*": "deny",
@@ -135,7 +141,11 @@
       "env": "deny",
       "env *": "deny",
       "printenv": "deny",
-      "printenv *": "deny"
+      "printenv *": "deny",
+      "security find-generic-password*": "deny",
+      "security find-internet-password*": "deny",
+      "security dump-keychain*": "deny",
+      "security export*": "deny"
     }
   }
 }

@@ -88,6 +88,18 @@ else
   status=1
 fi
 
+# 3b) external_directory is pinned to ask (#315): the read floor matches paths
+#     for the read tool only — grep matches its regex and glob its pattern, so
+#     neither honours a read deny (OpenCode docs). Outside the project every
+#     tool hits external_directory, which must stay "ask" in the managed floor
+#     rather than ride on OpenCode's default.
+if [[ "$(yq -p json '.permission.external_directory' "$config_file")" == ask ]]; then
+  ok "test passed: permission.external_directory is pinned to ask"
+else
+  fail "test failed: permission.external_directory must be ask"
+  status=1
+fi
+
 # 4) The bash floor, EXACT and ordered: allow-all base; outward (`git push` /
 #    `git clone`) and escalation (sudo / curl / wget) ask; the GitHub CLI ask
 #    BY DEFAULT (`gh *`) with only read-only subcommands allowed back (#240:
@@ -97,10 +109,10 @@ fi
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
 #    bare command fall through to the allow-all base (Codex review, PR #235).
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny'
+expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop read*=ask\nop item get*=ask\nop run*=ask\nop inject*=ask\nop document get*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity export*=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 6 ask incl. gh default, 44 read allow-backs as exact + '... *' pairs, 10 deny last; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 11 ask incl. gh default and the 1Password read family, 44 read allow-backs as exact + '... *' pairs, 14 deny last incl. keychain password read / dump / export; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -296,6 +308,18 @@ allow	gh help pr
 allow	gh pr view
 allow	gh issue list --state open
 allow	gh release list --limit 5
+ask	op read op://vault/item/field
+ask	op item get x --reveal
+ask	op run -- env
+ask	op inject -i tpl.env
+ask	op document get x
+allow	op whoami
+allow	op item list
+deny	security find-generic-password -s gh:github.com -w
+deny	security find-internet-password -s example.invalid -g
+deny	security dump-keychain
+deny	security export -k login.keychain
+allow	security find-identity -v -p codesigning
 allow	git status
 allow	git commit -m x
 allow	git fetch origin

@@ -204,7 +204,8 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
     credential-store 読取(`~/.aws` / `~/.config/gh` の OAuth token / `~/.netrc` /
     `~/.codex/auth.json`(#136)/ `~/.local/share/opencode/auth.json`(#234))・全 env dump
     (`printenv` / `env`)・GitHub Actions secret
-    (`gh secret` / `gh api *secrets*`)は誰も Claude に正規に頼まず、deny は Claude の
+    (`gh secret` / `gh api *secrets*`)・gh token の表示(`gh auth token` / `--show-token`)・keychain の
+    password の読み出し / dump / export(`security`、#315)は誰も Claude に正規に頼まず、deny は Claude の
     tool call にしか効かない(人間のターミナル非影響)ので、`enforceAiSandbox` を待たず
     常時 deny する(personal で今日 live)。file 系は **Read 側 deny を主軸**とし、Bash
     matcher の path 列挙はしない(等価経路で迂回できる leaky steering。tier 全体が

@@ -14,7 +14,7 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 | Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は `settings.local.json`(管理外)に隔離。managed 側は apply で戻る |
 | Codex | 承認 rules(コマンド allowlist) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
 | Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
-| OpenCode | `permission`(read / bash の pattern rule: secret floor は deny、外向き・昇格は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、他は allow。既定は allow all なので床が要る) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
+| OpenCode | `permission`(read / bash の pattern rule: secret floor は deny、外向き・昇格と 1Password の読み出し系は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、他は allow。既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
 
 原則(全 tool 共通):
 
@@ -59,7 +59,7 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
 
 その他の既定:
 
-- secret store は直接読ませない。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
+- secret store は直接読ませない。Claude と OpenCode の床で、keychain の password の読み出し・dump・export と gh token の表示は deny、1Password の読み出し系(`op read` / `op item get` / `op run` など)は ask にそろえている(Codex は baseline に無いので承認が要る、#315)。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
 - token は短命・scope限定にする。
 - work / client では会社・クライアントポリシーを優先する。
 - install / network tunnel / production access は明示承認が必要。

@@ -128,19 +128,24 @@ fi
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
-#    (13 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
+#    (22 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
 #    credential-store files — gh OAuth token, AWS keys, ~/.netrc, Codex
-#    auth.json — joined in #136, OpenCode auth.json in #234) and gateGitHubMcp
-#    is ON (Phase 2), so the deny is exactly those 14 (the floor present even
-#    with enforceAiSandbox off is the core of Phase 2 task B) with no ask block.
-#    We pin the EXACT ordered array, not length + a few representatives: this
-#    is a security-boundary regression test, so it must catch a floor matcher
-#    being swapped for another (which would keep the length at 14).
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nmcp__github'
+#    auth.json — joined in #136, OpenCode auth.json in #234; the credential
+#    display forms `gh auth token` / `gh auth status --show-token|-t` and the
+#    keychain password read / dump / export in #315, symmetric with OpenCode)
+#    and gateGitHubMcp is ON (Phase 2), so the deny is exactly those 23 (the
+#    floor present even with enforceAiSandbox off is the core of Phase 2 task
+#    B). The ask block is the 1Password read family alone (#315: human-directed
+#    uses exist, so approval rather than deny). We pin the EXACT ordered
+#    arrays, not length + a few representatives: this is a security-boundary
+#    regression test, so it must catch a floor matcher being swapped for
+#    another (which would keep the length).
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(security find-generic-password *)\nBash(security find-internet-password *)\nBash(security dump-keychain*)\nBash(security export *)\nmcp__github'
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
-ask_default="$(yq -p json '.permissions.ask // "absent"' "$off_file")"
-if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "absent" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + github MCP (14, ordered), no ask (enforceAiSandbox off)"
+expected_ask=$'Bash(op read *)\nBash(op item get *)\nBash(op run *)\nBash(op inject*)\nBash(op document get *)'
+ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
+if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
+  ok "test passed: committed personal deny is exactly the secret floor + github MCP (23, ordered); ask is exactly the 1Password read family (enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
