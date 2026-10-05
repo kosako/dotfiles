@@ -2737,20 +2737,36 @@ codex_fakebin="$fixture_home/codexfake"
 mkdir -p "$codex_fakebin" "$fixture_home/.codex/rules" "$fixture_home/real-project"
 cat > "$codex_fakebin/codex" <<'SH'
 #!/bin/sh
-# fake codex: execpolicy check --rules <path> <tokens...>
+# fake codex: execpolicy check --rules <path> [--rules <path> ...] <tokens...>
 # - logs each joined probe to $CODEX_FAKE_LOG (pins the probe SET in tests)
+# - logs the basename of every --rules path to $CODEX_FAKE_RULES_LOG, NUL-
+#   delimited (pins the rules-file SET doctor hands to the engine, newline in
+#   a name included, #316)
 # - CODEX_FAKE_MODE=fail -> exit 1 (engine-evaluation failure path; real codex
 #   exits 1 on a broken/missing rules file, verified 0.142.5)
-# - else emits an allow verdict iff the probe appears in $CODEX_FAKE_ALLOWS.
+# - else emits an allow verdict iff the probe appears in $CODEX_FAKE_ALLOWS —
+#   and, when $CODEX_FAKE_ALLOWS_IF_RULES names a rules file, only if that file
+#   was passed (an allow that lives in that file alone, #316).
 [ "$1" = "execpolicy" ] && [ "$2" = "check" ] || exit 2
 shift 2
-[ "$1" = "--rules" ] && shift 2
+rules_seen=","
+while [ "$1" = "--rules" ]; do
+  [ -n "${CODEX_FAKE_RULES_LOG:-}" ] && printf '%s\0' "${2##*/}" >> "$CODEX_FAKE_RULES_LOG"
+  rules_seen="$rules_seen${2##*/},"
+  shift 2
+done
 probe="$*"
 [ -n "${CODEX_FAKE_LOG:-}" ] && printf '%s\n' "$probe" >> "$CODEX_FAKE_LOG"
 [ "${CODEX_FAKE_MODE:-}" = "fail" ] && exit 1
 if [ -n "${CODEX_FAKE_RESULT:-}" ]; then
   cat "$CODEX_FAKE_RESULT"
   exit 0
+fi
+if [ -n "${CODEX_FAKE_ALLOWS_IF_RULES:-}" ]; then
+  case "$rules_seen" in
+    *",$CODEX_FAKE_ALLOWS_IF_RULES,"*) ;;
+    *) printf '{"matchedRules":[]}\n'; exit 0 ;;
+  esac
 fi
 case ",${CODEX_FAKE_ALLOWS:-}," in
   *",$probe,"*) printf '{"matchedRules":[{"x":1}],"decision":"allow"}\n' ;;
@@ -3093,6 +3109,271 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
   fi
 done
 rm -f "$aip_result"
+
+# AIP-5) Every *.rules Codex loads is probed, not only default.rules (#316).
+#        Codex reads each regular file with the .rules extension in the rules
+#        dir (exec_policy.rs collect_policy_files, 0.159.3): a sibling and a
+#        hidden one count; a symlink, a dir, default.rules.bak.<date> and a
+#        bare ".rules" do not. doctor must hand the engine exactly that set
+#        (shim log), name each unmanaged one (sanitized: a control character
+#        in a name must not reach the terminal), and report an allow that
+#        lives only in a sibling file.
+aip_rules_dir="$fixture_home/.codex/rules"
+aip_rules_log="$fixture_home/.codex-rules-log"
+aip_esc="$(printf '\033')"
+aip_evil_name="evil${aip_esc}[31m.rules"
+aip_nl_name="nl"$'\n'"name.rules"
+aip_rules_expected="$fixture_home/.codex-rules-expected"
+printf 'prefix_rule(pattern=["git", "push"], decision="allow")\n' > "$aip_rules_dir/extra.rules"
+: > "$aip_rules_dir/.hidden.rules"
+: > "$aip_rules_dir/$aip_evil_name"
+: > "$aip_rules_dir/$aip_nl_name"
+: > "$aip_rules_dir/..rules"
+: > "$aip_rules_dir/.rules"
+: > "$aip_rules_dir/default.rules.bak.20260702"
+mkdir -p "$aip_rules_dir/dir.rules"
+ln -s "$aip_rules_dir/extra.rules" "$aip_rules_dir/link.rules"
+# Codex's Path::extension() gives "..rules" the extension "rules" (only a
+# bare ".rules" has none), so it is loaded too.
+printf '%s\0' ".hidden.rules" "..rules" "default.rules" "$aip_evil_name" "extra.rules" "$aip_nl_name" \
+  | LC_ALL=C sort -z > "$aip_rules_expected"
+: > "$aip_rules_log"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  aip_unmanaged_prefix="unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/"
+  if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+    && grep -Fq "${aip_unmanaged_prefix}extra.rules " <<< "$aip_out" \
+    && grep -Fq "${aip_unmanaged_prefix}.hidden.rules " <<< "$aip_out" \
+    && grep -Fq "${aip_unmanaged_prefix}evil?[31m.rules " <<< "$aip_out" \
+    && grep -Fq "${aip_unmanaged_prefix}nl?name.rules " <<< "$aip_out" \
+    && grep -Fq "${aip_unmanaged_prefix}..rules " <<< "$aip_out" \
+    && ! grep -Fq "$aip_esc" <<< "$aip_out" \
+    && ! grep -Fq "${aip_unmanaged_prefix}default.rules" <<< "$aip_out" \
+    && ! grep -Fq "link.rules" <<< "$aip_out" \
+    && ! grep -Fq "dir.rules" <<< "$aip_out" \
+    && ! grep -Fq "default.rules.bak" <<< "$aip_out" \
+    && ! grep -Fq "${aip_unmanaged_prefix}.rules " <<< "$aip_out"; then
+    ok "test passed: unmanaged sibling rules files are named (sanitized) and an allow living only in one is reported"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: unmanaged Codex rules files not reported as expected"
+    status=1
+  fi
+  if LC_ALL=C sort -z -u "$aip_rules_log" | cmp -s - "$aip_rules_expected"; then
+    ok "test passed: doctor hands the engine exactly the rules files Codex loads (regular *.rules incl. hidden, ..rules and a newline in a name; no symlink / dir / .bak / bare .rules)"
+  else
+    LC_ALL=C sort -z -u "$aip_rules_log" | tr '\0' '\n' >&2
+    fail "test failed: rules-file set passed to codex execpolicy differs from what Codex loads"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (unmanaged Codex rules files)"
+  status=1
+fi
+# Same tree, nothing allowed: the clean ok counts the files it probed.
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "probes over 6 rules file(s) via codex execpolicy" <<< "$aip_out"; then
+  ok "test passed: the clean ok reports the number of rules files probed"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: clean ok missing the probed rules-file count"
+  status=1
+fi
+rm -rf "${aip_rules_dir:?}/extra.rules" "${aip_rules_dir:?}/.hidden.rules" "${aip_rules_dir:?}/${aip_evil_name:?}" \
+  "${aip_rules_dir:?}/${aip_nl_name:?}" "${aip_rules_dir:?}/..rules" \
+  "${aip_rules_dir:?}/.rules" "${aip_rules_dir:?}/default.rules.bak.20260702" "${aip_rules_dir:?}/dir.rules" \
+  "${aip_rules_dir:?}/link.rules" "$aip_rules_log" "$aip_rules_expected"
+
+# AIP-6) A symlinked default.rules is not loaded by Codex, so the baseline is
+#        not in effect: warn, and do not pass it to the engine (no clean ok).
+mv "$aip_rules_dir/default.rules" "$fixture_home/.codex/default.rules.real"
+ln -s "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "Codex approval-rules baseline is a symlink" <<< "$aip_out" \
+    && ! grep -Fq "Codex approval-rules baseline managed" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: a symlinked default.rules is warned as not in effect and is not probed"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: symlinked default.rules not reported as not in effect"
+    status=1
+  fi
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: doctor must stay exit 0 (symlinked default.rules)"
+  status=1
+fi
+# Same symlinked baseline beside a (clean) sibling file: the sibling is still
+# probed, and the clean ok must not claim the baseline is holding.
+: > "$aip_rules_dir/extra.rules"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "probes over 1 rules file(s) via codex execpolicy; the managed baseline is NOT in effect)" <<< "$aip_out" \
+  && ! grep -Fq "read-only baseline holding" <<< "$aip_out"; then
+  ok "test passed: with the baseline not in effect, the clean ok over a sibling file does not claim the baseline is holding"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: the clean ok claimed a holding baseline while default.rules is not in effect"
+  status=1
+fi
+rm -f "$aip_rules_dir/extra.rules" "$aip_rules_dir/default.rules"
+mv "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
+
+# AIP-7) An unreadable rules dir cannot be enumerated the way Codex does, so
+#        the scan is INCOMPLETE, never clean. Skipped as root (root reads it).
+if [[ "$(id -u)" != "0" ]]; then
+  chmod 000 "$aip_rules_dir"
+  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: an unreadable rules dir reports the scan INCOMPLETE (no false clean)"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: unreadable rules dir did not surface as INCOMPLETE"
+    status=1
+  fi
+  chmod 755 "$aip_rules_dir"
+fi
+
+# AIP-8) ~/.codex/rules itself a symlink to a directory: Codex's read_dir
+#        follows it, so the listing must too (while still skipping symlinked
+#        entries) — an allow in a sibling there must surface.
+mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+ln -s "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+printf 'prefix_rule(pattern=["git", "push"], decision="allow")\n' > "$fixture_home/.codex/rules-real/extra.rules"
+: > "$aip_rules_log"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+  && grep -Fq "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/extra.rules " <<< "$aip_out" \
+  && [[ "$(LC_ALL=C sort -z -u "$aip_rules_log" | tr '\0' '\n')" == $'default.rules\nextra.rules' ]]; then
+  ok "test passed: a symlinked rules dir is followed (its files are probed and named)"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a symlinked rules dir was not followed"
+  status=1
+fi
+rm -f "$aip_rules_dir" "$fixture_home/.codex/rules-real/extra.rules" "$aip_rules_log"
+mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+
+# AIP-9) A listing that prints some entries and then fails must not leave a
+#        subset that reads as clean: a PATH-front find prints default.rules for
+#        the rules dir and exits 1 (any other find call goes to the real one).
+aip_findbin="$fixture_home/findfake"
+mkdir -p "$aip_findbin"
+aip_real_find="$(command -v find)"
+cat > "$aip_findbin/find" <<SH
+#!/bin/sh
+case "\$*" in
+  *"/.codex/rules "*) printf '%s\0' "\$HOME/.codex/rules/default.rules"; exit 1 ;;
+esac
+exec "$aip_real_find" "\$@"
+SH
+chmod +x "$aip_findbin/find"
+if aip_out="$(HOME="$fixture_home" PATH="$aip_findbin:$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: a listing that fails after partial output reports the scan INCOMPLETE (no subset read as clean)"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a partially failed rules listing was read as clean"
+  status=1
+fi
+rm -rf "${aip_findbin:?}"
+
+# AIP-10) ~/.codex/rules exists but is not a directory: Codex cannot read its
+#         rules dir, so the scan is INCOMPLETE, never "not applied" or clean.
+mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+: > "$aip_rules_dir"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: a non-directory rules path reports the scan INCOMPLETE"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a non-directory rules path was not reported as INCOMPLETE"
+  status=1
+fi
+rm -f "$aip_rules_dir"
+mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+
+# AIP-11) Only a confirmed absence is "no rules": ~/.codex/rules a symlink into
+#         a parent without search permission is a read error for Codex, so it
+#         must be INCOMPLETE — `test -e` alone would call it absent and report
+#         only "not applied yet". Skipped as root.
+if [[ "$(id -u)" != "0" ]]; then
+  mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+  mkdir -p "$fixture_home/locked-parent"
+  mv "$fixture_home/.codex/rules-real" "$fixture_home/locked-parent/rules"
+  ln -s "$fixture_home/locked-parent/rules" "$aip_rules_dir"
+  chmod 000 "$fixture_home/locked-parent"
+  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: a rules dir behind an unsearchable parent is INCOMPLETE, not absent"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: an unresolvable rules dir was read as absent"
+    status=1
+  fi
+  chmod 755 "$fixture_home/locked-parent"
+  rm -f "$aip_rules_dir"
+  mv "$fixture_home/locked-parent/rules" "$aip_rules_dir"
+  rmdir "$fixture_home/locked-parent"
+fi
+
+# AIP-13) The absence test matches the strerror at the END of the message
+#         only: a HOME whose path contains "No such file or directory" must
+#         not turn a permission error into "absent". Skipped as root.
+if [[ "$(id -u)" != "0" ]]; then
+  aip_odd_home="$fixture_home/odd: No such file or directory"
+  mkdir -p "$aip_odd_home/.codex" "$aip_odd_home/locked-parent/rules"
+  : > "$aip_odd_home/locked-parent/rules/default.rules"
+  ln -s "$aip_odd_home/locked-parent/rules" "$aip_odd_home/.codex/rules"
+  chmod 000 "$aip_odd_home/locked-parent"
+  if aip_out="$(HOME="$aip_odd_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out"; then
+    ok "test passed: a HOME containing the strerror words does not turn a permission error into absent"
+  else
+    printf '%s\n' "$aip_out" >&2
+    fail "test failed: a permission error under a HOME containing the strerror words was read as absent"
+    status=1
+  fi
+  chmod 755 "$aip_odd_home/locked-parent"
+  rm -rf "${aip_odd_home:?}"
+fi
+
+# AIP-12) A dangling ~/.codex/rules symlink IS a confirmed absence (Codex's
+#         NotFound -> no rules): "not applied yet", not INCOMPLETE.
+mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
+ln -s "$fixture_home/.codex/rules-gone" "$aip_rules_dir"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+  && ! grep -Fq "Codex rules dir could not be" <<< "$aip_out"; then
+  ok "test passed: a dangling rules dir symlink is a confirmed absence (not applied, not INCOMPLETE)"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: a dangling rules dir symlink was not treated as absent"
+  status=1
+fi
+rm -f "$aip_rules_dir"
+mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
+
 rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
   "$fixture_home/real-project" "$codex_fakebin" "$aip_probe_log"
 

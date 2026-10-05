@@ -36,7 +36,9 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
   是正した home-root trust が 2026-07-10 の監査で復活していた)ので、「一度直したから
   大丈夫」とみなさない。rules の監視は行 grep ではなく **codex 自身の engine への probe**
   (`codex execpolicy check`)で行う — blanket prefix(`["gh","pr"]` が `gh pr create` を
-  allow する形)・複数行 rule・decision 省略(既定 allow)を行 grep は見逃すため。
+  allow する形)・複数行 rule・decision 省略(既定 allow)を行 grep は見逃すため。Codex は rules dir の
+  `*.rules` をすべて読むので、probe にもすべて渡し、managed でない rules file(drift に出ない)は名前で warn
+  する(#316)。trusted な project の `<repo>/.codex/rules/` も Codex は読むが、doctor は user layer だけを見る。
 
 ## Default
 

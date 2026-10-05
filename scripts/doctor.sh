@@ -821,19 +821,100 @@ fi
 # report-only — every path ends in ok/item/warn (return 0), so the plain
 # calls below are set -e safe without || true.
 report_codex_rules_probes() {
-  local codex_rules outward_probes outward_allowed probe_failures probe verdict decision
-  codex_rules="$HOME/.codex/rules/default.rules"
-  if [[ -f "$codex_rules" ]]; then
+  local codex_rules_dir codex_rules rules_file rules_name rules_args unmanaged_rules rules_listing_complete rules_dir_error
+  local baseline_state
+  local outward_probes outward_allowed probe_failures probe verdict decision
+  codex_rules_dir="$HOME/.codex/rules"
+  codex_rules="$codex_rules_dir/default.rules"
+  # Codex loads EVERY *.rules in the rules dir, not only default.rules
+  # (codex-rs/core/src/exec_policy.rs collect_policy_files, verified 0.159.3:
+  # extension == "rules" and a regular file — a symlink is not followed and
+  # default.rules.bak.<date> is not loaded; most restrictive decision wins
+  # across files) (#316). The probe below gets the same set, or an allow in a
+  # sibling file would never show up here. Only default.rules is managed, so a
+  # sibling never shows as drift either: it is named as unmanaged. Scope: the
+  # user layer only — a trusted project's <repo>/.codex/rules/ and Team Config
+  # layers are loaded by Codex too but not seen here.
+  rules_args=()
+  unmanaged_rules=()
+  # Only a CONFIRMED absence is "no rules": Codex treats NotFound (incl. a
+  # dangling symlink) as empty, but any other failure to resolve the dir
+  # (not a directory, permission denied — also on a parent a symlink points
+  # into —, a symlink loop) is a read_dir error there. `test -e` /
+  # `-d` collapse all of those into "absent", and BSD `ls -L` silently falls
+  # back to the link itself, so the errno is read from the builtin cd in a
+  # subshell (follows the link; the C locale keeps the message stable; the
+  # raw error, which carries the path, is never echoed).
+  if ! rules_dir_error="$( (LC_ALL=C; cd -P -- "$codex_rules_dir") 2>&1 )"; then
+    # Match the strerror at the END only: the message embeds the path, and a
+    # HOME containing the same words must not turn a permission error into
+    # "absent".
+    case "$rules_dir_error" in
+      *": No such file or directory") ;;
+      *)
+        warn "Codex rules dir could not be opened (~/.codex/rules — not a directory, permission denied or a symlink loop; Codex fails to read it too): rules-semantics scan INCOMPLETE; do NOT read this as clean"
+        return 0
+        ;;
+    esac
+  fi
+  if [[ -d "$codex_rules_dir" ]]; then
+    # The listing must be COMPLETE: a find that prints some entries and then
+    # fails would otherwise leave a subset that reads as clean. The producer
+    # appends an end marker only when both find and sort exit 0 (checked via
+    # PIPESTATUS, so it holds whether or not pipefail / errexit carry into the
+    # process substitution); every real record starts with "$codex_rules_dir/",
+    # so the marker cannot collide with one. -H follows the rules dir itself
+    # when it is a symlink (Codex's read_dir does) but still not a symlinked
+    # entry (Codex skips those).
+    rules_listing_complete=0
+    while IFS= read -r -d '' rules_file; do
+      if [[ "$rules_file" == "::rules-listing-complete::" ]]; then
+        rules_listing_complete=1
+        continue
+      fi
+      rules_args+=(--rules "$rules_file")
+      rules_name="${rules_file##*/}"
+      [[ "$rules_name" == "default.rules" ]] || unmanaged_rules+=("$rules_name")
+    done < <(
+      find -H "$codex_rules_dir" -mindepth 1 -maxdepth 1 -type f -name '*.rules' ! -name '.rules' -print0 2>/dev/null \
+        | LC_ALL=C sort -z
+      rules_listing_status="${PIPESTATUS[*]}"
+      if [[ "$rules_listing_status" == "0 0" ]]; then
+        printf '%s\0' "::rules-listing-complete::"
+      fi
+    )
+    if [[ "$rules_listing_complete" -ne 1 ]]; then
+      warn "Codex rules dir could not be listed completely (~/.codex/rules — the listing failed partway): rules-semantics scan INCOMPLETE; do NOT read this as clean"
+      return 0
+    fi
+  fi
+  # The clean ok below names the baseline's state: it may run over sibling
+  # files alone, so "baseline holding" is only said when the managed file is
+  # actually what Codex loads.
+  baseline_state="the managed baseline is NOT in effect"
+  if [[ -L "$codex_rules" ]]; then
+    warn "Codex approval-rules baseline is a symlink (~/.codex/rules/default.rules): Codex does not load a symlinked rules file, so the vetted baseline is not in effect (chezmoi apply writes a regular file)"
+  elif [[ -f "$codex_rules" ]]; then
+    baseline_state="read-only baseline holding"
     ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
+  else
+    item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
+  fi
+  # Names only (never the content); a name is attacker-shapeable, so anything
+  # outside printable ASCII is shown as '?'.
+  for rules_name in ${unmanaged_rules[@]+"${unmanaged_rules[@]}"}; do
+    warn "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/$(printf '%s' "$rules_name" | LC_ALL=C tr -c '[:print:]' '?') (not managed by dotfiles, so its grants never show as drift; probed below — remove it, or fold vetted rules into the managed baseline)"
+  done
+  if [[ "${#rules_args[@]}" -gt 0 ]]; then
     # Rules semantics are delegated to Codex's own engine: a fixed probe list
     # of outward/escalation/credential-display commands is evaluated with
-    # `codex execpolicy check` against the LIVE rules file. Grepping rule lines was rejected
+    # `codex execpolicy check` against the LIVE rules files. Grepping rule lines was rejected
     # (Codex review #187): it misses blanket prefixes (["gh","pr"] auto-allows
     # `gh pr create` — the exact 2026-07-02 regression form), multi-line
     # rules, and the omitted-decision default (= allow), and echoing rule
     # lines could leak secrets embedded in arbitrary pattern/justification
-    # strings. The probe approach never reads the rules file here (the path is
-    # only passed to codex) and only OUR fixed probe strings are echoed.
+    # strings. The probe approach never reads the rules files here (the paths
+    # are only passed to codex) and only OUR fixed probe strings are echoed.
     if command -v codex >/dev/null 2>&1; then
       # Policy-derived probe set: every outward-action / escalation family the
       # Approval Required list in docs/ai-policy.md names, plus the raw-write
@@ -876,7 +957,7 @@ report_codex_rules_probes() {
       probe_failures=0
       for probe in "${outward_probes[@]}"; do
         # shellcheck disable=SC2086 # probes are fixed strings; word-splitting into tokens is intended
-        if verdict="$(codex execpolicy check --rules "$codex_rules" $probe 2>/dev/null)"; then
+        if verdict="$(codex execpolicy check "${rules_args[@]}" $probe 2>/dev/null)"; then
           # Only the effective, top-level decision is authoritative. A
           # matched allow rule can coexist with a stronger forbidden rule.
           # The engine omits decision when no rules match; all other unknown
@@ -908,13 +989,11 @@ report_codex_rules_probes() {
       if [[ "$probe_failures" -gt 0 ]]; then
         warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error or invalid result — broken rules file or incompatible codex?); do NOT read this as clean"
       elif [[ "$outward_allowed" -eq 0 ]]; then
-        ok "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes via codex execpolicy; read-only baseline holding)"
+        ok "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes over $(( ${#rules_args[@]} / 2 )) rules file(s) via codex execpolicy; $baseline_state)"
       fi
     else
       item "codex CLI not found; rules-semantics probe skipped (baseline presence still verified above)"
     fi
-  else
-    item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
   fi
 }
 
