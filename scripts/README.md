@@ -86,7 +86,7 @@ policy validation が失敗した場合は exit 1。
 - 1Password: `allowSecretsAccess=true` のとき `op` の存在と sign-in。`op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し、応答なしは「未確認」の warn にして doctor を止めない — 未ログインの `op` が対話 unlock 待ちで固まり診断全体が止まっていた(#231)。
 - SSH (1Password agent): `enable1PasswordSSH` の managed `~/.ssh/config` が active か dangling か。
 - private-backup(report-only): public baseline の各 target の存在と、marker からのバックアップ有無・最終日時と、捕捉が完全かどうか(`capture: complete`。#242 以前の marker は `unknown`)を表示する。`capture_incomplete=true` なら warn とし、読めない entry を直してから再 backup する手順を next actions に出す(#242)。backup 未実行は allowSecretsAccess=true の profile でのみ warn — false の profile は backup 実行自体を拒否する設計なので中立表示(#174)。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない。
-- managed-path orphans: managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出。宣言済み **file** path のみ検査し、dir 宣言(gate 配管)の中身には再帰しない — セッションログ等の header 引用を偽 orphan にしない(#174)。
+- managed-path orphans: managed-by header があるのに現 profile で管理対象でない file。profile 切替の残骸検出。宣言済み **file** path のみ検査し、その祖先の directory(allowlist が親として通すだけ、#207)の下には再帰しない — セッションログ等の header 引用を偽 orphan にしない(#174)。
 - managed drift(report-only): `chezmoi status` の乖離を report-only で warn。enforce profile では `~/.npmrc` の `_authToken` 行の有無をキー名のみで scan — 値は読まない・出さない — と managed-by header の有無も報告(#148)。
 - AI policy: `enableAiPolicy` / `enableAiTools` の現状。codex-settings が active な profile では Codex 権限面も監視 — managed rules baseline の presence と、**外向き/昇格 probe(push・PR/issue/comment 作成・release・sudo・auth login・clone・curl 等の固定リスト)を `codex execpolicy check` で live rules に評価**し auto-allow を warn(行 grep は blanket prefix・複数行 rule・decision 省略の既定 allow を見逃し、rule 行 echo は任意文字列由来の secret を漏らしうるため不採用 — doctor は rules file を読まず path を codex に渡すだけ・echo するのは自前の probe 文字列のみ。codex CLI 不在時は skip を明示)、`config.toml` の `[projects]` trust は **section header の path と trust_level のみ** scan(MCP env 等の他内容は読まない・#148 と同じキー名限定規律)し、trusted な home root と実在しない path の残骸を warn(#139)。 見出しは `[projects."path"]` / `[projects.'path']`(閉じ引用符後の空白・行末コメント可)を読み、二重引用符内の escape など、それ以外の `[projects.` で始まる形式は INCOMPLETE とする。
 - OpenCode(report-only): `opencode` の presence、`opencode-settings` module が active な profile では managed な permission 床 `~/.config/opencode/opencode.json` の presence — 無ければ apply 手順の action、非 active なら not managed。credential store `~/.local/share/opencode/auth.json` は**存在のみ**で中身も provider 名も読まない(#234)。agent-tools の plugin(`plugins/personal-*.js`)は静的に、global の plugins dir にあるか(init の成功までは保証しないと明記)と二重読込(`.ts` / `.mjs` の併置・単数形 `plugin/` dir・OpenCode が読む設定 — managed の床と `OPENCODE_CONFIG` の指す file — の `plugin` 欄に同じ名前。読まれていない `opencode.local.json` だけなら注記)を報告する — OpenCode は起動しない(`opencode debug config` でさえ DB に書き込むため)、設定ファイルは `plugin` 欄だけを読み表示しない。`opencode.local.json` があるのに `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も報告する(#263)。この section の末尾に enforceAiSandbox(sandbox ブロックと human-legit write gate の live state)の行も出る。
@@ -181,6 +181,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   status を変えないこと。
 - コマンドは現在の shell で実行され `cd` / `export` が残ること。
 - コピー内容が「`$ コマンド`」+ 出力 +「`[exit status: N]`」であること。
+- コマンドが wrapper の内部の変数名に代入しても、既存の file・一時 file の削除・表示 / copy / status が壊れず、代入は
+  current shell に残ること。正常終了・非 0・SIGINT・pty の Ctrl-C の各経路で確かめる(#280)。
+- `mktemp` が失敗したら status 1 で、コマンドを実行も copy もしないこと(#280)。
 
 ## test-policy.sh
 
@@ -278,7 +281,7 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
 検証内容(section ごと):
 
 - managed-path orphan: header があり現 profile で管理対象でない file が warning / 管理対象の
-  profile では orphan にならない / header 無しは対象外 / dir 宣言の中身に再帰しない(#174)。
+  profile では orphan にならない / header 無しは対象外 / 宣言した file の祖先の directory の下に再帰しない(#174 / #207)。
 - managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は「not initialized」の
   item で skip(いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
   managed-by header の欠落も warn(#148)。
@@ -335,6 +338,14 @@ fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で d
 - OpenCode(#234): fake opencode を PATH 先頭に置き、personal で床 missing → apply 手順の action / 床 present → ok /
   work → not managed(action なし)。credential store は存在のみ(fake auth.json の provider 名と key を canary にして
   非表示を pin)。
+- OpenCode の plugin(#263): 静的な検査だけで、PATH 先頭の fake opencode が一度も起動されないこと(実行の記録で pin)。
+  plugin の発見・二重読込・`OPENCODE_CONFIG` の状態・herdr から見た OpenCode を report し、config の canary を出さないこと。
+- Codex review / worker profile(#264 / #299): personal で file 欠損 → apply の action / present → ok(fixture の canary で
+  中身の非表示を pin)/ capability が off なのに file が残る → action / work では手置き・欠損を中立に表示し、off 以外の値を
+  dangling として warn / `CODEX_HOME` が `~/.codex` 以外(末尾 `/` は同じ扱い)→ warn。
+- git hook gates の残置(#258): `enableGitHookGates=false` で配管が残るとき、module が active な personal では apply の
+  action、非 active な work では実在する file だけを名指しした `rm -i` の手順と core.hooksPath の確認 / 何も無ければ
+  not wired で action なし。
 - next actions(#227): summary が最後の section で件数 = 番号行数・inline `[warn]` と同順・各項目に手順行 /
   `--actions-only` が full run の summary と一致し他の行を含まない / 未知 option(`--actions-onyl` / `-h` /
   `-x`)は exit 2 で report を走らせない / 0 件は none / helper 単体の exact pin(複数 step・`%`・先頭 `-`・
@@ -390,7 +401,9 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
   先に stage、#208)→ machine-neutral manifest(時刻 / tool version / 各 file の type・mode・sha256。
   絶対 home path・host 名は入れない)生成 → **self-check**(verify / restore と同じ `check_manifest`
   を staging に当てる。不合格なら `--out` も `.partial` も書かず marker も更新せず exit 非 0、#224)
-  → 確認 → `tar | age -r recipient` を pipe(平文 tar をディスクに残さない)→ `--out` へ書き出し →
+  → 確認 → `tar | age -r recipient` を pipe(平文 tar をディスクに残さない)→ `--out` へ書き出し(`--out` は file の
+  path。既存の directory(directory への symlink を含む)は書き込みの前に拒否し、mv の後にも regular file であることを
+  確かめる、#298)→
   marker(`~/.local/state/dotfiles/private-backup.json`、最終成功時刻 / archive basename / 件数 /
   `capture_incomplete` のみ。#242)更新。捕捉 0 件(補足リストだけも含む)は空アーカイブを書かず fail。
 - **verify**: `--identity` / `--identity-command`(op seam)で 0700 temp に**復号**し、
@@ -404,7 +417,8 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
 - **restore**: verify を通った後のみ復元(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 退避 dir**(復元先 home 配下の
   `.local/state/dotfiles/restore-backup-<UTC ts>.<ランダム>/`。既定は `~` 配下、`--target-home` 指定時はその dir 配下)
-  へ move。`--skip-existing` で既存は触らない。**symlink 化した親 dir 経由の
+  へ move。`--skip-existing` で既存は触らない。復元先と退避先に新しく作る親 directory は 0700(既存の directory の
+  mode は変えない、#295)。**symlink 化した親 dir 経由の
   書き込みを拒否**して HOME 外 escape を防ぐ。`--target-home` で復元先を差し替え可(既定 `$HOME`)。
 - recipient / identity が解決できなければ fail-closed。仕様は `docs/private-backup.md`。
 
@@ -436,6 +450,9 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - restore が dry-run では何も書かず、`--apply` で原文どおり復元すること。
 - restore の上書きで既存ファイルを timestamp 退避すること。`--skip-existing` で既存を触らないこと。
 - restore が **symlink 化した親ディレクトリ経由の書き込みを拒否**し escape しないこと。
+- restore が復元先と退避先に新しく作る親 directory が 0700 であること(#295)。
+- `--out` は file の path で、既存の directory と directory への symlink を書き込みの前に拒否し、引数の検査の後に
+  directory が現れる競合(fake の `mv`)でも成功を表示しないこと。既存の regular file は上書きできること(#298)。
 - restore が verify 不合格アーカイブ / 拒否 profile では復元を拒否すること。
 - local 補足リスト自体が payload として canonical path(`.config/dotfiles/backup-paths.local`)に
   捕捉され、restore が dry-run で計画し `--apply` で内容と mode ごと復元し、復元した home からの
@@ -632,4 +649,4 @@ git が必要。chezmoi / starship binary は不要(CI では render job で実�
 他 script から source される共通 helper。
 data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)、global excludes の解決(`git_excludes_file_setting`: global > system・`GIT_CONFIG_NOSYSTEM` 尊重・unset / empty / path / error の 4 状態、`git_default_excludes_file`: XDG 既定。doctor と preflight が共有、#248)を提供する。ほかに、BSD/GNU をまたぐ octal mode 取得(`file_mode`)、doctor / preflight が共有する policy ゲート(`run_policy_validation`)と標準 project roots 報告(`report_standard_project_roots`)、catalog source → package manager の対応表(`manager_present`。installer と catalog drift 報告の単一 source)を持つ。
 
-policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
+policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-preflight.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
