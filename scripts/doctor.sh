@@ -822,6 +822,7 @@ fi
 # calls below are set -e safe without || true.
 report_codex_rules_probes() {
   local codex_rules_dir codex_rules rules_file rules_name rules_args unmanaged_rules rules_listing_complete rules_dir_error
+  local baseline_state
   local outward_probes outward_allowed probe_failures probe verdict decision
   codex_rules_dir="$HOME/.codex/rules"
   codex_rules="$codex_rules_dir/default.rules"
@@ -887,9 +888,14 @@ report_codex_rules_probes() {
       return 0
     fi
   fi
+  # The clean ok below names the baseline's state: it may run over sibling
+  # files alone, so "baseline holding" is only said when the managed file is
+  # actually what Codex loads.
+  baseline_state="the managed baseline is NOT in effect"
   if [[ -L "$codex_rules" ]]; then
     warn "Codex approval-rules baseline is a symlink (~/.codex/rules/default.rules): Codex does not load a symlinked rules file, so the vetted baseline is not in effect (chezmoi apply writes a regular file)"
   elif [[ -f "$codex_rules" ]]; then
+    baseline_state="read-only baseline holding"
     ok "Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)"
   else
     item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
@@ -983,7 +989,7 @@ report_codex_rules_probes() {
       if [[ "$probe_failures" -gt 0 ]]; then
         warn "rules-semantics scan INCOMPLETE: $probe_failures of ${#outward_probes[@]} probes failed to evaluate (codex execpolicy error or invalid result — broken rules file or incompatible codex?); do NOT read this as clean"
       elif [[ "$outward_allowed" -eq 0 ]]; then
-        ok "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes over $(( ${#rules_args[@]} / 2 )) rules file(s) via codex execpolicy; read-only baseline holding)"
+        ok "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (${#outward_probes[@]} probes over $(( ${#rules_args[@]} / 2 )) rules file(s) via codex execpolicy; $baseline_state)"
       fi
     else
       item "codex CLI not found; rules-semantics probe skipped (baseline presence still verified above)"

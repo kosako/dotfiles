@@ -3208,7 +3208,20 @@ else
   fail "test failed: doctor must stay exit 0 (symlinked default.rules)"
   status=1
 fi
-rm -f "$aip_rules_dir/default.rules"
+# Same symlinked baseline beside a (clean) sibling file: the sibling is still
+# probed, and the clean ok must not claim the baseline is holding.
+: > "$aip_rules_dir/extra.rules"
+if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
+  && grep -Fq "probes over 1 rules file(s) via codex execpolicy; the managed baseline is NOT in effect)" <<< "$aip_out" \
+  && ! grep -Fq "read-only baseline holding" <<< "$aip_out"; then
+  ok "test passed: with the baseline not in effect, the clean ok over a sibling file does not claim the baseline is holding"
+else
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: the clean ok claimed a holding baseline while default.rules is not in effect"
+  status=1
+fi
+rm -f "$aip_rules_dir/extra.rules" "$aip_rules_dir/default.rules"
 mv "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
 
 # AIP-7) An unreadable rules dir cannot be enumerated the way Codex does, so
