@@ -401,6 +401,26 @@ else
   ok "test passed: no includes-less core.hooksPath read remains"
 fi
 
+# 8) The four-script readiness list must stay identical in the arming
+#    template, doctor.sh, preflight.sh and this test's GATE_SCRIPTS (#307):
+#    a list cut short in one observer would report a partial deploy as ready
+#    while the template refuses to arm (or the reverse). Static pin; doctor's
+#    and preflight's behaviour on partial deploys is pinned in test-doctor.sh
+#    (HG) and test-preflight.sh.
+parity_template="$(grep -F 'range list "personal-' "$DOTFILES_ROOT/.chezmoitemplates/git-hook-gates-armed" | grep -o 'personal-[a-z-]*' | tr '\n' ' ')"
+parity_doctor="$(grep -E '^hook_gates_scripts=\(' "$SCRIPT_DIR/doctor.sh" | grep -o 'personal-[a-z-]*' | tr '\n' ' ')"
+parity_preflight="$(grep -E '^  for hook_gates_script in personal-' "$SCRIPT_DIR/preflight.sh" | grep -o 'personal-[a-z-]*' | tr '\n' ' ')"
+parity_test="${GATE_SCRIPTS[*]} "
+if [[ -n "$parity_template" && "$parity_template" == "$parity_doctor" \
+  && "$parity_template" == "$parity_preflight" && "$parity_template" == "$parity_test" ]]; then
+  ok "test passed: the four-script readiness list is identical in the template, doctor, preflight and this test"
+else
+  printf 'template:  %s\ndoctor:    %s\npreflight: %s\ntest:      %s\n' \
+    "$parity_template" "$parity_doctor" "$parity_preflight" "$parity_test" >&2
+  fail "test failed: the readiness list differs between the template, doctor, preflight and this test"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "git hook gates tests passed"
 fi

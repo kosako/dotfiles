@@ -813,6 +813,10 @@ write_fake_herdr_config_check 0
 # HC-5) XDG_CONFIG_HOME naming ~/.config with a trailing slash is the same
 #       file, so no redirect warning and the check runs.
 hc_check "XDG_CONFIG_HOME=~/.config/ is the managed file -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal XDG_CONFIG_HOME="$hc_home/.config/"
+# HC-5b) ... and so is XDG_CONFIG_HOME through a symlink to ~/.config (-ef, #307).
+ln -s "$hc_home/.config" "$hc_home/config-alias"
+hc_check "XDG_CONFIG_HOME through a symlink to ~/.config is the managed file -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal XDG_CONFIG_HOME="$hc_home/config-alias"
+rm -f "$hc_home/config-alias"
 # HC-6) work does not list the module -> not managed, whatever is on disk.
 hc_check "work -> not managed" "[ok] herdr config not managed (herdr-config module inactive for profile work)" work
 rm -rf "$hc_home" "$hc_fakebin"
@@ -933,6 +937,12 @@ ur_expect "XDG_CONFIG_HOME=~/.config/ -> same file, ok" personal XDG_CONFIG_HOME
   "$ur_ok" ! "points agent-tools at"
 ur_expect "relative XDG_CONFIG_HOME -> ignored, ok" personal XDG_CONFIG_HOME="rel/config" -- \
   "$ur_ok" ! "points agent-tools at"
+# UR-2b2) XDG_CONFIG_HOME through a symlink to ~/.config is the same file
+#         (-ef): no redirect warning (#307).
+ln -s "$ur_home/.config" "$ur_home/config-alias"
+ur_expect "XDG_CONFIG_HOME through a symlink to ~/.config -> same file, ok" personal XDG_CONFIG_HOME="$ur_home/config-alias" -- \
+  "$ur_ok" ! "points agent-tools at"
+rm -f "$ur_home/config-alias"
 # UR-2c) broken managed file under a redirect: the wrapper reads the other
 #        file, so the action must not claim it fails (Codex review, PR #302).
 ur_write "{\"argv\": [\"$ur_reader\"], \"note\": 1}"
@@ -2132,6 +2142,145 @@ else
   status=1
 fi
 rm -rf "$hl_home"
+
+# GS) Git section (#307): user.useConfigOnly / transfer.credentialsInUrl come
+#     from the global config and are warned while not set, and the remote URL
+#     scan walks every documented root under ~/src: a repo with credential-like
+#     userinfo in each of personal / work / client / sandbox / agent is
+#     flagged, its URL (a canary) never shown. Hermetic (env -i, own HOME, no
+#     system git config).
+gs_home="$fixture_home/gs-home"
+gs_canary="canary-remote-userinfo-307"
+rm -rf "$gs_home"
+mkdir -p "$gs_home"
+: > "$gs_home/.gitconfig"
+for gs_root in personal work client sandbox agent; do
+  env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 \
+    git init -q --template= "$gs_home/src/$gs_root/repo"
+  env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 \
+    git -C "$gs_home/src/$gs_root/repo" remote add origin "https://user:$gs_canary@example.invalid/x.git"
+done
+if gs_out="$(env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  gs_missing=""
+  for gs_line in "[warn] user.useConfigOnly is not true" "[warn] transfer.credentialsInUrl is not die"; do
+    grep -Fxq -- "$gs_line" <<< "$gs_out" || gs_missing="$gs_missing$gs_line"$'\n'
+  done
+  for gs_root in personal work client sandbox agent; do
+    gs_line="[warn] credential-like userinfo in remote URL: repo=$gs_home/src/$gs_root/repo remote=origin (URL not shown)"
+    grep -Fxq -- "$gs_line" <<< "$gs_out" || gs_missing="$gs_missing$gs_line"$'\n'
+  done
+  if [[ -z "$gs_missing" ]] && ! grep -Fq "$gs_canary" <<< "$gs_out"; then
+    ok "test passed: Git section warns on the two unset keys and flags a credential remote under every ~/src root without showing the URL"
+  else
+    printf '%s\n%s' "$gs_out" "$gs_missing" >&2
+    fail "test failed: Git section / remote URL scan"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (Git section)"
+  status=1
+fi
+printf '[user]\n\tuseConfigOnly = true\n[transfer]\n\tcredentialsInUrl = die\n' > "$gs_home/.gitconfig"
+if gs_out="$(env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fxq "[ok] user.useConfigOnly=true" <<< "$gs_out" \
+  && grep -Fxq "[ok] transfer.credentialsInUrl=die" <<< "$gs_out"; then
+  ok "test passed: Git section reports both keys ok once the global config sets them"
+else
+  printf '%s\n' "${gs_out:-<no output>}" >&2
+  fail "test failed: Git section must report both keys ok when set"
+  status=1
+fi
+rm -rf "$gs_home"
+
+# HG) git hook gates readiness on a module-active profile (#307): the
+#     observer side of the two-key gate. Each case plants the agent-tools
+#     deploy (all four scripts, a subset, or one not executable) and the
+#     wiring (both shims + core.hooksPath at the managed shim directory, or
+#     nothing) in an own HOME and pins doctor's exact readiness lines — a
+#     deploy list cut short in doctor.sh (e.g. the dispatcher alone) would
+#     report a partial deploy as complete and fail here. Hermetic (env -i).
+hg_home="$fixture_home/hg-home"
+hg_deploy="$hg_home/.claude/agent-tools/scripts"
+hg_shims="$hg_home/.config/git-hook-gates/hooks"
+hg_all=(personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate)
+# hg_setup WIRED SCRIPT... — a fresh HOME; WIRED=1 plants both shims and
+# core.hooksPath; each SCRIPT is planted executable.
+hg_setup() {
+  local wired="$1" hg_script
+  shift
+  rm -rf "$hg_home"
+  mkdir -p "$hg_deploy"
+  for hg_script in "$@"; do
+    printf '#!/bin/sh\nexit 0\n' > "$hg_deploy/$hg_script"
+    chmod +x "$hg_deploy/$hg_script"
+  done
+  if [[ "$wired" -eq 1 ]]; then
+    mkdir -p "$hg_shims"
+    for hg_script in pre-commit commit-msg; do
+      printf '#!/bin/sh\nexit 0\n' > "$hg_shims/$hg_script"
+      chmod +x "$hg_shims/$hg_script"
+    done
+    printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hg_home/.gitconfig"
+  fi
+}
+# hg_expect LABEL -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
+hg_expect() {
+  local label="$1" want=() absent=() mode=want arg missing="" out
+  shift 2
+  for arg in "$@"; do
+    case "$mode:$arg" in
+      want:!) mode=absent ;;
+      want:*) want+=("$arg") ;;
+      absent:*) absent+=("$arg") ;;
+    esac
+  done
+  if ! out="$(env -i PATH="$PATH" HOME="$hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    fail "test failed: doctor must stay exit 0 (hook gates readiness $label)"
+    status=1
+    return
+  fi
+  for arg in "${want[@]}"; do
+    grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n'
+  done
+  for arg in "${absent[@]:-}"; do
+    [[ -z "$arg" ]] && continue
+    if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi
+  done
+  if [[ -z "$missing" ]]; then
+    ok "test passed: hook gates readiness $label"
+  else
+    printf '%s\n%s' "$out" "$missing" >&2
+    fail "test failed: hook gates readiness $label"
+    status=1
+  fi
+}
+hg_complete="[ok] agent-tools deploy complete: dispatcher + all three gates executable in $hg_deploy (bodies owned by agent-tools sync)"
+hg_wired_incomplete="[warn] agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and all three gates in $hg_deploy — or set enableGitHookGates=false and apply"
+hg_both_incomplete="[warn] agent-tools deploy incomplete (dispatcher and/or a gate missing in $hg_deploy; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
+# HG-1) wired + all four deployed -> both shims ok, hooksPath ok, deploy complete.
+hg_setup 1 "${hg_all[@]}"
+hg_expect "wired + complete deploy -> all ok" -- \
+  "[ok] shim present and executable: $hg_shims/pre-commit" \
+  "[ok] shim present and executable: $hg_shims/commit-msg" \
+  "[ok] global core.hooksPath -> managed shim directory" \
+  "$hg_complete" ! "deploy INCOMPLETE" "deploy incomplete ("
+# HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
+hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
+hg_expect "wired + pre-#281 deploy (identity gate missing) -> BLOCKED warning" -- \
+  "$hg_wired_incomplete" ! "$hg_complete"
+# HG-3) wired + all four present but one gate not executable -> the same.
+hg_setup 1 "${hg_all[@]}"
+chmod 644 "$hg_deploy/personal-public-safety-gate"
+hg_expect "wired + a non-executable gate -> BLOCKED warning" -- \
+  "$hg_wired_incomplete" ! "$hg_complete"
+# HG-4) nothing wired + the dispatcher alone -> both halves incomplete.
+hg_setup 0 personal-git-hook-dispatcher
+hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- \
+  "[warn] shim missing or not executable: $hg_shims/pre-commit (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  "[warn] global core.hooksPath is not set (chezmoi apply arms it via the ~/.gitconfig include once the agent-tools deploy is complete)" \
+  "$hg_both_incomplete" ! "$hg_complete"
+rm -rf "$hg_home"
 
 # OP) OpenCode plugins, OPENCODE_CONFIG and herdr's OpenCode view (#263).
 #     Static checks only: doctor must never run OpenCode (even `opencode

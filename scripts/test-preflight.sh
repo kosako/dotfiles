@@ -247,6 +247,69 @@ else
   miss "personal with no usage reader config must report the absent/creates ok line"
 fi
 
+# 5f. git hook gates apply impact (#307): readiness is judged on all FOUR
+#     agent-tools scripts. A complete deploy with the managed hooksPath reports
+#     ok for each script, the arming and the path; the pre-#281 deploy (the
+#     identity gate missing) names that script and the "will NOT arm" warning
+#     — a deploy list cut short in preflight.sh would call it complete. env -i:
+#     no developer git config leaks in.
+pf_hg_home="$fixture_home/hook-gates"
+pf_hg_deploy="$pf_hg_home/.claude/agent-tools/scripts"
+mkdir -p "$pf_hg_deploy"
+for pf_hg_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
+  printf '#!/bin/sh\nexit 0\n' > "$pf_hg_deploy/$pf_hg_script"
+  chmod +x "$pf_hg_deploy/$pf_hg_script"
+done
+printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$pf_hg_home/.gitconfig"
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || true
+pf_missing=""
+for pf_hg_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
+  grep -Fxq "[ok] deployed: $pf_hg_deploy/$pf_hg_script" <<< "$pf_out" || pf_missing="$pf_missing $pf_hg_script"
+done
+if [[ -z "$pf_missing" ]] \
+  && grep -Fxq "[ok] agent-tools deploy complete: apply arms the commit gates (fail-closed on the normal git commit path)" <<< "$pf_out" \
+  && grep -Fxq "[ok] global core.hooksPath already points at the managed shim directory" <<< "$pf_out"; then
+  pass "git hook gates: a complete deploy with the managed hooksPath is reported ready"
+else
+  printf '%s\nmissing:%s\n' "$pf_out" "$pf_missing" >&2
+  miss "git hook gates: a complete deploy must report each script, the arming and the managed hooksPath"
+fi
+rm -f "$pf_hg_deploy/personal-git-identity-gate"
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || true
+if grep -Fxq "[warn] missing or not executable: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
+  && grep -Fxq "[warn] agent-tools deploy incomplete: apply will NOT arm the commit gates (two-key gate); run agent-tools sync first, then apply again. Do not arm a partial deploy — the dispatcher fails closed and would block every git commit" <<< "$pf_out" \
+  && ! grep -Fq "agent-tools deploy complete" <<< "$pf_out"; then
+  pass "git hook gates: the pre-#281 deploy (identity gate missing) names it and will not arm"
+else
+  printf '%s\n' "$pf_out" >&2
+  miss "git hook gates: a deploy without the identity gate must not be reported as complete"
+fi
+
+# 5g. Values are never shown (#307): with a global identity, hooksPath and
+#     excludesFile set, and a usage-reader.json / herdr config present, the
+#     report warns about each — and no canary from any of them appears.
+#     env -i, no system git config.
+pf_cv_home="$fixture_home/canary-values"
+pf_cv_canary="canary-value-307"
+mkdir -p "$pf_cv_home/.config/agent-tools" "$pf_cv_home/.config/herdr"
+printf '[user]\n\tname = %s-name\n\temail = %s@example.invalid\n[core]\n\thooksPath = /%s/hooks\n\texcludesFile = /%s/excludes\n' \
+  "$pf_cv_canary" "$pf_cv_canary" "$pf_cv_canary" "$pf_cv_canary" > "$pf_cv_home/.gitconfig"
+printf '{"argv": ["/%s/reader"]}\n' "$pf_cv_canary" > "$pf_cv_home/.config/agent-tools/usage-reader.json"
+printf '[ui]\nagent_panel_sort = "%s"\n' "$pf_cv_canary" > "$pf_cv_home/.config/herdr/config.toml"
+pf_out="$(env -i PATH="$PATH" HOME="$pf_cv_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || true
+if grep -Fxq "[warn] global user.name is set (value not shown)" <<< "$pf_out" \
+  && grep -Fxq "[warn] global user.email is set (value not shown)" <<< "$pf_out" \
+  && grep -Fxq "[warn] global core.hooksPath is set to something else (value not shown) — apply replaces ~/.gitconfig and the managed include takes over; diff first" <<< "$pf_out" \
+  && grep -Fq "core.excludesFile is set (value not shown; global or system config)" <<< "$pf_out" \
+  && grep -Fq "exists: $pf_cv_home/.config/agent-tools/usage-reader.json — apply (agent-tools-usage-reader) replaces it" <<< "$pf_out" \
+  && grep -Fq "exists: $pf_cv_home/.config/herdr/config.toml — apply (herdr-config) replaces it" <<< "$pf_out" \
+  && ! grep -Fq "$pf_cv_canary" <<< "$pf_out"; then
+  pass "values: identity / hooksPath / excludesFile / usage-reader / herdr config are reported without their values"
+else
+  printf '%s\n' "$pf_out" >&2
+  miss "values: a preflight warning must not show the value it is about"
+fi
+
 # 6. The only non-zero path: a failing policy validation aborts (a broken
 #    profiles.yaml in a repo copy — the mutation is fail-closed because the
 #    exit-1 assertion itself would fail on a no-op).

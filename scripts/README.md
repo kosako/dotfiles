@@ -145,7 +145,10 @@ git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.g
 herdr config の apply impact(既存 `~/.config/herdr/config.toml` の置換 warn、work の left-as-is、不在時の ok、#261)/
 agent-tools の残量の読み取り口の apply impact(既存 `~/.config/agent-tools/usage-reader.json` の置換 warn、work の left-as-is、不在時の ok、#301)/
 policy validation 失敗時のみ非 0 / commands 節が確認する tool がすべて catalog(name / pkg / bin)か
-catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)、をカバーする。
+catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)/
+git hook gates の deploy 4 本の readiness(完全な deploy は script ごとと武装と hooksPath が ok、identity gate が欠けた旧 deploy は
+その script と「武装しない」の warn、#307)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
+値を出さないこと(それぞれの warn は出し、canary は出ない、#307)、をカバーする。
 
 ## test-lib.sh
 
@@ -185,6 +188,12 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   一時 file が消え、表示 / copy / status が正しく、代入が current shell に残ること。SIGINT と pty の Ctrl-C による
   中断では、既存の file が無事で一時 file が消えること。
 - `mktemp` が失敗したら status 1 で、コマンドを実行も copy もしないこと(#280)。
+- Ctrl-O の widget(`_ai_clip_accept_line`)を抜き出し、zle と `print -s` を stub にした隔離 zsh で、空白で始まらない行は
+  そのまま履歴に保存され、BUFFER が空白で始まる wrapper の呼び出しになり、それを eval すると元の行が 1 つの引数として
+  展開されずに渡ること(行の中の command substitution は実行されない)、空白で始まる行は保存されないこと、空の行は
+  accept するだけであること(#307)。
+- pbcopy が無く `AI_CLIPBOARD_OSC52=1` のとき、copy が OSC 52(`ESC ] 52 ; c ; <base64> BEL`)として端末に届くこと
+  (`script(1)` の typescript で確かめる、#307)。
 
 ## test-policy.sh
 
@@ -315,7 +324,7 @@ query だけを実機で実行する(書き込みはしない)。
   exit 1 → action / missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
   空値)と `XDG_CONFIG_HOME`(別 dir・空値)の振り替え → warn で、present なら検証しない(fake は exit 1 を返すので、
   走れば action が出る)、missing なら redirect warn と「既定値」と断定しない missing action の両方 /
-  `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)は present でも missing でも同じ file 扱い / work → not managed。どの run も
+  `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)と `~/.config` への symlink(`-ef`、#307)は同じ file 扱い / work → not managed。どの run も
   `env -i` で hermetic。
 - agent-tools の残量の読み取り口(#301): fixture の HOME に fake の実行ファイルを置き、missing → `mkdir -p` →
   `chezmoi apply` の連続 2 step の action / 契約どおりの形(`timeout_sec` の 1・120・省略を含む)→ ok / 形の外れ
@@ -325,7 +334,7 @@ query だけを実機で実行する(書き込みはしない)。
   regular file でない → action / 指す先の無い symlink → 「読み取り口なし」の action(wrapper は exit 3 にするので失敗とは
   書かない)/ 絶対 path の `XDG_CONFIG_HOME` が別の場所 → redirect warn(missing でも形の外れでも
   「ずれを直すまで効かない」の action で、wrapper の失敗とは断定しない)、相対の `XDG_CONFIG_HOME` と `~/.config/`
-  (末尾 `/`)は同じ file 扱い / work → 手置きは中立の item、無ければ ok(読み先がずれていれば、どちらも「wrapper が読む」
+  (末尾 `/`)と `~/.config` への symlink(`-ef`、#307)は同じ file 扱い / work → 手置きは中立の item、無ければ ok(読み先がずれていれば、どちらも「wrapper が読む」
   「読み取り口なし」と断定せず、ずれた先を示す)。`argv` の canary が出力に出ないこと。fixture の
   reader と wrapper は実行されると marker を残し、全 run の後に marker が無いこと(doctor は実行しない)。どの run も
   `env -i` で hermetic。
@@ -348,6 +357,12 @@ query だけを実機で実行する(書き込みはしない)。
 - Codex review / worker profile(#264 / #299): personal で file 欠損 → apply の action / present → ok(fixture の canary で
   中身の非表示を pin)/ capability が off なのに file が残る → action / work では手置き・欠損を中立に表示し、off 以外の値を
   dangling として warn / `CODEX_HOME` が `~/.codex` 以外(末尾 `/` は同じ扱い)→ warn。
+- Git の節(#307): global の `user.useConfigOnly` / `transfer.credentialsInUrl` が無ければ warn、あれば ok。remote URL の
+  scan が `~/src` の personal / work / client / sandbox / agent のすべてを巡り、credential らしい userinfo の remote を URL を
+  出さずに warn すること(canary で pin)。
+- git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
+  欠けた旧 deploy、または実行 bit の無い gate → commit が止まる warn / 配線なし + dispatcher だけ → 両方が不完全の warn。
+  doctor の一覧が短くなれば落ちる。
 - git hook gates の残置(#258): `enableGitHookGates=false` で配管が残るとき、module が active な personal では apply の
   action、非 active な work では実在する file だけを名指しした `rm -i` の手順と core.hooksPath の確認 / 何も無ければ
   not wired で action なし。
@@ -618,7 +633,9 @@ deploy(agent-tools#281 以前の 3 本)、実行 bit の無い dispatcher のど
 dispatcher が pre-commit → commit-msg の順に呼ばれること、失敗する dispatcher が commit を止めること、`--no-verify` で
 両方を迂回できること(best-effort の既知の限界)を確認する。`enableGitHookGates=false` の apply で適用済みの配線が
 **削除される**こと、`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
-`--includes` 付きで読むこと(静的 pin)も確認する。throwaway destination に render し、実 home には触れない。
+`--includes` 付きで読むこと(静的 pin)と、deploy 4 本の一覧が武装の template・doctor・preflight・この test で同じであること
+(静的 pin、#307。doctor / preflight の部分 deploy での振る舞いは test-doctor / test-preflight が固定する)も確認する。
+throwaway destination に render し、実 home には触れない。
 chezmoi が必要(render job)。end-to-end 検査は git を使う(無ければ skip)。
 
 ## test-ssh.sh
