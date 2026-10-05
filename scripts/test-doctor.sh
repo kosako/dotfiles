@@ -3396,22 +3396,26 @@ case "$2" in
 esac
 SH
 chmod +x "$go_fakebin/go"
-for go_case in default-gopath explicit-gobin elsewhere no-path query-fails; do
+for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query-fails-no-path trailing-slash-home; do
   go_gobin=""
   go_gopath="$fixture_home/go"
   go_path="$go_fakebin:$fixture_home/go/bin:$PATH"
   go_fail=""
+  go_home="$fixture_home"
   case "$go_case" in
     explicit-gobin) go_gobin="$fixture_home/go/bin" ;;
     elsewhere) go_gobin="$fixture_home/toolchain/bin" ;;
     no-path) go_path="$go_fakebin:$PATH" ;;
     query-fails) go_fail=1 ;;
+    query-fails-no-path) go_fail=1; go_path="$go_fakebin:$PATH" ;;
+    # .zshenv appends ${HOME%/}/go/bin, so a trailing-slash HOME still matches.
+    trailing-slash-home) go_home="$fixture_home/" ;;
   esac
-  if go_out="$(HOME="$fixture_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
+  if go_out="$(HOME="$go_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
       FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     go_ok=0
     case "$go_case" in
-      default-gopath|explicit-gobin)
+      default-gopath|explicit-gobin|trailing-slash-home)
         grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
           && ! grep -Fq "go install target is" <<< "$go_out" \
           && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
@@ -3426,7 +3430,12 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails; do
         ;;
       query-fails)
         grep -Fq "[warn] go install target could not be determined" <<< "$go_out" \
-          && ! grep -Fq "[ok] go install target" <<< "$go_out" && go_ok=1
+          && ! grep -Fq "[ok] go install target" <<< "$go_out" \
+          && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+      query-fails-no-path)
+        grep -Fq "[warn] go install target could not be determined" <<< "$go_out" \
+          && grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
         ;;
     esac
     if [[ "$go_ok" -eq 1 ]]; then

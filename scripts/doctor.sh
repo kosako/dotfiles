@@ -503,6 +503,13 @@ section "runtime and shell"
 # those never look. Report-only.
 report_go_install_target() {
   local target home_dir
+  home_dir="${HOME%/}"
+  # PATH first: it matters (go-installed tools by name) whether or not Go
+  # itself is here or answers.
+  case ":$PATH:" in
+    *":$home_dir/go/bin:"*) ;;
+    *) item "PATH here lacks ~/go/bin, so go-installed tools do not resolve by name (the managed ~/.zshenv appends it; open a new shell)" ;;
+  esac
   if ! command -v go >/dev/null 2>&1; then
     item "go not on PATH; go install target not checked"
     return 0
@@ -511,16 +518,11 @@ report_go_install_target() {
     warn "go install target could not be determined (go env failed or gave an unusable path); not checked against ~/go/bin"
     return 0
   fi
-  home_dir="${HOME%/}"
   if [[ "$target" == "$home_dir/go/bin" ]]; then
     ok "go install target: ~/go/bin (catalog go_install tools land where the managed statusLine and usage reader run them)"
   else
     warn "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path; the managed mise config leaves GOBIN unset: apply ~/.config/mise/config.toml, open a new shell, and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local)"
   fi
-  case ":$PATH:" in
-    *":$home_dir/go/bin:"*) ;;
-    *) item "PATH here lacks ~/go/bin, so go-installed tools do not resolve by name (the managed ~/.zshenv appends it; open a new shell)" ;;
-  esac
 }
 if [[ "$(capability_value "$profile" enableRuntimeManagement)" == "true" ]]; then
   command_status mise || true

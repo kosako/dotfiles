@@ -165,6 +165,24 @@ rm "$fixture/gobin"
 mv "$fixture/saved-gobin" "$fixture/gobin"
 ok "GOPATH presence and uninspectable Go bin locations are handled safely"
 
+# #305: a copy only on PATH (e.g. in a toolchain dir that used to be GOBIN)
+# is not "installed": the Go bin dir is, so the installer puts it there.
+mv "$fixture/gobin/fixture-go" "$fixture/saved-fixture-go"
+printf '#!/bin/sh\nexit 0\n' > "$fixture/bin/fixture-go"
+chmod +x "$fixture/bin/fixture-go"
+: > "$fixture/installs"
+output="$(run_fixture "$installer" --apply 2>&1)"
+if ! grep -Fxq 'go install example.invalid/fixture/cli@latest' "$fixture/installs" \
+  || grep -Fq 'already installed: fixture-go' <<< "$output"; then
+  fail "a Go executable only on PATH (outside the Go bin dir) must be installed into the Go bin dir"
+  printf '%s\n' "$output" >&2
+  exit 1
+fi
+rm "$fixture/bin/fixture-go"
+mv "$fixture/saved-fixture-go" "$fixture/gobin/fixture-go"
+: > "$fixture/installs"
+ok "a Go executable only on PATH (outside the Go bin dir) is installed into the Go bin dir"
+
 for mode in dry-run apply; do
   args=("$installer")
   [[ "$mode" = apply ]] && args+=(--apply)

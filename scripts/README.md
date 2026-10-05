@@ -375,7 +375,8 @@ query だけを実機で実行する(書き込みはしない)。
   not installed・outdated なら `herdr integration install <agent>` の action、current なら info、herdr 不在
   は catalog section への pointer。
 - go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が warn、
-  `go env` の失敗は「確かめられない」の warn(ok を出さない)、PATH に `~/go/bin` が無ければ info。
+  `go env` の失敗は「確かめられない」の warn(ok を出さない)、PATH に `~/go/bin` が無ければ info(`go env` が
+  失敗したときも出す)、末尾 slash の HOME でも一致。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
   `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字は `?` に置換)、symlink の `default.rules` は
@@ -408,7 +409,7 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 `profile_installs_source` が personal のみ install を許し work 系は許さないこと、profile 未解決時の
 拒否、解決済み work profile の dry-run が 0 件を計画すること(副作用なし)を確認する。
 
-`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続を確認する。実 manager・実 install・実 home は使わない。
+`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続を確認する。実 manager・実 install・実 home は使わない。
 
 ## private-backup.sh
 

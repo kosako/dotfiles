@@ -43,7 +43,7 @@ boolean capability、module の boolean `requires:`、schema の `implemented:` 
 
 install は `install-packages.sh`(手動起動・`chezmoi apply` 非結合)が担う。catalog の未 install entry を、`installPackages`(brew_formula / npm_global / go_install)と `installGuiApps`(brew_cask / mas)で gate して install する。**dry-run 既定**(`--apply` で実行)、既 install は skip して**更新しない**(install と update の分離、[update-policy](update-policy.md))、track-only / manual は対象外、npm/go の manager 不在時は skip+warn。environmentKind 制約で work / client / agent は gate(installPackages/installGuiApps)が false 必須なので install されない(`environment_kind_forbidden_capabilities`)。sandbox は install 制約の対象外(secret のみ禁止)で、profile が install gate を true にすれば install されうる。
 
-Go の install 済み判定は GOBIN(空の場合は GOPATH の先頭 entry 配下の `bin`)を調べる。そこに executable があれば PATH 外でも再 install しない。`go env` の probe は `GOTOOLCHAIN=local` / `GO111MODULE=off` / `GOWORK=off` で実行し、呼出元の `go.mod` / `go.work` による toolchain 自動取得を抑止する。query 失敗、空や不正な GOPATH は「不明」であり、`/bin` へ fallback しない。
+Go の install 済み判定は GOBIN(空の場合は GOPATH の先頭 entry 配下の `bin`)を調べる。そこに executable があれば PATH 外でも再 install しない。逆に、PATH 上の別の場所(GOBIN だった toolchain の dir など)にある copy は導入済みとみなさない(#305。bin の dir が変わった後も、catalog が正しい場所に入れるため)。`go env` の probe は `GOTOOLCHAIN=local` / `GO111MODULE=off` / `GOWORK=off` で実行し、呼出元の `go.mod` / `go.work` による toolchain 自動取得を抑止する。query 失敗、空や不正な GOPATH は「不明」であり、`/bin` へ fallback しない。
 
 installer は inventory の不明と正常な空リストを区別する。取得・解析失敗時は dry-run でも install を計画せず、`--apply` でもその entry を変更しない。失敗を報告して exit nonzero とし、成功した inventory に対する処理は継続する。
 

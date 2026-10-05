@@ -47,10 +47,13 @@ is_installed() {
     brew_cask | mas)
       grep -Fxq -- "$canonical" <<< "$inv" ;;
     go_install)
-      # An executable in GOBIN is installed even when GOBIN is outside PATH
-      # (#209). PATH remains a separate availability fallback.
-      grep -Fxq -- "$bincmd" <<< "$inv" && return 0
-      command -v "$bincmd" >/dev/null 2>&1 ;;
+      # Installed means an executable in the Go bin dir (GOBIN, else the
+      # first GOPATH entry's bin), even when that dir is outside PATH (#209).
+      # A copy elsewhere on PATH does not count (#305): after the bin dir
+      # moves (mise's toolchain dir -> ~/go/bin), an old copy would keep the
+      # catalog from installing where the managed statusLine and usage
+      # reader run it.
+      grep -Fxq -- "$bincmd" <<< "$inv" ;;
     *) return 2 ;;
   esac
 }

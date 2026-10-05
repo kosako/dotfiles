@@ -22,4 +22,5 @@ export PATH="$HOME/.local/bin:$PATH"
 # land (the managed mise config leaves GOBIN unset, #305). Appended, so a
 # go-installed binary never shadows a system or package-manager command.
 # No-op when the dir does not exist.
-export PATH="$PATH:$HOME/go/bin"
+# ${HOME%/}: a HOME with a trailing slash must not yield "//go/bin".
+export PATH="$PATH:${HOME%/}/go/bin"

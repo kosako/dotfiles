@@ -113,7 +113,7 @@ while IFS= read -r profile; do
   fi
   if [[ -f "$root/home/.zshenv" ]]; then
     # shellcheck disable=SC2016 # the literal line, not an expansion
-    if grep -Fxq 'export PATH="$PATH:$HOME/go/bin"' "$root/home/.zshenv"; then
+    if grep -Fxq 'export PATH="$PATH:${HOME%/}/go/bin"' "$root/home/.zshenv"; then
       ok "test passed: .zshenv appends ~/go/bin to PATH for $profile"
     else
       fail "test failed: .zshenv does not append ~/go/bin to PATH for $profile"
