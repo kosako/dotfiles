@@ -2958,6 +2958,13 @@ aip_trust_case "backslash in a header comment" 1 \
 aip_trust_case "backslash in a literal header and in a value" 2 \
   "$aip_real_header" 'trust_level = "trusted"' "[projects.'/tmp/project${aip_bs}name']" 'trust_level = "trusted"' \
   '[mcp_servers.demo.env]' "PATHX = \"C:${aip_bs}${aip_bs}dir\""
+# A value continued over several lines (a multi-line array) is not a key:
+# escaped quotes in its elements keep the normal count (Codex review R3,
+# PR #312), while a root `projects` key after the array closes is still read.
+aip_trust_case "escaped quotes in a multi-line array value" 1 \
+  'notify = [' '  "sh",' '  "-c",' "  \"printf '%s' ${aip_bs}\"done${aip_bs}\"\"," ']' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "root projects key after a multi-line array" incomplete \
+  'arr = [' '  "a",' ']' 'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log

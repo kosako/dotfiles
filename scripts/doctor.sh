@@ -943,9 +943,11 @@ report_codex_projects_trust() {
     # inside a double-quoted key or table name at the root or in a project
     # section (TOML escapes are not decoded here). scan() walks each line
     # character by character — basic and literal strings (with escapes),
-    # multi-line strings across lines, comments — so a line that starts
-    # inside a multi-line string is skipped as a whole, and a quote or
-    # backslash inside a comment or a literal string means nothing.
+    # multi-line strings across lines, comments, and the bracket depth of a
+    # value (a multi-line array) — so a line that starts inside a multi-line
+    # string or inside a value continued from an earlier line is skipped as
+    # a whole, and a quote or backslash inside a comment, a literal string
+    # or a value means nothing.
     if trusted_paths="$(awk '
       function scan(s, st,    i, n, c) {
         n = length(s); i = 1
@@ -962,13 +964,17 @@ report_codex_projects_trust() {
           }
           if (c == "#") break
           if (c == "=") seen_eq = 1
+          if (seen_eq || vdepth > 0) {
+            if (c == "[" || c == "{") vdepth++
+            else if ((c == "]" || c == "}") && vdepth > 0) vdepth--
+          }
           if (substr(s, i, 3) == "\"\"\"") { st = "mlb"; i += 3; continue }
           if (substr(s, i, 3) == "\047\047\047") { st = "mll"; i += 3; continue }
           if (c == "\"") {
             i++
             while (i <= n) {
               c = substr(s, i, 1)
-              if (c == "\\") { if (!seen_eq) key_escape = 1; i += 2; continue }
+              if (c == "\\") { if (!seen_eq && vdepth == 0) key_escape = 1; i += 2; continue }
               if (c == "\"") break
               i++
             }
@@ -985,10 +991,11 @@ report_codex_projects_trust() {
       }
       {
         start_ml = in_ml
+        start_depth = vdepth
         key_escape = 0; seen_eq = 0
         in_ml = scan($0, in_ml)
       }
-      start_ml != "" { next }
+      start_ml != "" || start_depth > 0 { next }
       /^[[:space:]]*\[/ && key_escape { exit 1 }
       /^[[:space:]]*\[/ && $0 !~ /^[[:space:]]*\[projects\./ && $0 ~ /^[[:space:]]*\[+[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[].]/ { exit 1 }
       !seen_header && /^[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[.=]/ { exit 1 }
