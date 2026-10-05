@@ -61,7 +61,31 @@ steps_consecutive() {
 
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
-trap 'rm -rf "$fixture_home"' EXIT
+# Host tools doctor would otherwise launch for real on a developer machine
+# (`op whoami`, `herdr integration status`, codex / opencode probes): hundreds
+# of runs below inherit this PATH, and the real tools are credential-bearing or
+# slow to answer. A PATH-front dir of stubs that record the call and exit 1
+# keeps every run hermetic: the tools are present on PATH but fail when run
+# (e.g. op reads as "not signed in", not "not found"). Sections that need a
+# specific answer put their own fake in front of these, as before (#306).
+# Kept outside the fixture HOME so no section's cleanup removes it.
+host_stub_dir=""
+trap 'rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}' EXIT
+host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
+mkdir -p "$host_stub_dir/bin"
+for host_tool in op herdr codex opencode; do
+  printf '#!/bin/sh\nprintf "%%s\\n" %q >> %q\nexit 1\n' "$host_tool" "$host_stub_dir/calls" \
+    > "$host_stub_dir/bin/$host_tool"
+  chmod +x "$host_stub_dir/bin/$host_tool"
+done
+PATH="$host_stub_dir/bin:$PATH"
+export PATH
+for host_tool in op herdr codex opencode; do
+  if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
+    fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
+    exit 1
+  fi
+done
 
 # A leftover enforce-mode .npmrc, as after switching personal -> work.
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n' \
@@ -2506,11 +2530,20 @@ else
   status=1
 fi
 #           herdr absent: a PATH of the system dirs plus a private bin
-#           holding only a yq symlink — the real yq's directory (homebrew
-#           bin) is NOT on it, because that is where a real herdr lives.
+#           holding a yq symlink — the real yq's directory (homebrew bin) is
+#           NOT on it, because that is where a real herdr lives — and the
+#           op / codex / opencode stubs (this PATH replaces the one carrying
+#           them, #306). A herdr in the system dirs would make this case run
+#           the real tool, so it fails up front instead of running doctor.
 rm -f "$hi_fakebin/herdr"
 ln -sf "$(command -v yq)" "$hi_fakebin/yq"
-if na_work="$(HOME="$na_home" PATH="$hi_fakebin:/usr/bin:/bin" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+for host_tool in op codex opencode; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$hi_fakebin/$host_tool"
+done
+if (PATH="$hi_fakebin:/usr/bin:/bin"; hash -r; command -v herdr >/dev/null 2>&1); then
+  fail "test failed: the herdr-absent case needs a PATH without herdr, but /usr/bin:/bin has one (doctor not run against a real herdr)"
+  status=1
+elif na_work="$(HOME="$na_home" PATH="$hi_fakebin:/usr/bin:/bin" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
   if grep -Fq "herdr not on PATH: nothing to check (the software catalog section reports it as declared-missing" <<< "$na_work" \
     && ! grep -Fq "herdr integration install" <<< "$(printf '%s\n' "$na_work" | sed -n '/^\[info\] == next actions (/,$p')"; then
     ok "test passed: work profile without herdr on PATH -> pointer to the catalog section, no herdr action"
