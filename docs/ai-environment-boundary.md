@@ -124,7 +124,7 @@ AI skills / agents project から `dotfiles` に昇格してよいもの:
 ## `enableAiPolicy` / `enableAiTools` の現状
 
 AI agent の権限ポリシーは初期段階から定義し、AI tool 導入の capability(`enableAiTools`)は後続とした。
-AI tool の binary(`codex` / `opencode` / `copilot-cli`)は、他の CLI と同じく software catalog に載っており、`installPackages` / `installGuiApps` の gate の下で `install-packages.sh` が明示 install する(Claude Code は catalog 外の native installer)。harness 設定は `claude-settings` / `codex-settings` / `opencode-settings` module が管理する。
+AI tool の binary(`codex` / `opencode`)は、他の CLI と同じく software catalog に載っており、`installPackages` の gate の下で `install-packages.sh` が明示 install する(Claude Code は catalog 外の native installer)。harness 設定は `claude-settings` / `codex-settings` / `opencode-settings` module が管理する。
 
 現在の値(personal / work 共通):
 

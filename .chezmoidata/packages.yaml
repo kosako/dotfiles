@@ -61,7 +61,6 @@ packages:
   # managed here (start manually with `herdr server` or `brew services`).
   - { name: herdr, source: brew_formula }
   - { name: 1password-cli, source: brew_cask, bin: op }
-  - { name: copilot-cli, source: brew_cask }
   - { name: iterm2, source: brew_cask }
   - { name: swiftbar, source: brew_cask }
   # claude-code is installed via the native installer (claude.ai/install.sh) to
