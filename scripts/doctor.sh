@@ -845,8 +845,11 @@ report_codex_rules_probes() {
   # subshell (follows the link; the C locale keeps the message stable; the
   # raw error, which carries the path, is never echoed).
   if ! rules_dir_error="$( (LC_ALL=C; cd -P -- "$codex_rules_dir") 2>&1 )"; then
+    # Match the strerror at the END only: the message embeds the path, and a
+    # HOME containing the same words must not turn a permission error into
+    # "absent".
     case "$rules_dir_error" in
-      *"No such file or directory"*) ;;
+      *": No such file or directory") ;;
       *)
         warn "Codex rules dir could not be opened (~/.codex/rules — not a directory, permission denied or a symlink loop; Codex fails to read it too): rules-semantics scan INCOMPLETE; do NOT read this as clean"
         return 0
