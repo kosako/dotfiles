@@ -494,8 +494,46 @@ section "software catalog (report-only)"
 report_catalog_drift || true
 
 section "runtime and shell"
+# report_go_install_target — where `go install` puts binaries here. The
+# managed mise config leaves GOBIN unset (go.set_gobin = false) so the
+# software catalog's go_install tools land in ~/go/bin, the path the managed
+# statusLine and agent-tools usage reader run tacho from (#305). Anything
+# else (a GOBIN exported by a shell activated before the config was applied,
+# or GOBIN / GOPATH set elsewhere) means install-packages.sh installs where
+# those never look. Report-only.
+report_go_install_target() {
+  local target home_dir
+  home_dir="${HOME%/}"
+  # PATH first: it matters (go-installed tools by name) whether or not Go
+  # itself is here or answers.
+  case ":$PATH:" in
+    *":$home_dir/go/bin:"*) ;;
+    *) item "PATH here lacks ~/go/bin, so go-installed tools do not resolve by name (the managed ~/.zshenv appends it; open a new shell)" ;;
+  esac
+  if ! command -v go >/dev/null 2>&1; then
+    item "go not on PATH; go install target not checked"
+    return 0
+  fi
+  if ! target="$(go_bin_dir)"; then
+    warn "go install target could not be determined (go env failed or gave an unusable path); not checked against ~/go/bin"
+    return 0
+  fi
+  if [[ "$target" == "$home_dir/go/bin" ]]; then
+    ok "go install target: ~/go/bin (catalog go_install tools land where the managed statusLine and usage reader run them)"
+  else
+    # An action, not a warn: it must reach --actions-only, and ahead of the
+    # usage reader's install-packages step (later section), because the
+    # installer judges "installed" by this same target and would skip a
+    # tool already sitting in the old one.
+    action "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
+      "\$ chezmoi apply $(printf '%q' "$home_dir/.config/mise/config.toml") $(printf '%q' "$home_dir/.zshenv")   # leaves GOBIN unset; ~/go/bin on PATH" \
+      "\$ exec env -u GOBIN -u GOPATH zsh -l   # a new shell: an exported GOBIN / GOPATH is inherited otherwise (go.set_gobin only stops mise from setting it)" \
+      "# and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local); then re-run doctor"
+  fi
+}
 if [[ "$(capability_value "$profile" enableRuntimeManagement)" == "true" ]]; then
   command_status mise || true
+  report_go_install_target
 else
   ok "runtime management disabled for profile"
 fi

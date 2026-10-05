@@ -80,6 +80,11 @@ for host_tool in op herdr codex opencode; do
 done
 PATH="$host_stub_dir/bin:$PATH"
 export PATH
+# The go install target check (#305) reads `go env GOBIN` / `GOPATH`: a GOBIN
+# exported by the developer's mise-activated shell (or a custom GOPATH) would
+# otherwise turn every fixture run into an extra action. Unset, Go answers
+# for the fixture HOME ($HOME/go); the GO cases below use their own fake go.
+unset GOBIN GOPATH
 for host_tool in op herdr codex opencode; do
   if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
     fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
@@ -3376,6 +3381,98 @@ mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 
 rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
   "$fixture_home/real-project" "$codex_fakebin" "$aip_probe_log"
+
+# GO) go install target (#305): the managed mise config leaves GOBIN unset so
+#     `go install` lands in ~/go/bin, where the statusLine and the usage
+#     reader run tacho. A PATH-front fake go answers `go env GOBIN|GOPATH`
+#     from the environment (or fails), so the cases do not depend on the
+#     host's Go. Any other target warns; a failed query is not checked; PATH
+#     without ~/go/bin is an info line.
+go_fakebin="$fixture_home/gofake"
+mkdir -p "$go_fakebin"
+cat > "$go_fakebin/go" <<'SH'
+#!/bin/sh
+[ "${FAKE_GO_FAIL:-}" = "1" ] && exit 1
+[ "$1" = "env" ] || exit 2
+case "$2" in
+  GOBIN) printf '%s\n' "${FAKE_GOBIN-}" ;;
+  GOPATH) printf '%s\n' "${FAKE_GOPATH-}" ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$go_fakebin/go"
+for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query-fails-no-path trailing-slash-home; do
+  go_gobin=""
+  go_gopath="$fixture_home/go"
+  go_path="$go_fakebin:$fixture_home/go/bin:$PATH"
+  go_fail=""
+  go_home="$fixture_home"
+  case "$go_case" in
+    explicit-gobin) go_gobin="$fixture_home/go/bin" ;;
+    elsewhere) go_gobin="$fixture_home/toolchain/bin" ;;
+    no-path) go_path="$go_fakebin:$PATH" ;;
+    query-fails) go_fail=1 ;;
+    query-fails-no-path) go_fail=1; go_path="$go_fakebin:$PATH" ;;
+    # .zshenv appends ${HOME%/}/go/bin, so a trailing-slash HOME still matches.
+    trailing-slash-home) go_home="$fixture_home/" ;;
+  esac
+  if go_out="$(HOME="$go_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
+      FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+    go_ok=0
+    case "$go_case" in
+      default-gopath|explicit-gobin|trailing-slash-home)
+        grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
+          && ! grep -Fq "go install target is" <<< "$go_out" \
+          && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+      elsewhere)
+        # An action: it must also reach --actions-only with its steps, so
+        # the fix is listed (ahead of the usage reader's installer step).
+        go_only="$(HOME="$go_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
+          FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)" || go_only=""
+        grep -Fq "[warn] go install target is $fixture_home/toolchain/bin, not ~/go/bin" <<< "$go_out" \
+          && ! grep -Fq "[ok] go install target" <<< "$go_out" \
+          && grep -Fq "go install target is $fixture_home/toolchain/bin, not ~/go/bin" <<< "$go_only" \
+          && grep -Fq "chezmoi apply $fixture_home/.config/mise/config.toml $fixture_home/.zshenv" <<< "$go_only" \
+          && grep -Fq "\$ exec env -u GOBIN -u GOPATH zsh -l" <<< "$go_only" && go_ok=1
+        ;;
+      no-path)
+        grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
+          && grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+      query-fails)
+        grep -Fq "[warn] go install target could not be determined" <<< "$go_out" \
+          && ! grep -Fq "[ok] go install target" <<< "$go_out" \
+          && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+      query-fails-no-path)
+        grep -Fq "[warn] go install target could not be determined" <<< "$go_out" \
+          && grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
+        ;;
+    esac
+    if [[ "$go_ok" -eq 1 ]]; then
+      ok "test passed: go install target ($go_case) reported as expected"
+    else
+      printf '%s\n' "$go_out" | grep -F 'go' >&2
+      fail "test failed: go install target ($go_case) not reported as expected"
+      status=1
+    fi
+  else
+    printf '%s\n' "$go_out" >&2
+    fail "test failed: doctor must stay exit 0 (go install target, $go_case)"
+    status=1
+  fi
+done
+rm -rf "${go_fakebin:?}"
+# The new-shell step must actually drop an inherited GOBIN / GOPATH (a plain
+# `exec zsh -l` keeps exported values): check that this env(1) honors the
+# `-u` form the action prints, with a probe in place of the shell.
+if [[ "$(GOBIN=/inherited/bin GOPATH=/inherited env -u GOBIN -u GOPATH sh -c 'printf "%s:%s" "${GOBIN-unset}" "${GOPATH-unset}"')" == "unset:unset" ]]; then
+  ok "test passed: the action's env -u GOBIN -u GOPATH form drops inherited values here"
+else
+  fail "test failed: env -u GOBIN -u GOPATH did not drop inherited values"
+  status=1
+fi
 
 # NPM-A) A broken npm (shim without a runtime) must not kill the doctor:
 # report-only means warn + skip, exit 0 (#144).

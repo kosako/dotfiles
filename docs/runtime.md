@@ -21,6 +21,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 - runtime の自動 install はしない。`not_found_auto_install = false` を設定し、install は明示的な `mise install` で行う。baseline を宣言しても、shim 呼び出しで勝手に runtime を取りに行かない。
 - `mise trust` / `direnv allow` は自動化しない。
+- **`go install` の行き先は `~/go/bin`**(#305)。mise は既定で GOBIN を toolchain の install dir(`~/.local/share/mise/installs/go/<版>/bin`)に向けるが、managed な mise config は `go.set_gobin = false` で GOBIN を設定させず、Go の既定(`${GOPATH:-$HOME/go}/bin`)に入れる。software catalog の go_install(`install-packages.sh`)が入れる先と、managed な statusLine / agent-tools の usage reader が tacho を実行する path(`~/go/bin/tacho`)を一致させ、Go の版を上げても tool が古い toolchain の dir に取り残されないようにするため。`~/go/bin` は `~/.zshenv` が PATH の末尾に足す(go install した tool が system や package manager の command を隠さないよう末尾)。GOBIN / GOPATH を `~/.zshrc.local` などで別に設定しない。`doctor.sh` は行き先が `~/go/bin` でないと action として報告する(apply 前に開いた shell は mise が export した GOBIN を持ち続け、そこから起動した shell も引き継ぐ。apply 後は新しい terminal を開くか、`exec env -u GOBIN -u GOPATH zsh -l` で継承値を外す)。以前の既定で toolchain の dir に入った tool は catalog の追跡の外になるので、不要なら手で消す。
 - `enableRuntimeManagement=false` の profile では、mise config を chezmoi 管理対象外にする。この gate は `runtime` module の `paths:` / `requires:` 宣言(`.chezmoidata/modules.yaml`)から `.chezmoiignore` に生成される。
 
 ## config 管理と実 install の境界
@@ -47,7 +48,7 @@ runtime の upgrade は project 側の pin 変更、または global baseline �
 2. **baseline runtime を install**: `mise install`(global config の `node` / `go` / `uv` を取得)。`not_found_auto_install=false` なのでこの明示実行が必要。
 3. **PATH 確認**: 新しい shell で `command -v node npm go uv` が mise 配下(`$HOME/.local/share/mise/...`。対話 shell では `mise activate` による `installs/...`、`zsh -c` などの非対話 shell では `shims/...`)を指すことを確認。
 4. **global npm tool の入れ直し**: mise の node 配下に `@openai/codex` を入れ直す。`npm root -g` が mise 配下になっていることを確認する。（`claude` は npm-global ではなく native installer で入れるため対象外。`docs/supply-chain-npm.md`）
-5. **go tool**: `$HOME/go/bin` 配下の tool(`goreleaser` 等)は go バイナリと独立なので PATH に残るが、必要なら mise の go で再ビルドする。
+5. **go tool**: `$HOME/go/bin` 配下の tool(`goreleaser` 等)は go バイナリと独立なので(`~/.zshenv` が PATH に足す)残るが、必要なら mise の go で再ビルドする。mise の go の `go install` も `~/go/bin` に入る(上記「方針」、#305)。
 6. **検証**: `command -v node npm go uv codex` がすべて解決し、`npm root -g` が mise 配下を指すことを確認してから次へ（`claude` は native installer の `~/.local/bin` で別管理）。
 7. **brew から撤去**: 検証が済んだら `brew uninstall node go uv`。node/go/uv に依存する他 formula が無いことを `brew uses --installed node go uv` で事前確認する。
 

@@ -20,8 +20,10 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
 ```
 
 - 読み取り口は statusLine と同じ tacho(software catalog の go_install)の `status --json`。path は managed
-  statusLine と同じく `{{ .chezmoi.homeDir }}/go/bin` で決める(絶対 path を source に書かない。`GOBIN` を
-  変えている machine では合わない点も statusLine と同じ)。home の path は `toJson` で JSON として escape する。
+  statusLine と同じく `{{ .chezmoi.homeDir }}/go/bin` で決める(絶対 path を source に書かない)。managed な mise
+  config が GOBIN を設定させないので、catalog の go_install(`install-packages.sh`)も同じ `~/go/bin` に入れる
+  (#305。[runtime](runtime.md))。GOBIN / GOPATH を別に設定した machine では合わなくなり、doctor の
+  runtime and shell の節が action として報告する。home の path は `toJson` で JSON として escape する。
 - **file 名と key は agent-tools の公開契約**(正本は agent-tools の `docs/boundary-with-dotfiles.md`
   「残量の読み取り口の設定」)。key は `argv`(必須。空でない文字列の配列で、`argv[0]` は絶対 path の実行できる
   regular file)と `timeout_sec`(任意。1〜120 の整数、既定 20)**だけ**で、知らない key があると wrapper は
