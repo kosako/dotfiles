@@ -127,10 +127,10 @@ for fp_profile in personal work; do
   # when grep matches early and the condition reads as "no match" (#143).
   fp_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" "$fp_profile" 2>&1)"
   if grep -Fq "projects/session.jsonl" <<< "$fp_out"; then
-    fail "test failed: $fp_profile must not report session data under a dir declaration"
+    fail "test failed: $fp_profile must not report session data under the ancestor directory of a declared file"
     status=1
   else
-    ok "test passed: session data under dir declaration ignored ($fp_profile)"
+    ok "test passed: session data under the ancestor directory of a declared file ignored ($fp_profile)"
   fi
 done
 

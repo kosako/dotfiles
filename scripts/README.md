@@ -181,8 +181,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   status を変えないこと。
 - コマンドは現在の shell で実行され `cd` / `export` が残ること。
 - コピー内容が「`$ コマンド`」+ 出力 +「`[exit status: N]`」であること。
-- コマンドが wrapper の内部の変数名に代入しても、既存の file・一時 file の削除・表示 / copy / status が壊れず、代入は
-  current shell に残ること。正常終了・非 0・SIGINT・pty の Ctrl-C の各経路で確かめる(#280)。
+- コマンドが wrapper の内部の変数名に代入しても壊れないこと(#280): 正常終了と非 0 の終了では、既存の file が無事で
+  一時 file が消え、表示 / copy / status が正しく、代入が current shell に残ること。SIGINT と pty の Ctrl-C による
+  中断では、既存の file が無事で一時 file が消えること。
 - `mktemp` が失敗したら status 1 で、コマンドを実行も copy もしないこと(#280)。
 
 ## test-policy.sh
