@@ -80,6 +80,11 @@ for host_tool in op herdr codex opencode; do
 done
 PATH="$host_stub_dir/bin:$PATH"
 export PATH
+# The go install target check (#305) reads `go env GOBIN` / `GOPATH`: a GOBIN
+# exported by the developer's mise-activated shell (or a custom GOPATH) would
+# otherwise turn every fixture run into an extra action. Unset, Go answers
+# for the fixture HOME ($HOME/go); the GO cases below use their own fake go.
+unset GOBIN GOPATH
 for host_tool in op herdr codex opencode; do
   if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
     fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
@@ -3421,8 +3426,15 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
           && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
         ;;
       elsewhere)
+        # An action: it must also reach --actions-only with its steps, so
+        # the fix is listed (ahead of the usage reader's installer step).
+        go_only="$(HOME="$go_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
+          FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)" || go_only=""
         grep -Fq "[warn] go install target is $fixture_home/toolchain/bin, not ~/go/bin" <<< "$go_out" \
-          && ! grep -Fq "[ok] go install target" <<< "$go_out" && go_ok=1
+          && ! grep -Fq "[ok] go install target" <<< "$go_out" \
+          && grep -Fq "go install target is $fixture_home/toolchain/bin, not ~/go/bin" <<< "$go_only" \
+          && grep -Fq "chezmoi apply $fixture_home/.config/mise/config.toml $fixture_home/.zshenv" <<< "$go_only" \
+          && grep -Fq "exec zsh -l" <<< "$go_only" && go_ok=1
         ;;
       no-path)
         grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \

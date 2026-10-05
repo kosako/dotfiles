@@ -82,7 +82,7 @@ policy validation が失敗した場合は exit 1。
 - Git remote URLs: credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない。
 - npm hardening / Corepack: 検査内容は下記の docs に従う。
 - software catalog(report-only): catalog 宣言 vs 実機の brew/npm/go/mas。declared-missing / undeclared-sprawl / source-mismatch を report-only で表示。
-- runtime and shell: mise(`enableRuntimeManagement`)・direnv(`enableDirenv`)・zsh・starship の有無。mise を管理する profile では `go install` の行き先(`go env GOBIN`、空なら GOPATH の先頭の `bin`)が `~/go/bin` かを確かめ、違えば warn(statusLine と usage reader の tacho、catalog の go_install と食い違うため、#305)、PATH に `~/go/bin` が無ければ info。
+- runtime and shell: mise(`enableRuntimeManagement`)・direnv(`enableDirenv`)・zsh・starship の有無。mise を管理する profile では `go install` の行き先(`go env GOBIN`、空なら GOPATH の先頭の `bin`)が `~/go/bin` かを確かめ、違えば action(mise config の apply と、古い GOBIN を持たない新しい shell。installer は同じ行き先で導入済みを判定するので、usage reader の installer の案内より前に出る。#305)、PATH に `~/go/bin` が無ければ info。
 - 1Password: `allowSecretsAccess=true` のとき `op` の存在と sign-in。`op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し、応答なしは「未確認」の warn にして doctor を止めない — 未ログインの `op` が対話 unlock 待ちで固まり診断全体が止まっていた(#231)。
 - SSH (1Password agent): `enable1PasswordSSH` の managed `~/.ssh/config` が active か dangling か。
 - private-backup(report-only): public baseline の各 target の存在と、marker からのバックアップ有無・最終日時と、捕捉が完全かどうか(`capture: complete`。#242 以前の marker は `unknown`)を表示する。`capture_incomplete=true` なら warn とし、読めない entry を直してから再 backup する手順を next actions に出す(#242)。backup 未実行は allowSecretsAccess=true の profile でのみ warn — false の profile は backup 実行自体を拒否する設計なので中立表示(#174)。local 補足は **存在のみ**で中身・件数は出さない。アーカイブや captured file の中身は読まない。
@@ -374,7 +374,7 @@ query だけを実機で実行する(書き込みはしない)。
   空白 path)/ drift 手順の path が ` M x` でも `~/x` / work 機(module 非 active)で fake herdr が
   not installed・outdated なら `herdr integration install <agent>` の action、current なら info、herdr 不在
   は catalog section への pointer。
-- go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が warn、
+- go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が action(`--actions-only` に mise config の apply と新しい shell の手順が出る)、
   `go env` の失敗は「確かめられない」の warn(ok を出さない)、PATH に `~/go/bin` が無ければ info(`go env` が
   失敗したときも出す)、末尾 slash の HOME でも一致。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、

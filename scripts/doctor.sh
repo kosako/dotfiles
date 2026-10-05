@@ -521,7 +521,14 @@ report_go_install_target() {
   if [[ "$target" == "$home_dir/go/bin" ]]; then
     ok "go install target: ~/go/bin (catalog go_install tools land where the managed statusLine and usage reader run them)"
   else
-    warn "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path; the managed mise config leaves GOBIN unset: apply ~/.config/mise/config.toml, open a new shell, and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local)"
+    # An action, not a warn: it must reach --actions-only, and ahead of the
+    # usage reader's install-packages step (later section), because the
+    # installer judges "installed" by this same target and would skip a
+    # tool already sitting in the old one.
+    action "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
+      "\$ chezmoi apply $(printf '%q' "$home_dir/.config/mise/config.toml") $(printf '%q' "$home_dir/.zshenv")   # leaves GOBIN unset; ~/go/bin on PATH" \
+      "\$ exec zsh -l   # a new shell, without the GOBIN an already activated mise exported" \
+      "# and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local); then re-run doctor"
   fi
 }
 if [[ "$(capability_value "$profile" enableRuntimeManagement)" == "true" ]]; then
