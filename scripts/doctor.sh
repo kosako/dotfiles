@@ -919,7 +919,7 @@ report_codex_rules_probes() {
 }
 
 report_codex_projects_trust() {
-  local codex_config projects_kind trusted_paths trusted_path trusted_total
+  local codex_config projects_kind trusted_paths trusted_path trusted_total trusted_count
   # [projects] trust watch: which project paths config.toml marks
   # trust_level = "trusted" (an entry can be "untrusted" — only trusted ones
   # matter). The file is read with yq's TOML decoder (#309): every valid
@@ -931,13 +931,15 @@ report_codex_projects_trust() {
   # ever echoed and yq's errors are discarded (key-name-only discipline, same
   # as the #148 token scan). Anything that does not read as a map of project
   # tables — a TOML error, projects as a string or an array, a trusted key
-  # with a control character — is an INCOMPLETE scan, never "0 trusted".
+  # that is empty or has a control character (one path per output line could
+  # not carry it) — is an INCOMPLETE scan, never "0 trusted".
   codex_config="$HOME/.codex/config.toml"
   if [[ ! -f "$codex_config" ]]; then
     item "no ~/.codex/config.toml (codex not initialized); projects-trust watch skipped"
     return 0
   fi
   trusted_paths=""
+  trusted_count=0
   if ! projects_kind="$(yq -p toml -o json -r '.projects | kind' "$codex_config" 2>/dev/null)"; then
     projects_kind="unreadable"
   elif [[ "$projects_kind" == scalar ]]; then
@@ -945,7 +947,8 @@ report_codex_projects_trust() {
   fi
   if [[ "$projects_kind" == map ]]; then
     if ! trusted_paths="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | .[].key' "$codex_config" 2>/dev/null)" \
-      || [[ "$(yq -p toml -o json -r '.projects | to_entries | map(select((.value.trust_level == "trusted") and (.key | test("[[:cntrl:]]")))) | length' "$codex_config" 2>/dev/null)" != 0 ]]; then
+      || ! trusted_count="$(yq -p toml -o json -r '.projects | to_entries | map(select(.value.trust_level == "trusted")) | length' "$codex_config" 2>/dev/null)" \
+      || [[ "$(yq -p toml -o json -r '.projects | to_entries | map(select((.value.trust_level == "trusted") and ((.key == "") or (.key | test("[[:cntrl:]]"))))) | length' "$codex_config" 2>/dev/null)" != 0 ]]; then
       projects_kind="unreadable"
     fi
   fi
@@ -965,6 +968,10 @@ report_codex_projects_trust() {
         "edit ~/.codex/config.toml: delete the [projects.\"$trusted_path\"] section"
     fi
   done <<< "$trusted_paths"
+  if [[ "$projects_kind" == map && "$trusted_total" != "$trusted_count" ]]; then
+    warn "projects-trust scan INCOMPLETE: could not read the projects table of ~/.codex/config.toml; do NOT read this as zero trusted"
+    return 0
+  fi
   item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml read with yq's TOML decoder, project keys only)"
 }
 

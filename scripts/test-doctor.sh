@@ -2917,7 +2917,7 @@ aip_trust_case() {
 }
 # Valid spellings that grant trust: counted with the real project (2).
 aip_trust_case "root inline table" 2 \
-  'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
+  "projects = { \"/x\" = { trust_level = \"trusted\" }, \"$fixture_home/real-project\" = { trust_level = \"trusted\" } }"
 aip_trust_case "root dotted key" 2 \
   'projects."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "escaped root key" 2 \
@@ -2941,7 +2941,7 @@ aip_trust_case "escaped trust_level key" 2 \
 aip_trust_case "multi-line trust_level" 2 \
   "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' 'trust_level = """trusted"""'
 aip_trust_case "root projects key after a multi-line array" 2 \
-  'arr = [' '  "a",' ']' 'projects = { "/x" = { trust_level = "trusted" } }' "$aip_real_header" 'trust_level = "trusted"'
+  'arr = [' '  "a",' ']' "projects = { \"/x\" = { trust_level = \"trusted\" }, \"$fixture_home/real-project\" = { trust_level = \"trusted\" } }"
 # ... while trust_level in a sub-table, look-alike keys and tables, the same
 # key inside another table, string contents that look like tables, comments,
 # escapes in values or other tables' names, and an untrusted entry do not.
@@ -2980,6 +2980,8 @@ aip_trust_case "projects as a string" incomplete \
   'projects = "everything"'
 aip_trust_case "projects as an array of tables" incomplete \
   '[[projects]]' 'path = "/x"' 'trust_level = "trusted"'
+aip_trust_case "an empty trusted key" incomplete \
+  "$aip_real_header" 'trust_level = "trusted"' '[projects.""]' 'trust_level = "trusted"'
 aip_trust_case "a trusted key with a control character" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/a${aip_bs}nb\"]" 'trust_level = "trusted"'
 
