@@ -64,11 +64,11 @@ fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # Host tools doctor would otherwise launch for real on a developer machine
 # (`op whoami`, `herdr integration status`, codex / opencode probes): hundreds
 # of runs below inherit this PATH, and the real tools are credential-bearing or
-# slow to answer. A PATH-front dir of stubs that record the call and exit 1 —
-# the "tool failed / not usable" branch, which is also what CI (no such tools)
-# exercises — keeps every run hermetic. Sections that need a specific answer
-# put their own fake in front of these, as before (#306). Kept outside the
-# fixture HOME so no section's cleanup removes it.
+# slow to answer. A PATH-front dir of stubs that record the call and exit 1
+# keeps every run hermetic: the tools are present on PATH but fail when run
+# (e.g. op reads as "not signed in", not "not found"). Sections that need a
+# specific answer put their own fake in front of these, as before (#306).
+# Kept outside the fixture HOME so no section's cleanup removes it.
 host_stub_dir=""
 trap 'rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}' EXIT
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
