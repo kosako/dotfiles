@@ -939,25 +939,60 @@ report_codex_projects_trust() {
     # spaced / quoted / array name), a ROOT key projects.* / "projects" (an
     # inline table or dotted key before the first table header — inside
     # another table the same key is that table's own), a trust_level that is
-    # not the plain one-line form inside a project section, and any escaped
-    # quoted key or table name that could spell one of these (TOML escapes
-    # are not decoded here). Multi-line strings are skipped as a whole, so a
-    # string that merely contains a "[projects]" line is not read as a table.
+    # not the plain one-line form inside a project section, and an escape
+    # inside a double-quoted key or table name at the root or in a project
+    # section (TOML escapes are not decoded here). scan() walks each line
+    # character by character — basic and literal strings (with escapes),
+    # multi-line strings across lines, comments — so a line that starts
+    # inside a multi-line string is skipped as a whole, and a quote or
+    # backslash inside a comment or a literal string means nothing.
     if trusted_paths="$(awk '
-      in_ml != "" {
-        if (index($0, in_ml) > 0) in_ml = ""
-        next
+      function scan(s, st,    i, n, c) {
+        n = length(s); i = 1
+        while (i <= n) {
+          c = substr(s, i, 1)
+          if (st == "mlb") {
+            if (c == "\\") { i += 2; continue }
+            if (substr(s, i, 3) == "\"\"\"") { st = ""; i += 3; continue }
+            i++; continue
+          }
+          if (st == "mll") {
+            if (substr(s, i, 3) == "\047\047\047") { st = ""; i += 3; continue }
+            i++; continue
+          }
+          if (c == "#") break
+          if (c == "=") seen_eq = 1
+          if (substr(s, i, 3) == "\"\"\"") { st = "mlb"; i += 3; continue }
+          if (substr(s, i, 3) == "\047\047\047") { st = "mll"; i += 3; continue }
+          if (c == "\"") {
+            i++
+            while (i <= n) {
+              c = substr(s, i, 1)
+              if (c == "\\") { if (!seen_eq) key_escape = 1; i += 2; continue }
+              if (c == "\"") break
+              i++
+            }
+            i++; continue
+          }
+          if (c == "\047") {
+            i++
+            while (i <= n && substr(s, i, 1) != "\047") i++
+            i++; continue
+          }
+          i++
+        }
+        return st
       }
       {
-        probe = $0; n_basic = gsub(/"""/, "", probe)
-        probe = $0; n_literal = gsub(/\047\047\047/, "", probe)
-        if (n_basic % 2 == 1) in_ml = "\"\"\""
-        else if (n_literal % 2 == 1) in_ml = "\047\047\047"
+        start_ml = in_ml
+        key_escape = 0; seen_eq = 0
+        in_ml = scan($0, in_ml)
       }
-      /^[[:space:]]*\[/ && /\\/ { exit 1 }
+      start_ml != "" { next }
+      /^[[:space:]]*\[/ && key_escape { exit 1 }
       /^[[:space:]]*\[/ && $0 !~ /^[[:space:]]*\[projects\./ && $0 ~ /^[[:space:]]*\[+[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[].]/ { exit 1 }
       !seen_header && /^[[:space:]]*("projects"|'\''projects'\''|projects)[[:space:]]*[.=]/ { exit 1 }
-      !seen_header && /^[[:space:]]*"[^"]*\\/ { exit 1 }
+      !seen_header && key_escape { exit 1 }
       /^[[:space:]]*\[projects\./ {
         seen_header = 1
         p = $0
@@ -974,7 +1009,7 @@ report_codex_projects_trust() {
         current = ""
         next
       }
-      current != "" && /^[[:space:]]*"[^"]*\\/ { exit 1 }
+      current != "" && key_escape { exit 1 }
       current != "" && $0 ~ /^[[:space:]]*("trust_level"|'\''trust_level'\''|trust_level)[[:space:]]*[.=]/ {
         if ($0 ~ /^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*("[^"\\]*"|'\''[^'\'']*'\'')[[:space:]]*(#.*)?$/) next
         exit 1

@@ -378,7 +378,8 @@ query だけを実機で実行する(書き込みはしない)。
   engine 失敗は INCOMPLETE、`config.toml` の projects trust は header + trust_level のみ scan。対応する header の形以外で
   trust を与えうる書き方(`[projects]` table、空白・quote・配列・escape を含む table 名、最初の header より前の projects の
   inline table / dotted key、project の section の中の quote された / escape を含む / 1 行でない trust_level)は INCOMPLETE。
-  単語を含むだけの key / table、他の table の中の同名の key、複数行文字列の中身は従来どおり数えを変えない(#309)。
+  単語を含むだけの key / table、他の table の中の同名の key、複数行文字列の中身、コメントや literal 文字列や値の中の
+  引用符・backslash は、従来どおり数えを変えない(行を文字単位で走査する、#309)。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。

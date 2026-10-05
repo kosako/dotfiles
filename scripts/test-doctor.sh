@@ -2881,6 +2881,7 @@ done
 # the same key would belong to that table — and every config also carries a
 # real trusted project and an MCP env canary that must never be printed.
 aip_real_header="[projects.\"$fixture_home/real-project\"]"
+aip_bs='\'   # one backslash: the escape cases below spell TOML \uXXXX escapes with it
 # aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
 aip_trust_case() {
   local label="$1" expect="$2"
@@ -2915,7 +2916,7 @@ aip_trust_case "root inline table" incomplete \
 aip_trust_case "root dotted key" incomplete \
   'projects."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "escaped root key" incomplete \
-  '"projects"."/x".trust_level = "trusted"' "$aip_real_header" 'trust_level = "trusted"'
+  "\"pro${aip_bs}u006aects\".\"/x\".trust_level = \"trusted\"" "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "[projects] table" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' '[projects]' '"/x" = { trust_level = "trusted" }'
 aip_trust_case "spaced table name" incomplete \
@@ -2923,13 +2924,13 @@ aip_trust_case "spaced table name" incomplete \
 aip_trust_case "quoted table name" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' '["projects"."/x"]' 'trust_level = "trusted"'
 aip_trust_case "escaped table name" incomplete \
-  "$aip_real_header" 'trust_level = "trusted"' '["projects"."/x"]' 'trust_level = "trusted"'
+  "$aip_real_header" 'trust_level = "trusted"' "[\"pro${aip_bs}u006aects\".\"/x\"]" 'trust_level = "trusted"'
 aip_trust_case "array of tables" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' '[[projects]]' 'path = "/x"'
 aip_trust_case "quoted trust_level key" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' '"trust_level" = "trusted"'
 aip_trust_case "escaped trust_level key" incomplete \
-  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' '"trust_level" = "trusted"'
+  "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' "\"trust${aip_bs}u005flevel\" = \"trusted\""
 aip_trust_case "multi-line trust_level" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' '[projects."/x"]' 'trust_level = """trusted"""'
 # ... while keys and tables that merely contain the word, the same key inside
@@ -2944,6 +2945,19 @@ aip_trust_case "multi-line basic string with table-like text" 1 \
   'developer_instructions = """' '[projects]' 'projects = 1' '"""' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "multi-line literal string with table-like text" 1 \
   "notes = '''" '[projects]' "'''" "$aip_real_header" 'trust_level = "trusted"'
+# Quotes and backslashes only count inside strings (Codex review R2, PR #312):
+# a triple quote in a comment opens nothing, an escaped quote does not close a
+# multi-line string, and a backslash in a header comment, in a literal
+# (single-quoted) header or in a value is not a key escape.
+aip_trust_case "triple quote inside a comment" 1 \
+  '# a """ example in a comment' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "escaped quotes inside a multi-line string" 1 \
+  'developer_instructions = """' "say ${aip_bs}\"\"\"hi" '[projects]' '"""' "$aip_real_header" 'trust_level = "trusted"'
+aip_trust_case "backslash in a header comment" 1 \
+  "$aip_real_header # C:${aip_bs}work" 'trust_level = "trusted"'
+aip_trust_case "backslash in a literal header and in a value" 2 \
+  "$aip_real_header" 'trust_level = "trusted"' "[projects.'/tmp/project${aip_bs}name']" 'trust_level = "trusted"' \
+  '[mcp_servers.demo.env]' "PATHX = \"C:${aip_bs}${aip_bs}dir\""
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
 #        line (with the probe count), no warns from this watch. The shim log
