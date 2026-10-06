@@ -2388,6 +2388,7 @@ rm -rf "$hg_home"
 #     files carry a canary "secret" (an MCP header) that must never reach the
 #     report. A fake herdr answers `integration status`. Own HOME;
 #     OPENCODE_CONFIG is unset unless a case sets it. doctor stays exit 0.
+#     XDG_DATA_HOME too (the init marker's log, OP-i).
 op_home="$fixture_home/op-home"
 op_fakebin="$fixture_home/opfake"
 op_cfg="$op_home/.config/opencode"
@@ -2407,7 +2408,7 @@ SH
 chmod +x "$op_fakebin/opencode" "$op_fakebin/herdr"
 printf '// personal-agent-tools\n' > "$op_cfg/plugins/personal-agent-tools.js"
 op_run() {
-  env -u OPENCODE_CONFIG HOME="$op_home" PATH="$op_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1
+  env -u OPENCODE_CONFIG -u XDG_DATA_HOME HOME="$op_home" PATH="$op_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1
 }
 op_expect() {
   local label="$1" out="$2"
@@ -2434,7 +2435,7 @@ op_expect() {
   fi
   ok "test passed: $label"
 }
-op_ok_line="[ok] agent-tools plugin personal-agent-tools.js in the global plugins dir (OpenCode loads it at startup; a successful init is not verifiable yet: doctor does not run OpenCode, agent-tools#343)"
+op_ok_line="[ok] agent-tools plugin personal-agent-tools.js in the global plugins dir (OpenCode loads it at startup; its init is reported below)"
 #     OP-a) plugin in the global plugins dir, no config lists it -> ok with
 #           the honest-label; OpenCode never runs.
 if op_out="$(op_run)"; then
@@ -2582,6 +2583,194 @@ else
   fail "test failed: doctor must stay exit 0 (herdr OpenCode view)"
   status=1
 fi
+#     OP-i) the init marker of personal-agent-tools (#311, agent-tools#343):
+#           doctor reads OpenCode's existing log (never runs OpenCode) and
+#           calls the init confirmed only when the newest marker line's
+#           build_id equals the deployed file's marker; everything else is a
+#           neutral "not confirmed" with a reason. Log lines carry the canary
+#           in other fields and messages, so a line printed into the report
+#           fails op_expect. Exactly one init line per run.
+op_log="$op_home/.local/share/opencode/log/opencode.log"
+op_hex_a="$(printf '%064d' 0 | tr 0 a)"
+op_hex_b="$(printf '%064d' 0 | tr 0 b)"
+op_init="agent-tools plugin personal-agent-tools init"
+op_deployed="deployed build_id sha256:$op_hex_a"
+op_confirmed="[ok] $op_init confirmed by OpenCode's log (build_id sha256:$op_hex_a: some start of this build got through init, not necessarily the latest)"
+op_no_marker="[info] - $op_init not confirmed: no init marker in OpenCode's log (not started since the plugin began logging it, started with --pure or a log level above INFO, a rotated log, or an init that threw; $op_deployed)"
+op_not_v1="[info] - $op_init not confirmed: the newest init marker is not in the v=1 form this doctor reads ($op_deployed)"
+op_no_log="[info] - $op_init not confirmed: no OpenCode log yet (not started here; $op_deployed)"
+# op_line MESSAGE [quoted|bare] — one OpenCode 1.18.30 log line around MESSAGE.
+op_line() {
+  if [[ "${2:-quoted}" == quoted ]]; then
+    printf 'timestamp=2026-10-05T00:00:00.000Z level=INFO run=%s message="%s"\n' "$op_canary" "$1"
+  else
+    printf 'timestamp=2026-10-05T00:00:00.000Z level=INFO run=%s message=%s\n' "$op_canary" "$1"
+  fi
+}
+op_marker() {
+  printf 'agent-tools:plugin-init v=1 name=personal-agent-tools build_id=%s' "$1"
+}
+# op_log_write LINE... — the log's whole content: an unrelated line first.
+op_log_write() {
+  mkdir -p "$(dirname "$op_log")"
+  { op_line "service=x $op_canary unrelated"; printf '%s\n' "$@"; } > "$op_log"
+}
+# op_init_case LABEL EXPECTED_LINE [VAR=value...] — one run: EXPECTED_LINE is
+# the one and only init line, nothing leaks, OpenCode stays unrun.
+op_init_case() {
+  local label="$1" expected="$2" out
+  shift 2
+  if ! out="$(op_run "$@")"; then
+    fail "test failed: doctor must stay exit 0 (OpenCode init: $label)"
+    status=1
+    return
+  fi
+  op_init_check "$label" "$expected" "$out"
+}
+# op_init_check LABEL EXPECTED_LINE OUTPUT — the checks of op_init_case on a
+# doctor output already in hand.
+op_init_check() {
+  local label="$1" expected="$2" out="$3" count
+  count="$(grep -c -F -- "$op_init" <<< "$out" || true)"
+  if ! grep -Fxq -- "$expected" <<< "$out" || [[ "$count" != 1 ]]; then
+    printf '%s\n' "$out" | grep -F -- "$op_init" >&2 || true
+    fail "test failed: OpenCode init: $label (expected exactly: $expected)"
+    status=1
+    return
+  fi
+  op_expect "OpenCode init: $label" "$out" "$expected"
+}
+#     OP-i1) line 1 is not agent-tools' marker for this plugin -> no build_id
+#            to compare: no marker (the fixture so far), a plain comment that
+#            merely carries a build_id, another plugin's marker, a marker for
+#            another target (Codex review R1, PR #325). A matching log line is
+#            in place, so a lax marker check would turn into "confirmed".
+op_not_marker="[info] - $op_init not confirmed: the deployed file's line 1 is not agent-tools' marker for this plugin with a sha256 build_id (agent-tools' doctor checks its marker)"
+op_plugin_file() {
+  printf '%s\n// personal-agent-tools\n' "$1" > "$op_cfg/plugins/personal-agent-tools.js"
+}
+op_marker_line() {
+  printf '/* agent-tools:managed v=1 repo=agent-tools name=%s target=%s artifact_kind=plugin source=shared/plugins/personal-agent-tools.js build_id=sha256:%s */' "$1" "$2" "$op_hex_a"
+}
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
+op_init_case "deployed file without a marker -> not confirmed" "$op_not_marker"
+op_plugin_file "// build_id=sha256:$op_hex_a"
+op_init_case "a plain comment carrying a build_id is no marker -> not confirmed" "$op_not_marker"
+op_plugin_file "$(op_marker_line personal-other opencode)"
+op_init_case "another plugin's marker -> not confirmed" "$op_not_marker"
+op_plugin_file "$(op_marker_line personal-agent-tools claude-code)"
+op_init_case "a marker for another target -> not confirmed" "$op_not_marker"
+op_plugin_file "$(op_marker_line personal-agent-tools opencode)"
+rm -rf "$op_home/.local/share/opencode"
+#     OP-i2) no log at all -> not started.
+op_init_case "no OpenCode log -> not confirmed (not started)" "$op_no_log"
+#     OP-i3) a log without the marker.
+op_log_write
+op_init_case "log without the marker -> not confirmed" "$op_no_marker"
+#     OP-i4) the newest marker matches, quoted (as 1.18.30 writes it) or bare.
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
+op_init_case "quoted marker with the deployed build_id -> confirmed" "$op_confirmed"
+# A message with spaces is always quoted in OpenCode's key=value line, so an
+# unquoted one is not the plugin's marker line.
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")" bare)"
+op_init_case "unquoted marker text -> no marker" "$op_no_marker"
+#     OP-i5) only the newest marker counts, whichever way round.
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:$op_hex_b")")"
+op_init_case "newest marker from another build -> not confirmed, naming both" \
+  "[info] - $op_init not confirmed: the newest init marker is from build_id sha256:$op_hex_b, not the deployed sha256:$op_hex_a (OpenCode not started since the last sync, or a process still on the old build)"
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_b")")" "$(op_line "$(op_marker "sha256:$op_hex_a")")"
+op_init_case "an older marker from another build, newest matches -> confirmed" "$op_confirmed"
+#     OP-i6) build_id unknown.
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker unknown)")"
+op_init_case "newest marker with build_id unknown -> not confirmed" \
+  "[info] - $op_init not confirmed: the newest init marker carries build_id unknown (the plugin could not read its own marker; $op_deployed)"
+#     OP-i7) lines outside the v=1 form, each newest after a matching one: a
+#            newer version, an extra token, 65 hex digits, uppercase hex.
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" \
+  "$(op_line "agent-tools:plugin-init v=2 name=personal-agent-tools build_id=sha256:$op_hex_a")"
+op_init_case "newest marker in v=2 -> not confirmed" "$op_not_v1"
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:$op_hex_a") extra")"
+op_init_case "newest marker with an extra token -> not confirmed" "$op_not_v1"
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:${op_hex_a}a")")"
+op_init_case "newest marker with 65 hex digits -> not confirmed" "$op_not_v1"
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:$(printf '%064d' 0 | tr 0 A)")")"
+op_init_case "newest marker with uppercase hex -> not confirmed" "$op_not_v1"
+#     OP-i8) marker text that does not open the message, or names another
+#            plugin, is no marker at all.
+op_log_write "$(op_line "grep $(op_marker "sha256:$op_hex_a")")" \
+  "$(op_line "agent-tools:plugin-init v=1 name=personal-agent-tools-x build_id=sha256:$op_hex_a")"
+op_init_case "marker text inside another message, or another plugin's marker -> no marker" "$op_no_marker"
+#            ... and a message that only quotes the marker after other text,
+#            even with its own quote, is not the marker: the line's first
+#            message field decides (Codex review R1, PR #325).
+op_log_write "$(op_line "copied message=$(op_marker "sha256:$op_hex_a") extra")"
+op_init_case "marker text after other text in a message -> no marker" "$op_no_marker"
+op_log_write "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_a")\" extra")"
+op_init_case "a quoted marker inside another message -> no marker" "$op_no_marker"
+#            ... nor does such a later line hide an earlier real marker: the
+#            newest line is picked by its first message field too (Codex
+#            review R2, PR #325).
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" \
+  "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_b")\" extra")"
+op_init_case "a real marker, then a line quoting another marker -> confirmed" "$op_confirmed"
+#     OP-i9) XDG_DATA_HOME moves the log: absolute -> read there; empty -> the
+#            default; relative -> not confirmed (it depends on OpenCode's cwd).
+op_log_write
+mkdir -p "$op_home/xdg-data/opencode/log"
+op_line "$(op_marker "sha256:$op_hex_a")" > "$op_home/xdg-data/opencode/log/opencode.log"
+op_init_case "absolute XDG_DATA_HOME -> the log there" "$op_confirmed" XDG_DATA_HOME="$op_home/xdg-data/"
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
+op_init_case "empty XDG_DATA_HOME -> the default log" "$op_confirmed" XDG_DATA_HOME=
+op_init_case "absolute XDG_DATA_HOME without a log -> not started" "$op_no_log" XDG_DATA_HOME="$op_home/xdg-none"
+op_init_case "relative XDG_DATA_HOME -> not confirmed" \
+  "[info] - $op_init not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in ($op_deployed)" \
+  XDG_DATA_HOME=rel/data
+#     OP-i10) a log that is not a regular file (a FIFO would block a read:
+#             Codex review R1, PR #325) or cannot be read (skipped where
+#             permissions do not bind, e.g. as root).
+#             The FIFO run has a deadline: should doctor read the FIFO, it
+#             would block for good, so it is killed (with what it started)
+#             and the case fails instead of hanging the suite (Codex review
+#             R2, PR #325).
+mv "$op_log" "$op_log.keep"
+mkfifo "$op_log"
+# op_kill_tree PID — KILL PID and its descendants (collected before the kill).
+op_kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    op_kill_tree "$child"
+  done
+  kill -KILL "$1" 2>/dev/null || true
+}
+op_run > "$fixture_home/op-fifo.out" 2>&1 &
+op_fifo_pid=$!
+op_fifo_waited=0
+while kill -0 "$op_fifo_pid" 2>/dev/null && [[ "$op_fifo_waited" -lt 120 ]]; do
+  sleep 1
+  op_fifo_waited=$((op_fifo_waited + 1))
+done
+if kill -0 "$op_fifo_pid" 2>/dev/null; then
+  op_kill_tree "$op_fifo_pid"
+  wait "$op_fifo_pid" 2>/dev/null || true
+  fail "test failed: OpenCode init: a FIFO in place of the log hung doctor (killed after 120s)"
+  status=1
+elif ! wait "$op_fifo_pid"; then
+  fail "test failed: doctor must stay exit 0 (OpenCode init: a FIFO in place of the log)"
+  status=1
+else
+  op_init_check "a FIFO in place of the log -> not confirmed, no hang" \
+    "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)" \
+    "$(cat "$fixture_home/op-fifo.out")"
+fi
+rm -f "$op_log" "$fixture_home/op-fifo.out"
+mv "$op_log.keep" "$op_log"
+chmod 000 "$op_log"
+if [[ ! -r "$op_log" ]]; then
+  op_init_case "unreadable log -> not confirmed" \
+    "[info] - $op_init not confirmed: OpenCode's log could not be read ($op_deployed)"
+fi
+chmod 644 "$op_log"
+rm -rf "$op_home/.local/share/opencode" "$op_home/xdg-data"
 rm -rf "$op_home" "$op_fakebin" "$op_ran"
 
 # NA) next-actions summary (#227): every warning reported through `action`
