@@ -310,22 +310,146 @@ fi
 section "codex approval-rules baseline (#139)"
 
 # 4) Committed personal: enableAiPolicy is ON, so ~/.codex/rules/default.rules
-#    renders the vetted READ-ONLY baseline. Pinned as the EXACT ordered file
+#    renders the vetted READ-ONLY baseline, followed by #304's prompt rules
+#    for work-discarding git, forbidden rules for hook skips right after
+#    commit / push, and a prompt for --no-verify right after merge / rebase
+#    / am / pull (they only tighten: no new allow). Pinned as the EXACT ordered file
 #    content (same spirit as the settings.json deny exact-set test): this is a
 #    security baseline, so an outward/escalation/credential-display allow
 #    sneaking in — or a read rule silently swapped — must fail the test, not
 #    just "some rules exist".
 rules_file="${home:-}/.codex/rules/default.rules"
-expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")'
+expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")'
 if [[ ! -f "$rules_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
   status=1
 elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
-  ok "test passed: committed personal renders exactly the read-only rules baseline (9 allow rules, ordered; no outward/escalation/credential-display rule, no git clone)"
+  ok "test passed: committed personal renders exactly the rules baseline (9 read-only / local allow rules, then #304's 8 prompt, 2 forbidden and 1 more prompt git rules, ordered; no outward/escalation/credential-display allow, no git clone)"
 else
   fail "test failed: rules baseline content mismatch; rendered was:"
   cat "$rules_file" >&2
   status=1
+fi
+
+# 4b) What the rendered rules decide (#304), with Codex's own evaluator when
+#     a working `codex` is on PATH (`codex execpolicy check` only evaluates
+#     the rules file it is given; it runs nothing): work-discarding git with
+#     the option right after the subcommand -> prompt, the hook skips there
+#     -> forbidden (outranking the git commit allow: the strictest match
+#     wins), the everyday forms -> allow or no match, and the documented
+#     prefix gaps (an option after other arguments, global options) -> not
+#     caught. Where codex is not installed (CI) this is reported and
+#     skipped; the exact pin above still holds the content. An installed
+#     codex whose `execpolicy check` cannot be used, a non-zero exit, or an
+#     answer that is neither a decision nor an empty matchedRules array fails
+#     the test rather than passing as "no match" (Codex review R1, PR #328).
+# codex_policy_decision JSON — allow / prompt / forbidden as Codex answered,
+# "none" only for no decision key and an empty matchedRules array, and
+# "malformed" for anything else — an unknown decision string included, so a
+# "none" from Codex cannot pass as no match (Codex review R2, PR #328).
+codex_policy_decision() {
+  local answer
+  answer="$(yq -p json 'has("decision")' <<< "$1" 2>/dev/null)" || answer=""
+  if [[ "$answer" == true ]]; then
+    answer="$(yq -p json '.decision' <<< "$1" 2>/dev/null)" || answer=""
+    case "$answer" in
+      allow | prompt | forbidden) printf '%s\n' "$answer" ;;
+      *) printf 'malformed\n' ;;
+    esac
+  elif [[ "$answer" == false && "$(yq -p json '(.matchedRules | tag) + ":" + (.matchedRules | length | tostring)' <<< "$1" 2>/dev/null)" == '!!seq:0' ]]; then
+    printf 'none\n'
+  else
+    printf 'malformed\n'
+  fi
+}
+# The reading itself, on fixed answers (runs without codex, so in CI too).
+decision_reader_misses=""
+while IFS='|' read -r want answer; do
+  [[ -n "$want" ]] || continue
+  got="$(codex_policy_decision "$answer")"
+  [[ "$got" == "$want" ]] || decision_reader_misses+="  $answer -> $got (expected $want)"$'\n'
+done <<'ANSWERS'
+prompt|{"matchedRules":[{"prefixRuleMatch":{"matchedPrefix":["git","clean"],"decision":"prompt"}}],"decision":"prompt"}
+forbidden|{"matchedRules":[{}],"decision":"forbidden"}
+allow|{"matchedRules":[{}],"decision":"allow"}
+none|{"matchedRules":[]}
+malformed|{}
+malformed|{"decision":"none","matchedRules":[{}]}
+malformed|{"decision":"none","matchedRules":[]}
+malformed|{"matchedRules":[{}]}
+malformed|{"matchedRules":"x"}
+malformed|not json
+ANSWERS
+if [[ -z "$decision_reader_misses" ]]; then
+  ok "test passed: execpolicy answers are read strictly (only allow / prompt / forbidden, none only for an empty matchedRules without a decision)"
+else
+  fail "test failed: execpolicy answers are read wrongly:"
+  printf '%s' "$decision_reader_misses" >&2
+  status=1
+fi
+if ! command -v codex >/dev/null 2>&1; then
+  item "codex not installed here; execpolicy decisions not checked (the exact pin above still holds the content)"
+elif ! codex execpolicy check --help >/dev/null 2>&1 </dev/null; then
+  fail "test failed: codex is installed but \`codex execpolicy check\` is unusable here, so the rule decisions could not be checked"
+  status=1
+else
+  policy_misses=""
+  while IFS='|' read -r want cmd; do
+    [[ -n "$want" ]] || continue
+    read -r -a policy_argv <<< "$cmd"
+    policy_rc=0
+    policy_out="$(codex execpolicy check --rules "$rules_file" "${policy_argv[@]}" </dev/null 2>/dev/null)" || policy_rc=$?
+    if [[ "$policy_rc" -ne 0 ]]; then
+      policy_got="exit-$policy_rc"
+    else
+      policy_got="$(codex_policy_decision "$policy_out")"
+    fi
+    [[ "$policy_got" == "$want" ]] || policy_misses+="  $cmd -> $policy_got (expected $want)"$'\n'
+  done <<'CASES'
+prompt|git reset --hard
+prompt|git reset --hard HEAD~1
+prompt|git clean -fd
+prompt|git checkout -- a.txt
+prompt|git checkout .
+prompt|git checkout -f main
+prompt|git checkout -qf main
+prompt|git switch --discard-changes main
+prompt|git switch -f main
+prompt|git restore a.txt
+prompt|git restore --staged a.txt
+prompt|git push --force origin main
+prompt|git push -f
+prompt|git push -uf origin main
+prompt|git branch -D feat
+prompt|git branch -df topic
+prompt|git commit -nm x
+forbidden|git commit --no-verify -m x
+forbidden|git commit -n -m x
+forbidden|git push --no-verify
+prompt|git merge --no-verify topic
+prompt|git rebase --no-verify main
+prompt|git pull --no-verify
+allow|git commit -m x
+allow|git commit --amend --no-edit
+allow|git checkout main
+allow|git checkout -b feat/x
+allow|git add -A
+none|git push --force-with-lease origin feat
+none|git push origin main
+none|git branch -d merged
+none|git reset --soft HEAD~1
+none|git switch main
+allow|git commit -m x --no-verify
+none|git reset HEAD~1 --hard
+none|git -C /tmp/x reset --hard
+CASES
+  if [[ -z "$policy_misses" ]]; then
+    ok "test passed: codex execpolicy decides the rendered rules as intended (prompt / forbidden right after the subcommand; everyday forms untouched; documented prefix gaps uncaught)"
+  else
+    fail "test failed: codex execpolicy decisions differ from the intended ones:"
+    printf '%s' "$policy_misses" >&2
+    status=1
+  fi
 fi
 
 # 5) Gate independence, both directions: the two files in this module ride on
