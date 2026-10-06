@@ -93,13 +93,19 @@ work / client には配らない(`opencode-settings` module を持たない。cl
 - **plugin の init の確認(#311、agent-tools#343)**: `personal-agent-tools` は init を終えた時点で目印の行
   (`agent-tools:plugin-init v=1 name=personal-agent-tools build_id=<sha256:64 桁の小文字 hex | unknown>`。
   agent-tools の公開契約)を OpenCode の log に出す。doctor は **既にある log を読むだけ**(OpenCode は起動しない)で、
-  `${XDG_DATA_HOME:-~/.local/share}/opencode/log/opencode.log`(1.18.30 の場所)の中で message がこの接頭辞で始まる
-  いちばん新しい行の build_id が、配置中の `plugins/personal-agent-tools.js` の 1 行目の marker の build_id と一致する
-  ときだけ「確認できた」(ok)とする。それ以外は失敗とは言わず「未確認」の info に理由を添える: marker に build_id が
-  無い / log が無い(未起動)/ 行が無い(配備後に未起動・`--pure`・INFO より上の log level・rotate・init の throw)/
-  build_id の不一致(同期後に未起動・旧い build のままの process)/ `unknown` / v=1 の形でない(版違い・余分な
-  token・桁や大文字の違い)/ log を読めない / `XDG_DATA_HOME` が相対 path(OpenCode の起動 dir で場所が変わる)。
-  行の build_id は message の中で形として切り出し、行の末尾の位置には頼らない(1.18.30 は message を `"` で囲む)。
+  `${XDG_DATA_HOME:-~/.local/share}/opencode/log/opencode.log`(1.18.30 の場所。regular file のときだけ読む)の中で
+  message がこの接頭辞で始まるいちばん新しい行の build_id が、配置中の `plugins/personal-agent-tools.js` の 1 行目の
+  marker の build_id と一致するときだけ「確認できた」(ok)とする。1 行目は agent-tools の marker の接頭辞と、この
+  plugin を示す field(`repo=agent-tools name=personal-agent-tools target=opencode artifact_kind=plugin`)を持つ
+  ときだけ marker とみなす(marker 全体の検査は agent-tools の doctor の担当)。それ以外は失敗とは言わず
+  「未確認」の info に理由を添える: 1 行目がこの plugin の marker でない / log が無い(未起動)/ log が regular file で
+  ない / 行が無い(配備後に未起動・`--pure`・INFO より上の log level・rotate・init の throw)/ build_id の不一致
+  (同期後に未起動・旧い build のままの process)/ `unknown` / v=1 の形でない(版違い・余分な token・桁や大文字の
+  違い)/ log を読めない / `XDG_DATA_HOME` が相対 path(OpenCode の起動 dir で場所が変わる)。
+  行は 1.18.30 の `timestamp=… level=… run=… message="…"` の形で、目印とみなすのは、行の**最初の** `message=` の値が
+  `"` で囲まれた目印そのもので閉じているときだけ(message の途中に目印の文字列があっても目印ではない。空白を含む
+  message は必ず `"` で囲まれるので、囲まれていない形は受け付けない)。build_id はその形で切り出し、行の末尾の位置
+  には頼らない。
   表示は判定・build_id・短い理由だけで、log の行も過去の log も出さない。
   **限界**: 行は「この build で init が return まで到達した起動が過去にあった」証拠で、直近の起動が成功した証拠では
   ない(同じ build の古い行が残っていれば、その後の起動が init に失敗しても「確認できた」になる)。

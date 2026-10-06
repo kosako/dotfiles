@@ -1244,22 +1244,27 @@ else
   # the build_id and a short reason are shown, never a log line. Where the
   # log lives and how its line wraps the message are OpenCode's (1.18.30:
   # <data>/opencode/log/opencode.log, data = ${XDG_DATA_HOME:-~/.local/share};
-  # message="..." quoted), so the marker must open the message and its
-  # build_id is cut by its own form, not by the end of the line.
+  # `timestamp=… level=… run=… message="…"`, the message quoted since it has
+  # spaces). So the line's own message field — its first ` message=` — must
+  # hold exactly the marker, closed by its quote: marker text further inside
+  # a message is not the plugin's line (Codex review R1, PR #325), and the
+  # build_id is cut by that form, not by the end of the line. FILE's line 1
+  # must be agent-tools' marker for this plugin (prefix and identity fields;
+  # its full check is agent-tools' doctor's), and the log is read only as a
+  # regular file (a FIFO would block grep).
   opencode_plugin_init_report() {
-    local plugin_file="$1" label="agent-tools plugin personal-agent-tools init" first deployed data_home log line rc=0
+    local plugin_file="$1" label="agent-tools plugin personal-agent-tools init" first deployed data_home log line rc=0 field
     # Lowercase hex spelled out: a range like a-f may take in other letters
     # under some locales' collation.
     local sha='sha256:[0123456789abcdef]{64}'
-    local v1="agent-tools:plugin-init v=1 name=personal-agent-tools build_id=(${sha}|unknown)"
-    local any_re='(^|[[:space:]])message="?agent-tools:plugin-init .*[[:space:]]name=personal-agent-tools([[:space:]]|"|$)'
-    local quoted_re="(^|[[:space:]])message=\"${v1}\"" bare_re="(^|[[:space:]])message=${v1}([[:space:]]|\$)"
-    local marker_re="[[:space:]]build_id=(${sha})([[:space:]]|\$)"
+    local marker_re='^/\* agent-tools:managed v=1 repo=agent-tools name=personal-agent-tools target=opencode artifact_kind=plugin source=[^ /][^ ]* build_id=('"${sha}"') \*/$'
+    local any_re='(^|[[:space:]])message="agent-tools:plugin-init [^"]*name=personal-agent-tools([[:space:]]|")'
+    local v1_re='^"agent-tools:plugin-init v=1 name=personal-agent-tools build_id=('"${sha}"'|unknown)"([[:space:]]|$)'
     first="$(head -n 1 "$plugin_file" 2>/dev/null)" || first=""
     if [[ "$first" =~ $marker_re ]]; then
       deployed="${BASH_REMATCH[1]}"
     else
-      item "$label not confirmed: the deployed file's marker carries no build_id to compare (agent-tools' doctor checks its marker)"
+      item "$label not confirmed: the deployed file's line 1 is not agent-tools' marker for this plugin with a sha256 build_id (agent-tools' doctor checks its marker)"
       return 0
     fi
     data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -1268,21 +1273,28 @@ else
       return 0
     fi
     log="${data_home%/}/opencode/log/opencode.log"
-    if [[ ! -e "$log" ]]; then
+    if [[ ! -e "$log" && ! -L "$log" ]]; then
       item "$label not confirmed: no OpenCode log yet (not started here; deployed build_id $deployed)"
       return 0
     fi
+    if [[ ! -f "$log" ]]; then
+      item "$label not confirmed: OpenCode's log is not a regular file (deployed build_id $deployed)"
+      return 0
+    fi
     line="$(LC_ALL=C grep -a -E -- "$any_re" "$log" 2>/dev/null | tail -n 1)" || rc=$?
+    # The line's own message field: everything after its first " message=".
+    field=" $line"
+    field="${field#* message=}"
     if [[ "$rc" -eq 1 ]]; then
       item "$label not confirmed: no init marker in OpenCode's log (not started since the plugin began logging it, started with --pure or a log level above INFO, a rotated log, or an init that threw; deployed build_id $deployed)"
     elif [[ "$rc" -ne 0 ]]; then
       item "$label not confirmed: OpenCode's log could not be read (deployed build_id $deployed)"
-    elif ! [[ "$line" =~ $quoted_re ]] && ! [[ "$line" =~ $bare_re ]]; then
+    elif ! [[ "$field" =~ $v1_re ]]; then
       item "$label not confirmed: the newest init marker is not in the v=1 form this doctor reads (deployed build_id $deployed)"
-    elif [[ "${BASH_REMATCH[2]}" == unknown ]]; then
+    elif [[ "${BASH_REMATCH[1]}" == unknown ]]; then
       item "$label not confirmed: the newest init marker carries build_id unknown (the plugin could not read its own marker; deployed build_id $deployed)"
-    elif [[ "${BASH_REMATCH[2]}" != "$deployed" ]]; then
-      item "$label not confirmed: the newest init marker is from build_id ${BASH_REMATCH[2]}, not the deployed $deployed (OpenCode not started since the last sync, or a process still on the old build)"
+    elif [[ "${BASH_REMATCH[1]}" != "$deployed" ]]; then
+      item "$label not confirmed: the newest init marker is from build_id ${BASH_REMATCH[1]}, not the deployed $deployed (OpenCode not started since the last sync, or a process still on the old build)"
     else
       ok "$label confirmed by OpenCode's log (build_id $deployed: some start of this build got through init, not necessarily the latest)"
     fi

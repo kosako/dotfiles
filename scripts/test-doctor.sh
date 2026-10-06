@@ -2634,10 +2634,28 @@ op_init_case() {
   fi
   op_expect "OpenCode init: $label" "$out" "$expected"
 }
-#     OP-i1) no build_id in the deployed file's marker (the fixture so far).
-op_init_case "deployed file without a marker build_id -> not confirmed" \
-  "[info] - $op_init not confirmed: the deployed file's marker carries no build_id to compare (agent-tools' doctor checks its marker)"
-printf '/* agent-tools:managed v=1 repo=agent-tools name=personal-agent-tools target=opencode artifact_kind=plugin source=shared/plugins/personal-agent-tools.js build_id=sha256:%s */\n// personal-agent-tools\n' "$op_hex_a" > "$op_cfg/plugins/personal-agent-tools.js"
+#     OP-i1) line 1 is not agent-tools' marker for this plugin -> no build_id
+#            to compare: no marker (the fixture so far), a plain comment that
+#            merely carries a build_id, another plugin's marker, a marker for
+#            another target (Codex review R1, PR #325). A matching log line is
+#            in place, so a lax marker check would turn into "confirmed".
+op_not_marker="[info] - $op_init not confirmed: the deployed file's line 1 is not agent-tools' marker for this plugin with a sha256 build_id (agent-tools' doctor checks its marker)"
+op_plugin_file() {
+  printf '%s\n// personal-agent-tools\n' "$1" > "$op_cfg/plugins/personal-agent-tools.js"
+}
+op_marker_line() {
+  printf '/* agent-tools:managed v=1 repo=agent-tools name=%s target=%s artifact_kind=plugin source=shared/plugins/personal-agent-tools.js build_id=sha256:%s */' "$1" "$2" "$op_hex_a"
+}
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
+op_init_case "deployed file without a marker -> not confirmed" "$op_not_marker"
+op_plugin_file "// build_id=sha256:$op_hex_a"
+op_init_case "a plain comment carrying a build_id is no marker -> not confirmed" "$op_not_marker"
+op_plugin_file "$(op_marker_line personal-other opencode)"
+op_init_case "another plugin's marker -> not confirmed" "$op_not_marker"
+op_plugin_file "$(op_marker_line personal-agent-tools claude-code)"
+op_init_case "a marker for another target -> not confirmed" "$op_not_marker"
+op_plugin_file "$(op_marker_line personal-agent-tools opencode)"
+rm -rf "$op_home/.local/share/opencode"
 #     OP-i2) no log at all -> not started.
 op_init_case "no OpenCode log -> not confirmed (not started)" "$op_no_log"
 #     OP-i3) a log without the marker.
@@ -2646,8 +2664,10 @@ op_init_case "log without the marker -> not confirmed" "$op_no_marker"
 #     OP-i4) the newest marker matches, quoted (as 1.18.30 writes it) or bare.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "quoted marker with the deployed build_id -> confirmed" "$op_confirmed"
+# A message with spaces is always quoted in OpenCode's key=value line, so an
+# unquoted one is not the plugin's marker line.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")" bare)"
-op_init_case "bare marker with the deployed build_id -> confirmed" "$op_confirmed"
+op_init_case "unquoted marker text -> no marker" "$op_no_marker"
 #     OP-i5) only the newest marker counts, whichever way round.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:$op_hex_b")")"
 op_init_case "newest marker from another build -> not confirmed, naming both" \
@@ -2674,6 +2694,13 @@ op_init_case "newest marker with uppercase hex -> not confirmed" "$op_not_v1"
 op_log_write "$(op_line "grep $(op_marker "sha256:$op_hex_a")")" \
   "$(op_line "agent-tools:plugin-init v=1 name=personal-agent-tools-x build_id=sha256:$op_hex_a")"
 op_init_case "marker text inside another message, or another plugin's marker -> no marker" "$op_no_marker"
+#            ... and a message that only quotes the marker after other text,
+#            even with its own quote, is not the marker: the line's first
+#            message field decides (Codex review R1, PR #325).
+op_log_write "$(op_line "copied message=$(op_marker "sha256:$op_hex_a") extra")"
+op_init_case "marker text after other text in a message -> no marker" "$op_no_marker"
+op_log_write "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_a")\" extra")"
+op_init_case "a quoted marker inside another message -> not the v=1 form" "$op_not_v1"
 #     OP-i9) XDG_DATA_HOME moves the log: absolute -> read there; empty -> the
 #            default; relative -> not confirmed (it depends on OpenCode's cwd).
 op_log_write
@@ -2686,8 +2713,15 @@ op_init_case "absolute XDG_DATA_HOME without a log -> not started" "$op_no_log" 
 op_init_case "relative XDG_DATA_HOME -> not confirmed" \
   "[info] - $op_init not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in ($op_deployed)" \
   XDG_DATA_HOME=rel/data
-#     OP-i10) a log that cannot be read (skipped where permissions do not
-#             bind, e.g. as root).
+#     OP-i10) a log that is not a regular file (a FIFO would block a read:
+#             Codex review R1, PR #325) or cannot be read (skipped where
+#             permissions do not bind, e.g. as root).
+mv "$op_log" "$op_log.keep"
+mkfifo "$op_log"
+op_init_case "a FIFO in place of the log -> not confirmed, no hang" \
+  "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)"
+rm -f "$op_log"
+mv "$op_log.keep" "$op_log"
 chmod 000 "$op_log"
 if [[ ! -r "$op_log" ]]; then
   op_init_case "unreadable log -> not confirmed" \
