@@ -579,9 +579,16 @@ chezmoi が必要(CI では version pin して導入する)。
 
 managed `~/.claude/settings.json` の rendered content を検証する。throwaway repo copy で
 capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の無条件 deny
-30 件が順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を
-足して計 31 件。#136 で credential-store 読取 4 件、#234 で OpenCode の `auth.json`、#315 で gh token の表示と
-keychain の password の読み出し・dump・export を option の置き方の違いも含めて追加)、1Password の CLI 全体の無条件 ask(#315)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
+30 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件が
+順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を足して計 35 件。#136 で credential-store 読取 4 件、#234 で
+OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
+含めて追加)、1Password の CLI 全体と #304 の作業を捨てる git と hook の skip の 54 件の無条件 ask、その rule を Claude Code の
+docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一の ` *` は bare の command にも一致、deny → ask の順)で git の
+command の集合に当てた判定(作業を捨てる形と代表的な束ね(`-uf` / `-df` / `-qf`)は ask、hook の skip は
+`git commit` / `git push` の直後なら deny でそれ以外(global option・後ろや最後の語・束ね・引用の中の言及)は ask、
+`--force-with-lease`・`feature-f` のような branch 名・branch の作成と切替・merge 済みの `-d`・`--soft` などの日常の git と、
+`cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
+として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
 取り込んだ global preference キーの保持、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
 chezmoi が必要(render job)。

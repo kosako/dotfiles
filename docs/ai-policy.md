@@ -52,7 +52,12 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
 - 外向き操作・昇格の都度承認: OpenCode が ask にするのは床に列挙した command(`git push` / `git clone` /
   read 系以外の `gh` / `sudo` / `curl` / `wget`)だけで、それ以外(`ssh` / `scp` / `npm publish` など)は
   allow all の既定に落ちる。
-- ローカルでの書き込みや破壊的な操作(`rm` など)の確認要否は原則では定めず、tool の既定に委ねる(OpenCode は
+- 破壊的な git・hook の skip・参照先 note への書き込み(#304): 作業を捨てる git(`reset --hard` / `clean` /
+  `checkout --` / `restore` / lease なしの force push / `branch -D` など)は承認、`--no-verify` で gate を飛ばすことと
+  `.agent-context.local.md` への書き込みは deny。Claude Code は managed の permissions で実装している
+  ([claude-settings](claude-settings.md))。OpenCode と Codex は同じ Issue の後続の PR で足す(Codex の rules は
+  prefix しか書けないので、書ける形だけ)。どれも command の文字列への照合で、steering であって境界ではない。
+- 上の項目を除き、ローカルでの書き込みや破壊的な操作(`rm` など)の確認要否は原則では定めず、tool の既定に委ねる(OpenCode は
   allow all の上に床を置く形、Claude Code は managed settings に承認モードを置かず harness 既定の確認に従う形、
   Codex は承認 rules の baseline と codex 所有の approval_policy に従う形)。
 
