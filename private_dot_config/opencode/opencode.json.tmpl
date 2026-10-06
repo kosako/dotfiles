@@ -43,6 +43,25 @@
          scripts/test-opencode-settings.sh pins this map exactly AND
          evaluates it against a fixed command set (doctor's Codex outward
          probes plus short-flag / alias / read forms).
+         #304 adds the Claude floor's git rules (dot_claude/settings.json.tmpl
+         explains them): work-discarding git and hook skips in any placement
+         ask — each option a word of its own after its subcommand, generated
+         from the (subcommand, option) pairs below — and the hook skips right
+         after `git commit` / `git push` deny, at the end with the other
+         denies. OpenCode has no rule that makes a trailing " *" match the
+         bare command, so those denies list the bare form too.
+       - edit (#304): allow-all, but the user-owned reference note
+         .agent-context.local.md is deny (agents read it, never write it):
+         the bare name for a path relative to the start directory, and the
+         same name behind a leading star and a slash — the star matches any
+         character, `/` included (the pattern is not spelled out here: its
+         star-slash would end this template comment) — for one in a sub
+         directory or an absolute path, while a
+         look-alike such as example.agent-context.local.md stays allowed
+         (Codex review R1, PR #327). Which path form OpenCode passes to the
+         edit rules is not stated in its docs and not verified against a
+         running OpenCode; the two patterns cover both forms under the
+         documented glob. Writes from bash are not covered.
        - autoupdate off: update-policy (no self-updating tools; updates are
          deliberate, via the catalog source).
        - share disabled: no session upload surface (public safety).
@@ -73,6 +92,11 @@
       "*.env": "deny",
       "*.env.*": "deny",
       "*.env.example": "allow"
+    },
+    "edit": {
+      "*": "allow",
+      ".agent-context.local.md": "deny",
+      "*/.agent-context.local.md": "deny"
     },
     "external_directory": "ask",
     "bash": {
@@ -128,6 +152,14 @@
       "curl*": "ask",
       "wget*": "ask",
       "op *": "ask",
+{{- range list "git clean *" "git * clean *" "git restore *" "git * restore *" "git *checkout* -- *" "git *checkout* ." "git *push* +*" }}
+      {{ . | toJson }}: "ask",
+{{- end }}
+{{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") }}
+      {{ printf "git *%s* %s" (index . 0) (index . 1) | toJson }}: "ask",
+      {{ printf "git *%s* %s *" (index . 0) (index . 1) | toJson }}: "ask",
+{{- end }}
+      "git *--no-verify*": "ask",
       "cat ~/.ssh/*": "deny",
       "gh secret *": "deny",
       "gh api *secrets*": "deny",
@@ -148,7 +180,13 @@
       "security dump-keychain*": "deny",
       "security * dump-keychain*": "deny",
       "security export*": "deny",
-      "security * export*": "deny"
+      "security * export*": "deny",
+      "git commit --no-verify": "deny",
+      "git commit --no-verify *": "deny",
+      "git push --no-verify": "deny",
+      "git push --no-verify *": "deny",
+      "git commit -n": "deny",
+      "git commit -n *": "deny"
     }
   }
 }
