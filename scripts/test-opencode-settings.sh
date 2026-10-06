@@ -100,6 +100,41 @@ else
   status=1
 fi
 
+# 3c) edit (#304): the user-owned reference note `.agent-context.local.md`
+#     is read by agents and never written, so OpenCode's file modifications
+#     (edit / write / patch) deny it on an allow-all base. A `*` in OpenCode
+#     patterns matches any character, `/` included, so the one pattern covers
+#     the note in the project (a relative path) and outside it (an absolute
+#     one, also behind the external_directory ask); a file merely named like
+#     it with more after `.md` is untouched.
+actual_edit="$(yq -p json '.permission.edit | to_entries | .[] | .key + "=" + .value' "$config_file")"
+edit_rows="$(yq -p json '.permission.edit | to_entries | .[] | .key + "\t" + .value' "$config_file")"
+# opencode_edit_decision PATH -> allow | deny (last match wins).
+opencode_edit_decision() {
+  local path="$1" key value decision=""
+  while IFS=$'\t' read -r key value; do
+    [[ -z "$key" ]] && continue
+    # shellcheck disable=SC2254 # the rule IS a glob pattern by contract
+    case "$path" in
+      $key) decision="$value" ;;
+    esac
+  done <<< "$edit_rows"
+  printf '%s\n' "$decision"
+}
+edit_misses=""
+for edit_case in "deny|.agent-context.local.md" "deny|sub/dir/.agent-context.local.md" "deny|/Users/someone/src/repo/.agent-context.local.md" \
+  "allow|README.md" "allow|docs/agent-context.md" "allow|.agent-context.local.md.bak" "allow|/Users/someone/src/repo/AGENTS.md"; do
+  edit_got="$(opencode_edit_decision "${edit_case#*|}")"
+  [[ "$edit_got" == "${edit_case%%|*}" ]] || edit_misses+="  ${edit_case#*|} -> ${edit_got:-<no rule>} (expected ${edit_case%%|*})"$'\n'
+done
+if [[ "$actual_edit" == $'*=allow\n*.agent-context.local.md=deny' && -z "$edit_misses" ]]; then
+  ok "test passed: permission.edit is exactly allow-all with the reference note denied (in and outside the project)"
+else
+  fail "test failed: permission.edit unexpected; map was:"
+  printf '%s\n%s' "$actual_edit" "$edit_misses" >&2
+  status=1
+fi
+
 # 4) The bash floor, EXACT and ordered: allow-all base; outward (`git push` /
 #    `git clone`) and escalation (sudo / curl / wget) ask; the GitHub CLI ask
 #    BY DEFAULT (`gh *`) with only read-only subcommands allowed back (#240:
@@ -109,10 +144,16 @@ fi
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
 #    bare command fall through to the allow-all base (Codex review, PR #235).
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny'
+#    #304 adds the same git rules as the Claude floor (dot_claude/
+#    settings.json.tmpl): the work-discarding forms and the hook skips in
+#    any placement ask, each option a word of its own; the hook skips right
+#    after `git commit` / `git push` deny, last. OpenCode has no rule that
+#    makes a trailing " *" match the bare command, so those denies list the
+#    bare form too.
+expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *--no-verify*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 7 ask incl. gh default and the whole 1Password CLI, 44 read allow-backs as exact + '... *' pairs, 21 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, and keychain password read / dump / export with and without leading options; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 7 ask incl. gh default and the whole 1Password CLI, 44 read allow-backs as exact + '... *' pairs, #304's 54 work-discarding git / hook-skip asks, 27 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, keychain password read / dump / export with and without leading options, and #304's hook skips right after git commit / git push; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -350,6 +391,45 @@ allow	git fetch origin
 allow	ghq get o/r
 allow	ls -la
 allow	cat README.md
+ask	git reset --hard
+ask	git reset HEAD~1 --hard
+ask	git -C /tmp/x reset --hard
+ask	git clean -fd
+ask	git -C /tmp/x clean -f
+ask	git checkout -- a.txt
+ask	git checkout HEAD .
+ask	git checkout -f main
+ask	git checkout -qf main
+ask	git switch --discard-changes main
+ask	git switch -qf main
+ask	git restore a.txt
+ask	git -C /tmp/x push --force origin main
+ask	git -C /tmp/x push -uf origin main
+ask	git branch -D feat
+ask	git branch -df topic
+ask	git -C /tmp/x branch --delete --force feat
+ask	git commit -m x --no-verify
+ask	git -C /tmp/x commit --no-verify -m x
+ask	git commit -nm x
+ask	git commit -m x -n
+ask	git grep -e --no-verify
+ask	git commit -m "document --no-verify"
+deny	git commit --no-verify
+deny	git commit --no-verify -m x
+deny	git push --no-verify
+deny	git push --no-verify origin main
+deny	git commit -n
+deny	git commit -n -m x
+allow	git commit --amend --no-edit
+allow	git checkout main
+allow	git checkout -b feat/conf
+allow	git switch -c feat/x
+allow	git branch -d feature-Draft
+allow	git branch -d feature-f
+allow	git checkout feature-f
+allow	git reset --soft HEAD~1
+allow	git -C /tmp/x status
+allow	git commit -m "tidy cleanup"
 CASES
 if [[ "$decision_failures" -gt 0 ]]; then
   status=1

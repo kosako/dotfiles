@@ -50,6 +50,18 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     `gh status-token` のような alias 名まで通る。ask / deny は過剰一致しても安全側なので space なし `*` のまま)。
     例外: `gh search` は `gh search *` だけで bare の `gh search` は ask。`gh auth status` / `gh --version` /
     `gh version` は完全一致だけ。
+  - **破壊的な git と hook の skip(#304)**: Claude の床([claude-settings](claude-settings.md))と同じ rule を `bash` に
+    足す。作業を捨てる git(`reset --hard`、`clean`、`checkout -- <path>` / `checkout <...> .`、`checkout` / `switch` の
+    `-f` / `--force` / `--discard-changes`、`restore`、`push` の `--force` / `-f` / `+refspec`、`branch -D` / `--force` /
+    `-f`)と、`--no-verify` / `git commit -n` の置き方のうち `git commit` / `git push` の直後以外は **ask**。option は
+    単独の語として照合し(`git *push* -f` と `git *push* -f *`)、global option の後ろや他の引数の後ろでも拾い、
+    `feature-f` のような branch 名の一部には一致しない。2 文字の代表的な束ね(`-uf` / `-df` / `-qf` など)も拾い、
+    それ以外の束ねと省略形は拾わない。`git commit` / `git push` の直後の `--no-verify` と `git commit -n` は **deny** で、
+    map の末尾に置く(後続の ask に弱めさせないため)。OpenCode には末尾の ` *` が bare の command にも一致する規則が
+    無いので、deny は bare の形も並べる。`git push` は既存の `git push*` で元から全部 ask。
+  - `edit`(#304): `*` allow の上に、user の参照先 note `*.agent-context.local.md` を **deny**(agent は読むだけ)。
+    OpenCode の `*` は `/` を含む任意の文字に一致するので、project の中(相対 path)でも外(絶対 path)でも効く。
+    `edit` は edit / write / patch をまとめて扱うが、bash からの書き込みには効かない。
   - `external_directory` は managed な床で `ask` に固定する(#315。OpenCode の既定も ask だが、read の deny が
     効かない grep / glob に対する project の外の守りなので、既定に任せない)。`doom_loop` は OpenCode 既定(ask)のまま。
 - **`autoupdate: false`**: 起動時の本体の自動更新を止める([update-policy](update-policy.md))。更新は catalog の
