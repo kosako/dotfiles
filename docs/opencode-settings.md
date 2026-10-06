@@ -59,8 +59,11 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     それ以外の束ねと省略形は拾わない。`git commit` / `git push` の直後の `--no-verify` と `git commit -n` は **deny** で、
     map の末尾に置く(後続の ask に弱めさせないため)。OpenCode には末尾の ` *` が bare の command にも一致する規則が
     無いので、deny は bare の形も並べる。`git push` は既存の `git push*` で元から全部 ask。
-  - `edit`(#304): `*` allow の上に、user の参照先 note `*.agent-context.local.md` を **deny**(agent は読むだけ)。
-    OpenCode の `*` は `/` を含む任意の文字に一致するので、project の中(相対 path)でも外(絶対 path)でも効く。
+  - `edit`(#304): `*` allow の上に、user の参照先 note を **deny**(agent は読むだけ)。起動 dir からの相対 path 用の
+    `.agent-context.local.md` と、sub dir や絶対 path 用の `*/.agent-context.local.md` の 2 本(OpenCode の `*` は `/` を
+    含む任意の文字に一致する)。`example.agent-context.local.md` のような名前の似た file には一致しない。
+    OpenCode が edit の rule にどの形の path(相対か絶対か)を渡すかは docs に書かれておらず、実行中の OpenCode では
+    確かめていない。2 本の pattern は、docs の glob の上でどちらの形にも一致することを test で確かめている。
     `edit` は edit / write / patch をまとめて扱うが、bash からの書き込みには効かない。
   - `external_directory` は managed な床で `ask` に固定する(#315。OpenCode の既定も ask だが、read の deny が
     効かない grep / glob に対する project の外の守りなので、既定に任せない)。`doom_loop` は OpenCode 既定(ask)のまま。

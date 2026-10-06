@@ -613,7 +613,8 @@ managed `~/.config/opencode/opencode.json`(OpenCode の permission 床・#234)�
 1Password の CLI 全体の ask 計 7、read 系 `gh` subcommand の allow 戻し 44、末尾に env dump / gh secret・token 表示 /
 ssh 鍵 / keychain の password の読み出し・dump・export の deny 21 と、#304 の作業を捨てる git と hook の skip の ask 54・
 `git commit` / `git push` 直後の hook の skip の deny 6。#240 / #315 / #304)、`permission.edit` が allow-all の上で参照先 note
-`*.agent-context.local.md` を deny すること(project の中と外の path で判定。#304)、`permission.external_directory` が `ask`
+`.agent-context.local.md` / `*/.agent-context.local.md` を deny し、名前の似た file は allow のままであること(相対・sub dir・
+絶対の path に docs の glob で当てる。実行中の OpenCode での path の形は未検証。#304)、`permission.external_directory` が `ask`
 に固定されていること(#315)、
 `autoupdate: false` / `share: "disabled"` / `instructions` が agent-tools の運用ルール 1 件だけ(絶対 path)であること、
 top-level key が `$schema / autoupdate / share / instructions / permission` だけ(provider / model / plugin / mcp / agent を

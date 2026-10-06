@@ -102,11 +102,13 @@ fi
 
 # 3c) edit (#304): the user-owned reference note `.agent-context.local.md`
 #     is read by agents and never written, so OpenCode's file modifications
-#     (edit / write / patch) deny it on an allow-all base. A `*` in OpenCode
-#     patterns matches any character, `/` included, so the one pattern covers
-#     the note in the project (a relative path) and outside it (an absolute
-#     one, also behind the external_directory ask); a file merely named like
-#     it with more after `.md` is untouched.
+#     (edit / write / patch) deny it on an allow-all base: the bare name (a
+#     path relative to the start directory) and `*/.agent-context.local.md`
+#     (a sub directory or an absolute path — `*` in OpenCode patterns
+#     matches any character, `/` included), so a look-alike such as
+#     example.agent-context.local.md stays allowed (Codex review R1, PR
+#     #327). This checks the patterns under the documented glob only; which
+#     path form OpenCode passes in is not verified here.
 actual_edit="$(yq -p json '.permission.edit | to_entries | .[] | .key + "=" + .value' "$config_file")"
 edit_rows="$(yq -p json '.permission.edit | to_entries | .[] | .key + "\t" + .value' "$config_file")"
 # opencode_edit_decision PATH -> allow | deny (last match wins).
@@ -123,11 +125,12 @@ opencode_edit_decision() {
 }
 edit_misses=""
 for edit_case in "deny|.agent-context.local.md" "deny|sub/dir/.agent-context.local.md" "deny|/Users/someone/src/repo/.agent-context.local.md" \
-  "allow|README.md" "allow|docs/agent-context.md" "allow|.agent-context.local.md.bak" "allow|/Users/someone/src/repo/AGENTS.md"; do
+  "allow|README.md" "allow|docs/agent-context.md" "allow|.agent-context.local.md.bak" "allow|/Users/someone/src/repo/AGENTS.md" \
+  "allow|example.agent-context.local.md" "allow|/Users/someone/src/repo/example.agent-context.local.md"; do
   edit_got="$(opencode_edit_decision "${edit_case#*|}")"
   [[ "$edit_got" == "${edit_case%%|*}" ]] || edit_misses+="  ${edit_case#*|} -> ${edit_got:-<no rule>} (expected ${edit_case%%|*})"$'\n'
 done
-if [[ "$actual_edit" == $'*=allow\n*.agent-context.local.md=deny' && -z "$edit_misses" ]]; then
+if [[ "$actual_edit" == $'*=allow\n.agent-context.local.md=deny\n*/.agent-context.local.md=deny' && -z "$edit_misses" ]]; then
   ok "test passed: permission.edit is exactly allow-all with the reference note denied (in and outside the project)"
 else
   fail "test failed: permission.edit unexpected; map was:"
