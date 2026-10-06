@@ -606,7 +606,8 @@ apply 済み file が **削除される**こと(template 自己 gate)、rules ba
 直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、prefix で拾えない形
 (後ろの option・global option)は拾われないことを確かめる(#304)。`codex` が無い環境(CI)ではその旨を表示して飛ばし、
 exact pin だけが効く。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
-`matchedRules` も無い答えを返す、のどれも「一致なし」とはせず fail にする。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
+`matchedRules` も無い答えを返す、のどれも「一致なし」とはせず fail にする。答えの読み取り(decision は allow / prompt /
+forbidden だけ、一致なしは decision が無く `matchedRules` が空の配列のときだけ)は、codex の無い CI でも固定の答えで確かめる。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
 どおりであること(どちらも `model_reasoning_effort` だけ。review 用 file に `service_tier` を書かない)・全行が agent-tools の読み手(worker preflight と同じ)の top-level の形に収まること、
 値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ることを確認する。
 chezmoi が必要(render job)。

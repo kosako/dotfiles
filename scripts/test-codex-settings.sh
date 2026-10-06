@@ -343,6 +343,50 @@ fi
 #     codex whose `execpolicy check` cannot be used, a non-zero exit, or an
 #     answer that is neither a decision nor an empty matchedRules array fails
 #     the test rather than passing as "no match" (Codex review R1, PR #328).
+# codex_policy_decision JSON — allow / prompt / forbidden as Codex answered,
+# "none" only for no decision key and an empty matchedRules array, and
+# "malformed" for anything else — an unknown decision string included, so a
+# "none" from Codex cannot pass as no match (Codex review R2, PR #328).
+codex_policy_decision() {
+  local answer
+  answer="$(yq -p json 'has("decision")' <<< "$1" 2>/dev/null)" || answer=""
+  if [[ "$answer" == true ]]; then
+    answer="$(yq -p json '.decision' <<< "$1" 2>/dev/null)" || answer=""
+    case "$answer" in
+      allow | prompt | forbidden) printf '%s\n' "$answer" ;;
+      *) printf 'malformed\n' ;;
+    esac
+  elif [[ "$answer" == false && "$(yq -p json '(.matchedRules | tag) + ":" + (.matchedRules | length | tostring)' <<< "$1" 2>/dev/null)" == '!!seq:0' ]]; then
+    printf 'none\n'
+  else
+    printf 'malformed\n'
+  fi
+}
+# The reading itself, on fixed answers (runs without codex, so in CI too).
+decision_reader_misses=""
+while IFS='|' read -r want answer; do
+  [[ -n "$want" ]] || continue
+  got="$(codex_policy_decision "$answer")"
+  [[ "$got" == "$want" ]] || decision_reader_misses+="  $answer -> $got (expected $want)"$'\n'
+done <<'ANSWERS'
+prompt|{"matchedRules":[{"prefixRuleMatch":{"matchedPrefix":["git","clean"],"decision":"prompt"}}],"decision":"prompt"}
+forbidden|{"matchedRules":[{}],"decision":"forbidden"}
+allow|{"matchedRules":[{}],"decision":"allow"}
+none|{"matchedRules":[]}
+malformed|{}
+malformed|{"decision":"none","matchedRules":[{}]}
+malformed|{"decision":"none","matchedRules":[]}
+malformed|{"matchedRules":[{}]}
+malformed|{"matchedRules":"x"}
+malformed|not json
+ANSWERS
+if [[ -z "$decision_reader_misses" ]]; then
+  ok "test passed: execpolicy answers are read strictly (only allow / prompt / forbidden, none only for an empty matchedRules without a decision)"
+else
+  fail "test failed: execpolicy answers are read wrongly:"
+  printf '%s' "$decision_reader_misses" >&2
+  status=1
+fi
 if ! command -v codex >/dev/null 2>&1; then
   item "codex not installed here; execpolicy decisions not checked (the exact pin above still holds the content)"
 elif ! codex execpolicy check --help >/dev/null 2>&1 </dev/null; then
@@ -358,14 +402,7 @@ else
     if [[ "$policy_rc" -ne 0 ]]; then
       policy_got="exit-$policy_rc"
     else
-      policy_got="$(yq -p json '.decision // ""' <<< "$policy_out" 2>/dev/null || printf 'unreadable')"
-      if [[ -z "$policy_got" ]]; then
-        if [[ "$(yq -p json '(.matchedRules | tag) + ":" + (.matchedRules | length | tostring)' <<< "$policy_out" 2>/dev/null)" == '!!seq:0' ]]; then
-          policy_got="none"
-        else
-          policy_got="malformed"
-        fi
-      fi
+      policy_got="$(codex_policy_decision "$policy_out")"
     fi
     [[ "$policy_got" == "$want" ]] || policy_misses+="  $cmd -> $policy_got (expected $want)"$'\n'
   done <<'CASES'
