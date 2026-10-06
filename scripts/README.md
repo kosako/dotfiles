@@ -587,7 +587,8 @@ docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一�
 command の集合に当てた判定(作業を捨てる形と代表的な束ね(`-uf` / `-df` / `-qf`)は ask、hook の skip は
 `git commit` / `git push` の直後なら deny でそれ以外(global option・後ろや最後の語・束ね・引用の中の言及)は ask、
 `--force-with-lease`・`feature-f` のような branch 名・branch の作成と切替・merge 済みの `-d`・`--soft` などの日常の git と、
-clean / restore などの語を含む commit message はどちらでもない)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
+`cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
+として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
 取り込んだ global preference キーの保持、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
 chezmoi が必要(render job)。
