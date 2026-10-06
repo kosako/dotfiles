@@ -151,10 +151,10 @@ section "claude settings GitHub injection guard (#119)"
 #    keychain password read / dump / export, each also behind leading
 #    `security` options, in #315, symmetric with OpenCode) and gateGitHubMcp
 #    is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
-#    positions quoted data cannot take (--no-verify as the last word or right
-#    after `git commit` / `git push`, `git commit -n` likewise) and the Edit
-#    deny on any .agent-context.local.md, so the deny is those 36 +
-#    mcp__github = 37 (the floor present even with enforceAiSandbox off is
+#    one position argument data cannot take (--no-verify or -n right after
+#    `git commit`, --no-verify right after `git push`) and the Edit deny on
+#    any .agent-context.local.md, so the deny is those 34 + mcp__github = 35
+#    (the floor present even with enforceAiSandbox off is
 #    the core of Phase 2 task B). The ask block is the whole 1Password CLI
 #    (`op *`: global options can sit anywhere, so the program is the unit;
 #    #315: human-directed uses exist, so approval rather than deny) followed
@@ -165,14 +165,14 @@ section "claude settings GitHub injection guard (#119)"
 #    regression test, so it must catch a floor matcher being swapped for
 #    another (which would keep the length). What the rules decide for real
 #    commands is pinned separately (4c).
-expected_git_deny=$'Bash(git * --no-verify)\nBash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nBash(git commit * -n)\nEdit(//**/.agent-context.local.md)'
+expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
 expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *--no-verify*)'
 expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github'
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
 expected_ask='Bash(op *)'$'\n'"$expected_git_ask"
 ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP (37, ordered); ask is exactly the whole 1Password CLI + #304 work-discarding git and hook skips (55, ordered; enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP (35, ordered); ask is exactly the whole 1Password CLI + #304 work-discarding git and hook skips (55, ordered; enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -195,10 +195,10 @@ fi
 # 4c) What the committed rules decide for real git commands (#304): the
 #     work-discarding forms ask (an option counts as a word of its own, so a
 #     branch name merely containing -f / -D does not; representative short
-#     bundles such as -uf / -df / -qf do), a hook skip denies where quoted
-#     data cannot be (the last word, or right after `git commit` / `git
-#     push`) and asks anywhere else (global options, mid-command, or a quoted
-#     mention — Codex review R1, PR #326), and everyday git (plain commit /
+#     bundles such as -uf / -df / -qf do), a hook skip denies where argument
+#     data cannot be (right after `git commit` / `git push`) and asks anywhere
+#     else (global options, later or last words, or a quoted mention — Codex
+#     review R1 / R2, PR #326), and everyday git (plain commit /
 #     push, --force-with-lease, branch switching and creation, -d of a
 #     merged branch, soft resets) is left to the harness. The rules
 #     are evaluated the way Claude Code documents Bash rule matching
@@ -293,13 +293,17 @@ ask|git branch -df topic
 ask|git checkout -qf main
 ask|git switch -qf main
 deny|git commit --no-verify -m x
-deny|git commit -m x --no-verify
+deny|git commit --no-verify
 deny|git push --no-verify
-deny|git push origin main --no-verify
-deny|git merge topic --no-verify
+deny|git push --no-verify origin main
 deny|git commit -n
 deny|git commit -n -m x
-deny|git commit -m x -n
+ask|git commit -m x --no-verify
+ask|git push origin main --no-verify
+ask|git merge topic --no-verify
+ask|git commit -m x -n
+ask|git grep -e --no-verify
+ask|git commit -m -n
 ask|git -C /tmp/x commit --no-verify -m x
 ask|git merge --no-verify topic
 ask|git commit --amend --no-verify -m x
@@ -344,7 +348,7 @@ none|git stash
 none|git -C /tmp/x status
 CASES
 if [[ -z "$decision_misses" ]]; then
-  ok "test passed: the committed rules ask for work-discarding git, deny hook skips where quoted data cannot be and ask elsewhere, and leave everyday git alone (per the documented matching)"
+  ok "test passed: the committed rules ask for work-discarding git, deny hook skips right after commit / push and ask elsewhere, and leave everyday git alone (per the documented matching)"
 else
   fail "test failed: committed rules decide git commands unexpectedly:"
   printf '%s' "$decision_misses" >&2

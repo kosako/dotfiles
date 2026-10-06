@@ -56,11 +56,12 @@
          (its short form). Skipping the pre-commit / commit-msg gates
          (git-hook-gates) is never something to do from an AI tool; a human
          who needs it runs it in their own terminal. A glob cannot tell an
-         option from quoted data (`git commit -m "document --no-verify"`), so
-         deny is kept to the places data cannot take — the last word of the
-         command, or right after `git commit` / `git push` — and every other
-         placement (global options, mid-command, bundles -nm / -an / -anm, a
-         quoted mention) is ask (Codex review R1, PR #326). Not covered:
+         option from argument data (`git commit -m "document --no-verify"`,
+         `git grep -e --no-verify`, `git commit -m -n`), so deny is kept to
+         the one place data cannot take — right after `git commit` / `git
+         push` — and every other placement (global options, later or last
+         words, bundles -nm / -an / -anm, a quoted mention) is ask (Codex
+         review R1 / R2, PR #326). Not covered:
          other bundles, abbreviated long options, `-c core.hooksPath=...`.
        - deny: Edit on any .agent-context.local.md — the agent reads that
          user-owned note and never writes it. An Edit deny also binds Write,
@@ -109,7 +110,7 @@
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
        it is included only when at least one hook capability is on, so an
        empty "hooks": {} is never emitted. */ -}}
-{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git * --no-verify)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Bash(git commit * -n)" "Edit(//**/.agent-context.local.md)" -}}
+{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Edit(//**/.agent-context.local.md)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list "Bash(op *)" "Bash(git clean *)" "Bash(git * clean *)" "Bash(git restore *)" "Bash(git * restore *)" "Bash(git *checkout* -- *)" "Bash(git *checkout* .)" "Bash(git *push* +*)" -}}
 {{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") -}}
