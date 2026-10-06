@@ -12,7 +12,7 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 | tool | 権限面 | 管理点 | 堆積への手当て |
 | --- | --- | --- | --- |
 | Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は `settings.local.json`(管理外)に隔離。managed 側は apply で戻る |
-| Codex | 承認 rules(コマンド allowlist) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
+| Codex | 承認 rules(コマンド allowlist と、作業を捨てる git の prompt・hook の skip の forbidden(#304)) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
 | Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
 | OpenCode | `permission`(read / bash / edit の pattern rule: secret floor は deny、外向き・昇格と 1Password の CLI(`op`)は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、作業を捨てる git は ask で hook の skip と参照先 note への edit は deny(#304)、他は allow。既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
 
@@ -56,8 +56,12 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
   `checkout --` / `restore` / lease なしの force push / `branch -D` など)は承認、`--no-verify` で gate を飛ばすことと
   `.agent-context.local.md` への書き込みは deny。Claude Code は managed の permissions
   ([claude-settings](claude-settings.md))、OpenCode は `permission` の床の `bash` と `edit`
-  ([opencode-settings](opencode-settings.md))で実装している。Codex は同じ Issue の後続の PR で足す(rules は
-  prefix しか書けないので、書ける形だけ)。どれも command の文字列への照合で、steering であって境界ではない。
+  ([opencode-settings](opencode-settings.md))、Codex は承認 rules の `prompt` / `forbidden` で実装している。Codex の
+  rules は argv の **prefix** にしか一致しないので、option が subcommand の直後にある形だけを拾う(`git commit -m x
+  --no-verify`、`git reset HEAD --hard`、`git -C dir ...`、`+refspec` の push は拾わない。`git commit` / `git checkout`
+  の allow はユーザー判断で残す)。複数の rule に一致すると最も厳しい判定が勝つので、forbidden / prompt は allow に
+  優先する(`codex execpolicy check` で実測)。Codex の rules は command しか見ないので、note への書き込みの deny に
+  相当するものは無い。どれも command の文字列への照合で、steering であって境界ではない。
 - 上の項目を除き、ローカルでの書き込みや破壊的な操作(`rm` など)の確認要否は原則では定めず、tool の既定に委ねる(OpenCode は
   allow all の上に床を置く形、Claude Code は managed settings に承認モードを置かず harness 既定の確認に従う形、
   Codex は承認 rules の baseline と codex 所有の approval_policy に従う形)。

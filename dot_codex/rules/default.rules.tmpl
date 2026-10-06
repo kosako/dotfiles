@@ -26,6 +26,22 @@
        channel and cannot be managed (codex-owned live file, #181) — doctor
        watches it report-only instead.
 
+       Destructive git and hook skips (#304, after agent-tools#204 left
+       them to the hosts' permissions; the Claude and OpenCode floors carry
+       the same set): work-discarding git is "prompt" and a hook skip is
+       "forbidden". Codex rules match a PREFIX of the argv only, and the
+       strictest matching rule wins (measured with `codex execpolicy check`
+       on 0.159.3), so a forbidden / prompt rule outranks the `git commit`
+       / `git checkout` allows above, but only the forms that put the option
+       right after the subcommand are caught: `git commit -m x --no-verify`,
+       `git reset HEAD --hard`, `git checkout HEAD -- a`, `git -C dir ...`
+       and a +refspec push are not (the user kept the allows rather than
+       prompting every commit / checkout). The hook skips are forbidden in
+       that one position, like the Claude / OpenCode deny; their other
+       placements cannot be expressed here. Codex rules see commands only,
+       so the reference-note write deny of the other floors has no
+       counterpart. Steering, not a boundary.
+
        Gating (template self-gate, NOT a module `requires` — #184 lesson):
        enableAiPolicy=false renders EMPTY and chezmoi removes the managed target
        (a `requires:` gate would leave an already-applied file lingering).
@@ -40,4 +56,14 @@ prefix_rule(pattern=["gh", "pr", "diff"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "checks"], decision="allow")
 prefix_rule(pattern=["gh", "issue", "view"], decision="allow")
 prefix_rule(pattern=["gh", "issue", "list"], decision="allow")
+prefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")
+prefix_rule(pattern=["git", "clean"], decision="prompt")
+prefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")
+prefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")
+prefix_rule(pattern=["git", "restore"], decision="prompt")
+prefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu"]], decision="prompt")
+prefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], decision="prompt")
+prefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")
+prefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")
+prefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")
 {{ end -}}
