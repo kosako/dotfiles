@@ -1245,20 +1245,30 @@ else
   # log lives and how its line wraps the message are OpenCode's (1.18.30:
   # <data>/opencode/log/opencode.log, data = ${XDG_DATA_HOME:-~/.local/share};
   # `timestamp=… level=… run=… message="…"`, the message quoted since it has
-  # spaces). So the line's own message field — its first ` message=` — must
-  # hold exactly the marker, closed by its quote: marker text further inside
-  # a message is not the plugin's line (Codex review R1, PR #325), and the
-  # build_id is cut by that form, not by the end of the line. FILE's line 1
+  # spaces). So only a line's own message field — its first ` message=` —
+  # counts, both for picking the newest marker line and for its form, which
+  # must be exactly the marker closed by its quote: marker text further
+  # inside a message is not the plugin's line (Codex review R1 / R2, PR #325),
+  # and the build_id is cut by that form, not by the end of the line. FILE's line 1
   # must be agent-tools' marker for this plugin (prefix and identity fields;
   # its full check is agent-tools' doctor's), and the log is read only as a
   # regular file (a FIFO would block grep).
   opencode_plugin_init_report() {
-    local plugin_file="$1" label="agent-tools plugin personal-agent-tools init" first deployed data_home log line rc=0 field
+    local plugin_file="$1" label="agent-tools plugin personal-agent-tools init" first deployed data_home log rc=0 field
     # Lowercase hex spelled out: a range like a-f may take in other letters
     # under some locales' collation.
     local sha='sha256:[0123456789abcdef]{64}'
     local marker_re='^/\* agent-tools:managed v=1 repo=agent-tools name=personal-agent-tools target=opencode artifact_kind=plugin source=[^ /][^ ]* build_id=('"${sha}"') \*/$'
-    local any_re='(^|[[:space:]])message="agent-tools:plugin-init [^"]*name=personal-agent-tools([[:space:]]|")'
+    # Prints the message field (from its opening quote to the end of the
+    # line) of the last line whose FIRST message field opens with the marker
+    # prefix and names this plugin (any v=, any build_id: the form is judged
+    # below); exit 1 when there is none. Picking by the first field keeps a
+    # later line that merely quotes a marker from hiding an earlier real one
+    # (Codex review R2, PR #325).
+    local pick='{ s = " " $0; i = index(s, " message="); if (i == 0) next
+      f = substr(s, i + 9)
+      if (f ~ /^"agent-tools:plugin-init ([^"]* )?name=personal-agent-tools[ "]/) last = f }
+      END { if (last == "") exit 1; print last }'
     local v1_re='^"agent-tools:plugin-init v=1 name=personal-agent-tools build_id=('"${sha}"'|unknown)"([[:space:]]|$)'
     first="$(head -n 1 "$plugin_file" 2>/dev/null)" || first=""
     if [[ "$first" =~ $marker_re ]]; then
@@ -1281,10 +1291,13 @@ else
       item "$label not confirmed: OpenCode's log is not a regular file (deployed build_id $deployed)"
       return 0
     fi
-    line="$(LC_ALL=C grep -a -E -- "$any_re" "$log" 2>/dev/null | tail -n 1)" || rc=$?
-    # The line's own message field: everything after its first " message=".
-    field=" $line"
-    field="${field#* message=}"
+    # Checked before awk: gawk warns about a file it cannot open yet still
+    # runs END, whose `exit 1` would read as "no marker".
+    if [[ ! -r "$log" ]]; then
+      item "$label not confirmed: OpenCode's log could not be read (deployed build_id $deployed)"
+      return 0
+    fi
+    field="$(LC_ALL=C awk "$pick" "$log" 2>/dev/null)" || rc=$?
     if [[ "$rc" -eq 1 ]]; then
       item "$label not confirmed: no init marker in OpenCode's log (not started since the plugin began logging it, started with --pure or a log level above INFO, a rotated log, or an init that threw; deployed build_id $deployed)"
     elif [[ "$rc" -ne 0 ]]; then

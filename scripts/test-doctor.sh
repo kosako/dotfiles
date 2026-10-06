@@ -2618,13 +2618,19 @@ op_log_write() {
 # op_init_case LABEL EXPECTED_LINE [VAR=value...] — one run: EXPECTED_LINE is
 # the one and only init line, nothing leaks, OpenCode stays unrun.
 op_init_case() {
-  local label="$1" expected="$2" out count
+  local label="$1" expected="$2" out
   shift 2
   if ! out="$(op_run "$@")"; then
     fail "test failed: doctor must stay exit 0 (OpenCode init: $label)"
     status=1
     return
   fi
+  op_init_check "$label" "$expected" "$out"
+}
+# op_init_check LABEL EXPECTED_LINE OUTPUT — the checks of op_init_case on a
+# doctor output already in hand.
+op_init_check() {
+  local label="$1" expected="$2" out="$3" count
   count="$(grep -c -F -- "$op_init" <<< "$out" || true)"
   if ! grep -Fxq -- "$expected" <<< "$out" || [[ "$count" != 1 ]]; then
     printf '%s\n' "$out" | grep -F -- "$op_init" >&2 || true
@@ -2700,7 +2706,13 @@ op_init_case "marker text inside another message, or another plugin's marker -> 
 op_log_write "$(op_line "copied message=$(op_marker "sha256:$op_hex_a") extra")"
 op_init_case "marker text after other text in a message -> no marker" "$op_no_marker"
 op_log_write "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_a")\" extra")"
-op_init_case "a quoted marker inside another message -> not the v=1 form" "$op_not_v1"
+op_init_case "a quoted marker inside another message -> no marker" "$op_no_marker"
+#            ... nor does such a later line hide an earlier real marker: the
+#            newest line is picked by its first message field too (Codex
+#            review R2, PR #325).
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" \
+  "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_b")\" extra")"
+op_init_case "a real marker, then a line quoting another marker -> confirmed" "$op_confirmed"
 #     OP-i9) XDG_DATA_HOME moves the log: absolute -> read there; empty -> the
 #            default; relative -> not confirmed (it depends on OpenCode's cwd).
 op_log_write
@@ -2716,11 +2728,41 @@ op_init_case "relative XDG_DATA_HOME -> not confirmed" \
 #     OP-i10) a log that is not a regular file (a FIFO would block a read:
 #             Codex review R1, PR #325) or cannot be read (skipped where
 #             permissions do not bind, e.g. as root).
+#             The FIFO run has a deadline: should doctor read the FIFO, it
+#             would block for good, so it is killed (with what it started)
+#             and the case fails instead of hanging the suite (Codex review
+#             R2, PR #325).
 mv "$op_log" "$op_log.keep"
 mkfifo "$op_log"
-op_init_case "a FIFO in place of the log -> not confirmed, no hang" \
-  "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)"
-rm -f "$op_log"
+# op_kill_tree PID — KILL PID and its descendants (collected before the kill).
+op_kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    op_kill_tree "$child"
+  done
+  kill -KILL "$1" 2>/dev/null || true
+}
+op_run > "$fixture_home/op-fifo.out" 2>&1 &
+op_fifo_pid=$!
+op_fifo_waited=0
+while kill -0 "$op_fifo_pid" 2>/dev/null && [[ "$op_fifo_waited" -lt 120 ]]; do
+  sleep 1
+  op_fifo_waited=$((op_fifo_waited + 1))
+done
+if kill -0 "$op_fifo_pid" 2>/dev/null; then
+  op_kill_tree "$op_fifo_pid"
+  wait "$op_fifo_pid" 2>/dev/null || true
+  fail "test failed: OpenCode init: a FIFO in place of the log hung doctor (killed after 120s)"
+  status=1
+elif ! wait "$op_fifo_pid"; then
+  fail "test failed: doctor must stay exit 0 (OpenCode init: a FIFO in place of the log)"
+  status=1
+else
+  op_init_check "a FIFO in place of the log -> not confirmed, no hang" \
+    "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)" \
+    "$(cat "$fixture_home/op-fifo.out")"
+fi
+rm -f "$op_log" "$fixture_home/op-fifo.out"
 mv "$op_log.keep" "$op_log"
 chmod 000 "$op_log"
 if [[ ! -r "$op_log" ]]; then
