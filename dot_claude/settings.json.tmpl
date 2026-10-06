@@ -33,6 +33,30 @@
        get / signin --raw ...) take global options anywhere, so the program,
        not a subcommand list, is the unit. The human does direct those (e.g.
        private-backup --identity-command), so approval, not deny.
+       Destructive git, hook skips and the reference note (#304, after
+       agent-tools#204 left them to the hosts' permissions; unconditional,
+       steering like the rest):
+       - ask: work-discarding git — reset --hard, clean, checkout -- <path> /
+         checkout <...> . / checkout or switch with -f / --force /
+         --discard-changes, restore, push with --force / -f / a +refspec
+         (--force-with-lease is not matched), branch -D / --force / -f. The
+         human does direct these, so approval. Each rule sets `*` around the
+         subcommand or the option (`git *reset*--hard*`, `git * clean *`) so
+         global options before it (`git -C dir`) and options after other
+         arguments are caught too; the price is an occasional extra prompt
+         (a commit message naming such a command), harmless for ask. Bare
+         subcommand words that appear in prose (clean, checkout, restore)
+         keep a space on each side so `cleanup` and the like do not match.
+       - deny: --no-verify on any git command and `git commit -n` (its short
+         form) — skipping the pre-commit / commit-msg gates
+         (git-hook-gates) is never something to do from an AI tool; a human
+         who needs it runs it in their own terminal. Not covered: -n bundled
+         with other short options (-an), abbreviated long options,
+         `-c core.hooksPath=...`.
+       - deny: Edit on any .agent-context.local.md — the agent reads that
+         user-owned note and never writes it. An Edit deny also binds Write,
+         NotebookEdit and Bash file commands / redirections that name the
+         path, not scripts that open it themselves.
        3. enforceAiSandbox (human-legit, stays gated): git push to main/master and
           reading .env are things the human does legitimately direct Claude to do,
           so they ride on enforceAiSandbox — which personal keeps false because its
@@ -76,9 +100,9 @@
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
        it is included only when at least one hook capability is on, so an
        empty "hooks": {} is never emitted. */ -}}
-{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" -}}
+{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git *--no-verify*)" "Bash(git *commit -n)" "Bash(git *commit -n *)" "Bash(git *commit * -n)" "Bash(git *commit * -n *)" "Edit(//**/.agent-context.local.md)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
-{{- $ask := list "Bash(op *)" -}}
+{{- $ask := list "Bash(op *)" "Bash(git *reset*--hard*)" "Bash(git clean *)" "Bash(git * clean *)" "Bash(git checkout *-- *)" "Bash(git * checkout *-- *)" "Bash(git checkout *.)" "Bash(git * checkout *.)" "Bash(git *checkout -f*)" "Bash(git *checkout * -f*)" "Bash(git *checkout *--force*)" "Bash(git restore *)" "Bash(git * restore *)" "Bash(git *switch *--discard-changes*)" "Bash(git *switch -f*)" "Bash(git *switch * -f*)" "Bash(git *switch *--force*)" "Bash(git *push*--force)" "Bash(git *push*--force *)" "Bash(git *push*-f)" "Bash(git *push*-f *)" "Bash(git *push* +*)" "Bash(git *branch *-D*)" "Bash(git *branch -f*)" "Bash(git *branch * -f*)" "Bash(git *branch *--force*)" -}}
 {{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(cat *.env*)" "Read(//**/.env*)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
 {
 {{- if index $caps "enforceAiSandbox" }}

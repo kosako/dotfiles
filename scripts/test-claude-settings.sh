@@ -150,20 +150,26 @@ section "claude settings GitHub injection guard (#119)"
 #    plus `gh auth` with options before or right after `auth`, and the
 #    keychain password read / dump / export, each also behind leading
 #    `security` options, in #315, symmetric with OpenCode) and gateGitHubMcp
-#    is ON (Phase 2), so the deny is exactly those 31 (the
-#    floor present even with enforceAiSandbox off is the core of Phase 2 task
-#    B). The ask block is the whole 1Password CLI alone (`op *`: global
+#    is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny
+#    (--no-verify on any git command, `git commit -n`) and the Edit deny on
+#    any .agent-context.local.md, so the deny is those 36 + mcp__github = 37
+#    (the floor present even with enforceAiSandbox off is the core of Phase 2
+#    task B). The ask block is the whole 1Password CLI (`op *`: global
 #    options can sit anywhere, so the program is the unit; #315: human-
-#    directed uses exist, so approval rather than deny). We pin the EXACT ordered
+#    directed uses exist, so approval rather than deny) followed by the
+#    work-discarding git commands of #304 (25). We pin the EXACT ordered
 #    arrays, not length + a few representatives: this is a security-boundary
 #    regression test, so it must catch a floor matcher being swapped for
-#    another (which would keep the length).
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nmcp__github'
+#    another (which would keep the length). What the rules decide for real
+#    commands is pinned separately (4c).
+expected_git_deny=$'Bash(git *--no-verify*)\nBash(git *commit -n)\nBash(git *commit -n *)\nBash(git *commit * -n)\nBash(git *commit * -n *)\nEdit(//**/.agent-context.local.md)'
+expected_git_ask=$'Bash(git *reset*--hard*)\nBash(git clean *)\nBash(git * clean *)\nBash(git checkout *-- *)\nBash(git * checkout *-- *)\nBash(git checkout *.)\nBash(git * checkout *.)\nBash(git *checkout -f*)\nBash(git *checkout * -f*)\nBash(git *checkout *--force*)\nBash(git restore *)\nBash(git * restore *)\nBash(git *switch *--discard-changes*)\nBash(git *switch -f*)\nBash(git *switch * -f*)\nBash(git *switch *--force*)\nBash(git *push*--force)\nBash(git *push*--force *)\nBash(git *push*-f)\nBash(git *push*-f *)\nBash(git *push* +*)\nBash(git *branch *-D*)\nBash(git *branch -f*)\nBash(git *branch * -f*)\nBash(git *branch *--force*)'
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github'
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
-expected_ask='Bash(op *)'
+expected_ask='Bash(op *)'$'\n'"$expected_git_ask"
 ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + github MCP (31, ordered); ask is exactly the whole 1Password CLI (enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP (37, ordered); ask is exactly the whole 1Password CLI + #304 work-discarding git (26, ordered; enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -181,6 +187,144 @@ if grep -Fq '"Bash(git push * main)"' "$off_file" \
   status=1
 else
   ok "test passed: all human-legit gate matchers (main/master push, .env reads) absent until enforceAiSandbox (committed render)"
+fi
+
+# 4c) What the committed rules decide for real git commands (#304): the
+#     work-discarding forms ask, the hook skips deny, and everyday git (plain
+#     commit / push, --force-with-lease, branch switching and creation,
+#     -d of a merged branch, soft resets) is left to the harness. The rules
+#     are evaluated the way Claude Code documents Bash rule matching
+#     (code.claude.com/docs/en/permissions, "Wildcard patterns"): `*` stands
+#     for any text, spaces included, everything else is literal, a trailing
+#     " *" that is the rule's only wildcard also matches the bare command, and
+#     deny is checked before ask. This pins the rule TEXT against that
+#     reading; it does not prove the harness — the matchers stay steering.
+# claude_rule_matches BODY CMD — whether a Bash rule body (inside Bash(...))
+# matches CMD. A body with a regex-special character other than `*`, `.`
+# and `+` fails the test instead of being guessed at.
+claude_rule_matches() {
+  local body="$1" cmd="$2" re="" i c
+  if [[ "$body" == *" *" && "${body%" *"}" != *"*"* && "$cmd" == "${body%" *"}" ]]; then
+    return 0
+  fi
+  for ((i = 0; i < ${#body}; i++)); do
+    c="${body:i:1}"
+    case "$c" in
+      '*') re+='.*' ;;
+      '.' | '+') re+="\\$c" ;;
+      '[' | ']' | '(' | ')' | '{' | '}' | '|' | '^' | '$' | '?' | '\') return 2 ;;
+      *) re+="$c" ;;
+    esac
+  done
+  re="^${re}\$"
+  [[ "$cmd" =~ $re ]]
+}
+# claude_decision CMD — deny / ask / none for CMD under the committed rules.
+claude_decision() {
+  local kind rule rc
+  for kind in deny ask; do
+    while IFS= read -r rule; do
+      [[ "$rule" == 'Bash('*')' ]] || continue
+      rule="${rule#Bash(}"
+      rule="${rule%)}"
+      rc=0
+      claude_rule_matches "$rule" "$1" || rc=$?
+      if [[ "$rc" -eq 2 ]]; then
+        printf 'unsupported:%s\n' "$rule"
+        return 0
+      elif [[ "$rc" -eq 0 ]]; then
+        printf '%s\n' "$kind"
+        return 0
+      fi
+    done < <(yq -p json ".permissions.${kind}[]" "$off_file")
+  done
+  printf 'none\n'
+}
+decision_misses=""
+while IFS='|' read -r want cmd; do
+  [[ -n "$want" ]] || continue
+  got="$(claude_decision "$cmd")"
+  [[ "$got" == "$want" ]] || decision_misses+="  $cmd -> $got (expected $want)"$'\n'
+done <<'CASES'
+ask|git reset --hard
+ask|git reset --hard HEAD~1
+ask|git reset HEAD~1 --hard
+ask|git -C /tmp/x reset --hard
+ask|git clean -fd
+ask|git clean -fdx
+ask|git clean -f
+ask|git -C /tmp/x clean -fd
+ask|git checkout -- a.txt
+ask|git checkout HEAD -- a.txt
+ask|git checkout .
+ask|git checkout HEAD~1 .
+ask|git -C /tmp/x checkout -- a.txt
+ask|git checkout -f main
+ask|git checkout main -f
+ask|git checkout --force main
+ask|git switch --discard-changes main
+ask|git switch -f main
+ask|git switch main --force
+ask|git restore a.txt
+ask|git restore --staged --worktree a.txt
+ask|git -C /tmp/x restore .
+ask|git push --force
+ask|git push -f
+ask|git push origin main --force
+ask|git push origin -f main
+ask|git push origin +main
+ask|git push +main
+ask|git -C /tmp/x push --force origin main
+ask|git branch -D feat
+ask|git branch --delete --force feat
+ask|git branch -d -f feat
+ask|git -C /tmp/x branch -D feat
+deny|git commit --no-verify -m x
+deny|git commit -m x --no-verify
+deny|git push --no-verify
+deny|git push origin main --no-verify
+deny|git -C /tmp/x commit --no-verify -m x
+deny|git merge --no-verify topic
+deny|git commit -n
+deny|git commit -n -m x
+deny|git commit -m x -n
+deny|git -C /tmp/x commit -n -m x
+none|git status
+none|git commit -m x
+none|git commit -m "tidy cleanup"
+none|git commit -m "checkouts restored"
+none|git commit --amend --no-edit
+none|git commit -am x
+none|git push
+none|git push origin main
+none|git push -u origin feat/x-fix
+none|git push --force-with-lease
+none|git push --force-with-lease origin feat
+none|git push --follow-tags
+none|git checkout main
+none|git checkout -b feat/foo-fix
+none|git checkout -
+none|git switch main
+none|git switch -c feat/x
+none|git branch -d merged
+none|git branch feat-foo
+none|git reset HEAD~1
+none|git reset --soft HEAD~1
+none|git log --oneline
+none|git diff
+none|git add -A
+none|git fetch
+none|git pull --ff-only
+none|git rebase main
+none|git stash
+none|git -C /tmp/x status
+CASES
+if [[ -z "$decision_misses" ]]; then
+  ok "test passed: the committed rules ask for work-discarding git, deny hook skips, and leave everyday git alone (per the documented matching)"
+else
+  fail "test failed: committed rules decide git commands unexpectedly:"
+  printf '%s' "$decision_misses" >&2
+  status=1
 fi
 
 # 5) enforceAiSandbox=true: the human-legit write gate is ADDED on top of the
