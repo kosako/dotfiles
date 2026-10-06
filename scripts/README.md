@@ -600,11 +600,13 @@ Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、hook capability が全部 false のとき
 apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content(read-only / local の allow 9 と、
-#304 の作業を捨てる git の prompt 8・hook の skip の forbidden 2)と gate の独立性(#139)を確認する。`codex` が PATH に
-あれば、render した rules を `codex execpolicy check`(rules を評価するだけで何も実行しない)に当て、subcommand の直後の
-作業を捨てる形は prompt、直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、
-prefix で拾えない形(後ろの option・global option)は拾われないことを確かめる(#304)。`codex` が無い環境(CI)では
-その旨を表示して飛ばし、exact pin だけが効く。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
+#304 の作業を捨てる git の prompt 8・commit / push 直後の hook の skip の forbidden 2・merge / rebase / am / pull 直後の
+`--no-verify` の prompt 1)と gate の独立性(#139)を確認する。`codex` が install されていれば、render した rules を
+`codex execpolicy check`(rules を評価するだけで何も実行しない)に当て、subcommand の直後の作業を捨てる形は prompt、
+直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、prefix で拾えない形
+(後ろの option・global option)は拾われないことを確かめる(#304)。`codex` が無い環境(CI)ではその旨を表示して飛ばし、
+exact pin だけが効く。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
+`matchedRules` も無い答えを返す、のどれも「一致なし」とはせず fail にする。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
 どおりであること(どちらも `model_reasoning_effort` だけ。review 用 file に `service_tier` を書かない)・全行が agent-tools の読み手(worker preflight と同じ)の top-level の形に収まること、
 値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ることを確認する。
 chezmoi が必要(render job)。

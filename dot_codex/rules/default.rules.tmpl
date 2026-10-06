@@ -37,8 +37,10 @@
        `git reset HEAD --hard`, `git checkout HEAD -- a`, `git -C dir ...`
        and a +refspec push are not (the user kept the allows rather than
        prompting every commit / checkout). The hook skips are forbidden in
-       that one position, like the Claude / OpenCode deny; their other
-       placements cannot be expressed here. Codex rules see commands only,
+       that one position, like the Claude / OpenCode deny; --no-verify right
+       after merge / rebase / am / pull is prompt, as the other floors ask
+       for it (Codex review R1, PR #328); other placements cannot be
+       expressed here. Codex rules see commands only,
        so the reference-note write deny of the other floors has no
        counterpart. Steering, not a boundary.
 
@@ -66,4 +68,5 @@ prefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], de
 prefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")
 prefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")
 prefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")
+prefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")
 {{ end -}}

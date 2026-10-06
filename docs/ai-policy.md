@@ -58,7 +58,8 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
   ([claude-settings](claude-settings.md))、OpenCode は `permission` の床の `bash` と `edit`
   ([opencode-settings](opencode-settings.md))、Codex は承認 rules の `prompt` / `forbidden` で実装している。Codex の
   rules は argv の **prefix** にしか一致しないので、option が subcommand の直後にある形だけを拾う(`git commit -m x
-  --no-verify`、`git reset HEAD --hard`、`git -C dir ...`、`+refspec` の push は拾わない。`git commit` / `git checkout`
+  --no-verify`、`git reset HEAD --hard`、`git -C dir ...`、`+refspec` の push は拾わない。merge / rebase / am / pull の
+  直後の `--no-verify` は prompt。`git commit` / `git checkout`
   の allow はユーザー判断で残す)。複数の rule に一致すると最も厳しい判定が勝つので、forbidden / prompt は allow に
   優先する(`codex execpolicy check` で実測)。Codex の rules は command しか見ないので、note への書き込みの deny に
   相当するものは無い。どれも command の文字列への照合で、steering であって境界ではない。
