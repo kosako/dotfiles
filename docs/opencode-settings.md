@@ -88,9 +88,21 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   **二重読込**になる配置(`.ts` / `.mjs` の併置、単数形 `plugin/` dir の copy、OpenCode が読む設定 — managed の床と `OPENCODE_CONFIG` が指す file — の `plugin` 欄に同じ
   plugin 名)が無いか(読まれていない `opencode.local.json` に載っているだけなら注記にとどめる)。doctor は OpenCode を起動しない — `opencode debug config` でさえ OpenCode の DB
   (`~/.local/share/opencode/opencode.db`)に書き込むため(1.18.30 で実測)、doctor の副作用なしの規則に反する。
-  設定ファイルは secret を含みうるので `plugin` 欄だけを読み、中身は表示しない。報告するのは「plugins dir に
-  ある」までで、init の成功ではない(init の throw は user に見えず、1.18.30 の log にも plugin の読込は出ない)。
-  成功の目印は agent-tools#343 で plugin が log に出す予定。
+  設定ファイルは secret を含みうるので `plugin` 欄だけを読み、中身は表示しない。配置だけでは init の成功は
+  分からない(init の throw は user に見えず、1.18.30 の log にも plugin の読込は出ない)。
+- **plugin の init の確認(#311、agent-tools#343)**: `personal-agent-tools` は init を終えた時点で目印の行
+  (`agent-tools:plugin-init v=1 name=personal-agent-tools build_id=<sha256:64 桁の小文字 hex | unknown>`。
+  agent-tools の公開契約)を OpenCode の log に出す。doctor は **既にある log を読むだけ**(OpenCode は起動しない)で、
+  `${XDG_DATA_HOME:-~/.local/share}/opencode/log/opencode.log`(1.18.30 の場所)の中で message がこの接頭辞で始まる
+  いちばん新しい行の build_id が、配置中の `plugins/personal-agent-tools.js` の 1 行目の marker の build_id と一致する
+  ときだけ「確認できた」(ok)とする。それ以外は失敗とは言わず「未確認」の info に理由を添える: marker に build_id が
+  無い / log が無い(未起動)/ 行が無い(配備後に未起動・`--pure`・INFO より上の log level・rotate・init の throw)/
+  build_id の不一致(同期後に未起動・旧い build のままの process)/ `unknown` / v=1 の形でない(版違い・余分な
+  token・桁や大文字の違い)/ log を読めない / `XDG_DATA_HOME` が相対 path(OpenCode の起動 dir で場所が変わる)。
+  行の build_id は message の中で形として切り出し、行の末尾の位置には頼らない(1.18.30 は message を `"` で囲む)。
+  表示は判定・build_id・短い理由だけで、log の行も過去の log も出さない。
+  **限界**: 行は「この build で init が return まで到達した起動が過去にあった」証拠で、直近の起動が成功した証拠では
+  ない(同じ build の古い行が残っていれば、その後の起動が init に失敗しても「確認できた」になる)。
   `opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も
   報告する(`~/.zshrc.local` に export があれば、非対話 shell 由来として中立表示)。
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash の rule map を順序込みで、

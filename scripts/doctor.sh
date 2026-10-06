@@ -1173,7 +1173,8 @@ fi
 # break doctor's no-side-effects rule. So presence in the global plugins dir
 # is reported, not a successful load; an init that throws is invisible to
 # the user (agent-tools probe M2) and 1.18.30 logs nothing about plugin
-# loading, until the plugin logs its own marker (agent-tools#343).
+# loading. personal-agent-tools logs its own init marker instead (#311,
+# agent-tools#343), read from OpenCode's existing log below.
 # Double loading: a copy OpenCode would also pick up (.ts / .mjs next to the
 # .js, the singular plugin/ dir) or the same plugin name listed in a config
 # file's `plugin` key. Config files can hold secrets (provider options, MCP
@@ -1229,18 +1230,83 @@ else
     done <<< "$1"
     return 1
   }
+  # opencode_plugin_init_report FILE — whether OpenCode's log shows that the
+  # personal-agent-tools plugin deployed as FILE got through its init. The
+  # plugin logs `agent-tools:plugin-init v=1 name=personal-agent-tools
+  # build_id=<sha256:64 hex | unknown>` once its init returns (agent-tools'
+  # docs/boundary-with-dotfiles.md, a public contract). Confirmed only when
+  # the newest such line's build_id equals the one in FILE's marker (line 1);
+  # anything else is "not confirmed", never a failure: no log (OpenCode not
+  # started here yet), no line (--pure, a log level above INFO, a rotated
+  # log, an init that threw), another build, or a line outside the v=1 form
+  # (a newer v= included). The line proves that some past start of this
+  # build got through init, not that the latest one did. Only the verdict,
+  # the build_id and a short reason are shown, never a log line. Where the
+  # log lives and how its line wraps the message are OpenCode's (1.18.30:
+  # <data>/opencode/log/opencode.log, data = ${XDG_DATA_HOME:-~/.local/share};
+  # message="..." quoted), so the marker must open the message and its
+  # build_id is cut by its own form, not by the end of the line.
+  opencode_plugin_init_report() {
+    local plugin_file="$1" label="agent-tools plugin personal-agent-tools init" first deployed data_home log line rc=0
+    # Lowercase hex spelled out: a range like a-f may take in other letters
+    # under some locales' collation.
+    local sha='sha256:[0123456789abcdef]{64}'
+    local v1="agent-tools:plugin-init v=1 name=personal-agent-tools build_id=(${sha}|unknown)"
+    local any_re='(^|[[:space:]])message="?agent-tools:plugin-init .*[[:space:]]name=personal-agent-tools([[:space:]]|"|$)'
+    local quoted_re="(^|[[:space:]])message=\"${v1}\"" bare_re="(^|[[:space:]])message=${v1}([[:space:]]|\$)"
+    local marker_re="[[:space:]]build_id=(${sha})([[:space:]]|\$)"
+    first="$(head -n 1 "$plugin_file" 2>/dev/null)" || first=""
+    if [[ "$first" =~ $marker_re ]]; then
+      deployed="${BASH_REMATCH[1]}"
+    else
+      item "$label not confirmed: the deployed file's marker carries no build_id to compare (agent-tools' doctor checks its marker)"
+      return 0
+    fi
+    data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+    if [[ "$data_home" != /* ]]; then
+      item "$label not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in (deployed build_id $deployed)"
+      return 0
+    fi
+    log="${data_home%/}/opencode/log/opencode.log"
+    if [[ ! -e "$log" ]]; then
+      item "$label not confirmed: no OpenCode log yet (not started here; deployed build_id $deployed)"
+      return 0
+    fi
+    line="$(LC_ALL=C grep -a -E -- "$any_re" "$log" 2>/dev/null | tail -n 1)" || rc=$?
+    if [[ "$rc" -eq 1 ]]; then
+      item "$label not confirmed: no init marker in OpenCode's log (not started since the plugin began logging it, started with --pure or a log level above INFO, a rotated log, or an init that threw; deployed build_id $deployed)"
+    elif [[ "$rc" -ne 0 ]]; then
+      item "$label not confirmed: OpenCode's log could not be read (deployed build_id $deployed)"
+    elif ! [[ "$line" =~ $quoted_re ]] && ! [[ "$line" =~ $bare_re ]]; then
+      item "$label not confirmed: the newest init marker is not in the v=1 form this doctor reads (deployed build_id $deployed)"
+    elif [[ "${BASH_REMATCH[2]}" == unknown ]]; then
+      item "$label not confirmed: the newest init marker carries build_id unknown (the plugin could not read its own marker; deployed build_id $deployed)"
+    elif [[ "${BASH_REMATCH[2]}" != "$deployed" ]]; then
+      item "$label not confirmed: the newest init marker is from build_id ${BASH_REMATCH[2]}, not the deployed $deployed (OpenCode not started since the last sync, or a process still on the old build)"
+    else
+      ok "$label confirmed by OpenCode's log (build_id $deployed: some start of this build got through init, not necessarily the latest)"
+    fi
+  }
   for opencode_plugin_name in "${opencode_plugins[@]}"; do
     opencode_stem="${opencode_plugin_name%.js}"
+    if [[ "$opencode_stem" == personal-agent-tools ]]; then
+      opencode_init_note="its init is reported below"
+    else
+      opencode_init_note="its init is not verifiable: only personal-agent-tools logs an init marker, and doctor does not run OpenCode"
+    fi
     if plugin_listed_in "$opencode_listed_active" "$opencode_stem"; then
       warn "agent-tools plugin $opencode_stem is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
     else
-      ok "agent-tools plugin $opencode_plugin_name in the global plugins dir (OpenCode loads it at startup; a successful init is not verifiable yet: doctor does not run OpenCode, agent-tools#343)"
+      ok "agent-tools plugin $opencode_plugin_name in the global plugins dir (OpenCode loads it at startup; $opencode_init_note)"
       if plugin_listed_in "$opencode_listed_inactive" "$opencode_stem"; then
         item "$opencode_stem is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it — it would then load twice"
       fi
     fi
+    if [[ "$opencode_stem" == personal-agent-tools ]]; then
+      opencode_plugin_init_report "$opencode_config_dir/plugins/$opencode_plugin_name"
+    fi
   done
-  unset -f plugin_listed_in opencode_plugin_names
+  unset -f plugin_listed_in opencode_plugin_names opencode_plugin_init_report
 fi
 
 # The local (non-managed) config — provider / model / plugin / mcp — lives in
