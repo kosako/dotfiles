@@ -95,13 +95,19 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
 
 - **ask**(人が頼むこともあるので承認): 作業を捨てる git — `reset --hard`、`clean`、`checkout -- <path>` /
   `checkout <...> .`、`-f` / `--force` / `--discard-changes` つきの `checkout` / `switch`、`restore`、`--force` / `-f` /
-  `+refspec` の `push`(`--force-with-lease` は一致しない)、`branch -D` / `--force` / `-f`。subcommand や option の
-  前後に `*` を置き(`git *reset*--hard*`、`git * clean *`)、`git -C dir` のような global option や、他の引数の後ろの
-  option も拾う。代わりに、そうした command 名を含む commit message などで確認が出ることがある(ask なので害は小さい)。
-  文章に出やすい語(clean / checkout / restore)は前後に空白を置いて `cleanup` などに一致させない。
-- **deny**: 任意の git の `--no-verify` と `git commit -n`(その短縮形)。pre-commit / commit-msg の gate
+  `+refspec` の `push`(`--force-with-lease` は一致しない)、`branch -D` / `--force` / `-f`。option は**単独の語**として
+  照合し(`git *push* -f` と `git *push* -f *`)、subcommand の後ろならどの位置でも、`git -C dir` のような global option が
+  前にあっても拾う。`feature-f` のような branch 名の一部には一致しない。2 文字の代表的な束ね(push の `-uf` / `-fu`、
+  branch の `-df` / `-fd`、checkout と switch の `-qf` / `-fq`)も拾うが、それ以外の束ねと long option の省略形は
+  拾わない(綴りの違いは列挙しない。#315 の教訓)。代わりに、そうした command 名を含む commit message などで確認が
+  出ることがある(ask なので害は小さい)。文章に出やすい語(clean / restore)は前後に空白を置く。template は
+  (subcommand, option) の組から両方の rule を生成する。
+- **hook の skip**: 任意の git の `--no-verify` と `git commit -n`(その短縮形)。pre-commit / commit-msg の gate
   ([git-hook-gates](git-hook-gates.md))を AI tool から飛ばす理由はなく、必要なら人が自分の terminal で実行する。
-  拾わない形: 他の短い option と束ねた `-n`(`-an`)、long option の省略形、`-c core.hooksPath=...`。
+  glob では option と引用の中のデータ(`git commit -m "document --no-verify"`)を区別できないので、**deny** は
+  データが入りえない位置 — command の最後の語、または `git commit` / `git push` の直後 — に限り、それ以外の置き方
+  (global option の後ろ、途中の位置、束ねた `-nm` / `-an` / `-anm`、引用の中での言及)は **ask** にする。
+  拾わない形: 他の束ね、long option の省略形、`-c core.hooksPath=...`。
 - **deny**: 任意の `.agent-context.local.md` への `Edit`(`Edit(//**/.agent-context.local.md)`)。agent は読むだけの
   user の note。`Edit` の deny は Write・NotebookEdit と、path を名指しする Bash の file command / リダイレクトにも効くが、
   自分で file を開く script には効かない。

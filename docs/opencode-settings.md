@@ -120,4 +120,4 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
   こと(secret floor 30 件 + #304 の hook の skip と note の deny 6 件 + personal 既定の `mcp__github` で計 37 件の deny と、
-  1Password の CLI 全体と #304 の作業を捨てる git の ask 26 件を順序込みで exact pin。#315 / #304)。
+  1Password の CLI 全体と #304 の作業を捨てる git・hook の skip の ask 55 件を順序込みで exact pin。#315 / #304)。
