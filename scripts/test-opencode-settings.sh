@@ -81,10 +81,46 @@ fi
 expected_read=$'*=allow\n~/.ssh/*=deny\n~/.aws/*=deny\n~/.config/gh/*=deny\n~/.netrc=deny\n~/.codex/auth.json=deny\n~/.local/share/opencode/auth.json=deny\n*.env=deny\n*.env.*=deny\n*.env.example=allow\n~/.codex/config.toml=ask\n~/.zshrc.local=ask\n~/.config/opencode/opencode.local.json=ask'
 actual_read="$(yq -p json '.permission.read | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_read" == "$expected_read" ]]; then
-  ok "test passed: permission.read is exactly the secret floor (10 rules, ordered)"
+  ok "test passed: permission.read is exactly the secret floor plus #334's config-read asks (13 rules, ordered)"
 else
   fail "test failed: permission.read drifted from the pinned floor; was:"
   printf '%s\n' "$actual_read" >&2
+  status=1
+fi
+
+# 3a2) What the read map decides for real paths (#334, Codex review R2, PR
+#      #338): a leading `~` in a pattern is the home directory (OpenCode
+#      docs) and `*` matches any character, `/` included; last match wins.
+#      Evaluated against a made-up home so the real one never matters: the
+#      config files that may hold secrets ask, look-alikes stay allowed, the
+#      credential stores and .env files stay denied.
+read_rows="$(yq -p json '.permission.read | to_entries | .[] | .key + "\t" + .value' "$config_file")"
+read_home="/fixture-home"
+# opencode_read_decision PATH -> allow | ask | deny (last match wins).
+opencode_read_decision() {
+  local path="$1" key value decision=""
+  while IFS=$'\t' read -r key value; do
+    [[ -z "$key" ]] && continue
+    [[ "$key" == \~/* ]] && key="$read_home/${key#\~/}"
+    # shellcheck disable=SC2254 # the rule IS a glob pattern by contract
+    case "$path" in
+      $key) decision="$value" ;;
+    esac
+  done <<< "$read_rows"
+  printf '%s\n' "$decision"
+}
+read_misses=""
+for read_case in "ask|$read_home/.codex/config.toml" "ask|$read_home/.zshrc.local" "ask|$read_home/.config/opencode/opencode.local.json" \
+  "allow|$read_home/.codex/config.toml.bak" "allow|$read_home/.zshrc" "allow|$read_home/.config/opencode/opencode.json" "allow|$read_home/src/repo/.zshrc.local" \
+  "deny|$read_home/.ssh/id_ed25519" "deny|$read_home/.codex/auth.json" "deny|$read_home/.config/gh/hosts.yml" "deny|app/.env" "allow|app/.env.example"; do
+  read_got="$(opencode_read_decision "${read_case#*|}")"
+  [[ "$read_got" == "${read_case%%|*}" ]] || read_misses+="  ${read_case#*|} -> ${read_got:-<no rule>} (expected ${read_case%%|*})"$'\n'
+done
+if [[ -z "$read_misses" ]]; then
+  ok "test passed: the read map asks for the secret-bearing config files, denies the credential stores and .env, and leaves look-alikes allowed"
+else
+  fail "test failed: the read map decides paths unexpectedly:"
+  printf '%s' "$read_misses" >&2
   status=1
 fi
 
@@ -153,7 +189,7 @@ fi
 #    after `git commit` / `git push` deny, last. OpenCode has no rule that
 #    makes a trailing " *" match the bare command, so those denies list the
 #    bare form too.
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *push* :*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *push* --mirror=ask\ngit *push* --mirror *=ask\ngit *push* --delete=ask\ngit *push* --delete *=ask\ngit *push* -d=ask\ngit *push* -d *=ask\ngit *branch* -M=ask\ngit *branch* -M *=ask\ngit *stash* drop=ask\ngit *stash* drop *=ask\ngit *stash* clear=ask\ngit *stash* clear *=ask\ngit *worktree* --force=ask\ngit *worktree* --force *=ask\ngit *worktree* -f=ask\ngit *worktree* -f *=ask\ngit *--no-verify*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
+expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *push* :*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *push* --mirror=ask\ngit *push* --mirror *=ask\ngit *push* --delete=ask\ngit *push* --delete *=ask\ngit *push* -d=ask\ngit *push* -d *=ask\ngit *branch* -M=ask\ngit *branch* -M *=ask\ngit *stash* drop=ask\ngit *stash* drop *=ask\ngit *stash* clear=ask\ngit *stash* clear *=ask\ngit *worktree remove* --force=ask\ngit *worktree remove* --force *=ask\ngit *worktree remove* -f=ask\ngit *worktree remove* -f *=ask\ngit *--no-verify*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
   ok "test passed: permission.bash is exactly the pinned floor (allow-all, 7 ask incl. gh default and the whole 1Password CLI, 44 read allow-backs as exact + '... *' pairs, #304 / #334's 71 work-discarding git / hook-skip asks, 27 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, keychain password read / dump / export with and without leading options, and #304's hook skips right after git commit / git push; ordered)"
@@ -419,6 +455,10 @@ ask	git branch -D feat
 ask	git branch -df topic
 ask	git -C /tmp/x branch --delete --force feat
 ask	git -C /tmp/x push --mirror origin
+ask	git -C /tmp/x push --delete origin feat
+ask	git -C /tmp/x push -d origin feat
+ask	git -C /tmp/x push origin :feat
+allow	git -C /tmp/x push origin main:main
 ask	git branch -M main
 ask	git stash drop
 ask	git stash clear
@@ -428,6 +468,7 @@ allow	git stash pop
 allow	git stash list
 allow	git worktree add ../wt feat
 allow	git worktree remove ../wt
+allow	git worktree add --force ../wt main
 allow	git branch -m old new
 ask	git commit -m x --no-verify
 ask	git -C /tmp/x commit --no-verify -m x

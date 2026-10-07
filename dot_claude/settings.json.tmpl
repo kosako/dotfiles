@@ -42,7 +42,8 @@
          --discard-changes, restore, push with --force / -f / a +refspec
          (--force-with-lease is not matched), branch -D / --force / -f, and
          (#334) push --mirror / --delete / -d / a :refspec (a remote branch
-         deleted), branch -M, stash drop / clear, worktree with --force / -f.
+         deleted), branch -M, stash drop / clear, worktree remove with --force
+         / -f (not worktree add --force: Codex review R1, PR #338).
          The human does direct these, so approval. An option counts only as a
          word of its own (`git *push* -f`, `git *push* -f *`), wherever it sits
          after its subcommand, and global options may precede the
@@ -122,7 +123,7 @@
 {{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Edit(//**/.agent-context.local.md)" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- $ask := list "Bash(op *)" "Read(~/.codex/config.toml)" "Read(~/.zshrc.local)" "Read(~/.config/opencode/opencode.local.json)" "Bash(git clean *)" "Bash(git * clean *)" "Bash(git restore *)" "Bash(git * restore *)" "Bash(git *checkout* -- *)" "Bash(git *checkout* .)" "Bash(git *push* +*)" "Bash(git *push* :*)" -}}
-{{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") (list "push" "--mirror") (list "push" "--delete") (list "push" "-d") (list "branch" "-M") (list "stash" "drop") (list "stash" "clear") (list "worktree" "--force") (list "worktree" "-f") -}}
+{{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") (list "push" "--mirror") (list "push" "--delete") (list "push" "-d") (list "branch" "-M") (list "stash" "drop") (list "stash" "clear") (list "worktree remove" "--force") (list "worktree remove" "-f") -}}
 {{- $ask = concat $ask (list (printf "Bash(git *%s* %s)" (index . 0) (index . 1)) (printf "Bash(git *%s* %s *)" (index . 0) (index . 1))) -}}
 {{- end -}}
 {{- $ask = append $ask "Bash(git *--no-verify*)" -}}

@@ -168,7 +168,7 @@ section "claude settings GitHub injection guard (#119)"
 #    another (which would keep the length). What the rules decide for real
 #    commands is pinned separately (4c).
 expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
-expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :*)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree* --force)\nBash(git *worktree* --force *)\nBash(git *worktree* -f)\nBash(git *worktree* -f *)\nBash(git *--no-verify*)'
+expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :*)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
 expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github'
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
 expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
@@ -362,6 +362,8 @@ none|git stash pop
 none|git stash list
 none|git worktree add ../wt feat
 none|git worktree remove ../wt
+none|git worktree add --force ../wt main
+none|git worktree add -f ../wt main
 none|git branch -m old new
 none|git push origin main:main
 none|git -C /tmp/x status
@@ -371,6 +373,64 @@ if [[ -z "$decision_misses" ]]; then
 else
   fail "test failed: committed rules decide git commands unexpectedly:"
   printf '%s' "$decision_misses" >&2
+  status=1
+fi
+
+# 4d) What the committed Read rules decide for real paths (#334, Codex review
+#     R2, PR #338), per the documented path rules: `~/path` is from the home
+#     directory, a trailing `/**` covers everything under it, and deny is
+#     checked before ask. Only those two shapes are evaluated; any other Read
+#     rule fails the test instead of being guessed at. A made-up home keeps
+#     the real one out of it.
+claude_read_home="/fixture-home"
+# claude_read_decision PATH -> deny / ask / none under the committed Read rules.
+claude_read_decision() {
+  local kind rule body base
+  for kind in deny ask; do
+    while IFS= read -r rule; do
+      [[ "$rule" == 'Read('*')' ]] || continue
+      body="${rule#Read(}"
+      body="${body%)}"
+      # Only `~/<path>` and `~/<path>/**` (no other wildcard) are evaluated.
+      if [[ "$body" != \~/* || "${body%/\*\*}" == *"*"* ]]; then
+        printf 'unsupported:%s\n' "$body"
+        return 0
+      fi
+      base="$claude_read_home/${body#\~/}"
+      if [[ "$body" == *"/**" ]]; then
+        base="${base%/\*\*}"
+        [[ "$1" == "$base"/* ]] && { printf '%s\n' "$kind"; return 0; }
+      elif [[ "$1" == "$base" ]]; then
+        printf '%s\n' "$kind"
+        return 0
+      fi
+    done < <(yq -p json ".permissions.${kind}[]" "$off_file")
+  done
+  printf 'none\n'
+}
+read_misses=""
+while IFS='|' read -r want path; do
+  [[ -n "$want" ]] || continue
+  got="$(claude_read_decision "$path")"
+  [[ "$got" == "$want" ]] || read_misses+="  $path -> $got (expected $want)"$'\n'
+done <<CASES
+ask|$claude_read_home/.codex/config.toml
+ask|$claude_read_home/.zshrc.local
+ask|$claude_read_home/.config/opencode/opencode.local.json
+none|$claude_read_home/.codex/config.toml.bak
+none|$claude_read_home/.zshrc
+none|$claude_read_home/.config/opencode/opencode.json
+none|$claude_read_home/src/repo/.zshrc.local
+deny|$claude_read_home/.ssh/id_ed25519
+deny|$claude_read_home/.codex/auth.json
+deny|$claude_read_home/.config/gh/hosts.yml
+deny|$claude_read_home/.netrc
+CASES
+if [[ -z "$read_misses" ]]; then
+  ok "test passed: the committed Read rules ask for the secret-bearing config files, deny the credential stores, and leave look-alikes alone (per the documented path rules)"
+else
+  fail "test failed: committed Read rules decide paths unexpectedly:"
+  printf '%s' "$read_misses" >&2
   status=1
 fi
 

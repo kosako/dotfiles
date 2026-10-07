@@ -97,7 +97,7 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
   `checkout <...> .`、`-f` / `--force` / `--discard-changes` つきの `checkout` / `switch`、`restore`、`--force` / `-f` /
   `+refspec` の `push`(`--force-with-lease` は一致しない)、`branch -D` / `--force` / `-f`、#334 で足した `push --mirror` /
   `--delete` / `-d` / `:refspec`(remote の branch の削除)、`branch -M`、`stash drop` / `clear`、`--force` / `-f` つきの
-  `worktree`。option は**単独の語**として
+  `worktree remove`(`worktree add --force` は対象外)。option は**単独の語**として
   照合し(`git *push* -f` と `git *push* -f *`)、subcommand の後ろならどの位置でも、`git -C dir` のような global option が
   前にあっても拾う。`feature-f` のような branch 名の一部には一致しない。2 文字の代表的な束ね(push の `-uf` / `-fu`、
   branch の `-df` / `-fd`、checkout と switch の `-qf` / `-fq`)も拾うが、それ以外の束ねと long option の省略形は
@@ -119,7 +119,7 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
   doctor は値を出さないが、Codex の設定の調査など正当な理由もありうるので、deny ではなく承認。
 
 日常の git(普通の commit / push、`--force-with-lease`、branch の作成・切替・force なしの rename、merge 済みの `-d`、
-`--soft` / mixed の reset、`stash pop` / `list`、force なしの `worktree add` / `remove` など)は止めない。これらの判定は `scripts/test-claude-settings.sh` が、Claude Code の docs の照合規則で git の
+`--soft` / mixed の reset、`stash pop` / `list`、`worktree add`(`--force` つきも)、force なしの `worktree remove` など)は止めない。これらの判定は `scripts/test-claude-settings.sh` が、Claude Code の docs の照合規則で git の
 command の集合に当てて固定する(rule の文面を固定するもので、harness の挙動の証明ではない)。これらは **steering であって
 enforcement boundary ではない**(射程と限界は
 [ai-environment-boundary](ai-environment-boundary.md))。deny の内容と順序は

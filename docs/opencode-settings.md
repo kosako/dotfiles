@@ -56,7 +56,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     足す。作業を捨てる git(`reset --hard`、`clean`、`checkout -- <path>` / `checkout <...> .`、`checkout` / `switch` の
     `-f` / `--force` / `--discard-changes`、`restore`、`push` の `--force` / `-f` / `+refspec`、`branch -D` / `--force` /
     `-f`、#334 で足した `push --mirror` / `--delete` / `-d` / `:refspec`、`branch -M`、`stash drop` / `clear`、`--force` /
-    `-f` つきの `worktree`)と、`--no-verify` / `git commit -n` の置き方のうち `git commit` / `git push` の直後以外は **ask**。option は
+    `-f` つきの `worktree remove`)と、`--no-verify` / `git commit -n` の置き方のうち `git commit` / `git push` の直後以外は **ask**。option は
     単独の語として照合し(`git *push* -f` と `git *push* -f *`)、global option の後ろや他の引数の後ろでも拾い、
     `feature-f` のような branch 名の一部には一致しない。2 文字の代表的な束ね(`-uf` / `-df` / `-qf` など)も拾い、
     それ以外の束ねと省略形は拾わない。`git commit` / `git push` の直後の `--no-verify` と `git commit -n` は **deny** で、
