@@ -323,12 +323,12 @@ section "codex approval-rules baseline (#139)"
 #    sneaking in — or a read rule silently swapped — must fail the test, not
 #    just "some rules exist".
 rules_file="${home:-}/.codex/rules/default.rules"
-expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")\nprefix_rule(pattern=["env"], decision="forbidden")\nprefix_rule(pattern=["printenv"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")\nprefix_rule(pattern=["gh", "auth"], decision="prompt")\nprefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security"], decision="prompt")\nprefix_rule(pattern=["op"], decision="prompt")'
+expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu", "--mirror", "--delete", "-d"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd", "-M"]], decision="prompt")\nprefix_rule(pattern=["git", "stash", ["drop", "clear"]], decision="prompt")\nprefix_rule(pattern=["git", "worktree", "remove", ["--force", "-f"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")\nprefix_rule(pattern=["env"], decision="forbidden")\nprefix_rule(pattern=["printenv"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")\nprefix_rule(pattern=["gh", "auth"], decision="prompt")\nprefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security"], decision="prompt")\nprefix_rule(pattern=["op"], decision="prompt")'
 if [[ ! -f "$rules_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
   status=1
 elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
-  ok "test passed: committed personal renders exactly the rules baseline (9 read-only / local allow rules, then #304's 8 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, ordered; no outward/escalation/credential-display allow, no git clone)"
+  ok "test passed: committed personal renders exactly the rules baseline (9 read-only / local allow rules, then #304 / #334's 10 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, ordered; no outward/escalation/credential-display allow, no git clone)"
 else
   fail "test failed: rules baseline content mismatch; rendered was:"
   cat "$rules_file" >&2
@@ -426,6 +426,14 @@ prompt|git push -f
 prompt|git push -uf origin main
 prompt|git branch -D feat
 prompt|git branch -df topic
+prompt|git push --mirror origin
+prompt|git push --delete origin feat
+prompt|git push -d origin feat
+prompt|git branch -M main
+prompt|git stash drop
+prompt|git stash clear
+prompt|git worktree remove --force ../wt
+prompt|git worktree remove -f ../wt
 prompt|git commit -nm x
 forbidden|git commit --no-verify -m x
 forbidden|git commit -n -m x
@@ -463,6 +471,11 @@ none|git push origin main
 none|git branch -d merged
 none|git reset --soft HEAD~1
 none|git switch main
+none|git stash pop
+none|git worktree add ../wt feat
+none|git worktree remove ../wt
+none|git branch -m old new
+none|git push origin :feat
 allow|git commit -m x --no-verify
 none|git reset HEAD~1 --hard
 none|git -C /tmp/x reset --hard

@@ -582,7 +582,8 @@ capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の�
 30 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件が
 順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を足して計 35 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
-含めて追加)、1Password の CLI 全体(1 件)と #304 の作業を捨てる git と hook の skip(54 件)の計 55 件の無条件 ask、その rule を Claude Code の
+含めて追加)、1Password の CLI 全体(1 件)と #334 の secret を含みうる設定 file の読み取り(3 件)と #304 / #334 の作業を捨てる git と
+hook の skip(71 件)の計 75 件の無条件 ask、その rule を Claude Code の
 docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一の ` *` は bare の command にも一致、deny → ask の順)で git の
 command の集合に当てた判定(作業を捨てる形と代表的な束ね(`-uf` / `-df` / `-qf`)は ask、hook の skip は
 `git commit` / `git push` の直後なら deny でそれ以外(global option・後ろや最後の語・束ね・引用の中の言及)は ask、
@@ -600,7 +601,7 @@ Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、hook capability が全部 false のとき
 apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content(read-only / local の allow 9 と、
-#304 の作業を捨てる git の prompt 8・commit / push 直後の hook の skip の forbidden 2・merge / rebase / am / pull 直後の
+#304 / #334 の作業を捨てる git の prompt 10・commit / push 直後の hook の skip の forbidden 2・merge / rebase / am / pull 直後の
 `--no-verify` の prompt 1、#334 の secret の床の forbidden 6・prompt 3)と gate の独立性(#139)を確認する。`codex` が install されていれば、render した rules を
 `codex execpolicy check`(rules を評価するだけで何も実行しない)に当て、subcommand の直後の作業を捨てる形は prompt、
 直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、prefix で拾えない形
@@ -616,9 +617,9 @@ chezmoi が必要(render job)。
 
 managed `~/.config/opencode/opencode.json`(OpenCode の permission 床・#234)の rendered content を検証する。
 `permission.read` / `permission.bash` の rule map を**順序込みで exact pin**(OpenCode は last-match-wins なので
-順序も契約。read = secret floor の deny 6 + `.env` 系、bash = allow-all の上に外向き・昇格と `gh *` の既定 ask と
+順序も契約。read = secret floor の deny 6 + `.env` 系 + #334 の secret を含みうる設定 file の ask 3、bash = allow-all の上に外向き・昇格と `gh *` の既定 ask と
 1Password の CLI 全体の ask 計 7、read 系 `gh` subcommand の allow 戻し 44、末尾に env dump / gh secret・token 表示 /
-ssh 鍵 / keychain の password の読み出し・dump・export の deny 21 と、#304 の作業を捨てる git と hook の skip の ask 54・
+ssh 鍵 / keychain の password の読み出し・dump・export の deny 21 と、#304 / #334 の作業を捨てる git と hook の skip の ask 71・
 `git commit` / `git push` 直後の hook の skip の deny 6。#240 / #315 / #304)、`permission.edit` が allow-all の上で参照先 note
 `.agent-context.local.md` / `*/.agent-context.local.md` を deny し、名前の似た file は allow のままであること(相対・sub dir・
 絶対の path に docs の glob で当てる。実行中の OpenCode での path の形は未検証。#304)、`permission.external_directory` が `ask`

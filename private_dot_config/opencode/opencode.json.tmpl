@@ -49,7 +49,12 @@
          from the (subcommand, option) pairs below — and the hook skips right
          after `git commit` / `git push` deny, at the end with the other
          denies. OpenCode has no rule that makes a trailing " *" match the
-         bare command, so those denies list the bare form too.
+         bare command, so those denies list the bare form too. #334 extends
+         the set the same way as the Claude floor (push --mirror / --delete /
+         -d / a :refspec, branch -M, stash drop / clear, worktree --force /
+         -f) and asks before reading the config files that may hold secrets
+         (~/.codex/config.toml, ~/.zshrc.local, the local opencode.local.json),
+         like the Claude floor's Read asks.
        - edit (#304): allow-all, but the user-owned reference note
          .agent-context.local.md is deny (agents read it, never write it):
          the bare name for a path relative to the start directory, and the
@@ -91,7 +96,10 @@
       "~/.local/share/opencode/auth.json": "deny",
       "*.env": "deny",
       "*.env.*": "deny",
-      "*.env.example": "allow"
+      "*.env.example": "allow",
+      "~/.codex/config.toml": "ask",
+      "~/.zshrc.local": "ask",
+      "~/.config/opencode/opencode.local.json": "ask"
     },
     "edit": {
       "*": "allow",
@@ -152,10 +160,10 @@
       "curl*": "ask",
       "wget*": "ask",
       "op *": "ask",
-{{- range list "git clean *" "git * clean *" "git restore *" "git * restore *" "git *checkout* -- *" "git *checkout* ." "git *push* +*" }}
+{{- range list "git clean *" "git * clean *" "git restore *" "git * restore *" "git *checkout* -- *" "git *checkout* ." "git *push* +*" "git *push* :*" }}
       {{ . | toJson }}: "ask",
 {{- end }}
-{{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") }}
+{{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") (list "push" "--mirror") (list "push" "--delete") (list "push" "-d") (list "branch" "-M") (list "stash" "drop") (list "stash" "clear") (list "worktree" "--force") (list "worktree" "-f") }}
       {{ printf "git *%s* %s" (index . 0) (index . 1) | toJson }}: "ask",
       {{ printf "git *%s* %s *" (index . 0) (index . 1) | toJson }}: "ask",
 {{- end }}

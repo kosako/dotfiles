@@ -53,7 +53,8 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
   read 系以外の `gh` / `sudo` / `curl` / `wget`)だけで、それ以外(`ssh` / `scp` / `npm publish` など)は
   allow all の既定に落ちる。
 - 破壊的な git・hook の skip・参照先 note への書き込み(#304): 作業を捨てる git(`reset --hard` / `clean` /
-  `checkout --` / `restore` / lease なしの force push / `branch -D` など)は承認、`--no-verify` で gate を飛ばすことと
+  `checkout --` / `restore` / lease なしの force push / `branch -D`、#334 で足した mirror push・remote の branch の削除・
+  `branch -M`・`stash drop` / `clear`・force つきの `worktree remove` など)は承認、`--no-verify` で gate を飛ばすことと
   `.agent-context.local.md` への書き込みは deny。Claude Code は managed の permissions
   ([claude-settings](claude-settings.md))、OpenCode は `permission` の床の `bash` と `edit`
   ([opencode-settings](opencode-settings.md))、Codex は承認 rules の `prompt` / `forbidden` で実装している。Codex の
