@@ -49,11 +49,15 @@
        inside the sandbox without approval): dumping the environment, showing
        the gh token, and reading / dumping / exporting keychain passwords are
        "forbidden"; the 1Password CLI is "prompt" (a human does direct it,
-       e.g. private-backup --identity-command). A prefix cannot reach a
-       subcommand behind leading options (`security -q find-...`, `gh -h x
-       auth ...`), so the whole `security` program is "prompt" as the net
-       under the forbidden subcommands; gh's option placements the Claude
-       floor denies stay uncovered here. doctor's Codex rules probes include
+       e.g. private-backup --identity-command). A prefix matches fixed
+       tokens only, so the common single leading flag (`security -q` / `-v`)
+       is listed for the keychain subcommands, and any other option sequence
+       — or a token flag that does not come right after `gh auth status`
+       (`--hostname x --show-token`) — is caught by a program-level "prompt"
+       net instead (the whole `security` program, the whole `gh auth
+       status`; Codex review R1, PR #337). Options placed before `auth`
+       (`gh -R x auth ...`), which the Claude floor denies as a whole, stay
+       uncovered here. doctor's Codex rules probes include
        these families, so an allow piled up for them is reported.
 
        Gating (template self-gate, NOT a module `requires` — #184 lesson):
@@ -85,7 +89,9 @@ prefix_rule(pattern=["env"], decision="forbidden")
 prefix_rule(pattern=["printenv"], decision="forbidden")
 prefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")
 prefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")
+prefix_rule(pattern=["gh", "auth", "status"], decision="prompt")
 prefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")
+prefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")
 prefix_rule(pattern=["security"], decision="prompt")
 prefix_rule(pattern=["op"], decision="prompt")
 {{ end -}}
