@@ -28,7 +28,10 @@
 
        Destructive git and hook skips (#304, after agent-tools#204 left
        them to the hosts' permissions; the Claude and OpenCode floors carry
-       the same set): work-discarding git is "prompt" and a hook skip is
+       the same set; #334 added push --mirror / --delete / -d, branch -M,
+       stash drop / clear and worktree remove --force / -f, while a
+       :refspec push cannot be written as a fixed prefix token):
+       work-discarding git is "prompt" and a hook skip is
        "forbidden". Codex rules match a PREFIX of the argv only, and the
        strictest matching rule wins (measured with `codex execpolicy check`
        on 0.159.3), so a forbidden / prompt rule outranks the `git commit`
@@ -80,8 +83,10 @@ prefix_rule(pattern=["git", "clean"], decision="prompt")
 prefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")
 prefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")
 prefix_rule(pattern=["git", "restore"], decision="prompt")
-prefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu"]], decision="prompt")
-prefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], decision="prompt")
+prefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu", "--mirror", "--delete", "-d"]], decision="prompt")
+prefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd", "-M"]], decision="prompt")
+prefix_rule(pattern=["git", "stash", ["drop", "clear"]], decision="prompt")
+prefix_rule(pattern=["git", "worktree", "remove", ["--force", "-f"]], decision="prompt")
 prefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")
 prefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")
 prefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")
