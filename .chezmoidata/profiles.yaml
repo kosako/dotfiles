@@ -59,7 +59,10 @@ profiles:
       # #73: opt in to the report-only monitoring layer. doctor runs
       # agent-tools' status.sh (--json, read-only, contract v3) and summarizes
       # its health (clean / checks / stale / sync conflicts) as warnings. Still
-      # report-only / exit 0; never clones / pulls / syncs. A non-standard
+      # report-only / exit 0; never clones / pulls / syncs. The same opt-in
+      # lets doctor run the deployed personal-usage-reader's --help / --check
+      # (it validates the usage-reader config and never runs the reader;
+      # #303). A non-standard
       # checkout path is resolved via AGENT_TOOLS in the local, non-tracked
       # ~/.zshrc.local (the concrete path is never baked into tracked files; see
       # docs/local-overrides.md).

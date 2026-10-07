@@ -149,8 +149,9 @@ export AGENT_TOOLS="$HOME/path/to/agent-tools"
 - 監視層自体を動かすかどうかの opt-in は `enableAgentToolsStatus`(profile capability、tracked)
   で、AGENT_TOOLS(checkout path の解決)とは別レイヤ。capability が off なら presence までで
   status は読まない。
-- 共通原則どおり managed 側は AGENT_TOOLS 未設定でも壊れない(既定 path に fallback し、
-  不在なら report-only の warn)。
+- 共通原則どおり managed 側は AGENT_TOOLS 未設定でも壊れない(既定 path に fallback する。不在は
+  `enableAgentToolsStatus=true` の profile だけ report-only の warn、それ以外の profile では想定どおりの状態として
+  中立表示。#258)。
 
 ## Git global ignore: managed-only(local 無し、#248)
 

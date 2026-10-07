@@ -88,7 +88,7 @@ jobs:
       - name: npmrc hardening tests
         run: ./scripts/test-npmrc.sh
 
-      - name: doctor orphan tests
+      - name: doctor tests
         run: ./scripts/test-doctor.sh
 
       - name: private-backup secrets-gate tests
@@ -138,10 +138,10 @@ jobs:
       - name: chezmoi render and managed-set tests
         run: ./scripts/test-render.sh
 
-      - name: claude settings sandbox content tests
+      - name: claude settings content tests
         run: ./scripts/test-claude-settings.sh
 
-      - name: codex settings hook registration tests
+      - name: codex settings content tests
         run: ./scripts/test-codex-settings.sh
 
       - name: opencode settings permission floor tests

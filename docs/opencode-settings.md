@@ -127,10 +127,12 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   ない(同じ build の古い行が残っていれば、その後の起動が init に失敗しても「確認できた」になる)。
   `opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も
   報告する(`~/.zshrc.local` に export があれば、非対話 shell 由来として中立表示)。
-- `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash の rule map を順序込みで、
-  autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
+- `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash / edit の rule map を順序込みで、
+  `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
-  assert する(#240): doctor の Codex probe 30 本(外向き・昇格 27 + 認証情報の表示 3、#287)+ 短縮 flag / alias / read 形の約 100 本。期待値は
+  assert する(#240): doctor の Codex probe 30 本(外向き・昇格 27 + 認証情報の表示 3、#287)に、短縮 flag / alias / read 形、
+  認証情報を扱う command の置き方(#315)、#304 の git の形を足した集合。edit の rule map も同じ glob で、参照先 note と
+  名前の似た file の path に当てて判定する(#304)。期待値は
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている

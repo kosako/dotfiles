@@ -582,7 +582,7 @@ capability(`enforceAiSandbox` / `gateGitHubMcp`)を flip し、secret floor の�
 30 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件が
 順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` を足して計 35 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
-含めて追加)、1Password の CLI 全体と #304 の作業を捨てる git と hook の skip の 54 件の無条件 ask、その rule を Claude Code の
+含めて追加)、1Password の CLI 全体(1 件)と #304 の作業を捨てる git と hook の skip(54 件)の計 55 件の無条件 ask、その rule を Claude Code の
 docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一の ` *` は bare の command にも一致、deny → ask の順)で git の
 command の集合に当てた判定(作業を捨てる形と代表的な束ね(`-uf` / `-df` / `-qf`)は ask、hook の skip は
 `git commit` / `git push` の直後なら deny でそれ以外(global option・後ろや最後の語・束ね・引用の中の言及)は ask、

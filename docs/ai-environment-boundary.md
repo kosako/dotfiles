@@ -82,14 +82,14 @@ AI skills / agents project は、`dotfiles` の policy を前提に動く。poli
 - `dotfiles` は AI skills / agents project の path を表示してよい。
 - `dotfiles` は AI skills / agents project を自動更新しない。
 - `dotfiles` は AI skills / agents project の secret を読まない。
-- `dotfiles` の `doctor` は `~/src/agent/agent-tools`(既定。非標準な checkout 先は `AGENT_TOOLS` env で override 可)の presence を report する(不在を warn にするのは `enableAgentToolsStatus=true` の profile だけ。agent-tools を配備しない work では中立表示。#258)。status(`scripts/status.sh --json`、report-only、`contract_version: 3`)の読み取りは別 repo のコード実行になるため、`enableAgentToolsStatus` capability での明示 opt-in 時のみ実行し、安全な summary(`conflict` / `stale` / `deployed_but_inactive` / 失敗 check 等は warning)を出す(Issue #7、v3 追従は #194)。clone / pull / sync は一切しない。
+- `dotfiles` の `doctor` は `~/src/agent/agent-tools`(既定。非標準な checkout 先は `AGENT_TOOLS` env で override 可)の presence を report する(不在を warn にするのは `enableAgentToolsStatus=true` の profile だけ。agent-tools を配備しない work では中立表示。#258)。status(`scripts/status.sh --json`、report-only、`contract_version: 3`)の読み取りは別 repo のコード実行になるため、`enableAgentToolsStatus` capability での明示 opt-in 時のみ実行し、安全な summary(`conflict` / `stale` / `deployed_but_inactive` / 失敗 check 等は warning)を出す(Issue #7、v3 追従は #194)。同じ opt-in の下でだけ、配備済みの残量の読み取り口の wrapper(`personal-usage-reader`)の `--help` / `--check` も実行し、managed な設定 file が契約どおりかを判定させる(読み取り口そのものは起動しない。#303、[agent-tools-usage-reader](agent-tools-usage-reader.md))。clone / pull / sync は一切しない。
 - AI skills / agents project は `dotfiles` の capability を前提条件として参照してよい。
 - AI skills / agents project が install、network tunnel、secret access を必要とする場合は、`dotfiles` 側の capability と approval policy に従う。
 
 連携は 2 層に分かれる。混同しない:
 
 - **配布層**(AI skills / agents project → AI tool home): skill / instruction を `~/.claude` / `~/.codex` などへ配置するのは AI skills / agents project 側の責務(build / sync)。`dotfiles` はこの**配布物**(skill / instruction)を作らない。配布の正本は当該 project 側の docs。(例外: ハーネス設定 ── Claude の `~/.claude/settings.json`、Codex の `~/.codex/hooks.json` / `~/.codex/rules/default.rules`、OpenCode の `~/.config/opencode/opencode.json` ── は配布物ではなく**環境設定**なので、personal の public-safe な範囲だけ `dotfiles` が control plane として管理する。上の「dotfiles が持つもの」参照。)
-- **監視層**(`dotfiles` → AI skills / agents project): `dotfiles` の `doctor` が presence と、opt-in 時に status の health を read-only で覗くだけ(上の箇条書き)。書き込み・clone・sync はしない。
+- **監視層**(`dotfiles` → AI skills / agents project): `dotfiles` の `doctor` が presence と、opt-in 時に status の health と usage reader の設定の判定(wrapper の `--check`)を read-only で覗くだけ(上の箇条書き)。書き込み・clone・sync はしない。
 
 監視層の status 読み取りは personal で on(`enableAgentToolsStatus: true`、#73)。work profile は既定 off のまま。doctor は status を `status.sh --root <checkout>` で pin して読む(#73 当時の status.sh は既定で cwd を検査し、未 pin だと doctor の cwd を誤検査して空 repo を偽報告した。agent-tools#305 以降は既定の root が script の属する repo になり cwd に依存しないが、検査対象を明示するため pin は続ける)。非標準 checkout の path は `AGENT_TOOLS`(override 機構は #71)を非追跡の `~/.zshrc.local` に置く(具体 path は tracked file に焼かない。[local-overrides](local-overrides.md))。
 
