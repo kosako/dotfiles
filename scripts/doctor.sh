@@ -856,6 +856,57 @@ if [[ "$npm_mode" == "enforce" && -f "$HOME/.npmrc" ]]; then
   fi
 fi
 
+# Probe commands shared by the AI-harness accumulation watchers (#139,
+# #334): every outward-action / escalation family the Approval Required list
+# in docs/ai-policy.md names, plus the raw-write escape hatches (gh api POST,
+# gh secret) and credential-display commands; then the secret-reading
+# families the Claude / OpenCode floors stop (env dump, keychain password
+# read / dump / export, the 1Password CLI). Fixed strings, split into argv
+# tokens where evaluated. test-doctor.sh pins the Codex set (both lists).
+outward_probe_commands=(
+  "git push"
+  "git clone https://example.invalid/repo"
+  "gh pr create"
+  "gh pr merge"
+  "gh pr comment"
+  "gh pr edit"
+  "gh pr close"
+  "gh issue create"
+  "gh issue comment"
+  "gh issue edit"
+  "gh issue close"
+  "gh issue delete"
+  "gh issue transfer"
+  "gh release create"
+  "gh release edit"
+  "gh release delete"
+  "gh release upload"
+  "gh repo delete"
+  "gh repo edit"
+  "gh repo archive"
+  "gh repo rename"
+  "gh api --method POST repos/o/r/issues"
+  "gh secret set"
+  "gh auth login"
+  "gh auth status --show-token"
+  "gh auth status -t"
+  "gh auth token"
+  "sudo -v"
+  "curl https://example.invalid"
+  "wget https://example.invalid"
+)
+secret_read_probe_commands=(
+  "env"
+  "printenv"
+  "op read op://example/item/field"
+  "op item get example"
+  "security find-generic-password -s example.invalid -w"
+  "security -q find-generic-password -s example.invalid -w"
+  "security find-internet-password -s example.invalid -w"
+  "security dump-keychain"
+  "security export -k login.keychain"
+)
+
 # Codex permission-surface watchers (#139), extracted as functions: the AI
 # policy section is the most-edited part of doctor (probe/watch additions in
 # #139/#181/#137) and sat five levels of nesting deep inline. Both are
@@ -957,55 +1008,11 @@ report_codex_rules_probes() {
     # strings. The probe approach never reads the rules files here (the paths
     # are only passed to codex) and only OUR fixed probe strings are echoed.
     if command -v codex >/dev/null 2>&1; then
-      # Policy-derived probe set: every outward-action / escalation family the
-      # Approval Required list in docs/ai-policy.md names, plus the raw-write
-      # escape hatches (gh api POST, gh secret), credential-display commands,
-      # and the secret-reading families the Claude / OpenCode floors stop
-      # (env dump, keychain password read / dump / export, the 1Password CLI;
-      # #315, #334) — so an allow piled up for those shows here too.
+      # Policy-derived probe set (the shared lists above; #315 / #334 added the
+      # secret-reading families so an allow piled up for them shows here too).
       # Keep in sync with the pin in test-doctor.sh (the fake-shim log asserts
       # this exact set so a dropped probe fails the test).
-      outward_probes=(
-        "git push"
-        "git clone https://example.invalid/repo"
-        "gh pr create"
-        "gh pr merge"
-        "gh pr comment"
-        "gh pr edit"
-        "gh pr close"
-        "gh issue create"
-        "gh issue comment"
-        "gh issue edit"
-        "gh issue close"
-        "gh issue delete"
-        "gh issue transfer"
-        "gh release create"
-        "gh release edit"
-        "gh release delete"
-        "gh release upload"
-        "gh repo delete"
-        "gh repo edit"
-        "gh repo archive"
-        "gh repo rename"
-        "gh api --method POST repos/o/r/issues"
-        "gh secret set"
-        "gh auth login"
-        "gh auth status --show-token"
-        "gh auth status -t"
-        "gh auth token"
-        "sudo -v"
-        "curl https://example.invalid"
-        "wget https://example.invalid"
-        "env"
-        "printenv"
-        "op read op://example/item/field"
-        "op item get example"
-        "security find-generic-password -s example.invalid -w"
-        "security -q find-generic-password -s example.invalid -w"
-        "security find-internet-password -s example.invalid -w"
-        "security dump-keychain"
-        "security export -k login.keychain"
-      )
+      outward_probes=("${outward_probe_commands[@]}" "${secret_read_probe_commands[@]}")
       outward_allowed=0
       probe_failures=0
       for probe in "${outward_probes[@]}"; do
@@ -1109,6 +1116,145 @@ report_codex_projects_trust() {
   item "Codex projects trust: $trusted_total path(s) trusted (report-only; codex-owned config.toml read with yq's TOML decoder, project keys only)"
 }
 
+# Claude permission surface (#334, S1-1). Claude's managed floor has no ask
+# for outward actions (the agent's own push / PR flow would stall on it), and
+# "Yes, and don't ask again" piles allow rules up per project in
+# <repo>/.claude/settings.local.json (a shared <repo>/.claude/settings.json
+# can carry them too) — the same erosion #139 found on the Codex side. So,
+# as with the Codex rules probes, the shared outward probe commands are
+# evaluated against the allow rules of those files in the repos directly
+# under the standard project roots (and this repo when it is under HOME),
+# matched the way Claude Code classifies a Bash rule (claude_bash_rule_matches
+# below); the bare tool `Bash` allows every command. A probe a deny / ask of
+# the live ~/.claude/settings.json or of the project's own two files covers is
+# skipped (deny and ask beat allow, whichever file holds them). Report-only and contents-blind: a rule saved from an
+# approved command can carry a token, so only the file and the probe names
+# are shown, never a rule. Deeper checkouts (clones of clones) are not read.
+# claude_bash_rule_matches BODY CMD — whether a Bash rule body matches CMD,
+# classified the way Claude Code does (read from 2.1.293): a body ending in
+# `:*` is the legacy prefix form (CMD is the prefix, or starts with it plus a
+# space; whitespace runs collapse; a `*` inside that prefix stays literal, so
+# such a rule never matches a real command); a body with an unescaped `*` is
+# a wildcard (`*` any text, `\*` a literal star, `/**/` any directories, a
+# trailing " *" that is the only wildcard also matches the bare command);
+# anything else is exact.
+claude_bash_rule_matches() {
+  local body="$1" cmd="$2" legacy_re='^(.+):\*$' prefix re="" i c stars=0
+  if [[ "$body" =~ $legacy_re ]]; then
+    prefix="${BASH_REMATCH[1]//$'\t'/ }"
+    while [[ "$prefix" == *"  "* ]]; do prefix="${prefix//  / }"; done
+    cmd="${cmd//$'\t'/ }"
+    while [[ "$cmd" == *"  "* ]]; do cmd="${cmd//  / }"; done
+    [[ "$cmd" == "$prefix" || "$cmd" == "$prefix "* ]]
+    return
+  fi
+  local pattern="${body#"${body%%[![:space:]]*}"}"
+  pattern="${pattern%"${pattern##*[![:space:]]}"}"
+  for ((i = 0; i < ${#pattern}; i++)); do
+    c="${pattern:i:1}"
+    if [[ "$c" == '\' && "${pattern:i+1:1}" == [*\\] ]]; then
+      re+="[${pattern:i+1:1}]"
+      i=$((i + 1))
+      continue
+    fi
+    if [[ "$c" == / && "${pattern:i+1:3}" == '**/' ]]; then
+      while [[ "${pattern:i+1:3}" == '**/' ]]; do
+        i=$((i + 3))
+        stars=$((stars + 2))
+      done
+      re+='/(.*/)?'
+      continue
+    fi
+    case "$c" in
+      '*')
+        re+='.*'
+        stars=$((stars + 1))
+        ;;
+      [A-Za-z0-9\ _-]) re+="$c" ;;
+      '^') re+='\^' ;;
+      ']') re+='[]]' ;;
+      *) re+="[$c]" ;;
+    esac
+  done
+  if [[ "$stars" -eq 0 ]]; then
+    [[ "$cmd" == "$body" ]]
+    return
+  fi
+  [[ "$stars" -eq 1 && "$re" == *" .*" ]] && re="${re%" .*"}( .*)?"
+  re="^${re}\$"
+  [[ "$cmd" =~ $re ]]
+}
+# claude_rules_cover RULES CMD — whether any Bash rule in RULES (one per line;
+# `Bash` alone or `Bash(<body>)`) matches CMD.
+claude_rules_cover() {
+  local rule body
+  while IFS= read -r rule; do
+    case "$rule" in
+      Bash) return 0 ;;
+      'Bash('*')')
+        body="${rule#Bash(}"
+        body="${body%)}"
+        claude_bash_rule_matches "$body" "$2" && return 0
+        ;;
+    esac
+  done <<< "$1"
+  return 1
+}
+report_claude_project_allows() {
+  local floor_file="$HOME/.claude/settings.json" floor_rules="" stop_rules project_stops dirs dir file allows probe hits hit_count shown files_read=0 files_flagged=0
+  if [[ -f "$floor_file" ]]; then
+    floor_rules="$(yq -p json -r '(.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str")' "$floor_file" 2>/dev/null)" || {
+      item "Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)"
+      return 0
+    }
+  fi
+  # This repo counts only when it sits under HOME (where the user's Claude
+  # sessions run; a fixture HOME elsewhere does not read the real checkout).
+  dirs=()
+  [[ "$DOTFILES_ROOT" == "${HOME%/}"/* ]] && dirs+=("$DOTFILES_ROOT")
+  for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*/; do
+      [[ -d "$file" ]] && dirs+=("${file%/}")
+    done
+  done
+  for dir in ${dirs[@]+"${dirs[@]}"}; do
+    # The project's own deny / ask (either file) beat its allows too.
+    stop_rules="$floor_rules"
+    for file in "$dir/.claude/settings.local.json" "$dir/.claude/settings.json"; do
+      [[ -f "$file" ]] || continue
+      project_stops="$(yq -p json -r '(.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str")' "$file" 2>/dev/null)" || continue
+      stop_rules+=$'\n'"$project_stops"
+    done
+    for file in "$dir/.claude/settings.local.json" "$dir/.claude/settings.json"; do
+      [[ -f "$file" ]] || continue
+      if ! allows="$(yq -p json -r '.permissions.allow // [] | .[] | select(tag == "!!str")' "$file" 2>/dev/null)"; then
+        item "the allow rules of $(printf '%q' "$file") could not be read (not JSON?); not checked (contents never shown)"
+        continue
+      fi
+      files_read=$((files_read + 1))
+      [[ -n "$allows" ]] || continue
+      hits=()
+      for probe in "${outward_probe_commands[@]}"; do
+        claude_rules_cover "$allows" "$probe" || continue
+        claude_rules_cover "$stop_rules" "$probe" && continue
+        hits+=("$probe")
+      done
+      hit_count="${#hits[@]}"
+      [[ "$hit_count" -gt 0 ]] || continue
+      files_flagged=$((files_flagged + 1))
+      shown="$(printf "'%s', " "${hits[@]:0:5}")"
+      shown="${shown%, }"
+      [[ "$hit_count" -gt 5 ]] && shown+=" and $((hit_count - 5)) more"
+      action "$hit_count outward probe(s) auto-allowed for Claude by project-level allow rules in $(printf '%q' "$file"): $shown — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" \
+        "edit $(printf '%q' "$file"): remove the allow rules covering those commands (approve them per use instead)"
+    done
+  done
+  if [[ "$files_flagged" -eq 0 ]]; then
+    ok "no project-level Claude allow rule covers an outward probe (${#outward_probe_commands[@]} probes over $files_read settings file(s) in this repo and the repos directly under the standard project roots)"
+  fi
+}
+
 section "AI policy"
 if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
   ok "enableAiPolicy=true (policy docs + report-only checks, plus the managed Codex approval-rules baseline where codex-settings is active; see docs/ai-policy.md)"
@@ -1133,6 +1279,13 @@ if [[ "$(capability_value "$profile" enableAiPolicy)" == "true" ]]; then
     report_codex_projects_trust
   else
     item "Codex-side permission files not managed for this profile (codex-settings module inactive)"
+  fi
+  # Claude-side accumulation (#334): only where claude-settings manages the
+  # Claude floor the watcher compares against.
+  if module_active_for_profile "$profile" claude-settings; then
+    report_claude_project_allows
+  else
+    item "Claude project-level allows not watched for this profile (claude-settings module inactive)"
   fi
 else
   ok "AI policy checks disabled for profile"
