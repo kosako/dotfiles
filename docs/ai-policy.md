@@ -47,8 +47,8 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
 
 - secret の読取 deny: Claude Code は managed の `permissions.deny`(claude-settings module が active な
   personal)、OpenCode は `permission` の床(opencode-settings module が active な personal。project / local
-  設定で上書きできる)で実装する。Codex の rules
-  baseline は command の allowlist で、相当する床を持たない(方針のみ)。
+  設定で上書きできる)で実装する。Codex は承認 rules の baseline に、同じ種類の command の forbidden / prompt を
+  prefix で持つ(#334)。file の読み取りを止める rule は書けないので、Codex の床は command 側だけ。
 - 外向き操作・昇格の都度承認: OpenCode が ask にするのは床に列挙した command(`git push` / `git clone` /
   read 系以外の `gh` / `sudo` / `curl` / `wget`)だけで、それ以外(`ssh` / `scp` / `npm publish` など)は
   allow all の既定に落ちる。
@@ -72,7 +72,7 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
 
 その他の既定:
 
-- secret store は直接読ませない。Claude と OpenCode の床で、keychain の password の読み出し・dump・export と gh token の表示は deny、1Password の CLI(`op`。読み出し系の `op read` / `op item get` / `op run` などは global option の位置を問わないので program 単位)は ask にそろえている(Codex は baseline に無いので承認が要る、#315)。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
+- secret store は直接読ませない。Claude と OpenCode の床で、keychain の password の読み出し・dump・export と gh token の表示は deny、1Password の CLI(`op`。読み出し系の `op read` / `op item get` / `op run` などは global option の位置を問わないので program 単位)は ask にそろえている(#315)。Codex は rules の baseline で、env の一覧・gh token の表示・keychain の password の読み出し・dump・export を forbidden、`security` 全体と 1Password の CLI を prompt にしている(prefix にしか一致しないので、前に option を置く形は `security` 全体の prompt で受ける。#334)。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
 - token は短命・scope限定にする。
 - work / client では会社・クライアントポリシーを優先する。
 - install / network tunnel / production access は明示承認が必要。

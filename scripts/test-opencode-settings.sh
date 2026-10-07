@@ -168,8 +168,10 @@ fi
 #     rendered map is also EVALUATED against a fixed command set with
 #     OpenCode's rule semantics (glob, last match wins). Expected decisions
 #     are written here by hand from docs/ai-policy.md — never derived from
-#     the map. The command set is the Codex outward probe list of doctor.sh
-#     (keep in sync; test-doctor.sh pins that list) plus the forms the audit
+#     the map. The command set is the Codex probe list of doctor.sh (keep in
+#     sync; test-doctor.sh pins that list; the outward probes are the rows
+#     without a tab, expecting ask, and the secret-read probes of #334 carry
+#     their own expected decision) plus the forms the audit
 #     found: short-flag `gh api`, aliases, and the reads that must stay
 #     allowed. Only `*` is a metacharacter in OpenCode patterns; bash `case`
 #     also interprets `?`, `[`, `]` and `\`, so a rule containing those is
@@ -239,6 +241,11 @@ gh auth login
 sudo -v
 curl https://example.invalid
 wget https://example.invalid
+ask	op read op://example/item/field
+ask	op item get example
+deny	security find-generic-password -s example.invalid -w
+deny	security -q find-generic-password -s example.invalid -w
+deny	security find-internet-password -s example.invalid -w
 deny	gh secret set
 ask	git push origin main
 ask	gh pr merge 1

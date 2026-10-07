@@ -959,7 +959,10 @@ report_codex_rules_probes() {
     if command -v codex >/dev/null 2>&1; then
       # Policy-derived probe set: every outward-action / escalation family the
       # Approval Required list in docs/ai-policy.md names, plus the raw-write
-      # escape hatches (gh api POST, gh secret) and credential-display commands.
+      # escape hatches (gh api POST, gh secret), credential-display commands,
+      # and the secret-reading families the Claude / OpenCode floors stop
+      # (env dump, keychain password read / dump / export, the 1Password CLI;
+      # #315, #334) — so an allow piled up for those shows here too.
       # Keep in sync with the pin in test-doctor.sh (the fake-shim log asserts
       # this exact set so a dropped probe fails the test).
       outward_probes=(
@@ -993,6 +996,15 @@ report_codex_rules_probes() {
         "sudo -v"
         "curl https://example.invalid"
         "wget https://example.invalid"
+        "env"
+        "printenv"
+        "op read op://example/item/field"
+        "op item get example"
+        "security find-generic-password -s example.invalid -w"
+        "security -q find-generic-password -s example.invalid -w"
+        "security find-internet-password -s example.invalid -w"
+        "security dump-keychain"
+        "security export -k login.keychain"
       )
       outward_allowed=0
       probe_failures=0

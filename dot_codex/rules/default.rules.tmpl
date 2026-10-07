@@ -44,6 +44,18 @@
        so the reference-note write deny of the other floors has no
        counterpart. Steering, not a boundary.
 
+       Secret floor (#334, the Claude / OpenCode secret floor's command side;
+       before it these commands matched no rule, so Codex's default ran them
+       inside the sandbox without approval): dumping the environment, showing
+       the gh token, and reading / dumping / exporting keychain passwords are
+       "forbidden"; the 1Password CLI is "prompt" (a human does direct it,
+       e.g. private-backup --identity-command). A prefix cannot reach a
+       subcommand behind leading options (`security -q find-...`, `gh -h x
+       auth ...`), so the whole `security` program is "prompt" as the net
+       under the forbidden subcommands; gh's option placements the Claude
+       floor denies stay uncovered here. doctor's Codex rules probes include
+       these families, so an allow piled up for them is reported.
+
        Gating (template self-gate, NOT a module `requires` — #184 lesson):
        enableAiPolicy=false renders EMPTY and chezmoi removes the managed target
        (a `requires:` gate would leave an already-applied file lingering).
@@ -69,4 +81,11 @@ prefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt"
 prefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")
 prefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")
 prefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")
+prefix_rule(pattern=["env"], decision="forbidden")
+prefix_rule(pattern=["printenv"], decision="forbidden")
+prefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")
+prefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")
+prefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")
+prefix_rule(pattern=["security"], decision="prompt")
+prefix_rule(pattern=["op"], decision="prompt")
 {{ end -}}

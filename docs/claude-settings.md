@@ -80,7 +80,7 @@ managed set でこの gate を回帰固定している。
 `gh auth status --show-token|-t|-at`、`auth` の前か直後に option を置いた `gh auth`(`gh -* auth *` /
 `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)と、keychain の password の読み出し・dump・export(`security
 find-generic-password` / `find-internet-password` / `dump-keychain` / `export`。`-q` などの前置 option を
-挟む形も)— 後の 2 群は #315 で OpenCode の床と Codex の probe に揃えた)を常時出力する。**Read 側 deny を
+挟む形も)— 後の 2 群は #315 で OpenCode の床に揃え、#334 で Codex の rules の床と doctor の Codex rules の probe にも同じ種類を足した)を常時出力する。**Read 側 deny を
 主軸**とする(Read tool はコマンド経由でない読取にも効く。Bash matcher は `head` / `xxd` /
 `python open()` 等の等価経路で迂回できる leaky steering なので、path ごとの Bash 列挙は
 意図的にしない。#136)。`gateGitHubMcp=true`(personal 既定)で
