@@ -3084,13 +3084,16 @@ trust_level = "untrusted"
 trust_level = "trusted"
 TOML
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token" \
+    CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token,env,op read op://example/item/field,security -q find-generic-password -s example.invalid -w" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
     && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
     && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status --show-token'" <<< "$aip_out" \
     && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status -t'" <<< "$aip_out" \
     && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth token'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'env'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'op read op://example/item/field'" <<< "$aip_out" \
+    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'security -q find-generic-password -s example.invalid -w'" <<< "$aip_out" \
     && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
     && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
     && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
@@ -3293,7 +3296,7 @@ trust_level = "trusted"
 TOML
 aip_probe_log="$fixture_home/.codex-probe-log"
 : > "$aip_probe_log"
-expected_probes=$'curl https://example.invalid\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nsudo -v\nwget https://example.invalid'
+expected_probes=$'curl https://example.invalid\nenv\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nop item get example\nop read op://example/item/field\nprintenv\nsecurity -q find-generic-password -s example.invalid -w\nsecurity dump-keychain\nsecurity export -k login.keychain\nsecurity find-generic-password -s example.invalid -w\nsecurity find-internet-password -s example.invalid -w\nsudo -v\nwget https://example.invalid'
 if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log" \
     "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
@@ -3309,7 +3312,7 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     status=1
   fi
   if probe_diff="$(diff <(printf '%s\n' "$expected_probes") <(sort "$aip_probe_log"))"; then
-    ok "test passed: doctor evaluated exactly the pinned outward/escalation/credential-display probe set (30 probes)"
+    ok "test passed: doctor evaluated exactly the pinned outward/escalation/credential-display/secret-read probe set (39 probes)"
   else
     printf '%s\n' "$probe_diff" >&2
     fail "test failed: outward/escalation/credential-display probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"

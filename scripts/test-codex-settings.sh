@@ -313,18 +313,22 @@ section "codex approval-rules baseline (#139)"
 #    renders the vetted READ-ONLY baseline, followed by #304's prompt rules
 #    for work-discarding git, forbidden rules for hook skips right after
 #    commit / push, and a prompt for --no-verify right after merge / rebase
-#    / am / pull (they only tighten: no new allow). Pinned as the EXACT ordered file
+#    / am / pull, then #334's secret floor (forbidden for env dumps, gh
+#    token display and keychain password read / dump / export, also behind
+#    `security -q` / `-v`; prompt for the whole security program, the whole
+#    `gh auth` and the 1Password CLI). They only tighten:
+#    no new allow. Pinned as the EXACT ordered file
 #    content (same spirit as the settings.json deny exact-set test): this is a
 #    security baseline, so an outward/escalation/credential-display allow
 #    sneaking in — or a read rule silently swapped — must fail the test, not
 #    just "some rules exist".
 rules_file="${home:-}/.codex/rules/default.rules"
-expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")'
+expected_rules=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")\nprefix_rule(pattern=["env"], decision="forbidden")\nprefix_rule(pattern=["printenv"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")\nprefix_rule(pattern=["gh", "auth"], decision="prompt")\nprefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security"], decision="prompt")\nprefix_rule(pattern=["op"], decision="prompt")'
 if [[ ! -f "$rules_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
   status=1
 elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
-  ok "test passed: committed personal renders exactly the rules baseline (9 read-only / local allow rules, then #304's 8 prompt, 2 forbidden and 1 more prompt git rules, ordered; no outward/escalation/credential-display allow, no git clone)"
+  ok "test passed: committed personal renders exactly the rules baseline (9 read-only / local allow rules, then #304's 8 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, ordered; no outward/escalation/credential-display allow, no git clone)"
 else
   fail "test failed: rules baseline content mismatch; rendered was:"
   cat "$rules_file" >&2
@@ -429,6 +433,26 @@ forbidden|git push --no-verify
 prompt|git merge --no-verify topic
 prompt|git rebase --no-verify main
 prompt|git pull --no-verify
+forbidden|env
+forbidden|env FOO=1 make
+forbidden|printenv HOME
+forbidden|gh auth token
+forbidden|gh auth status --show-token
+forbidden|gh auth status -t
+forbidden|security find-generic-password -s example.invalid -w
+forbidden|security find-internet-password -s example.invalid -w
+forbidden|security dump-keychain
+forbidden|security export -k login.keychain
+forbidden|security -q find-generic-password -s example.invalid -w
+forbidden|security -v dump-keychain
+prompt|security -i find-generic-password -s example.invalid -w
+prompt|security find-identity -v -p codesigning
+prompt|gh auth status --hostname github.com --show-token
+prompt|gh auth --hostname=github.com token
+prompt|gh auth status
+prompt|gh auth login
+prompt|op read op://example/item/field
+prompt|op item get example
 allow|git commit -m x
 allow|git commit --amend --no-edit
 allow|git checkout main
