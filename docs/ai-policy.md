@@ -72,7 +72,7 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
 
 その他の既定:
 
-- secret store は直接読ませない。Claude と OpenCode の床で、keychain の password の読み出し・dump・export と gh token の表示は deny、1Password の CLI(`op`。読み出し系の `op read` / `op item get` / `op run` などは global option の位置を問わないので program 単位)は ask にそろえている(#315)。Codex は rules の baseline で、env の一覧・gh token の表示(`gh auth token` と、表示の flag が `gh auth status` の直後にある形)・keychain の password の読み出し・dump・export(前に `-q` / `-v` を置く形を含む)を forbidden、`security` 全体・`gh auth status` 全体・1Password の CLI を prompt にしている。prefix は固定の token にしか一致しないので、それ以外の option の置き方は program 単位の prompt で受け、`auth` より前に option を置いた `gh` は拾わない(#334)。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
+- secret store は直接読ませない。Claude と OpenCode の床で、keychain の password の読み出し・dump・export と gh token の表示は deny、1Password の CLI(`op`。読み出し系の `op read` / `op item get` / `op run` などは global option の位置を問わないので program 単位)は ask にそろえている(#315)。Codex は rules の baseline で、env の一覧・gh token の表示(`gh auth token` と、表示の flag が `gh auth status` の直後にある形)・keychain の password の読み出し・dump・export(前に `-q` / `-v` を置く形を含む)を forbidden、`security` 全体・`gh auth` 全体・1Password の CLI を prompt にしている。prefix は固定の token にしか一致しないので、それ以外の option の置き方は program 単位の prompt で受け、`auth` より前に option を置いた `gh` は拾わない(`gh` 全体を prompt にすると読み取り系の `gh` の allow まで止まるため。#334)。secret の正しい供給方式は [secrets](secrets.md) に規約化してあるが、これは利用者本人の実行時注入であって AI agent への自動供給ではない。dotfiles 自体は secret を fetch しない。
 - token は短命・scope限定にする。
 - work / client では会社・クライアントポリシーを優先する。
 - install / network tunnel / production access は明示承認が必要。
