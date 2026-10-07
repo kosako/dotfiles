@@ -209,17 +209,22 @@ fi
 #     " *" that is the rule's only wildcard also matches the bare command, and
 #     deny is checked before ask. A body ending in `:*` is the legacy prefix
 #     form instead (the command is the prefix or starts with it plus a
-#     space), where a `*` inside the prefix stays literal — read from Claude
-#     Code 2.1.293 (#334), and the reason a rule may not mix the two (4e).
+#     space, runs of spaces / tabs in both read as one space), where a `*`
+#     inside the prefix stays literal — read from Claude Code 2.1.293 (#334),
+#     and the reason a rule may not mix the two (4e).
 #     This pins the rule TEXT against that reading; it does not prove the
 #     harness — the matchers stay steering.
 # claude_rule_matches BODY CMD — whether a Bash rule body (inside Bash(...))
 # matches CMD. A body with a regex-special character other than `*`, `.`
 # and `+` fails the test instead of being guessed at.
 claude_rule_matches() {
-  local body="$1" cmd="$2" re="" i c legacy_re='^(.+):\*$'
+  local body="$1" cmd="$2" re="" i c legacy_re='^(.+):\*$' prefix
   if [[ "$body" =~ $legacy_re ]]; then
-    [[ "$cmd" == "${BASH_REMATCH[1]}" || "$cmd" == "${BASH_REMATCH[1]} "* ]]
+    prefix="${BASH_REMATCH[1]//$'\t'/ }"
+    while [[ "$prefix" == *"  "* ]]; do prefix="${prefix//  / }"; done
+    cmd="${cmd//$'\t'/ }"
+    while [[ "$cmd" == *"  "* ]]; do cmd="${cmd//  / }"; done
+    [[ "$cmd" == "$prefix" || "$cmd" == "$prefix "* ]]
     return
   fi
   if [[ "$body" == *" *" && "${body%" *"}" != *"*"* && "$cmd" == "${body%" *"}" ]]; then
@@ -447,6 +452,7 @@ fi
 #     rule never matches a real command (`git *push* :*` was one, PR #338).
 #     Both renders, every list.
 dead_rules=""
+legacy_tab=$'\t'
 for rendered in "$off_file" "$on_file"; do
   while IFS= read -r rule; do
     [[ "$rule" == 'Bash('*':*)' ]] || continue
@@ -460,6 +466,32 @@ if [[ -z "$dead_rules" ]]; then
 else
   fail "test failed: Bash rules that mix * with the trailing :* never match in Claude Code:"
   printf '%s' "$dead_rules" >&2
+  status=1
+fi
+# The emulator's own legacy-prefix reading (no committed rule uses the form,
+# so the decision cases above cannot pin it; Codex review R1, PR #339).
+legacy_misses=""
+while IFS='|' read -r want body cmd; do
+  [[ -n "$want" ]] || continue
+  got=no
+  claude_rule_matches "$body" "$cmd" && got=yes
+  [[ "$got" == "$want" ]] || legacy_misses+="  Bash($body) vs '$cmd' -> $got (expected $want)"$'\n'
+done <<CASES
+yes|git push:*|git push
+yes|git push:*|git push origin main
+yes|git push:*|git  push origin main
+yes|gh${legacy_tab}pr merge:*|gh pr merge 12
+yes|gh  pr merge:*|gh pr${legacy_tab}merge
+no|git push:*|git pushx
+no|git push:*|git -C x push
+no|git *push* :*|git push origin :feat
+no|git *push* :*|git push
+CASES
+if [[ -z "$legacy_misses" ]]; then
+  ok "test passed: the emulator reads the legacy :* prefix the way Claude Code does (prefix or prefix + space, whitespace runs as one, * literal)"
+else
+  fail "test failed: the emulator's legacy :* prefix reading drifted:"
+  printf '%s' "$legacy_misses" >&2
   status=1
 fi
 
