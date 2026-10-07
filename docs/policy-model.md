@@ -130,7 +130,9 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 - GitHub 由来の deny は専用 capability を作らず **3 tier**(#119 Phase 2 task B): never-legit な
   secret 読取(`~/.ssh` と credential-store の `~/.aws` / `~/.config/gh` / `~/.netrc` /
   `~/.codex/auth.json`(#136)/ `~/.local/share/opencode/auth.json`(#234)/ `printenv` /
-  `env` / `gh secret` / `gh api *secrets*`)は **無条件 deny**(`enforceAiSandbox` を待たず常時)。file 系は **Read 側 deny を主軸**とし、
+  `env` / `gh secret` / `gh api *secrets*` / gh token の表示(`gh auth token` / `gh auth status --show-token` など)/
+  keychain の password の読み出し・dump・export(`security`)(#315))は **無条件 deny**(`enforceAiSandbox` を待たず常時。
+  正確な一覧は [claude-settings](claude-settings.md))。file 系は **Read 側 deny を主軸**とし、
   Bash matcher の path 列挙はしない(等価経路で迂回できる leaky steering。#136)。main / master 直 push と `.env` 読取 deny + release /
   branch-protection ask は **`enforceAiSandbox` に相乗り**(human-legit ゆえ常時 ON にしない)。
 - tier3 の main-push deny(`git push * main|master`)は **leaky steering**: ` main` 末尾の explicit
@@ -306,7 +308,8 @@ skill は `~/.claude/skills` を OpenCode が直接読むので再配布しな�
   module 非 active は「not managed」。乖離は managed drift section。
 - **状態**: personal のみ列挙、work は非列挙。plugin による hook parity と相互レビュー契約への追加は
   OpenCode 導入 Phase 2(agent-tools#295)で、plugin は agent-tools が `plugins/personal-*.js` として配る。
-  dotfiles の doctor は plugins dir の配置と二重読込を静的に確認する(#263。OpenCode は起動しない)。詳細は [opencode-settings](opencode-settings.md)。
+  dotfiles の doctor は plugins dir の配置と二重読込を静的に確認し(#263)、`personal-agent-tools` の init を既存の OpenCode の
+  log の目印で「確認できた / 未確認」と報告する(#311)。どちらも OpenCode は起動しない。詳細は [opencode-settings](opencode-settings.md)。
 
 ## Git global ignore(`git-ignore` module、#248)
 

@@ -194,7 +194,7 @@ chezmoi execute-template --source ~/dotfiles '{{ .profile }}'                 # 
 - unknown profile / module / capability は fail closed にする。
 - `doctor` は副作用を持たない。`preflight` は導入前の危険検知に限定する。
 - package install / GUI app install / macOS defaults / secret fetch / network tunnel / Git remote mutation / 既存 home 設定の上書きは、暗黙には実行しない。
-- 別 repository(agent-tools)の status 取得は、別 repo のコード実行になるため `enableAgentToolsStatus` での明示 opt-in 時のみ行う([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md))。
+- 別 repository(agent-tools)の status 取得と、残量の読み取り口の wrapper の `--help` / `--check` の実行は、別 repo のコード実行になるため `enableAgentToolsStatus` での明示 opt-in 時のみ行う([docs/ai-environment-boundary.md](docs/ai-environment-boundary.md))。
 
 ## repository の構成
 
