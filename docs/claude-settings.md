@@ -96,7 +96,8 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
 - **ask**(人が頼むこともあるので承認): 作業を捨てる git — `reset --hard`、`clean`、`checkout -- <path>` /
   `checkout <...> .`、`-f` / `--force` / `--discard-changes` つきの `checkout` / `switch`、`restore`、`--force` / `-f` /
   `+refspec` の `push`(`--force-with-lease` は一致しない)、`branch -D` / `--force` / `-f`、#334 で足した `push --mirror` /
-  `--delete` / `-d` / `:refspec`(remote の branch の削除)、`branch -M`、`stash drop` / `clear`、`--force` / `-f` つきの
+  `--delete` / `-d` / `:refspec`(remote の branch の削除。rule は `git *push* :**`: 末尾が `:*` だと Claude Code は旧式の
+  prefix として読み、その前の `*` を展開しないので一致しない。2.1.293 の実装から確認、test-claude-settings の 4e が混在を弾く。起動時に Claude Code が「この `:*` は wildcard として一致する」と注記するが、それが意図どおり)、`branch -M`、`stash drop` / `clear`、`--force` / `-f` つきの
   `worktree remove`(`worktree add --force` は対象外)。option は**単独の語**として
   照合し(`git *push* -f` と `git *push* -f *`)、subcommand の後ろならどの位置でも、`git -C dir` のような global option が
   前にあっても拾う。`feature-f` のような branch 名の一部には一致しない。2 文字の代表的な束ね(push の `-uf` / `-fu`、
