@@ -59,6 +59,9 @@ capabilities:
   gateGitHubMcp:
     type: boolean
     implemented: true
+  gateUnusedClaudeMcp:
+    type: boolean
+    implemented: true
   enableGitHubIsolatedReader:
     type: boolean
     implemented: true

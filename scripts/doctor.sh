@@ -1394,6 +1394,25 @@ else
   ok "Claude Code native sandbox not enforced via managed settings (enforceAiSandbox=false)"
 fi
 
+section "Claude MCP exposure (report-only)"
+# gateUnusedClaudeMcp (#341) denies, in the managed ~/.claude/settings.json, the
+# MCP that Claude Code is connected to but does not use day to day: the
+# claude.ai hosted connectors Gmail / Google Calendar / Google Drive / Claude
+# Docs (whole servers) and the Notion plugin's write tools with no or rare use.
+# Exposure reduction only — it binds Claude Code, not the web / mobile chat, and
+# is best-effort / steering, not an enforcement boundary. Safety-hardening
+# polarity like gateGitHubMcp, so it is absent from the forbidden table.
+# Report-only and contents-blind (the live file is not probed here).
+if [[ "$(capability_value "$profile" gateUnusedClaudeMcp)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    ok "gateUnusedClaudeMcp=true; managed ~/.claude/settings.json denies the claude.ai Gmail / Google Calendar / Google Drive / Claude Docs connectors and the rarely used Notion write tools (exposure reduction for Claude Code only, not a boundary)"
+  else
+    warn "gateUnusedClaudeMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)"
+  fi
+else
+  ok "gateUnusedClaudeMcp not active (false)"
+fi
+
 section "GitHub injection guard (report-only)"
 # gateGitHubMcp / enableGitHubIsolatedReader are safety-hardening capabilities for
 # the GitHub runtime prompt-injection defense (epic #119). Like enforceAiSandbox

@@ -148,6 +148,26 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   PreToolUse hook 登録を live 化。両 home 同一 body)、work=false。github MCP は現状未構成
   なので deny は実質 no-op = 将来 MCP を足したとき先回りで deny する defense-in-depth。
 
+## Claude MCP exposure (`gateUnusedClaudeMcp`)
+
+Claude Code に接続されていても日常で使っていない MCP を露出から外す capability(#341)。
+
+- `gateUnusedClaudeMcp`(boolean): managed `~/.claude/settings.json` の `permissions.deny` に次の 21 件を出す。
+  - claude.ai の hosted connector 4 つを server 単位で: `mcp__claude_ai_Gmail` / `mcp__claude_ai_Google_Calendar` /
+    `mcp__claude_ai_Google_Drive` / `mcp__claude_ai_Claude_Docs`。
+  - Notion plugin の書込 tool のうち、利用が無いかまれな 17 個(`mcp__plugin_Notion_notion__<tool>`)。毎日使う
+    `notion-update-page` / `notion-create-pages` と読取系は出さない。正確な一覧は template と
+    `scripts/test-claude-settings.sh` の exact pin。
+- 根拠は 2026-09-01〜10-08 の Claude Code の transcript の集計(4 つの connector は 0 回、Notion は update-page と
+  fetch が大半)。まれに使う 3 つ(move-pages / duplicate-page / create-file-upload)は、ask が人に届くと確かめたら
+  ask へ移す予定。
+- **極性は `gateGitHubMcp` と同じ**(安全強化型)。権限を付与しないので `environment_kind_forbidden_capabilities`
+  には**入れない**。
+- 効くのは Claude Code だけ。claude.ai の web / mobile の chat は connector をそのまま使える(connector 自体を外すのは
+  claude.ai 側の操作で、ここでは扱わない)。deny は steering で、enforcement boundary ではない。効くのは
+  `claude-settings` module が active な profile だけ。dangling は doctor が report。
+- **状態**: personal=true、work=false(会社の Mac の MCP の利用は測っていない)。
+
 ## quality loop hooks(`enableQualityLoopHooks`)
 
 hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**する capability(#199)。

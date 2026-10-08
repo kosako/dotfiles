@@ -153,7 +153,9 @@ section "claude settings GitHub injection guard (#119)"
 #    is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
 #    one position argument data cannot take (--no-verify or -n right after
 #    `git commit`, --no-verify right after `git push`) and the Edit deny on
-#    any .agent-context.local.md, so the deny is those 34 + mcp__github = 35
+#    any .agent-context.local.md, so the deny is those 34 + mcp__github = 35,
+#    followed by gateUnusedClaudeMcp's 21 (#341, ON for personal: the four
+#    claude.ai connectors as whole servers, then 17 Notion write tools) = 56
 #    (the floor present even with enforceAiSandbox off is
 #    the core of Phase 2 task B). The ask block is the whole 1Password CLI
 #    (`op *`: global options can sit anywhere, so the program is the unit;
@@ -169,12 +171,16 @@ section "claude settings GitHub injection guard (#119)"
 #    commands is pinned separately (4c).
 expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
 expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :*)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github'
+expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp__claude_ai_Google_Drive\nmcp__claude_ai_Claude_Docs'
+for notion_tool in notion-create-comment notion-create-attachment notion-create-database notion-create-view notion-update-view notion-update-data-source notion-create-folder notion-update-folder notion-restore-pages notion-convert-page-to-skill notion-upload-skill notion-spawn-session notion-send-message-to-session notion-stop-session notion-move-pages notion-duplicate-page notion-create-file-upload; do
+  expected_unused_mcp+=$'\nmcp__plugin_Notion_notion__'"$notion_tool"
+done
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github\n'"$expected_unused_mcp"
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
 expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
 ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP (35, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (75, ordered; enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (75, ordered; enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -505,6 +511,35 @@ if yq -p json '.' "$both_file" >/dev/null 2>&1 \
 else
   fail "test failed: both gates on produced invalid JSON or missing matchers"
   status=1
+fi
+
+# 6c) gateUnusedClaudeMcp=false (#341): none of its 21 denies render, the JSON
+#     stays valid, and the daily Notion writes are never denied either way.
+unused_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-unused.XXXXXX")"
+tmp_roots+=("$unused_src")
+make_flipped_source "$unused_src"
+flip_personal_capability "$unused_src/src" gateUnusedClaudeMcp false
+unused_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$unused_root")
+if ! render_personal_into "$unused_src/src" "$unused_root"; then
+  fail "test failed: personal apply (gateUnusedClaudeMcp=false) did not render"
+  exit 1
+fi
+unused_file="$unused_root/home/.claude/settings.json"
+if yq -p json '.' "$unused_file" >/dev/null 2>&1 \
+  && ! grep -Fq 'mcp__claude_ai_' "$unused_file" \
+  && ! grep -Fq 'mcp__plugin_Notion_notion__' "$unused_file" \
+  && grep -Fq '"mcp__github"' "$unused_file"; then
+  ok "test passed: gateUnusedClaudeMcp=false renders none of its denies (valid JSON, github MCP deny kept)"
+else
+  fail "test failed: gateUnusedClaudeMcp=false still renders its denies (or invalid JSON)"
+  status=1
+fi
+if grep -Fq 'notion-update-page' "$off_file" || grep -Fq 'notion-create-pages' "$off_file"; then
+  fail "test failed: a daily Notion write (notion-update-page / notion-create-pages) is denied"
+  status=1
+else
+  ok "test passed: the daily Notion writes (notion-update-page / notion-create-pages) are not denied"
 fi
 
 # 7) Bypass negative test. The static command-string matchers are steering, NOT
