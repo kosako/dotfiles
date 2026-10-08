@@ -3782,6 +3782,23 @@ else
 fi
 rm -rf "$cl_home/src/personal/dotfiles"
 
+# CL-7) this repo under HOME but outside the standard roots is read only as
+#       "this repo", and HOME is compared in normalized form: the copy at
+#       ~/dotfiles runs with a HOME spelled with a doubled slash (Codex review
+#       R4, PR #340) -> its action appears.
+copy_repo_fixture "$cl_home/dotfiles"
+cl_write "$cl_home/dotfiles/.claude/settings.local.json" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
+cl_home_dbl="${cl_home%/*}//${cl_home##*/}"
+if cl_out="$(HOME="$cl_home_dbl" "$cl_home/dotfiles/scripts/doctor.sh" personal 2>&1)" \
+  && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/cl-home/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+  ok "test passed: this repo under HOME outside the standard roots is read (HOME compared normalized)"
+else
+  printf '%s\n' "$cl_out" >&2
+  fail "test failed: this repo under HOME outside the standard roots must be read"
+  status=1
+fi
+rm -rf "$cl_home/dotfiles"
+
 # CL-U) the matcher itself, on shapes the probes cannot reach (no probe holds
 #       a backslash, a star, `^` or `]`, or a run of spaces): extracted from
 #       doctor.sh and run in a subshell, each pair one match and one miss

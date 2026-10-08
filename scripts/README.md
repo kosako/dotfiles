@@ -403,7 +403,7 @@ query だけを実機で実行する(書き込みはしない)。
   1 つに詰める、wildcard でも rule と command の空白と tab の連続を 1 つに読む、同じ file の deny も allow に勝つ、改行を含む rule は 1 つのまま(floor の複数行の ask が `Bash` 単体に読めない、
   allow の末尾の改行は落とす)、JSON でない file は item(中身を出さない)、深い checkout は読まない、file の中の canary を出さない。
   floor が止める allow だけなら ok(読んだ file の数)、読めない file があれば ok を出さず「clean ではない」の item、HOME の下の
-  標準の root に置いたこの repo の写しは 1 回だけ読む、floor の file が無ければ全部 warn、floor が読めなければ not checked、work は
+  標準の root に置いたこの repo の写しは 1 回だけ読む、標準の root の外(`~/dotfiles`)の写しも `//` を含む HOME で読む、floor の file が無ければ全部 warn、floor が読めなければ not checked、work は
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
