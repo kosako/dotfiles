@@ -3933,6 +3933,20 @@ else
   status=1
 fi
 
+# CL-4b) a floor of two JSON documents (not one JSON value; yq would read
+#        each) is unreadable too, so its first document's deny of the bare
+#        tool cannot hide the project allows (Codex review R6, PR #340).
+printf '%s\n%s\n' '{"permissions":{"deny":["Bash"]}}' '{}' > "$cl_home/.claude/settings.json"
+if cl_out="$(cl_run)" \
+  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+  && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+  ok "test passed: a floor of more than one JSON document is not read (no false clean)"
+else
+  printf '%s\n' "$cl_out" >&2
+  fail "test failed: a floor of more than one JSON document must not be read"
+  status=1
+fi
+
 # CL-5) work does not manage the Claude floor (claude-settings inactive) ->
 #       not watched, whatever is on disk.
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
