@@ -1131,28 +1131,39 @@ report_codex_projects_trust() {
 # approved command can carry a token, so only the file and the probe names
 # are shown, never a rule. Deeper checkouts (clones of clones) are not read.
 # claude_bash_rule_matches BODY CMD — whether a Bash rule body matches CMD,
-# classified the way Claude Code does (read from 2.1.293): a body ending in
-# `:*` is the legacy prefix form (CMD is the prefix, or starts with it plus a
-# space; whitespace runs collapse; a `*` inside that prefix stays literal, so
-# such a rule never matches a real command); a body with an unescaped `*` is
-# a wildcard (`*` any text, `\*` a literal star, `/**/` any directories, a
-# trailing " *" that is the only wildcard also matches the bare command);
-# anything else is exact.
+# classified the way Claude Code does (read from 2.1.293). The body is first
+# unescaped (`\(` `\)` `\\`), then: a body ending in `:*` is the legacy
+# prefix form when what precedes it is non-empty and has no line break (CMD
+# is the prefix, or starts with it plus a space; whitespace runs collapse; a
+# `*` inside that prefix stays literal, so such a rule never matches a real
+# command); any other body ending in `:*` is exact; a body with an unescaped
+# `*` is a wildcard (trimmed; `*` any text, `\*` a literal star, `/**/` any
+# directories, a trailing " *" that is the only wildcard also matches the
+# bare command); anything else is exact.
 claude_bash_rule_matches() {
-  local body="$1" cmd="$2" legacy_re='^(.+):\*$' prefix re="" i c stars=0
-  if [[ "$body" =~ $legacy_re ]]; then
-    prefix="${BASH_REMATCH[1]//$'\t'/ }"
+  local body="$1" cmd="$2" bs='\' lp='(' rp=')' prefix pattern re="" i c stars=0
+  # Unquoted replacements: bash 3.2 keeps the quotes of a quoted one.
+  body="${body//"$bs$lp"/$lp}"
+  body="${body//"$bs$rp"/$rp}"
+  body="${body//"$bs$bs"/$bs}"
+  if [[ "$body" == *":*" ]]; then
+    prefix="${body%:\*}"
+    if [[ -z "$prefix" || "$prefix" == *[$'\n\r']* ]]; then
+      [[ "$cmd" == "$body" ]]
+      return
+    fi
+    prefix="${prefix//$'\t'/ }"
     while [[ "$prefix" == *"  "* ]]; do prefix="${prefix//  / }"; done
     cmd="${cmd//$'\t'/ }"
     while [[ "$cmd" == *"  "* ]]; do cmd="${cmd//  / }"; done
     [[ "$cmd" == "$prefix" || "$cmd" == "$prefix "* ]]
     return
   fi
-  local pattern="${body#"${body%%[![:space:]]*}"}"
+  pattern="${body#"${body%%[![:space:]]*}"}"
   pattern="${pattern%"${pattern##*[![:space:]]}"}"
   for ((i = 0; i < ${#pattern}; i++)); do
     c="${pattern:i:1}"
-    if [[ "$c" == '\' && "${pattern:i+1:1}" == [*\\] ]]; then
+    if [[ "$c" == "$bs" && "${pattern:i+1:1}" == [*\\] ]]; then
       re+="[${pattern:i+1:1}]"
       i=$((i + 1))
       continue
@@ -1184,60 +1195,118 @@ claude_bash_rule_matches() {
   re="^${re}\$"
   [[ "$cmd" =~ $re ]]
 }
-# claude_rules_cover RULES CMD — whether any Bash rule in RULES (one per line;
-# `Bash` alone or `Bash(<body>)`) matches CMD.
+# claude_rules_cover CMD [RULE...] — whether any of the Bash rules matches
+# CMD: the bare tool (`Bash`, `Bash()`, `Bash(*)`) matches everything; a
+# rule whose closing parenthesis is escaped is malformed (Claude Code skips
+# it); other tools' rules are ignored.
 claude_rules_cover() {
-  local rule body
-  while IFS= read -r rule; do
+  local cmd="$1" rule body trailing
+  shift
+  for rule in "$@"; do
     case "$rule" in
-      Bash) return 0 ;;
+      Bash | 'Bash()' | 'Bash(*)') return 0 ;;
       'Bash('*')')
         body="${rule#Bash(}"
         body="${body%)}"
-        claude_bash_rule_matches "$body" "$2" && return 0
+        trailing="${body##*[!\\]}"
+        (( ${#trailing} % 2 == 0 )) || continue
+        claude_bash_rule_matches "$body" "$cmd" && return 0
         ;;
     esac
-  done <<< "$1"
+  done
   return 1
 }
+# claude_read_rules FILE — fill claude_allow_rules and claude_stop_rules (deny
+# + ask) with the string entries of FILE's permission lists, one element per
+# JSON string: NUL-delimited, so a rule holding a line break stays one rule.
+# Returns 1 when FILE is not JSON of the expected shape (an object whose
+# permissions is an object of arrays) or a rule holds a NUL.
+claude_read_rules() {
+  local rule expr='(tag == "!!map" and (.permissions == null or (.permissions | tag) == "!!map") and ([.permissions.allow, .permissions.deny, .permissions.ask] | all_c(. == null or tag == "!!seq"))) as $ok | select($ok or error("unexpected shape")) | (.permissions.allow // [] | .[] | select(tag == "!!str") | "A" + .), ((.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str") | "S" + .)'
+  claude_allow_rules=()
+  claude_stop_rules=()
+  yq -p json -o json -0 -r "$expr" "$1" >/dev/null 2>&1 || return 1
+  while IFS= read -r -d '' rule; do
+    case "$rule" in
+      A*) claude_allow_rules+=("${rule#A}") ;;
+      S*) claude_stop_rules+=("${rule#S}") ;;
+    esac
+  done < <(yq -p json -o json -0 -r "$expr" "$1" 2>/dev/null)
+}
 report_claude_project_allows() {
-  local floor_file="$HOME/.claude/settings.json" floor_rules="" stop_rules project_stops dirs dir file allows probe hits hit_count shown files_read=0 files_flagged=0
+  local floor_file="$HOME/.claude/settings.json" floor_stops=() stop_rules dirs root dir seen dup file kind allows probe hits hit_count shown
+  local home_dir local_allows shared_allows local_read shared_read files_read=0 files_unreadable=0 files_flagged=0
   if [[ -f "$floor_file" ]]; then
-    floor_rules="$(yq -p json -r '(.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str")' "$floor_file" 2>/dev/null)" || {
+    if ! claude_read_rules "$floor_file"; then
       item "Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)"
       return 0
-    }
+    fi
+    floor_stops=(${claude_stop_rules[@]+"${claude_stop_rules[@]}"})
   fi
   # This repo counts only when it sits under HOME (where the user's Claude
   # sessions run; a fixture HOME elsewhere does not read the real checkout).
+  # A directory reached twice (this repo under a standard root, a symlink)
+  # is read once.
+  # HOME is compared in the spelling `pwd` gives DOTFILES_ROOT (a HOME with
+  # a doubled or trailing slash would never match as typed).
   dirs=()
-  [[ "$DOTFILES_ROOT" == "${HOME%/}"/* ]] && dirs+=("$DOTFILES_ROOT")
-  for dir in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
-    [[ -d "$dir" ]] || continue
-    for file in "$dir"/*/; do
-      [[ -d "$file" ]] && dirs+=("${file%/}")
+  home_dir="$(CDPATH='' cd -- "$HOME" 2>/dev/null && pwd)" || home_dir="$HOME"
+  [[ "$DOTFILES_ROOT" == "${home_dir%/}"/* ]] && dirs+=("$DOTFILES_ROOT")
+  for root in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
+    [[ -d "$root" ]] || continue
+    for dir in "$root"/*/; do
+      [[ -d "$dir" ]] || continue
+      dir="${dir%/}"
+      dup=0
+      for seen in ${dirs[@]+"${dirs[@]}"}; do
+        if [[ "$dir" -ef "$seen" ]]; then
+          dup=1
+          break
+        fi
+      done
+      [[ "$dup" -eq 1 ]] || dirs+=("$dir")
     done
   done
   for dir in ${dirs[@]+"${dirs[@]}"}; do
-    # The project's own deny / ask (either file) beat its allows too.
-    stop_rules="$floor_rules"
-    for file in "$dir/.claude/settings.local.json" "$dir/.claude/settings.json"; do
+    # The deny / ask of either project file beat the allows of both.
+    stop_rules=(${floor_stops[@]+"${floor_stops[@]}"})
+    local_allows=()
+    shared_allows=()
+    local_read=0
+    shared_read=0
+    for kind in local shared; do
+      file="$dir/.claude/settings.json"
+      [[ "$kind" == local ]] && file="$dir/.claude/settings.local.json"
       [[ -f "$file" ]] || continue
-      project_stops="$(yq -p json -r '(.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str")' "$file" 2>/dev/null)" || continue
-      stop_rules+=$'\n'"$project_stops"
-    done
-    for file in "$dir/.claude/settings.local.json" "$dir/.claude/settings.json"; do
-      [[ -f "$file" ]] || continue
-      if ! allows="$(yq -p json -r '.permissions.allow // [] | .[] | select(tag == "!!str")' "$file" 2>/dev/null)"; then
-        item "the allow rules of $(printf '%q' "$file") could not be read (not JSON?); not checked (contents never shown)"
+      if ! claude_read_rules "$file"; then
+        item "the permission rules of $(printf '%q' "$file") could not be read (not JSON of the expected shape?); not checked (contents never shown)"
+        files_unreadable=$((files_unreadable + 1))
         continue
       fi
       files_read=$((files_read + 1))
-      [[ -n "$allows" ]] || continue
+      stop_rules+=(${claude_stop_rules[@]+"${claude_stop_rules[@]}"})
+      if [[ "$kind" == local ]]; then
+        local_allows=(${claude_allow_rules[@]+"${claude_allow_rules[@]}"})
+        local_read=1
+      else
+        shared_allows=(${claude_allow_rules[@]+"${claude_allow_rules[@]}"})
+        shared_read=1
+      fi
+    done
+    for kind in local shared; do
+      if [[ "$kind" == local ]]; then
+        [[ "$local_read" -eq 1 && "${#local_allows[@]}" -gt 0 ]] || continue
+        file="$dir/.claude/settings.local.json"
+        allows=("${local_allows[@]}")
+      else
+        [[ "$shared_read" -eq 1 && "${#shared_allows[@]}" -gt 0 ]] || continue
+        file="$dir/.claude/settings.json"
+        allows=("${shared_allows[@]}")
+      fi
       hits=()
       for probe in "${outward_probe_commands[@]}"; do
-        claude_rules_cover "$allows" "$probe" || continue
-        claude_rules_cover "$stop_rules" "$probe" && continue
+        claude_rules_cover "$probe" "${allows[@]}" || continue
+        claude_rules_cover "$probe" ${stop_rules[@]+"${stop_rules[@]}"} && continue
         hits+=("$probe")
       done
       hit_count="${#hits[@]}"
@@ -1250,8 +1319,10 @@ report_claude_project_allows() {
         "edit $(printf '%q' "$file"): remove the allow rules covering those commands (approve them per use instead)"
     done
   done
-  if [[ "$files_flagged" -eq 0 ]]; then
+  if [[ "$files_flagged" -eq 0 && "$files_unreadable" -eq 0 ]]; then
     ok "no project-level Claude allow rule covers an outward probe (${#outward_probe_commands[@]} probes over $files_read settings file(s) in this repo and the repos directly under the standard project roots)"
+  elif [[ "$files_flagged" -eq 0 ]]; then
+    item "Claude project-level allows partly checked: no outward probe auto-allowed in the $files_read file(s) read, but $files_unreadable could not be read — not a clean result"
   fi
 }
 

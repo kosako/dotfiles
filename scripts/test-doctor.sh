@@ -3664,9 +3664,11 @@ rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
 #     "don't ask again" saves an allow rule into the project's
 #     .claude/settings.local.json; doctor evaluates the outward probes against
 #     the allow rules of the repos directly under the standard project roots
-#     and reports the ones the live floor (deny / ask of ~/.claude/settings.json)
-#     does not stop. Report-only, contents-blind (a saved rule can carry a
-#     token: only the file and the probe names are shown). A HOME of its own,
+#     and reports the ones no deny / ask stops (the live floor
+#     ~/.claude/settings.json, or the project's own two files). Rules are read
+#     one per JSON string, so a rule holding a line break stays one rule.
+#     Report-only, contents-blind (a saved rule can carry a token: only the
+#     file and the probe names are shown). A HOME of its own,
 #     so no other case's files are read; the real checkout is outside it and
 #     is not scanned.
 cl_home="$fixture_home/cl-home"
@@ -3678,19 +3680,21 @@ cl_write() {
 cl_run() {
   HOME="$cl_home" "$SCRIPT_DIR/doctor.sh" "${1:-personal}" 2>&1
 }
-cl_floor='{"permissions":{"deny":["Bash(gh auth token)",7],"ask":["Bash(gh pr merge *)"]}}'
+cl_floor='{"permissions":{"deny":["Bash(gh auth token)",7],"ask":["Bash(gh pr merge *)","Bash(echo harmless\nBash\n)"]}}'
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
 cl_a="$cl_home/src/personal/repo-a/.claude/settings.local.json"
 cl_b="$cl_home/src/agent/repo-b/.claude/settings.json"
 cl_c="$cl_home/src/work/repo c/.claude/settings.local.json"
 cl_d="$cl_home/src/client/repo-d/.claude/settings.local.json"
 cl_deep="$cl_home/src/personal/group/nested/.claude/settings.local.json"
+cl_f="$cl_home/src/sandbox/repo-f/.claude/settings.local.json"
 cl_write "$cl_a" "{\"permissions\":{\"allow\":[\"Bash(git push:*)\",\"Bash(npm test:*)\",\"Bash(gh * create)\",\"Bash(sudo.*)\",\"Bash(gh *:*)\",\"Bash(git clone https://example.invalid/**/repo)\",\"Bash(curl -H \\\"x: $cl_canary\\\" *)\",\"Read(~/notes/**)\",42]}}"
 cl_write "$cl_b" '{"permissions":{"allow":["Bash(gh auth token)","Bash(gh pr merge:*)","Bash(wget:*)"]}}'
 cl_write "$cl_c" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_d" "{\"permissions\":{\"allow\":[\"Bash($cl_canary)\""
 cl_write "$cl_deep" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_home/src/personal/repo-a/.claude/settings.json" '{"permissions":{"ask":["Bash(gh release *)"]}}'
+cl_write "$cl_f" '{"permissions":{"allow":["Bash(gh repo *)","Bash(sudo -v *\n)","Bash(echo x\nBash\n)"],"deny":["Bash(gh repo delete)"]}}'
 
 # CL-1) one run over every shape: a `:*` rule matching the bare command, the
 #       floor's deny and ask winning over allow, the bare `Bash` tool (first
@@ -3698,15 +3702,19 @@ cl_write "$cl_home/src/personal/repo-a/.claude/settings.json" '{"permissions":{"
 #       taken literally (`sudo.*` is not `sudo -v`), a `*` before the legacy
 #       `:*` staying literal (`gh *:*` matches nothing, as in Claude Code),
 #       `/**/` standing for zero or more directories, the project's own ask
-#       (in its shared settings.json) beating its local allow, a file that is not
-#       JSON (an item, no contents), a deeper checkout not read, a non-string
-#       entry ignored.
+#       (in its shared settings.json) beating its local allow, a deny in the
+#       same file beating its allow, a rule with line breaks staying one rule
+#       (the floor's multi-line ask does not read as the bare tool; a trailing
+#       line break of an allow is trimmed, as Claude Code does), a file that is
+#       not JSON (an item, no contents), a deeper checkout not read, a
+#       non-string entry ignored.
 if cl_out="$(cl_run)"; then
   if grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_a: 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh issue create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "        edit $cl_a: remove the allow rules covering those commands (approve them per use instead)" <<< "$cl_out" \
     && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'wget https://example.invalid' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "[warn] 28 outward probe(s) auto-allowed for Claude by project-level allow rules in $(printf '%q' "$cl_c"): 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh pr comment', 'gh pr edit' and 23 more — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
-    && grep -Fxq "[info] - the allow rules of $cl_d could not be read (not JSON?); not checked (contents never shown)" <<< "$cl_out" \
+    && grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_f: 'gh repo edit', 'gh repo archive', 'gh repo rename', 'sudo -v' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
+    && grep -Fxq "[info] - the permission rules of $cl_d could not be read (not JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
     && ! grep -Fq "$cl_deep" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out" \
     && ! grep -Fq "$cl_canary" <<< "$cl_out"; then
@@ -3734,6 +3742,90 @@ if cl_out="$(cl_run)" \
 else
   printf '%s\n' "$cl_out" >&2
   fail "test failed: floor-covered project allows must leave the ok line"
+  status=1
+fi
+
+# CL-2b) a file that cannot be read keeps the result from being clean: no ok
+#        line, an item saying so (here the only other file is clean). An
+#        allow list of the wrong shape counts as unreadable too.
+cl_write "$cl_d" '{"permissions":{"allow":"Bash"}}'
+if cl_out="$(cl_run)" \
+  && grep -Fxq "[info] - the permission rules of $cl_d could not be read (not JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
+  && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 2 file(s) read, but 1 could not be read — not a clean result" <<< "$cl_out" \
+  && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+  ok "test passed: an unreadable project file keeps the Claude allow check from reporting clean"
+else
+  printf '%s\n' "$cl_out" >&2
+  fail "test failed: an unreadable project file must not leave the clean ok"
+  status=1
+fi
+rm -rf "$cl_home/src/client"
+
+# CL-6) this repo under a standard root is read once: a minimal repo copy at
+#       ~/src/personal/dotfiles runs doctor from there, so it is both "this
+#       repo" and a repo under the root -> one action, not two (counted
+#       whatever the path spelling: the fixture HOME may hold a doubled
+#       slash from TMPDIR, which `pwd` drops from the repo's own path).
+copy_repo_fixture "$cl_home/src/personal/dotfiles"
+cl_self="$cl_home/src/personal/dotfiles/.claude/settings.local.json"
+cl_write "$cl_self" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
+if cl_out="$(HOME="$cl_home" "$cl_home/src/personal/dotfiles/scripts/doctor.sh" personal 2>&1)" \
+  && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/src/personal/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+  ok "test passed: this repo under a standard project root is read once (one action)"
+else
+  printf '%s\n' "$cl_out" >&2
+  fail "test failed: this repo under a standard project root must be read once"
+  status=1
+fi
+rm -rf "$cl_home/src/personal/dotfiles"
+
+# CL-U) the matcher itself, on shapes the probes cannot reach (no probe holds
+#       a backslash, a star, `^` or `]`): extracted from doctor.sh and run
+#       in a subshell, each pair one match and one miss.
+cl_fns="$(sed -n '/^claude_bash_rule_matches() {/,/^}/p; /^claude_rules_cover() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+read -r -d '' cl_cases <<'CASES' || true
+yes|Bash(wget \* x*)|wget * xyz
+no|Bash(wget \* x*)|wget a xyz
+yes|Bash(wget \*)|wget \*
+no|Bash(wget \*)|wget *
+yes|Bash(echo \\\*)|echo \anything
+no|Bash(echo \\\*)|echo anything
+yes|Bash(echo a\\b)|echo a\b
+no|Bash(echo a\\b)|echo a\\b
+yes|Bash(echo \(x\))|echo (x)
+no|Bash(echo \(x\))|echo \(x\)
+yes|Bash(a^b *)|a^b c
+no|Bash(a^b *)|ab c
+yes|Bash(a]b *)|a]b c
+no|Bash(a]b *)|ab c
+yes|Bash()|anything
+yes|Bash(*)|anything
+no|Read(*)|anything
+no|Bash(gh auth token\)|gh auth token\
+yes|Bash(gh auth token\\)|gh auth token\
+no|Bash(a\nb:*)|a
+yes|Bash(a\nb:*)|a\nb:*
+no|Bash(:*)|anything
+CASES
+if [[ -z "$cl_fns" ]]; then
+  fail "test failed: claude_bash_rule_matches / claude_rules_cover not found in doctor.sh"
+  status=1
+elif cl_misses="$(
+  eval "$cl_fns"
+  nl=$'\n'
+  while IFS='|' read -r want rule cmd; do
+    [[ -n "$want" ]] || continue
+    rule="${rule//\\n/$nl}"
+    cmd="${cmd//\\n/$nl}"
+    got=no
+    claude_rules_cover "$cmd" "$rule" && got=yes
+    [[ "$got" == "$want" ]] || printf '  %q vs %q -> %s (expected %s)\n' "$rule" "$cmd" "$got" "$want"
+  done <<< "$cl_cases"
+)" && [[ -z "$cl_misses" ]]; then
+  ok "test passed: the Claude rule matcher reads escapes, regex characters, the bare forms and line breaks the way Claude Code does"
+else
+  fail "test failed: the Claude rule matcher drifted:"
+  printf '%s\n' "$cl_misses" >&2
   status=1
 fi
 
