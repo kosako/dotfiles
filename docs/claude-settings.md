@@ -14,7 +14,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 等の global preference) | public repo(`dot_claude/settings.json.tmpl`) | ✅ chezmoi(**personal profile のみ**) |
-| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、`gateGitHubMcp` の `mcp__github` deny(personal 既定 true で deny は計 35 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
+| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 21 件(#341。どちらも personal 既定 true で deny は計 56 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `^(startup\|resume\|clear\|compact\|fork)$`(herdr 0.9.3 の integration v10 と同じ。#274)に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | personal・機密(secret を含む設定など) | project の `.claude/settings.local.json`(project 単位)/ `CLAUDE_CONFIG_DIR` の別 config dir(machine 全体)/ `--settings` や環境変数(session 限定)。user 級 `~/.claude/settings.local.json` は Claude Code が**読まない**ので置き場にしない(#245、[local-overrides](local-overrides.md)) | ❌ 非コミット・管理外 |
 | work / client の settings | 各マシン手設定(#60 の暗号化バックアップは `allowSecretsAccess=false` の work / client では実行を拒否するため使えない) | ❌ public repo に生値を置かない |
@@ -62,6 +62,14 @@ preference キーを `settings.json` に書くと、template に取り込むま�
 template に追記して再 apply する(= 取り込みの継続運用)」。`settings.local.json` 行きの
 permission 承認は対象外。
 
+**project 側の allow の堆積(#334)**: `settings.local.json` は管理外なので、`chezmoi apply` では戻らない。
+承認の「次から聞かない」で外向きの操作(push・PR の作成や merge・外部送信など)の allow が溜まると、その
+project ではそれらが承認なしに走る(managed の deny / ask は allow に勝つが、外向きの操作の多くは ask に
+入れていない)。doctor が標準の project root 直下の repo の allow を外向きの probe で評価し、managed の floor と
+project 自身の deny / ask が止めないものを warn する(rule の
+中身は出さない。一致の規則は [scripts/README](../scripts/README.md) の doctor の AI policy)。対処はその file から
+該当の allow を外し、都度承認に戻すこと。
+
 ## gate の仕組み
 
 `claude-settings` module(`.chezmoidata/modules.yaml`)が `.claude/settings.json` を
@@ -84,7 +92,7 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
 主軸**とする(Read tool はコマンド経由でない読取にも効く。Bash matcher は `head` / `xxd` /
 `python open()` 等の等価経路で迂回できる leaky steering なので、path ごとの Bash 列挙は
 意図的にしない。#136)。`gateGitHubMcp=true`(personal 既定)で
-`mcp__github`(server 全体)の deny を足して計 35 件(下の #304 の 4 件を含む)、`enforceAiSandbox=true` で human-legit gate
+`mcp__github`(server 全体)の deny を足して計 35 件(下の #304 の 4 件を含む)、`gateUnusedClaudeMcp=true`(personal 既定。#341)で claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs の connector(server 全体)と Notion の書込 tool 17 個の deny を足して計 56 件、`enforceAiSandbox=true` で human-legit gate
 (`.env` 読取 / main・master への push の deny、release / branch-protection の ask)を
 追加する。`permissions.ask` には、1Password の CLI 全体(`Bash(op *)`)を常時出力する(`op read` / `op item get` /
 `op run` などの読み出し系は global option をどこにでも置けるので、subcommand の列挙ではなく program 単位にする。人が private-backup の `--identity-command` などで指示する

@@ -80,6 +80,13 @@ profiles:
       # docs/ai-environment-boundary.md). No github MCP is configured today, so
       # this is harmless defense-in-depth: an MCP added later is pre-denied.
       gateGitHubMcp: true
+      # #341: deny, in the managed settings.json, the MCP that Claude Code is
+      # connected to but does not use day to day: the claude.ai hosted
+      # connectors Gmail / Google Calendar / Google Drive / Claude Docs (0 calls
+      # in 2026-09-01..10-08) and 17 Notion plugin write tools with no or rare
+      # use. Exposure reduction for Claude Code only (the web / mobile chat keep
+      # the connectors); best-effort / steering, not an enforcement boundary.
+      gateUnusedClaudeMcp: true
       # #137 / #181: register the PreToolUse hook (personal-safe-gh-hook) so raw
       # `gh` reads of untrusted GitHub content are steered to the safe-gh isolated
       # reader. ONE capability drives BOTH AI homes: claude-settings emits it into
@@ -181,6 +188,8 @@ profiles:
       enableAgentToolsStatus: false
       enableAiPolicy: true
       gateGitHubMcp: false
+      # #341: intent off — the work machine's MCP use is not measured here.
+      gateUnusedClaudeMcp: false
       enableGitHubIsolatedReader: false
       # #196: intent off — agent-tools is not part of the work policy (no
       # deploy on work machines; the readiness key of the two-key gate would
