@@ -3680,7 +3680,7 @@ cl_write() {
 cl_run() {
   HOME="$cl_home" "$SCRIPT_DIR/doctor.sh" "${1:-personal}" 2>&1
 }
-cl_floor='{"permissions":{"deny":["Bash(gh auth token)",7],"ask":["Bash(gh pr merge *)","Bash(echo harmless\nBash\n)"]}}'
+cl_floor='{"permissions":{"deny":["Bash(gh auth token)",7],"ask":["Bash(gh  pr merge *)","Bash(echo harmless\nBash\n)"]}}'
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
 cl_a="$cl_home/src/personal/repo-a/.claude/settings.local.json"
 cl_b="$cl_home/src/agent/repo-b/.claude/settings.json"
@@ -3694,7 +3694,7 @@ cl_write "$cl_c" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_d" "{\"permissions\":{\"allow\":[\"Bash($cl_canary)\""
 cl_write "$cl_deep" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_home/src/personal/repo-a/.claude/settings.json" '{"permissions":{"ask":["Bash(gh release *)"]}}'
-cl_write "$cl_f" '{"permissions":{"allow":["Bash(gh repo *)","Bash(sudo -v *\n)","Bash(echo x\nBash\n)"],"deny":["Bash(gh repo delete)"]}}'
+cl_write "$cl_f" '{"permissions":{"allow":["Bash(gh  repo\t*)","Bash(sudo -v *\n)","Bash(echo x\nBash\n)"],"deny":["Bash(gh repo delete)"]}}'
 
 # CL-1) one run over every shape: a `:*` rule matching the bare command, the
 #       floor's deny and ask winning over allow, the bare `Bash` tool (first
@@ -3707,7 +3707,8 @@ cl_write "$cl_f" '{"permissions":{"allow":["Bash(gh repo *)","Bash(sudo -v *\n)"
 #       (the floor's multi-line ask does not read as the bare tool; a trailing
 #       line break of an allow is trimmed, as Claude Code does), a file that is
 #       not JSON (an item, no contents), a deeper checkout not read, a
-#       non-string entry ignored.
+#       non-string entry ignored, runs of spaces / tabs in a wildcard read as
+#       one space (the floor's `gh  pr merge *` ask, repo-f's `gh  repo\t*`).
 if cl_out="$(cl_run)"; then
   if grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_a: 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh issue create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "        edit $cl_a: remove the allow rules covering those commands (approve them per use instead)" <<< "$cl_out" \
@@ -3780,8 +3781,9 @@ fi
 rm -rf "$cl_home/src/personal/dotfiles"
 
 # CL-U) the matcher itself, on shapes the probes cannot reach (no probe holds
-#       a backslash, a star, `^` or `]`): extracted from doctor.sh and run
-#       in a subshell, each pair one match and one miss.
+#       a backslash, a star, `^` or `]`, or a run of spaces): extracted from
+#       doctor.sh and run in a subshell, each pair one match and one miss
+#       (`\n` / `\t` in a case stand for a line break / tab).
 cl_fns="$(sed -n '/^claude_bash_rule_matches() {/,/^}/p; /^claude_rules_cover() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
 read -r -d '' cl_cases <<'CASES' || true
 yes|Bash(wget \* x*)|wget * xyz
@@ -3806,6 +3808,12 @@ yes|Bash(gh auth token\\)|gh auth token\
 no|Bash(a\nb:*)|a
 yes|Bash(a\nb:*)|a\nb:*
 no|Bash(:*)|anything
+yes|Bash(git  push *)|git push
+yes|Bash(git push *)|git  push\tx
+no|Bash(git push x*)|git pushx
+yes|Bash(git\tpush x*)|git push xy
+no|Bash(git  push)|git push
+yes|Bash(git  push)|git  push
 CASES
 if [[ -z "$cl_fns" ]]; then
   fail "test failed: claude_bash_rule_matches / claude_rules_cover not found in doctor.sh"
@@ -3813,10 +3821,13 @@ if [[ -z "$cl_fns" ]]; then
 elif cl_misses="$(
   eval "$cl_fns"
   nl=$'\n'
+  tab=$'\t'
   while IFS='|' read -r want rule cmd; do
     [[ -n "$want" ]] || continue
     rule="${rule//\\n/$nl}"
     cmd="${cmd//\\n/$nl}"
+    rule="${rule//\\t/$tab}"
+    cmd="${cmd//\\t/$tab}"
     got=no
     claude_rules_cover "$cmd" "$rule" && got=yes
     [[ "$got" == "$want" ]] || printf '  %q vs %q -> %s (expected %s)\n' "$rule" "$cmd" "$got" "$want"

@@ -1137,9 +1137,10 @@ report_codex_projects_trust() {
 # is the prefix, or starts with it plus a space; whitespace runs collapse; a
 # `*` inside that prefix stays literal, so such a rule never matches a real
 # command); any other body ending in `:*` is exact; a body with an unescaped
-# `*` is a wildcard (trimmed; `*` any text, `\*` a literal star, `/**/` any
+# `*` is a wildcard (trimmed, and runs of spaces / tabs read as one space in
+# both the pattern and CMD; `*` any text, `\*` a literal star, `/**/` any
 # directories, a trailing " *" that is the only wildcard also matches the
-# bare command); anything else is exact.
+# bare command); anything else is exact (as written).
 claude_bash_rule_matches() {
   local body="$1" cmd="$2" bs='\' lp='(' rp=')' prefix pattern re="" i c stars=0
   # Unquoted replacements: bash 3.2 keeps the quotes of a quoted one.
@@ -1161,6 +1162,8 @@ claude_bash_rule_matches() {
   fi
   pattern="${body#"${body%%[![:space:]]*}"}"
   pattern="${pattern%"${pattern##*[![:space:]]}"}"
+  pattern="${pattern//$'\t'/ }"
+  while [[ "$pattern" == *"  "* ]]; do pattern="${pattern//  / }"; done
   for ((i = 0; i < ${#pattern}; i++)); do
     c="${pattern:i:1}"
     if [[ "$c" == "$bs" && "${pattern:i+1:1}" == [*\\] ]]; then
@@ -1193,6 +1196,8 @@ claude_bash_rule_matches() {
   fi
   [[ "$stars" -eq 1 && "$re" == *" .*" ]] && re="${re%" .*"}( .*)?"
   re="^${re}\$"
+  cmd="${cmd//$'\t'/ }"
+  while [[ "$cmd" == *"  "* ]]; do cmd="${cmd//  / }"; done
   [[ "$cmd" =~ $re ]]
 }
 # claude_rules_cover CMD [RULE...] — whether any of the Bash rules matches
