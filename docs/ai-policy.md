@@ -11,7 +11,7 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 
 | tool | 権限面 | 管理点 | 堆積への手当て |
 | --- | --- | --- | --- |
-| Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は `settings.local.json`(管理外)に隔離。managed 側は apply で戻る |
+| Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は project の `settings.local.json`(管理外)に隔離。managed 側は apply で戻る。project 側に溜まった allow が外向きの操作を承認なしにしていないかを doctor が report-only で監視(#334) |
 | Codex | 承認 rules(コマンド allowlist と、作業を捨てる git の prompt・hook の skip の forbidden(#304)) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
 | Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
 | OpenCode | `permission`(read / bash / edit の pattern rule: secret floor は deny、外向き・昇格と 1Password の CLI(`op`)は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、作業を捨てる git は ask で hook の skip と参照先 note への edit は deny(#304)、他は allow。既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
@@ -32,7 +32,9 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 - **一時許可は堆積させず棚卸しする**。Codex rules はリセット操作を機械化済み
   (`chezmoi apply` = baseline へ戻す。定期実行までは仕組み化しておらず、doctor / drift
   表示が棚卸しのトリガー)。projects trust はリセット手段がない(codex 所有)ため
-  doctor の warn を見て codex 側で手動除去する。堆積は実際に再発する(2026-07-02 に
+  doctor の warn を見て codex 側で手動除去する。Claude の project 級の allow(承認の「次から聞かない」で
+  `.claude/settings.local.json` に溜まる)も管理外でリセット手段がないので、doctor が外向きの probe を Claude Code の
+  rule の分類どおりに当てて warn し、人がその file から rule を外す(#334。rule の中身は出さない)。堆積は実際に再発する(2026-07-02 に
   是正した home-root trust が 2026-07-10 の監査で復活していた)ので、「一度直したから
   大丈夫」とみなさない。rules の監視は行 grep ではなく **codex 自身の engine への probe**
   (`codex execpolicy check`)で行う — blanket prefix(`["gh","pr"]` が `gh pr create` を
