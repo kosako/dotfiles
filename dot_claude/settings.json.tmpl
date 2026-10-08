@@ -53,6 +53,12 @@
          (#334) push --mirror / --delete / -d / a :refspec (a remote branch
          deleted), branch -M, stash drop / clear, worktree remove with --force
          / -f (not worktree add --force: Codex review R1, PR #338).
+         The :refspec rule ends in `:**`, not `:*`: Claude Code reads a
+         trailing `:*` as the legacy prefix form, where a `*` before it stays
+         literal, so `git *push* :*` never matched (read from Claude Code
+         2.1.293, #334). `:**` is an ordinary wildcard (the colon literal);
+         Claude Code notes at startup that this :* is matched as a wildcard,
+         which is the intent (the old rule drew a literal-prefix note instead).
          The human does direct these, so approval. An option counts only as a
          word of its own (`git *push* -f`, `git *push* -f *`), wherever it sits
          after its subcommand, and global options may precede the
@@ -137,7 +143,7 @@
 {{- $deny = append $deny (printf "mcp__plugin_Notion_notion__%s" .) -}}
 {{- end -}}
 {{- end -}}
-{{- $ask := list "Bash(op *)" "Read(~/.codex/config.toml)" "Read(~/.zshrc.local)" "Read(~/.config/opencode/opencode.local.json)" "Bash(git clean *)" "Bash(git * clean *)" "Bash(git restore *)" "Bash(git * restore *)" "Bash(git *checkout* -- *)" "Bash(git *checkout* .)" "Bash(git *push* +*)" "Bash(git *push* :*)" -}}
+{{- $ask := list "Bash(op *)" "Read(~/.codex/config.toml)" "Read(~/.zshrc.local)" "Read(~/.config/opencode/opencode.local.json)" "Bash(git clean *)" "Bash(git * clean *)" "Bash(git restore *)" "Bash(git * restore *)" "Bash(git *checkout* -- *)" "Bash(git *checkout* .)" "Bash(git *push* +*)" "Bash(git *push* :**)" -}}
 {{- range list (list "reset" "--hard") (list "checkout" "--force") (list "checkout" "-f") (list "checkout" "-qf") (list "checkout" "-fq") (list "switch" "--force") (list "switch" "--discard-changes") (list "switch" "-f") (list "switch" "-qf") (list "switch" "-fq") (list "push" "--force") (list "push" "-f") (list "push" "-uf") (list "push" "-fu") (list "branch" "-D") (list "branch" "--force") (list "branch" "-f") (list "branch" "-df") (list "branch" "-fd") (list "commit" "-n") (list "commit" "-nm") (list "commit" "-an") (list "commit" "-anm") (list "push" "--mirror") (list "push" "--delete") (list "push" "-d") (list "branch" "-M") (list "stash" "drop") (list "stash" "clear") (list "worktree remove" "--force") (list "worktree remove" "-f") -}}
 {{- $ask = concat $ask (list (printf "Bash(git *%s* %s)" (index . 0) (index . 1)) (printf "Bash(git *%s* %s *)" (index . 0) (index . 1))) -}}
 {{- end -}}

@@ -170,7 +170,7 @@ section "claude settings GitHub injection guard (#119)"
 #    another (which would keep the length). What the rules decide for real
 #    commands is pinned separately (4c).
 expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
-expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :*)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
+expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :**)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
 expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp__claude_ai_Google_Drive\nmcp__claude_ai_Claude_Docs'
 for notion_tool in notion-create-comment notion-create-attachment notion-create-database notion-create-view notion-update-view notion-update-data-source notion-create-folder notion-update-folder notion-restore-pages notion-convert-page-to-skill notion-upload-skill notion-spawn-session notion-send-message-to-session notion-stop-session notion-move-pages notion-duplicate-page notion-create-file-upload; do
   expected_unused_mcp+=$'\nmcp__plugin_Notion_notion__'"$notion_tool"
@@ -213,13 +213,26 @@ fi
 #     (code.claude.com/docs/en/permissions, "Wildcard patterns"): `*` stands
 #     for any text, spaces included, everything else is literal, a trailing
 #     " *" that is the rule's only wildcard also matches the bare command, and
-#     deny is checked before ask. This pins the rule TEXT against that
-#     reading; it does not prove the harness — the matchers stay steering.
+#     deny is checked before ask. A body ending in `:*` is the legacy prefix
+#     form instead (the command is the prefix or starts with it plus a
+#     space, runs of spaces / tabs in both read as one space), where a `*`
+#     inside the prefix stays literal — read from Claude Code 2.1.293 (#334),
+#     and the reason a rule may not mix the two (4e).
+#     This pins the rule TEXT against that reading; it does not prove the
+#     harness — the matchers stay steering.
 # claude_rule_matches BODY CMD — whether a Bash rule body (inside Bash(...))
 # matches CMD. A body with a regex-special character other than `*`, `.`
 # and `+` fails the test instead of being guessed at.
 claude_rule_matches() {
-  local body="$1" cmd="$2" re="" i c
+  local body="$1" cmd="$2" re="" i c legacy_re='^(.+):\*$' prefix
+  if [[ "$body" =~ $legacy_re ]]; then
+    prefix="${BASH_REMATCH[1]//$'\t'/ }"
+    while [[ "$prefix" == *"  "* ]]; do prefix="${prefix//  / }"; done
+    cmd="${cmd//$'\t'/ }"
+    while [[ "$cmd" == *"  "* ]]; do cmd="${cmd//  / }"; done
+    [[ "$cmd" == "$prefix" || "$cmd" == "$prefix "* ]]
+    return
+  fi
   if [[ "$body" == *" *" && "${body%" *"}" != *"*"* && "$cmd" == "${body%" *"}" ]]; then
     return 0
   fi
@@ -437,6 +450,54 @@ if [[ -z "$read_misses" ]]; then
 else
   fail "test failed: committed Read rules decide paths unexpectedly:"
   printf '%s' "$read_misses" >&2
+  status=1
+fi
+
+# 4e) No Bash rule mixes `*` with the trailing `:*` (#334): Claude Code reads
+#     such a body as the legacy prefix form with the `*` kept literal, so the
+#     rule never matches a real command (`git *push* :*` was one, PR #338).
+#     Both renders, every list.
+dead_rules=""
+legacy_tab=$'\t'
+for rendered in "$off_file" "$on_file"; do
+  while IFS= read -r rule; do
+    [[ "$rule" == 'Bash('*':*)' ]] || continue
+    body="${rule#Bash(}"
+    body="${body%:\*)}"
+    [[ "$body" == *'*'* ]] && dead_rules+="  $rule"$'\n'
+  done < <(yq -p json '(.permissions.deny // []) + (.permissions.ask // []) + (.permissions.allow // []) | .[]' "$rendered")
+done
+if [[ -z "$dead_rules" ]]; then
+  ok "test passed: no Bash rule mixes * with the trailing :* (Claude Code would keep that * literal and never match)"
+else
+  fail "test failed: Bash rules that mix * with the trailing :* never match in Claude Code:"
+  printf '%s' "$dead_rules" >&2
+  status=1
+fi
+# The emulator's own legacy-prefix reading (no committed rule uses the form,
+# so the decision cases above cannot pin it; Codex review R1, PR #339).
+legacy_misses=""
+while IFS='|' read -r want body cmd; do
+  [[ -n "$want" ]] || continue
+  got=no
+  claude_rule_matches "$body" "$cmd" && got=yes
+  [[ "$got" == "$want" ]] || legacy_misses+="  Bash($body) vs '$cmd' -> $got (expected $want)"$'\n'
+done <<CASES
+yes|git push:*|git push
+yes|git push:*|git push origin main
+yes|git push:*|git  push origin main
+yes|gh${legacy_tab}pr merge:*|gh pr merge 12
+yes|gh  pr merge:*|gh pr${legacy_tab}merge
+no|git push:*|git pushx
+no|git push:*|git -C x push
+no|git *push* :*|git push origin :feat
+no|git *push* :*|git push
+CASES
+if [[ -z "$legacy_misses" ]]; then
+  ok "test passed: the emulator reads the legacy :* prefix the way Claude Code does (prefix or prefix + space, whitespace runs as one, * literal)"
+else
+  fail "test failed: the emulator's legacy :* prefix reading drifted:"
+  printf '%s' "$legacy_misses" >&2
   status=1
 fi
 
