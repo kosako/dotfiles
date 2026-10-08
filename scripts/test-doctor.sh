@@ -3881,6 +3881,31 @@ else
   status=1
 fi
 
+# CL-R) the reader takes a file as read only when yq's stream ends with the
+#       marker it emits after a complete evaluation (Codex review R5, PR
+#       #340): a stub yq that stops mid-stream must leave the file unread,
+#       one that completes fills both lists, one element per string.
+cl_reader="$(sed -n '/^claude_read_rules() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+if [[ -n "$cl_reader" ]] && cl_reader_out="$(
+  eval "$cl_reader"
+  claude_allow_rules=()
+  claude_stop_rules=()
+  yq() { printf 'ABash(git push)\0Sx\0'; return 1; }
+  if claude_read_rules /dev/null; then echo "partial-read-accepted"; fi
+  yq() { printf 'ABash(git push *\n)\0ABash(npm test)\0SBash(gh repo *)\0E\0'; }
+  if claude_read_rules /dev/null; then
+    printf 'allow=%s stop=%s first=%q\n' "${#claude_allow_rules[@]}" "${#claude_stop_rules[@]}" "${claude_allow_rules[0]}"
+  else
+    echo "complete-read-rejected"
+  fi
+)" && [[ "$cl_reader_out" == "allow=2 stop=1 first=$(printf '%q' $'Bash(git push *\n)')" ]]; then
+  ok "test passed: the Claude rule reader needs yq's end marker and keeps one element per rule"
+else
+  printf '%s\n' "${cl_reader_out:-claude_read_rules not found in doctor.sh}" >&2
+  fail "test failed: the Claude rule reader accepted a partial read or split a rule"
+  status=1
+fi
+
 # CL-3) no live floor file: nothing beats the allows, so every covered probe
 #       is reported (in probe order; the legacy prefix collapses whitespace
 #       runs, so `gh  pr merge:*` covers `gh pr merge`).

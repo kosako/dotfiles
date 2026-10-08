@@ -1247,19 +1247,23 @@ claude_rules_cover() {
 # claude_read_rules FILE — fill claude_allow_rules and claude_stop_rules (deny
 # + ask) with the string entries of FILE's permission lists, one element per
 # JSON string: NUL-delimited, so a rule holding a line break stays one rule.
-# Returns 1 when FILE is not JSON of the expected shape (an object whose
-# permissions is an object of arrays) or a rule holds a NUL.
+# One read; yq ends the stream with the marker `E` only when the whole
+# evaluation succeeded, so a file that changes or breaks mid-read is not
+# taken as read. Returns 1 when FILE is not JSON of the expected shape (an
+# object whose permissions is an object of arrays), a rule holds a NUL, or
+# the marker never arrives.
 claude_read_rules() {
-  local rule expr='(tag == "!!map" and (.permissions == null or (.permissions | tag) == "!!map") and ([.permissions.allow, .permissions.deny, .permissions.ask] | all_c(. == null or tag == "!!seq"))) as $ok | select($ok or error("unexpected shape")) | (.permissions.allow // [] | .[] | select(tag == "!!str") | "A" + .), ((.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str") | "S" + .)'
+  local rule complete=0 expr='(tag == "!!map" and (.permissions == null or (.permissions | tag) == "!!map") and ([.permissions.allow, .permissions.deny, .permissions.ask] | all_c(. == null or tag == "!!seq"))) as $ok | select($ok or error("unexpected shape")) | ((.permissions.allow // [] | .[] | select(tag == "!!str") | "A" + .), ((.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str") | "S" + .), "E")'
   claude_allow_rules=()
   claude_stop_rules=()
-  yq -p json -o json -0 -r "$expr" "$1" >/dev/null 2>&1 || return 1
   while IFS= read -r -d '' rule; do
     case "$rule" in
+      E) complete=1 ;;
       A*) claude_allow_rules+=("${rule#A}") ;;
       S*) claude_stop_rules+=("${rule#S}") ;;
     esac
   done < <(yq -p json -o json -0 -r "$expr" "$1" 2>/dev/null)
+  [[ "$complete" -eq 1 ]]
 }
 report_claude_project_allows() {
   local floor_file="$HOME/.claude/settings.json" floor_stops=() stop_rules dirs root dir seen dup file kind allows probe hits hit_count shown
