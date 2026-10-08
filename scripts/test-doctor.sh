@@ -3694,7 +3694,7 @@ cl_write "$cl_c" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_d" "{\"permissions\":{\"allow\":[\"Bash($cl_canary)\""
 cl_write "$cl_deep" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_home/src/personal/repo-a/.claude/settings.json" '{"permissions":{"ask":["Bash(gh release *)"]}}'
-cl_write "$cl_f" '{"permissions":{"allow":["Bash(gh  repo\t*)","Bash(sudo -v *\n)","Bash(echo x\nBash\n)"],"deny":["Bash(gh repo delete)"]}}'
+cl_write "$cl_f" '{"permissions":{"allow":["Bash(\u00a0gh pr close *)","Bash(gh  repo\t*)","Bash(sudo -v *\n)","Bash(echo x\nBash\n)"],"deny":["Bash(gh repo delete)"]}}'
 
 # CL-1) one run over every shape: a `:*` rule matching the bare command, the
 #       floor's deny and ask winning over allow, the bare `Bash` tool (first
@@ -3708,13 +3708,15 @@ cl_write "$cl_f" '{"permissions":{"allow":["Bash(gh  repo\t*)","Bash(sudo -v *\n
 #       line break of an allow is trimmed, as Claude Code does), a file that is
 #       not JSON (an item, no contents), a deeper checkout not read, a
 #       non-string entry ignored, runs of spaces / tabs in a wildcard read as
-#       one space (the floor's `gh  pr merge *` ask, repo-f's `gh  repo\t*`).
-if cl_out="$(cl_run)"; then
+#       one space (the floor's `gh  pr merge *` ask, repo-f's `gh  repo\t*`),
+#       a wildcard trimmed as JavaScript does whatever the locale (repo-f's
+#       NBSP-led allow; this run uses LC_ALL=C).
+if cl_out="$(LC_ALL=C cl_run)"; then
   if grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_a: 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh issue create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "        edit $cl_a: remove the allow rules covering those commands (approve them per use instead)" <<< "$cl_out" \
     && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'wget https://example.invalid' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "[warn] 28 outward probe(s) auto-allowed for Claude by project-level allow rules in $(printf '%q' "$cl_c"): 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh pr comment', 'gh pr edit' and 23 more — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
-    && grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_f: 'gh repo edit', 'gh repo archive', 'gh repo rename', 'sudo -v' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
+    && grep -Fxq "[warn] 5 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_f: 'gh pr close', 'gh repo edit', 'gh repo archive', 'gh repo rename', 'sudo -v' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "[info] - the permission rules of $cl_d could not be read (not JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
     && ! grep -Fq "$cl_deep" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out" \
@@ -3783,8 +3785,10 @@ rm -rf "$cl_home/src/personal/dotfiles"
 # CL-U) the matcher itself, on shapes the probes cannot reach (no probe holds
 #       a backslash, a star, `^` or `]`, or a run of spaces): extracted from
 #       doctor.sh and run in a subshell, each pair one match and one miss
-#       (`\n` / `\t` in a case stand for a line break / tab).
-cl_fns="$(sed -n '/^claude_bash_rule_matches() {/,/^}/p; /^claude_rules_cover() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+#       (`\n` / `\t` / `<NBSP>` / `<BOM>` / `<LS>` in a case stand for a line
+#       break / tab / U+00A0 / U+FEFF / U+2028). Run under LC_ALL=C and the
+#       inherited locale: the trim must not depend on it.
+cl_fns="$(sed -n '/^claude_js_space=(/,/)$/p; /^claude_bash_rule_matches() {/,/^}/p; /^claude_rules_cover() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
 read -r -d '' cl_cases <<'CASES' || true
 yes|Bash(wget \* x*)|wget * xyz
 no|Bash(wget \* x*)|wget a xyz
@@ -3814,25 +3818,45 @@ no|Bash(git push x*)|git pushx
 yes|Bash(git\tpush x*)|git push xy
 no|Bash(git  push)|git push
 yes|Bash(git  push)|git  push
+yes|Bash(<NBSP>git push *)|git push
+yes|Bash(git push *<BOM>)|git push x
+no|Bash(<NBSP>git push)|git push
+yes|Bash(<NBSP>git push)|<NBSP>git push
+no|Bash(a<LS>b:*)|a
+yes|Bash(a<LS>b:*)|a<LS>b:*
 CASES
+# cl_matcher_misses LOCALE — run the cases in a subshell under LC_ALL=LOCALE
+# ('' keeps the inherited locale); print each miss.
+cl_matcher_misses() {
+  (
+    [[ -z "$1" ]] || export LC_ALL="$1"
+    eval "$cl_fns"
+    nl=$'\n'
+    tab=$'\t'
+    nbsp=$'\xc2\xa0'
+    bom=$'\xef\xbb\xbf'
+    lsep=$'\xe2\x80\xa8'
+    while IFS='|' read -r want rule cmd; do
+      [[ -n "$want" ]] || continue
+      for token in rule cmd; do
+        value="${!token}"
+        value="${value//\\n/$nl}"
+        value="${value//\\t/$tab}"
+        value="${value//<NBSP>/$nbsp}"
+        value="${value//<BOM>/$bom}"
+        value="${value//<LS>/$lsep}"
+        printf -v "$token" '%s' "$value"
+      done
+      got=no
+      claude_rules_cover "$cmd" "$rule" && got=yes
+      [[ "$got" == "$want" ]] || printf '  [LC_ALL=%s] %q vs %q -> %s (expected %s)\n' "${1:-inherited}" "$rule" "$cmd" "$got" "$want"
+    done <<< "$cl_cases"
+  )
+}
 if [[ -z "$cl_fns" ]]; then
-  fail "test failed: claude_bash_rule_matches / claude_rules_cover not found in doctor.sh"
+  fail "test failed: claude_js_space / claude_bash_rule_matches / claude_rules_cover not found in doctor.sh"
   status=1
-elif cl_misses="$(
-  eval "$cl_fns"
-  nl=$'\n'
-  tab=$'\t'
-  while IFS='|' read -r want rule cmd; do
-    [[ -n "$want" ]] || continue
-    rule="${rule//\\n/$nl}"
-    cmd="${cmd//\\n/$nl}"
-    rule="${rule//\\t/$tab}"
-    cmd="${cmd//\\t/$tab}"
-    got=no
-    claude_rules_cover "$cmd" "$rule" && got=yes
-    [[ "$got" == "$want" ]] || printf '  %q vs %q -> %s (expected %s)\n' "$rule" "$cmd" "$got" "$want"
-  done <<< "$cl_cases"
-)" && [[ -z "$cl_misses" ]]; then
+elif cl_misses="$(cl_matcher_misses C; cl_matcher_misses '')" && [[ -z "$cl_misses" ]]; then
   ok "test passed: the Claude rule matcher reads escapes, regex characters, the bare forms and line breaks the way Claude Code does"
 else
   fail "test failed: the Claude rule matcher drifted:"

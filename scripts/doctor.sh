@@ -1130,26 +1130,36 @@ report_codex_projects_trust() {
 # skipped (deny and ask beat allow, whichever file holds them). Report-only and contents-blind: a rule saved from an
 # approved command can carry a token, so only the file and the probe names
 # are shown, never a rule. Deeper checkouts (clones of clones) are not read.
+# The characters JavaScript's String.prototype.trim() removes (Claude Code
+# trims a wildcard rule with it), as UTF-8 byte strings so the trim does not
+# depend on the locale: the ASCII whitespace, NBSP, U+1680, U+2000-U+200A,
+# the line / paragraph separators, U+202F, U+205F, U+3000 and the BOM.
+claude_js_space=(' ' $'\t' $'\n' $'\v' $'\f' $'\r' $'\xc2\xa0' $'\xe1\x9a\x80'
+  $'\xe2\x80\x80' $'\xe2\x80\x81' $'\xe2\x80\x82' $'\xe2\x80\x83' $'\xe2\x80\x84' $'\xe2\x80\x85'
+  $'\xe2\x80\x86' $'\xe2\x80\x87' $'\xe2\x80\x88' $'\xe2\x80\x89' $'\xe2\x80\x8a'
+  $'\xe2\x80\xa8' $'\xe2\x80\xa9' $'\xe2\x80\xaf' $'\xe2\x81\x9f' $'\xe3\x80\x80' $'\xef\xbb\xbf')
 # claude_bash_rule_matches BODY CMD — whether a Bash rule body matches CMD,
 # classified the way Claude Code does (read from 2.1.293). The body is first
 # unescaped (`\(` `\)` `\\`), then: a body ending in `:*` is the legacy
-# prefix form when what precedes it is non-empty and has no line break (CMD
+# prefix form when what precedes it is non-empty and has no line terminator
+# (\n, \r, U+2028, U+2029: JavaScript's `.` stops there) (CMD
 # is the prefix, or starts with it plus a space; whitespace runs collapse; a
 # `*` inside that prefix stays literal, so such a rule never matches a real
 # command); any other body ending in `:*` is exact; a body with an unescaped
-# `*` is a wildcard (trimmed, and runs of spaces / tabs read as one space in
+# `*` is a wildcard (trimmed as JavaScript's trim() does, and runs of spaces
+# / tabs read as one space in
 # both the pattern and CMD; `*` any text, `\*` a literal star, `/**/` any
 # directories, a trailing " *" that is the only wildcard also matches the
 # bare command); anything else is exact (as written).
 claude_bash_rule_matches() {
-  local body="$1" cmd="$2" bs='\' lp='(' rp=')' prefix pattern re="" i c stars=0
+  local body="$1" cmd="$2" bs='\' lp='(' rp=')' prefix pattern re="" i c ws trimmed stars=0
   # Unquoted replacements: bash 3.2 keeps the quotes of a quoted one.
   body="${body//"$bs$lp"/$lp}"
   body="${body//"$bs$rp"/$rp}"
   body="${body//"$bs$bs"/$bs}"
   if [[ "$body" == *":*" ]]; then
     prefix="${body%:\*}"
-    if [[ -z "$prefix" || "$prefix" == *[$'\n\r']* ]]; then
+    if [[ -z "$prefix" || "$prefix" == *[$'\n\r']* || "$prefix" == *$'\xe2\x80\xa8'* || "$prefix" == *$'\xe2\x80\xa9'* ]]; then
       [[ "$cmd" == "$body" ]]
       return
     fi
@@ -1160,8 +1170,21 @@ claude_bash_rule_matches() {
     [[ "$cmd" == "$prefix" || "$cmd" == "$prefix "* ]]
     return
   fi
-  pattern="${body#"${body%%[![:space:]]*}"}"
-  pattern="${pattern%"${pattern##*[![:space:]]}"}"
+  pattern="$body"
+  trimmed=0
+  while [[ "$trimmed" -eq 0 ]]; do
+    trimmed=1
+    for ws in "${claude_js_space[@]}"; do
+      if [[ "$pattern" == "$ws"* ]]; then
+        pattern="${pattern#"$ws"}"
+        trimmed=0
+      fi
+      if [[ "$pattern" == *"$ws" ]]; then
+        pattern="${pattern%"$ws"}"
+        trimmed=0
+      fi
+    done
+  done
   pattern="${pattern//$'\t'/ }"
   while [[ "$pattern" == *"  "* ]]; do pattern="${pattern//  / }"; done
   for ((i = 0; i < ${#pattern}; i++)); do
