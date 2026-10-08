@@ -3946,6 +3946,18 @@ else
   fail "test failed: a floor of more than one JSON document must not be read"
   status=1
 fi
+# ... and so is a floor repeating a key: yq would take the first
+#     `permissions` (a deny of the bare tool), JSON.parse the last (none).
+printf '%s\n' '{"permissions":{"deny":["Bash"]},"permissions":{}}' > "$cl_home/.claude/settings.json"
+if cl_out="$(cl_run)" \
+  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+  && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+  ok "test passed: a floor repeating a key is not read (yq and JSON.parse would disagree)"
+else
+  printf '%s\n' "$cl_out" >&2
+  fail "test failed: a floor repeating a key must not be read"
+  status=1
+fi
 
 # CL-5) work does not manage the Claude floor (claude-settings inactive) ->
 #       not watched, whatever is on disk.

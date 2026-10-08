@@ -1250,11 +1250,13 @@ claude_rules_cover() {
 # One read of all documents at once (eval-all): exactly one JSON document is
 # required, and yq ends the stream with the marker `E` only when the whole
 # evaluation succeeded, so a file that changes or breaks mid-read, or holds
-# more than one document, is not taken as read. Returns 1 when FILE is not
-# one JSON document of the expected shape (an object whose permissions is an
-# object of arrays), a rule holds a NUL, or the marker never arrives.
+# more than one document, is not taken as read. A key repeated in an object
+# is refused too: yq answers with the first, JSON.parse (Claude Code) with
+# the last. Returns 1 when FILE is not one JSON document of the expected
+# shape (an object whose permissions is an object of arrays, no repeated
+# key), a rule holds a NUL, or the marker never arrives.
 claude_read_rules() {
-  local rule complete=0 expr='[.] as $docs | select(($docs | length) == 1 or error("not one document")) | $docs[0] | (tag == "!!map" and (.permissions == null or (.permissions | tag) == "!!map") and ([.permissions.allow, .permissions.deny, .permissions.ask] | all_c(. == null or tag == "!!seq"))) as $ok | select($ok or error("unexpected shape")) | ((.permissions.allow // [] | .[] | select(tag == "!!str") | "A" + .), ((.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str") | "S" + .), "E")'
+  local rule complete=0 expr='[.] as $docs | select(($docs | length) == 1 or error("not one document")) | $docs[0] | (tag == "!!map" and ([.. | select(tag == "!!map") | (keys | length) == (keys | unique | length)] | all) and (.permissions == null or (.permissions | tag) == "!!map") and ([.permissions.allow, .permissions.deny, .permissions.ask] | all_c(. == null or tag == "!!seq"))) as $ok | select($ok or error("unexpected shape")) | ((.permissions.allow // [] | .[] | select(tag == "!!str") | "A" + .), ((.permissions.deny // []) + (.permissions.ask // []) | .[] | select(tag == "!!str") | "S" + .), "E")'
   claude_allow_rules=()
   claude_stop_rules=()
   while IFS= read -r -d '' rule; do
