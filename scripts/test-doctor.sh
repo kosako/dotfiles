@@ -1015,10 +1015,11 @@ else
   fail "test failed: usage reader --check exit 2 -> expected the action with the reason and the apply step immediately followed by the install step"
   status=1
 fi
-# UR-3b) terminal control in the reason is stripped (another repo's output).
+# UR-3b) terminal control in the reason is shown as ? (another repo's output,
+#        through display_safe, #335).
 ur_fake 0 "$ur_usage" 2 "personal-usage-reader: bad"$'\033'"[31m value"$'\r'
-ur_expect "--check reason with terminal control -> stripped" personal -- \
-  "[warn] usage reader config $ur_config rejected by personal-usage-reader --check (bad[31m value) — personal-usage-reader fails (exit 2), so agent-tools reads no budget"
+ur_expect "--check reason with terminal control -> shown as ?" personal -- \
+  "[warn] usage reader config $ur_config rejected by personal-usage-reader --check (bad?[31m value?) — personal-usage-reader fails (exit 2), so agent-tools reads no budget"
 # UR-3c) no reason line -> the action without a parenthesis.
 ur_fake 0 "$ur_usage" 2
 ur_expect "--check exit 2 without a reason -> action without a parenthesis" personal -- \
@@ -4453,6 +4454,136 @@ else
   status=1
 fi
 rm -rf "$dr_home/.config/chezmoi"
+
+# DS) display_safe (#335): values doctor did not make itself reach a report
+#     line only through display_safe. DS-U checks the helper itself
+#     (extracted from doctor.sh, run under LC_ALL=C and the inherited
+#     locale); DS-1 plants a terminal escape, a BEL, a C1 control, a bidi
+#     override and invalid UTF-8 in every such source at once — another
+#     tool's output (agent-tools status.sh, herdr, npm) and names others can
+#     shape (a repo directory, OpenCode plugin files, the backup marker, a
+#     Codex project key) — and expects each shown with `?` in its place and
+#     not one raw byte of them anywhere in the report. The usage reader's
+#     reason and the Codex rules file names are pinned in their own sections
+#     (UR-3b, AIP-5).
+ds_fns="$(sed -n '/^display_safe() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+# ds_misses LOCALE — run the helper cases under LC_ALL=LOCALE ('' keeps the
+# inherited locale); print each miss.
+ds_misses() {
+  (
+    [[ -z "$1" ]] || export LC_ALL="$1"
+    eval "$ds_fns"
+    ds_case() {
+      local got
+      got="$(display_safe "$1")"
+      [[ "$got" == "$2" ]] || printf '  [LC_ALL=%s] %q -> %q (expected %q)\n' "${3:-inherited}" "$1" "$got" "$2"
+    }
+    ds_case 'plain ascii 1.2-3_x' 'plain ascii 1.2-3_x' "$1"
+    ds_case "a"$'\033'"[31mb" 'a?[31mb' "$1"
+    ds_case "x"$'\r'"y"$'\n'"z"$'\t'"w"$'\177' 'x?y?z?w?' "$1"
+    ds_case '設定 file がありません' '設定 file がありません' "$1"
+    ds_case "c1"$'\xc2\x9b'"x" 'c1?x' "$1"
+    ds_case "nbsp"$'\xc2\xa0'"ok" "nbsp"$'\xc2\xa0'"ok" "$1"
+    ds_case "rlo"$'\xe2\x80\xae'"x lri"$'\xe2\x81\xa6'"y" 'rlo?x lri?y' "$1"
+    ds_case "zwsp"$'\xe2\x80\x8b'"ok" "zwsp"$'\xe2\x80\x8b'"ok" "$1"
+    ds_case "bad"$'\xff'"x lone"$'\x9b'"y" 'bad?x lone?y' "$1"
+    ds_case "trunc"$'\xe3\x81' 'trunc??' "$1"
+    ds_case "overlong"$'\xc0\xaf'" "$'\xe0\x80\xaf' 'overlong?? ???' "$1"
+    ds_case "surrogate"$'\xed\xa0\x80' 'surrogate???' "$1"
+    ds_case "emoji"$'\xf0\x9f\x98\x80' "emoji"$'\xf0\x9f\x98\x80' "$1"
+    ds_case "toohigh"$'\xf4\x90\x80\x80' 'toohigh????' "$1"
+    ds_case "q'and\"dq" "q'and\"dq" "$1"
+    ds_case '' '' "$1"
+  )
+}
+if [[ -z "$ds_fns" ]]; then
+  fail "test failed: display_safe not found in doctor.sh"
+  status=1
+elif ds_out="$(ds_misses C; ds_misses '')" && [[ -z "$ds_out" ]]; then
+  ok "test passed: display_safe keeps valid UTF-8 and turns controls, bidi overrides and invalid bytes into ? (locale-independent)"
+else
+  fail "test failed: display_safe drifted:"
+  printf '%s\n' "$ds_out" >&2
+  status=1
+fi
+
+ds_home="$fixture_home/ds-home"
+ds_bin="$fixture_home/ds-bin"
+ds_esc=$'\033'
+ds_bel=$'\007'
+ds_c1=$'\xc2\x9b'
+ds_rlo=$'\xe2\x80\xae'
+mkdir -p "$ds_home/.config/opencode/plugins" "$ds_home/.local/state/dotfiles" "$ds_home/.codex" "$ds_bin" "$ds_home/at/scripts"
+# another tool's output: agent-tools status.sh, herdr, npm
+write_root_pinned_status_sh "$ds_home/at/scripts/status.sh" \
+  '{"contract_version":3,"repo":{"present":true,"clean":true},"assets":{"total":1,"manifest_errors":0},"checks":{"manifest_validation":"fail\u001b[2J","prompt_injection_static":"pass"},"generated":{"total":1,"stale":0},"register":{"catalog_present":false},"sync_targets":[{"tool":"co\u001b]0;x\u0007dex","name":"d","state":"conflict"}]}'
+cat > "$ds_bin/herdr" <<SH
+#!/bin/sh
+[ "\$1" = integration ] && [ "\$2" = status ] || exit 2
+printf '%s\n' "claude: not installed (x)" "codex: not installed (y)" "opencode: not${ds_esc}[2J installed (z)"
+SH
+cat > "$ds_bin/opencode" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat > "$ds_bin/npm" <<SH
+#!/bin/sh
+case "\$1" in
+  --version) printf '%s\n' "1${ds_esc}[2J" ;;
+  config) [ "\$3" = userconfig ] && printf '%s\n' "/x${ds_c1}y/.npmrc" || printf 'true\n' ;;
+esac
+exit 0
+SH
+chmod +x "$ds_bin/herdr" "$ds_bin/opencode" "$ds_bin/npm"
+# names others can shape: a repo directory, plugin files, the marker, a
+# Codex project key
+ds_repo="$ds_home/src/personal/re${ds_esc}[31mpo"
+env -i PATH="$PATH" HOME="$ds_home" GIT_CONFIG_NOSYSTEM=1 git init -q --template= "$ds_repo"
+env -i PATH="$PATH" HOME="$ds_home" GIT_CONFIG_NOSYSTEM=1 \
+  git -C "$ds_repo" remote add origin "https://user:canary-ds-335@example.invalid/x.git"
+printf '// personal\n' > "$ds_home/.config/opencode/plugins/personal-x${ds_esc}[31m.js"
+printf '// copy\n' > "$ds_home/.config/opencode/plugins/personal-y${ds_rlo}z.ts"
+printf '// listed\n' > "$ds_home/.config/opencode/plugins/personal-w${ds_esc}[1m.js"
+printf '{"plugin":["personal-w\\u001b[1m"]}\n' > "$ds_home/.config/opencode/opencode.json"
+printf '{"schema_version":1,"last_success":"2026%s[2J","archive":"a%sb.age","file_count":2,"capture_incomplete":false}\n' "$ds_esc" "$ds_rlo" \
+  > "$ds_home/.local/state/dotfiles/private-backup.json"
+printf '[projects."/gone\\u202eproj"]\ntrust_level = "trusted"\n' > "$ds_home/.codex/config.toml"
+if ds_out="$(env -u OPENCODE_CONFIG -u XDG_DATA_HOME -u XDG_CONFIG_HOME HOME="$ds_home" AGENT_TOOLS="$ds_home/at" \
+    PATH="$ds_bin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  ds_missing=""
+  for ds_line in \
+    "[warn] check manifest_validation: fail?[2J" \
+    "[warn] agent-tools sync conflicts (unmanaged same-name targets; tools: co?]0;x?dex); sync must not change them" \
+    "[info] - herdr's own view: opencode integration not?[2J installed (" \
+    "[info] - npm userconfig=/x?y/.npmrc" \
+    "[warn] credential-like userinfo in remote URL: repo=$ds_home/src/personal/re?[31mpo remote=origin (URL not shown)" \
+    "[ok] agent-tools plugin personal-x?[31m.js in the global plugins dir" \
+    "[warn] agent-tools plugin personal-w?[1m is also listed in an OpenCode config's plugin key" \
+    "[ok] npm: 1?[2J" \
+    "[warn] npm version '1?[2J' not recognized" \
+    "[warn] agent-tools plugin copy that OpenCode may load twice: $ds_home/.config/opencode/plugins/personal-y?z.ts (" \
+    "[ok] last backup: 2026?[2J (archive: a?b.age, files: 2, capture: complete)" \
+    "[warn] stale Codex projects trust (path no longer exists): /gone?proj — leftover grant"; do
+    grep -Fq -- "$ds_line" <<< "$ds_out" || ds_missing+="  $ds_line"$'\n'
+  done
+  ds_raw=""
+  for ds_byte in "$ds_esc" "$ds_bel" "$ds_c1" "$ds_rlo"; do
+    LC_ALL=C grep -Fq -- "$ds_byte" <<< "$ds_out" && ds_raw+=" $(printf '%q' "$ds_byte")"
+  done
+  if [[ -z "$ds_missing" && -z "$ds_raw" ]] && ! grep -Fq "canary-ds-335" <<< "$ds_out"; then
+    ok "test passed: every value doctor did not make itself is shown through display_safe (no raw control, C1 or bidi byte in the report)"
+  else
+    printf '%s\n' "$ds_out" | LC_ALL=C cat -v >&2
+    printf 'missing:\n%sraw bytes in the report:%s\n' "$ds_missing" "${ds_raw:- none}" >&2
+    fail "test failed: an outside value reached the report without display_safe"
+    status=1
+  fi
+else
+  printf '%s\n' "$ds_out" | LC_ALL=C cat -v >&2
+  fail "test failed: doctor must stay exit 0 (display_safe sources)"
+  status=1
+fi
+rm -rf "${ds_home:?}" "${ds_bin:?}"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"

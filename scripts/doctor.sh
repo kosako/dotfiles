@@ -5,6 +5,81 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
+# Values doctor did not make itself — another tool's or repo's output (status.sh,
+# the usage reader, herdr, npm) and names others can shape (repo directories
+# and remotes, plugin and rules file names, the backup marker's fields, Codex
+# project keys) — pass through display_safe before they reach a report line
+# (#335), so a terminal escape or a bidi override in them cannot restyle or
+# spoof doctor's output. Plain text in them still shows as text (doctor only
+# reports it; whoever reads the report treats it as data).
+# display_safe VALUE — print VALUE (no newline) in a form safe to show on a
+# terminal: valid UTF-8 text is kept as is, and each control character (C0,
+# DEL, C1), bidirectional override / isolate (U+202A-U+202E, U+2066-U+2069)
+# and byte that is not part of valid UTF-8 becomes `?`. Read byte by byte
+# under LC_ALL=C, so the result does not depend on the locale.
+display_safe() {
+  local LC_ALL=C
+  local s="$1" out="" i=0 n need j b c cp seq valid
+  n=${#s}
+  while ((i < n)); do
+    c="${s:i:1}"
+    printf -v b '%d' "'$c"
+    ((b < 0)) && b=$((b + 256))
+    if ((b >= 32 && b < 127)); then
+      out+="$c"
+      i=$((i + 1))
+      continue
+    fi
+    if ((b >= 194 && b <= 223)); then
+      need=1
+      cp=$((b & 31))
+    elif ((b >= 224 && b <= 239)); then
+      need=2
+      cp=$((b & 15))
+    elif ((b >= 240 && b <= 244)); then
+      need=3
+      cp=$((b & 7))
+    else
+      out+='?'
+      i=$((i + 1))
+      continue
+    fi
+    seq="$c"
+    valid=1
+    for ((j = 1; j <= need; j++)); do
+      c="${s:i+j:1}"
+      if [[ -z "$c" ]]; then
+        valid=0
+        break
+      fi
+      printf -v b '%d' "'$c"
+      ((b < 0)) && b=$((b + 256))
+      if ((b < 128 || b > 191)); then
+        valid=0
+        break
+      fi
+      cp=$(((cp << 6) | (b & 63)))
+      seq+="$c"
+    done
+    # Malformed (truncated, overlong, a surrogate, above U+10FFFF): one `?`
+    # for the lead byte, the rest is read again. Well formed but a control
+    # or bidi character: one `?` for the whole character.
+    if ((valid == 0)) || ((need == 2 && cp < 2048)) || ((need == 3 && (cp < 65536 || cp > 1114111))) \
+      || ((cp >= 55296 && cp <= 57343)); then
+      out+='?'
+      i=$((i + 1))
+      continue
+    fi
+    if (((cp >= 128 && cp <= 159) || (cp >= 8234 && cp <= 8238) || (cp >= 8294 && cp <= 8297))); then
+      out+='?'
+    else
+      out+="$seq"
+    fi
+    i=$((i + need + 1))
+  done
+  printf '%s' "$out"
+}
+
 # Arguments: [PROFILE] [--actions-only]. --actions-only mutes every report
 # line except [fail] and the closing next-actions summary (#227), so the
 # list of things to run can be read (or redirected) without scanning the
@@ -388,7 +463,7 @@ else
       while IFS= read -r remote_name; do
         [[ -z "$remote_name" ]] && continue
         flagged_remotes=$((flagged_remotes + 1))
-        warn "credential-like userinfo in remote URL: repo=$repo remote=$remote_name (URL not shown)"
+        warn "credential-like userinfo in remote URL: repo=$(display_safe "$repo") remote=$(display_safe "$remote_name") (URL not shown)"
       done < <(git_remotes_with_credentials "$repo")
     done < <(find "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)
   done
@@ -413,10 +488,10 @@ elif ! npm_version="$(npm --version 2>/dev/null)" || [[ -z "$npm_version" ]]; th
   # the report-only contract (#144).
   warn "npm on PATH but not runnable (shim without a runtime?); skipping npm checks"
 else
-  ok "npm: $npm_version"
+  ok "npm: $(display_safe "$npm_version")"
   for key in before ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
-    item "npm $key=$value"
+    item "npm $key=$(display_safe "$value")"
   done
   npm_major="${npm_version%%.*}"
   npm_minor="$(printf '%s' "$npm_version" | cut -d. -f2)"
@@ -424,7 +499,7 @@ else
   # arithmetic, so a non-numeric component resolves as a variable name and
   # aborts the shell under set -u (the old 2>/dev/null hid even that) (#144).
   if [[ ! "$npm_major" =~ ^[0-9]+$ || ! "$npm_minor" =~ ^[0-9]+$ ]]; then
-    warn "npm version '$npm_version' not recognized; cannot check min-release-age support"
+    warn "npm version '$(display_safe "$npm_version")' not recognized; cannot check min-release-age support"
   elif [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]]; then
     ok "npm supports min-release-age (>= 11.10)"
   else
@@ -437,7 +512,7 @@ else
       if [[ "$actual" == "$expected" ]]; then
         ok "npm $key=$expected"
       else
-        warn "enforce expects npm $key=$expected, current: $actual (apply pending?)"
+        warn "enforce expects npm $key=$expected, current: $(display_safe "$actual") (apply pending?)"
       fi
     done <<'EOF'
 ignore-scripts=true
@@ -459,9 +534,9 @@ EOF
       npm_before_epoch="$(node -e 'const t=Date.parse(process.argv[1]||"");process.stdout.write(Number.isNaN(t)?"":String(Math.floor(t/1000)))' "$npm_before" 2>/dev/null || true)"
     fi
     if npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
-      ok "npm min-release-age=7 honored (before=$npm_before)"
+      ok "npm min-release-age=7 honored (before=$(display_safe "$npm_before"))"
     else
-      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=${npm_before:-unset} (apply pending?)"
+      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=$(display_safe "${npm_before:-unset}") (apply pending?)"
     fi
   fi
 fi
@@ -723,12 +798,12 @@ fi
 
 # State marker: presence + last success + basename + count, nothing else.
 # The marker is repo-external and could be stale or hand-edited, so treat
-# its fields as untrusted: drop non-printable chars, basename the archive,
+# its fields as untrusted: display_safe them, basename the archive,
 # and require a numeric count — anything odd is shown as "unknown" rather
 # than echoed verbatim to the terminal.
 backup_marker="$HOME/.local/state/dotfiles/private-backup.json"
 if [[ -f "$backup_marker" ]]; then
-  bm() { yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null | tr -dc '[:print:]' || true; }
+  bm() { display_safe "$(yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null || true)"; }
   marker_last="$(bm '.last_success // ""')"
   marker_archive_raw="$(bm '.archive // ""')"
   marker_count="$(bm '.file_count // ""')"
@@ -995,7 +1070,7 @@ report_codex_rules_probes() {
   # Names only (never the content); a name is attacker-shapeable, so anything
   # outside printable ASCII is shown as '?'.
   for rules_name in ${unmanaged_rules[@]+"${unmanaged_rules[@]}"}; do
-    warn "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/$(printf '%s' "$rules_name" | LC_ALL=C tr -c '[:print:]' '?') (not managed by dotfiles, so its grants never show as drift; probed below — remove it, or fold vetted rules into the managed baseline)"
+    warn "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/$(display_safe "$rules_name") (not managed by dotfiles, so its grants never show as drift; probed below — remove it, or fold vetted rules into the managed baseline)"
   done
   if [[ "${#rules_args[@]}" -gt 0 ]]; then
     # Rules semantics are delegated to Codex's own engine: a fixed probe list
@@ -1102,10 +1177,10 @@ report_codex_projects_trust() {
     [[ -z "$trusted_path" ]] && continue
     trusted_total=$((trusted_total + 1))
     if [[ "$trusted_path" == "$HOME" ]]; then
-      action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
+      action "Codex projects trust covers the WHOLE home directory ($(display_safe "$trusted_path")) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
         "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)"
     elif [[ ! -d "$trusted_path" ]]; then
-      action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
+      action "stale Codex projects trust (path no longer exists): $(display_safe "$trusted_path") — leftover grant; remove it in codex" \
         "edit ~/.codex/config.toml: remove the project entry for this path"
     fi
   done <<< "$trusted_paths"
@@ -1508,7 +1583,7 @@ for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.js; do
 done
 for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.ts "$opencode_config_dir"/plugins/personal-*.mjs "$opencode_config_dir"/plugin/personal-*; do
   [[ -e "$opencode_plugin_file" ]] || continue
-  warn "agent-tools plugin copy that OpenCode may load twice: $opencode_plugin_file (agent-tools deploys only plugins/personal-*.js; remove the extra copy)"
+  warn "agent-tools plugin copy that OpenCode may load twice: $(display_safe "$opencode_plugin_file") (agent-tools deploys only plugins/personal-*.js; remove the extra copy)"
 done
 if [[ "${#opencode_plugins[@]}" -eq 0 ]]; then
   item "no agent-tools plugin in ~/.config/opencode/plugins (agent-tools sync deploys personal-*.js there)"
@@ -1642,11 +1717,11 @@ else
       opencode_init_note="its init is not verifiable: only personal-agent-tools logs an init marker, and doctor does not run OpenCode"
     fi
     if plugin_listed_in "$opencode_listed_active" "$opencode_stem"; then
-      warn "agent-tools plugin $opencode_stem is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
+      warn "agent-tools plugin $(display_safe "$opencode_stem") is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
     else
-      ok "agent-tools plugin $opencode_plugin_name in the global plugins dir (OpenCode loads it at startup; $opencode_init_note)"
+      ok "agent-tools plugin $(display_safe "$opencode_plugin_name") in the global plugins dir (OpenCode loads it at startup; $opencode_init_note)"
       if plugin_listed_in "$opencode_listed_inactive" "$opencode_stem"; then
-        item "$opencode_stem is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it — it would then load twice"
+        item "$(display_safe "$opencode_stem") is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it — it would then load twice"
       fi
     fi
     if [[ "$opencode_stem" == personal-agent-tools ]]; then
@@ -1928,7 +2003,8 @@ herdr_integration_state() {
   line="$(grep -E "^$1: " <<< "$herdr_status" | head -n 1 || true)"
   [[ -n "$line" ]] || return 0
   line="${line#"$1: "}"
-  printf '%s\n' "${line%% (*}"
+  display_safe "${line%% (*}"
+  printf '\n'
 }
 # herdr_integration_home DIR
 # Set the per-home facts for .claude / .codex: agent, settings module, the
@@ -2255,9 +2331,9 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
             ok "usage reader config $usage_reader_config present and accepted by personal-usage-reader --check (the agent-tools contract, argv[0] included; the reader itself not run)"
             ;;
           2)
-            # The reason without the wrapper's name prefix, and with any
-            # terminal control stripped: it is another repo's output.
-            usage_reader_reason="$(printf '%s' "${probe_lines%%$'\n'*}" | LC_ALL=C tr -d '[:cntrl:]')"
+            # The reason without the wrapper's name prefix, through
+            # display_safe: it is another repo's output.
+            usage_reader_reason="$(display_safe "${probe_lines%%$'\n'*}")"
             usage_reader_reason="${usage_reader_reason#personal-usage-reader: }"
             if [[ -n "$usage_reader_reason" ]]; then
               usage_reader_reason=" ($usage_reader_reason)"
@@ -2337,7 +2413,7 @@ else
   else
     # Null-safe queries plus `|| true` keep doctor report-only even if
     # the JSON is malformed (a failed substitution would trip set -e).
-    sj() { printf '%s' "$status_json" | yq -p json "$1" 2>/dev/null || true; }
+    sj() { display_safe "$(printf '%s' "$status_json" | yq -p json "$1" 2>/dev/null || true)"; }
     contract_version="$(sj '.contract_version // ""')"
     if [[ "$contract_version" != "3" ]]; then
       warn "agent-tools status contract_version=${contract_version:-unknown}, expected 3 (not interpreting fields)"

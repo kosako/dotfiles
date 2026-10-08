@@ -76,7 +76,8 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
        warn。
      - `--check` は `XDG_CONFIG_HOME` を外して呼ぶ(読み先がずれていても managed file を判定するため)。どちらの
        呼び出しも `bounded_probe` で期限付き(5 秒)にする。
-     - exit 0 → ok。exit 2 → wrapper の理由の 1 行(接頭辞 `personal-usage-reader: ` を外し、制御文字を除く)を
+     - exit 0 → ok。exit 2 → wrapper の理由の 1 行(接頭辞 `personal-usage-reader: ` を外し、制御文字などを `?` にする doctor の
+       `display_safe` を通す。#335)を
        添えた action。手順は `chezmoi apply` と、理由が実行ファイルなら tacho の導入(`install-packages.sh`)。読み先が
        ずれていれば「ずれを直すまで効かない」と書き、wrapper が失敗するとは断定しない。exit 3(設定 file が無い。
        doctor が有無を確かめた後に消えた)→ 無いときと同じ手順の action。それ以外の exit や期限切れ → 未確認の warn。

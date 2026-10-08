@@ -72,6 +72,14 @@ policy validation が失敗した場合は exit 1。
 
 導入後または現状環境の健康診断を行う。section は出力順に次のとおり(最後に next actions の一覧。下記)。
 
+doctor が自分で作っていない値 — 他の tool や repo の出力(agent-tools の `status.sh`・usage reader の理由・herdr の状態・
+npm の版と設定値)と、他人が形を決められる名前(repo の dir と git remote、OpenCode の plugin と Codex の rules の
+file 名、backup の marker の欄、Codex の project の key)— は、共通の `display_safe` を通してから表示する(#335)。
+正しい UTF-8 の文字はそのまま残し、制御文字(C0・DEL・C1)、bidi の override / isolate(U+202A〜U+202E・
+U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする。判定は byte 単位で locale に依らない。terminal の escape 列で
+表示を崩したり偽装したりできなくするためで、文字列の中身(指示文など)は text のまま出る(読む側は data として扱う)。
+doctor 自身の定数、HOME と環境変数から組む path、`chezmoi status` の target 名(repo が決める)は対象外。
+
 - doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
 - chezmoi: chezmoi の version と source directory。
 - Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 2 つを見る。
@@ -108,7 +116,7 @@ policy validation が失敗した場合は exit 1。
   wrapper が判定する(#303): `enableAgentToolsStatus=true` の opt-in の下でだけ、配備済みの
   `~/.claude/agent-tools/scripts/personal-usage-reader` の `--help` の 1 行目に `[--check]` があることを確かめてから
   `--check` を `XDG_CONFIG_HOME` を外して(= managed file に対して)`bounded_probe` で呼ぶ。exit 0 → ok、
-  exit 2 → wrapper の理由の 1 行(制御文字は除く)を添えた action(手順は `chezmoi apply` と、理由が実行ファイルなら
+  exit 2 → wrapper の理由の 1 行(`display_safe` を通す)を添えた action(手順は `chezmoi apply` と、理由が実行ファイルなら
   tacho の導入 `install-packages.sh`。読み先がずれていれば「ずれを直すまで効かない」と書く)、exit 3(有無の確認の
   後に消えた)→ 無いときと同じ手順の action、それ以外の exit・期限切れ → 未確認の warn。opt-in なし → 未確認の item、wrapper の未配備・`--check` 非対応の旧版 → 未確認で
   agent-tools の sync を示す action、`--help` が失敗する(起動できない wrapper もありうる)→ 未確認の warn。設定の値は表示しない。非 active な profile では手置きの file を中立に表示する(#301)。
@@ -393,7 +401,7 @@ query だけを実機で実行する(書き込みはしない)。
   失敗したときも出す)、末尾 slash の HOME でも一致。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
-  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字は `?` に置換)、symlink の `default.rules` は
+  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、symlink の `default.rules` は
   baseline 無効として warn、読めない rules dir は INCOMPLETE(#316)、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
   取り出す(値は出さない、#309)。正当な書き方(`[projects]` table・inline table・dotted / quote / escape を含む key・
   複数行文字列)は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key が空か制御文字を含む、
@@ -408,6 +416,12 @@ query だけを実機で実行する(書き込みはしない)。
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。reader も取り出し、
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
+- display_safe(#335): helper を doctor.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字)を残し、C0・DEL・C1・bidi の
+  制御・不正な UTF-8(途中で切れた列・overlong・surrogate・U+10FFFF 超)を `?` にすることを、`LC_ALL=C` と継承した locale の
+  両方で確かめる。専用の HOME で 1 回 doctor を走らせ、status.sh・herdr・npm の出力、repo の dir 名、OpenCode の plugin の
+  file 名(config の `plugin` 欄にも載るものを含む)、backup の marker、Codex の project の key に escape・BEL・C1・RLO を
+  仕込み、それぞれが `?` で出ることと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の
+  rules の file 名は AI policy の case で固定する。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
