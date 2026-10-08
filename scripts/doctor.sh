@@ -1268,16 +1268,50 @@ claude_read_rules() {
   done < <(yq eval-all -p json -o json -0 -r "$expr" "$1" 2>/dev/null)
   [[ "$complete" -eq 1 ]]
 }
+# claude_settings_dir_state DIR — "open" when DIR can be searched, "absent"
+# only on a confirmed absence (No such file or directory, a dangling symlink
+# included), "error" otherwise (permission denied, not a directory, a symlink
+# loop): `-f` / `-e` read every failure to stat as absence, so the errno is
+# taken from the builtin cd in a subshell, the C locale keeping the message
+# stable and the raw error (it carries the path) never echoed (as for the
+# Codex rules dir, #316).
+claude_settings_dir_state() {
+  local error
+  if error="$( (LC_ALL=C; cd -P -- "$1") 2>&1 )"; then
+    echo open
+    return 0
+  fi
+  case "$error" in
+    *": No such file or directory") echo absent ;;
+    *) echo error ;;
+  esac
+}
+# claude_settings_file_state FILE — in a DIR that is "open": "file" for a
+# regular file (followed through a symlink), "absent" when nothing is there,
+# "other" for anything else (a directory, a dangling or looping symlink).
+claude_settings_file_state() {
+  if [[ -f "$1" ]]; then
+    echo file
+  elif [[ -e "$1" || -L "$1" ]]; then
+    echo other
+  else
+    echo absent
+  fi
+}
 report_claude_project_allows() {
   local floor_file="$HOME/.claude/settings.json" floor_stops=() stop_rules dirs root dir seen dup file kind allows probe hits hit_count shown
-  local home_dir local_allows shared_allows local_read shared_read files_read=0 files_unreadable=0 files_flagged=0
-  if [[ -f "$floor_file" ]]; then
-    if ! claude_read_rules "$floor_file"; then
-      item "Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)"
-      return 0
-    fi
-    floor_stops=(${claude_stop_rules[@]+"${claude_stop_rules[@]}"})
+  local home_dir dir_state file_state local_allows shared_allows local_read shared_read files_read=0 files_unreadable=0 files_flagged=0
+  # The floor: absent (confirmed) means no deny / ask; anything that cannot
+  # be read decides nothing, so the check stops there.
+  dir_state="$(claude_settings_dir_state "$HOME/.claude")"
+  file_state=absent
+  [[ "$dir_state" == open ]] && file_state="$(claude_settings_file_state "$floor_file")"
+  if [[ "$dir_state" == error || "$file_state" == other ]] \
+    || { [[ "$file_state" == file ]] && ! claude_read_rules "$floor_file"; }; then
+    item "Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)"
+    return 0
   fi
+  [[ "$file_state" == file ]] && floor_stops=(${claude_stop_rules[@]+"${claude_stop_rules[@]}"})
   # This repo counts only when it sits under HOME (where the user's Claude
   # sessions run; a fixture HOME elsewhere does not read the real checkout).
   # A directory reached twice (this repo under a standard root, a symlink)
@@ -1287,9 +1321,18 @@ report_claude_project_allows() {
   dirs=()
   home_dir="$(CDPATH='' cd -- "$HOME" 2>/dev/null && pwd)" || home_dir="$HOME"
   [[ "$DOTFILES_ROOT" == "${home_dir%/}"/* ]] && dirs+=("$DOTFILES_ROOT")
+  # A root that cannot be searched or listed would yield no repos at all, so
+  # it is unreadable, not empty; dot-named repos are listed too.
   for root in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
-    [[ -d "$root" ]] || continue
-    for dir in "$root"/*/; do
+    dir_state="$(claude_settings_dir_state "$root")"
+    [[ "$dir_state" == open && ! -r "$root" ]] && dir_state=error
+    if [[ "$dir_state" == error ]]; then
+      item "the project root $(printf '%q' "$root") could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked"
+      files_unreadable=$((files_unreadable + 1))
+      continue
+    fi
+    [[ "$dir_state" == open ]] || continue
+    for dir in "$root"/*/ "$root"/.[!.]*/ "$root"/..?*/; do
       [[ -d "$dir" ]] || continue
       dir="${dir%/}"
       dup=0
@@ -1309,12 +1352,20 @@ report_claude_project_allows() {
     shared_allows=()
     local_read=0
     shared_read=0
+    dir_state="$(claude_settings_dir_state "$dir/.claude")"
+    if [[ "$dir_state" == error ]]; then
+      item "the .claude directory of $(printf '%q' "$dir") could not be opened (permission denied, not a directory or a symlink loop); its settings not checked"
+      files_unreadable=$((files_unreadable + 1))
+      continue
+    fi
+    [[ "$dir_state" == open ]] || continue
     for kind in local shared; do
       file="$dir/.claude/settings.json"
       [[ "$kind" == local ]] && file="$dir/.claude/settings.local.json"
-      [[ -f "$file" ]] || continue
-      if ! claude_read_rules "$file"; then
-        item "the permission rules of $(printf '%q' "$file") could not be read (not JSON of the expected shape?); not checked (contents never shown)"
+      file_state="$(claude_settings_file_state "$file")"
+      [[ "$file_state" != absent ]] || continue
+      if [[ "$file_state" == other ]] || ! claude_read_rules "$file"; then
+        item "the permission rules of $(printf '%q' "$file") could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)"
         files_unreadable=$((files_unreadable + 1))
         continue
       fi
