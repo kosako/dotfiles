@@ -1211,6 +1211,32 @@ else
   status=1
 fi
 
+# P1) Claude MCP exposure (#341): committed personal has gateUnusedClaudeMcp ON
+#     with claude-settings active, so doctor reports the deny; flipped off it
+#     reports the declared-off state. Both stay exit 0 (report-only).
+if grep -Fq "gateUnusedClaudeMcp=true; managed ~/.claude/settings.json denies the claude.ai Gmail" <<< "$gh_out"; then
+  ok "test passed: gateUnusedClaudeMcp=true reported as wired in managed settings.json"
+else
+  fail "test failed: gateUnusedClaudeMcp=true not reported"
+  status=1
+fi
+unused_root="$fixture_home/.dotfiles-unusedmcp"
+copy_repo_fixture "$unused_root"
+set_capability_all "$unused_root" gateUnusedClaudeMcp false
+if unused_out="$(HOME="$fixture_home" "$unused_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "gateUnusedClaudeMcp not active (false)" <<< "$unused_out"; then
+    ok "test passed: gateUnusedClaudeMcp=false reported as not active"
+  else
+    printf '%s\n' "$unused_out" >&2
+    fail "test failed: gateUnusedClaudeMcp=false not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$unused_out" >&2
+  fail "test failed: doctor must stay exit 0 (gateUnusedClaudeMcp=false)"
+  status=1
+fi
+
 # P2) trust list (#119 PR3): the injection-guard section points to the
 #     non-committed trust list, and the private-backup section reports its
 #     presence contents-blind (it is in backup-paths.yaml). The fixture HOME has

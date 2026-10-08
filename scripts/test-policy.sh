@@ -564,6 +564,14 @@ run_ok \
   "GitHub guard capabilities are allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
+# gateUnusedClaudeMcp (#341) only removes MCP exposure from Claude Code (a
+# deny), so it must NOT be in the forbidden table either.
+make_fixture
+set_capability_all "$fixture" gateUnusedClaudeMcp true
+run_ok \
+  "gateUnusedClaudeMcp=true is allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 # enableQualityLoopHooks (#199) only adds gates on the agent (a lint steer and
 # a once-per-scope Stop block) and grants no install / secret / network
 # privilege, so it must NOT be in the forbidden table either.
