@@ -79,7 +79,8 @@ npm の設定値・`go env` の行き先・`core.excludesFile`)と、他人が�
 package と go の実行ファイルの名前・`npm root -g`)。正しい UTF-8 の文字はそのまま残し、制御文字(C0・DEL・C1)、bidi の
 override / isolate(U+202A〜U+202E・U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする。判定は byte 単位で locale に
 依らない。terminal の escape 列で表示を崩したり偽装したりできなくするためで、文字列の中身(指示文など)は text のまま出る
-(読む側は data として扱う)。doctor 自身の定数、catalog の中身、HOME と環境変数から組む path(`command -v` の結果を含む)、
+(読む側は data として扱う)。この repo の checkout の path も名前なので通す。外部の command の stderr は表示に使わず捨てる
+(通す経路が無いため)。doctor 自身の定数、catalog の中身、HOME と環境変数から組む path(`command -v` の結果を含む)、
 `chezmoi status` の target 名(repo が決める)は対象外。next actions の手順に出す path は、同じ `lib-policy.sh` の
 `shell_quote_safe`(C locale の `printf %q`)で引用する。ASCII だけの引用になり、貼り付ければ元の path に戻る(UTF-8 locale の
 bash 3.2 の `%q` は一部の byte を生のまま残すため)。期限付きの probe(`bounded_probe`)の終了状態の行は呼び出しごとの
@@ -429,7 +430,7 @@ query だけを実機で実行する(書き込みはしない)。
   repo 名の Claude の設定 file が、warn と next actions の手順の両方で ASCII だけの引用で出ることを継承した locale で確かめる。専用の HOME で 1 回 doctor を走らせ(C locale。macOS の UTF-8 locale では
   bidi の文字も `[[:cntrl:]]` に当たり、go の行き先の検査が先に弾くため)、status.sh・herdr・npm・git・chezmoi・corepack・go・
   brew の出力、repo の dir 名、OpenCode の plugin の file 名(config の `plugin` 欄にも載るものを含む)、backup の marker、Codex の
-  project の key、`core.excludesFile`、go の実行ファイル名に escape・BEL・C1・RLO・不正な byte を仕込み、それぞれが `?` で出る
+  project の key、`core.excludesFile`、go の実行ファイル名、doctor を置いた checkout の dir 名、git の stderr に escape・BEL・C1・RLO・不正な byte を仕込み、それぞれが `?` で出る
   ことと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の rules の file 名は AI policy の
   case で固定する。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。

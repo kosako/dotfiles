@@ -4573,9 +4573,12 @@ case "\$1" in
 esac
 exit 0
 SH
+# The fake git also writes an escape to stderr (a shim's or a config error's
+# text): doctor must not pass a command's stderr through either.
 cat > "$ds_bin/git" <<SH
 #!/bin/sh
-if [ "\$1" = --version ]; then printf '%s\n' "git version 2${ds_esc}[2J"; exit 0; fi
+if [ "\$1" = --version ]; then printf '%s\n' "git version 2${ds_esc}[2J"; printf '%s\n' "shim${ds_esc}]0;x${ds_bel}" >&2; exit 0; fi
+if [ "\$1" = config ] && [ "\$2" = --global ]; then printf '%s\n' "warn${ds_esc}[5m" >&2; fi
 exec "$ds_real_git" "\$@"
 SH
 cat > "$ds_bin/chezmoi" <<SH
@@ -4628,13 +4631,20 @@ printf '{"plugin":["personal-w\\u001b[1m"]}\n' > "$ds_home/.config/opencode/open
 printf '{"schema_version":1,"last_success":"2026%s[2J","archive":"a%sb.age","file_count":2,"capture_incomplete":false}\n' "$ds_esc" "$ds_rlo" \
   > "$ds_home/.local/state/dotfiles/private-backup.json"
 printf '[projects."/gone\\u202eproj"]\ntrust_level = "trusted"\n' > "$ds_home/.codex/config.toml"
+# doctor itself runs from a repo copy whose directory name carries an escape
+# (the checkout's own path is a name someone chose too).
+ds_repo_copy="$fixture_home/do${ds_esc}[7mtfiles"
+copy_repo_fixture "$ds_repo_copy"
+ds_repo_shown="$(cd "$ds_repo_copy" && pwd)"
+ds_repo_shown="${ds_repo_shown//$ds_esc/?}"
 if ds_out="$(env -u OPENCODE_CONFIG -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL HOME="$ds_home" AGENT_TOOLS="$ds_home/at" \
-    GIT_CONFIG_NOSYSTEM=1 LC_ALL=C PATH="$ds_bin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+    GIT_CONFIG_NOSYSTEM=1 LC_ALL=C PATH="$ds_bin:$PATH" "$ds_repo_copy/scripts/doctor.sh" personal 2>&1)"; then
   ds_missing=""
   for ds_line in \
     "[warn] check manifest_validation: fail?[2J" \
     "[warn] agent-tools sync conflicts (unmanaged same-name targets; tools: co?]0;x?dex); sync must not change them" \
     "[info] - herdr's own view: opencode integration not?[2J installed (" \
+    "[ok] source directory: $ds_repo_shown" \
     "[info] - npm userconfig=/x?y?z/.npmrc" \
     "[ok] git: git version 2?[2J" \
     "[ok] chezmoi: chezmoi version v2?x" \
@@ -4674,7 +4684,7 @@ else
   fail "test failed: doctor must stay exit 0 (display_safe sources)"
   status=1
 fi
-rm -rf "${ds_home:?}" "${ds_bin:?}"
+rm -rf "${ds_home:?}" "${ds_bin:?}" "${ds_repo_copy:?}"
 
 # DS-2) a repo directory with a bidi override, in the inherited locale (where
 #       bash 3.2's %q leaves bytes raw): the Claude allow watcher names its

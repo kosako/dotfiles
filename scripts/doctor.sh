@@ -61,13 +61,13 @@ if command -v chezmoi >/dev/null 2>&1; then
 else
   warn "chezmoi not found"
 fi
-ok "source directory: $DOTFILES_ROOT"
+ok "source directory: $(display_safe "$DOTFILES_ROOT")"
 
 section "Git"
 if command -v git >/dev/null 2>&1; then
-  ok "git: $(display_safe "$(git --version)")"
-  use_config_only="$(git config --global --get user.useConfigOnly || true)"
-  credentials_in_url="$(git config --global --get transfer.credentialsInUrl || true)"
+  ok "git: $(display_safe "$(git --version 2>/dev/null)")"
+  use_config_only="$(git config --global --get user.useConfigOnly 2>/dev/null || true)"
+  credentials_in_url="$(git config --global --get transfer.credentialsInUrl 2>/dev/null || true)"
   if [[ "$use_config_only" == "true" ]]; then
     ok "user.useConfigOnly=true"
   else
@@ -187,7 +187,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       # hooks.gitconfig, and `git config --global --get` skips includes by
       # default when a scope file is given — without the flag a correctly
       # wired machine misreports as unwired (found in the #196 live smoke).
-      hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
+      hook_gates_path="$(git config --global --includes --get core.hooksPath 2>/dev/null || true)"
       # shellcheck disable=SC2088 # the first pattern is the literal value stored in gitconfig (git expands the tilde, not the shell)
       case "$hook_gates_path" in
         "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks")
@@ -231,7 +231,7 @@ else
   done
   if command -v git >/dev/null 2>&1; then
     # --includes for the same reason as the enabled branch above.
-    hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
+    hook_gates_path="$(git config --global --includes --get core.hooksPath 2>/dev/null || true)"
     # shellcheck disable=SC2088 # literal gitconfig value comparison, as above
     case "$hook_gates_path" in
       "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks") hook_gates_lingering=1 ;;
