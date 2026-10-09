@@ -524,7 +524,8 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
 
 `private-backup.sh` の round-trip と安全性を hermetic に検証する(fixture HOME・fake chezmoi で
 gate profile を与える・throwaway age 鍵)。実 home には触れない。`age` / `age-keygen` が無い環境
-では skip(exit 0)。
+では、手元は skip(exit 0)、CI(`CI=true`)では fail(exit 1。workflow の age の導入が消えても green に
+ならないように、#330)。この規則自体も、age の無い PATH で suite を走らせ直して確かめる。
 
 ```sh
 ./scripts/test-private-backup.sh
