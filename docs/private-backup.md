@@ -164,15 +164,19 @@ secret ではないが repo にはコミットしない)。
 - **runtime gate**: 実 profile を chezmoi config から fail-closed に取得し、
   `allowSecretsAccess != true`(work / client / sandbox / agent など)では実行を拒否する。
 - restore は home-relative entry のみ許可・**0700 temp** に展開して検証後 copy・
-  symlink / hardlink の member は常に拒否(許可する flag は無い)・`..` / 絶対パスを拒否し
-  HOME 外を壊さない。member の種別は 2 回確かめる(#335):
+  symlink / hardlink を許す flag は無く・`..` / 絶対パスを拒否し HOME 外を壊さない。保証するのは、検証と copy に
+  使う展開後の tree が**通常の file と dir だけで、どの file も link 数が 1** であること。そのために member の種別を
+  2 回確かめる(#335):
   - 展開前: `tar -tvf` の一覧の先頭の文字が通常の file か dir でなければ拒否する。ただしこれは一覧の表示で、
     bsdtar は header の mode から表示するので、通常の file の mode を持たせた hardlink の header は `-` と出て
     ここを通る(GNU tar は種別の flag で表示するので `h` と出て止まる)。
   - 展開後: 0700 temp に tar が実際に作ったものを、中身を読んだり copy したりする前に確かめる。通常の file
     と dir 以外(symlink・fifo など)と、link 数が 2 以上の file(archive 内の別の member や temp の外への
-    hardlink)があれば拒否する。backup は各 file を `cp -p` で複製してから archive にするので、正常な
+    hardlink)が残っていれば拒否する。backup は各 file を `cp -p` で複製してから archive にするので、正常な
     archive にどちらも入らない。find が辿れない dir が残った場合も拒否する。
+  - 展開の途中で一度作られ、後の member で置き換えられて残らない link は拒否しない(例: 偽装した hardlink の後に
+    同じ名前の通常の file が来ると、最後の tree では link 数が 1 に戻る)。その tree は通常の file だけの archive と
+    同じもので、link を通して temp の外を指すことはない。
   - 展開の途中で temp の外へ書かれないこと(絶対 path や `..` を含む link 先)は、展開前の名前の検査と、
     bsdtar / GNU tar の既定の安全な展開に依る。
 - 復号物・一時展開は確実に削除(trap)し平文を残さない。verify / restore の temp は、archive が権限の無い dir(mode 000)を
