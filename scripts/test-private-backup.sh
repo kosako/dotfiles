@@ -451,25 +451,35 @@ if rcpt_run backup --out "$rcpt_home/out/file.age" --recipients-file "$rcpt_home
 else
   miss "backup --recipients-file did not produce a verifiable archive"
 fi
-rcpt_rc=0
-rcpt_out="$(rcpt_run backup --out "$rcpt_home/out/missing.age" --recipients-file "$rcpt_home/no-such-file" --yes 2>&1)" || rcpt_rc=$?
-if [[ "$rcpt_rc" -eq 2 ]] && grep -Fxq "[fail] recipients file not found: $rcpt_home/no-such-file" <<< "$rcpt_out" \
-  && [[ ! -e "$rcpt_home/out/missing.age" ]]; then
-  pass "a missing --recipients-file is a usage error (exit 2) and writes nothing"
-else
-  printf '%s\n' "$rcpt_out" >&2
-  miss "a missing --recipients-file must exit 2 without an archive (rc=$rcpt_rc)"
-fi
-rcpt_rc=0
-rcpt_out="$(rcpt_run backup --out "$rcpt_home/out/both.age" --recipient "$recipient" \
-  --recipients-file "$rcpt_home/recipients.txt" --yes 2>&1)" || rcpt_rc=$?
-if [[ "$rcpt_rc" -eq 2 ]] && grep -Fxq "[fail] use only one of --recipient / --recipients-file" <<< "$rcpt_out" \
-  && [[ ! -e "$rcpt_home/out/both.age" ]]; then
-  pass "--recipient together with --recipients-file is a usage error (exit 2) and writes nothing"
-else
-  printf '%s\n' "$rcpt_out" >&2
-  miss "--recipient with --recipients-file must exit 2 without an archive (rc=$rcpt_rc)"
-fi
+# The two usage errors run in fresh homes (no marker yet), so "writes
+# nothing" covers the archive, its .partial and the marker (Codex review,
+# PR #351).
+for rcpt_err in missing-file both-flags; do
+  rcpt_err_home="$fixture_home/rcpt-$rcpt_err"
+  mkdir -p "$rcpt_err_home/.ssh"
+  printf 'a\n' > "$rcpt_err_home/.zshrc.local"
+  printf 'b\n' > "$rcpt_err_home/.ssh/config.local"
+  rcpt_rc=0
+  case "$rcpt_err" in
+    missing-file)
+      rcpt_expect="[fail] recipients file not found: $rcpt_err_home/no-such-file"
+      rcpt_out="$(HOME="$rcpt_err_home" PATH="$fixture_home/fakebin:$PATH" "$PB" backup --out "$rcpt_err_home/x.age" \
+        --recipients-file "$rcpt_err_home/no-such-file" --yes 2>&1)" || rcpt_rc=$?
+      ;;
+    both-flags)
+      rcpt_expect="[fail] use only one of --recipient / --recipients-file"
+      rcpt_out="$(HOME="$rcpt_err_home" PATH="$fixture_home/fakebin:$PATH" "$PB" backup --out "$rcpt_err_home/x.age" \
+        --recipient "$recipient" --recipients-file "$rcpt_home/recipients.txt" --yes 2>&1)" || rcpt_rc=$?
+      ;;
+  esac
+  if [[ "$rcpt_rc" -eq 2 ]] && grep -Fxq "$rcpt_expect" <<< "$rcpt_out" \
+    && [[ ! -e "$rcpt_err_home/x.age" && ! -e "$rcpt_err_home/x.age.partial" && ! -e "$rcpt_err_home/.local/state/dotfiles/private-backup.json" ]]; then
+    pass "recipient usage error ($rcpt_err) exits 2 and writes no archive, partial or marker"
+  else
+    printf '%s\n' "$rcpt_out" >&2
+    miss "recipient usage error ($rcpt_err) must exit 2 without writing anything (rc=$rcpt_rc)"
+  fi
+done
 
 # 12. restore dry-run writes nothing.
 rdst="$fixture_home/restore-dst"
@@ -1100,9 +1110,27 @@ mkfifo "$kind_home/fifo"
 printf 'plain file\n' > "$kind_home/not-a-dir"
 printf 'backup_paths:\n  - { path: link-file, type: file }\n  - { path: link-dir, type: dir }\n  - { path: fifo, type: file }\n  - { path: not-a-dir, type: dir }\n' \
   > "$kind_home/.config/dotfiles/backup-paths.local"
+# A regression that reads the FIFO (no regular-file check) would block
+# forever on a FIFO with no writer and never reach the assertions (Codex
+# review, PR #351). While backup runs, a feeder keeps opening and closing
+# the FIFO for writing, so every open finds a writer and every read ends in
+# EOF (stage_file opens its source several times: cp, wc, shasum). Such a
+# regression then captures the FIFO as an empty file and the case fails; a
+# correct run never opens it. The feeder stops on a stop file and is reaped.
+feed_fifo() { # FIFO STOPFILE
+  while [[ ! -e "$2" ]]; do
+    exec 9<>"$1"
+    sleep 0.2
+    exec 9>&-
+  done
+}
+feed_fifo "$kind_home/fifo" "$fixture_home/kind-feeder-stop" &
+kind_feeder=$!
 kind_rc=0
 kind_out="$(HOME="$kind_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$kind_home/k.age" --recipient "$recipient" --yes 2>&1)" || kind_rc=$?
+: > "$fixture_home/kind-feeder-stop"
+wait "$kind_feeder" 2>/dev/null || true
 kind_extract="$fixture_home/kind-extract"
 mkdir -p "$kind_extract"
 kind_files=""
