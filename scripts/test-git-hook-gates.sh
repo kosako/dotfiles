@@ -229,6 +229,22 @@ else
   status=1
 fi
 
+# gate_wiring_armed HOME_DIR
+# The fully armed state exactly as pinned above (both shims present,
+# executable and byte-exact; hooks.gitconfig byte-exact), as a predicate for
+# later cases whose precondition is "armed". `! gate_files_absent` is NOT that
+# predicate: it accepts a single lingering file as armed.
+gate_wiring_armed() {
+  local home_dir="$1" stage shim
+  for stage in pre-commit commit-msg; do
+    shim="$home_dir/.config/git-hook-gates/hooks/$stage"
+    [[ -f "$shim" && -x "$shim" ]] || return 1
+    diff <(shim_body "$stage") "$shim" >/dev/null || return 1
+  done
+  [[ -f "$home_dir/.config/git-hook-gates/hooks.gitconfig" ]] || return 1
+  [[ "$(cat "$home_dir/.config/git-hook-gates/hooks.gitconfig")" == "$expected_gitconfig" ]]
+}
+
 section "git hook gates end to end (rendered ~/.gitconfig drives the shims)"
 
 # 4) Drive a real commit through the RENDERED artifacts: HOME is the armed
@@ -359,7 +375,9 @@ fi
 #     unmet → 空 render → chezmoi が 3 file を prune する。消えるまでの commit は
 #     無い dispatcher を exec して止まるので残置は許されない。source を変えない
 #     のは意図的: source が変わったときだけ再評価する probe や、render 済み target
-#     を readiness と見なす probe は case 5 を通って、ここだけで落ちる。
+#     を readiness と見なす probe は case 5 を通って、ここだけで落ちる。武装の
+#     前提確認は gate_wiring_armed (3 file とも case 3 と同じ exact pin) で取る:
+#     1 file の残置を armed と誤認すると、この case の disarm 判定が空になる。
 disarm_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-disarm.XXXXXX")"
 tmp_roots+=("$disarm_root")
 mkdir -p "$disarm_root/home"
@@ -367,8 +385,8 @@ plant_gate_deploy "$disarm_root/home" "${GATE_SCRIPTS[@]}"
 if ! render_personal_into "$DOTFILES_ROOT" "$disarm_root"; then
   fail "test failed: cap-on apply into disarm home did not render"
   status=1
-elif gate_files_absent "$disarm_root/home"; then
-  fail "test failed: cap-on apply did not arm the gate wiring (disarm test precondition; deploy was planted)"
+elif ! gate_wiring_armed "$disarm_root/home"; then
+  fail "test failed: cap-on apply did not fully arm the gate wiring (disarm test precondition; deploy was planted)"
   status=1
 elif ! rm -rf "$disarm_root/home/.claude/agent-tools/scripts"; then
   fail "test failed: could not remove the planted deploy (disarm test fixture)"
