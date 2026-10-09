@@ -218,9 +218,14 @@ fi
 # so "dispatcher present, gate missing" would arm the wiring and then block
 # every commit (Codex review, PR #197). This list must stay identical to
 # .chezmoitemplates/git-hook-gates-armed and doctor.sh. Report-only, like
-# everything here.
+# everything here. The capability alone arms nothing: without the
+# git-hook-gates module, .chezmoiignore keeps the shims and hooks.gitconfig
+# out of apply, so that case is a dangling capability as in doctor (#329).
 section "git hook gates (apply impact)"
-if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
+if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]] \
+  && ! module_active_for_profile "$profile" git-hook-gates; then
+  warn "enableGitHookGates=true but the git-hook-gates module is inactive for this profile (apply manages no shims or hooksPath — dangling capability)"
+elif [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
   hook_gates_missing=0
   for hook_gates_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do

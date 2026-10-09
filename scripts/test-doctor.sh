@@ -2906,6 +2906,23 @@ for na_opt in --actions-onyl -h -x; do
     status=1
   fi
 done
+#     NA-c2) a second profile is a usage error too (exit 2, no report),
+#            whichever side of --actions-only it sits: before #329 the last
+#            one silently won, so `doctor.sh work personal` reported
+#            personal as if it were the requested profile.
+for na_args in "work personal" "work --actions-only personal"; do
+  na_rc=0
+  # shellcheck disable=SC2086 # split on purpose: each case is a word list
+  na_bad="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" $na_args 2>&1)" || na_rc=$?
+  if [[ "$na_rc" -eq 2 ]] && grep -Fq "too many arguments (usage: doctor.sh [PROFILE] [--actions-only])" <<< "$na_bad" \
+    && ! grep -Fq "doctor profile:" <<< "$na_bad" && ! grep -Fq "next actions" <<< "$na_bad"; then
+    ok "test passed: a second profile ($na_args) -> usage error (exit 2) without running the report"
+  else
+    printf 'rc=%s\n%s\n' "$na_rc" "$na_bad" >&2
+    fail "test failed: a second profile ($na_args) must be rejected with exit 2 and no report"
+    status=1
+  fi
+done
 #     NA-d) helper-level exact pins (deterministic, no host state): zero
 #           actions -> "none"; then two actions where the steps carry a
 #           printf directive (%), a leading dash and a shell-quoted path
@@ -2939,6 +2956,24 @@ if [[ "$na_two" == "$na_two_expected" ]]; then
 else
   diff <(printf '%s\n' "$na_two_expected") <(printf '%s\n' "$na_two") >&2 || true
   fail "test failed: helper-level next-actions output differs from the expected block"
+  status=1
+fi
+#     NA-d1) an action without steps (or ending in an empty one) recorded
+#            last still leaves report_actions at status 0: doctor closes
+#            with it under set -e, so a non-zero return would turn the
+#            report-only run into exit 1 (#329).
+na_nostep="$(bash -c 'set -euo pipefail; source "$1"
+action "with a step" "\$ step one"
+action "no step"
+report_actions
+action "empty last step" "\$ step two" ""
+report_actions
+printf "after\n"' _ "$SCRIPT_DIR/lib-policy.sh" 2>&1)" && na_nostep_rc=0 || na_nostep_rc=$?
+if [[ "$na_nostep_rc" -eq 0 && "$na_nostep" == *$'[info] 2. no step\n[warn] empty last step\n[info] == next actions (3) =='* && "$na_nostep" == *$'        $ step two\nafter' ]]; then
+  ok "test passed: report_actions returns 0 when the last action has no (or an empty last) step"
+else
+  printf 'rc=%s\n%s\n' "$na_nostep_rc" "$na_nostep" >&2
+  fail "test failed: report_actions must return 0 when the last action has no (or an empty last) step"
   status=1
 fi
 #     NA-d2) drift step path: a chezmoi status line with a single-column
@@ -4114,7 +4149,7 @@ case "$2" in
 esac
 SH
 chmod +x "$go_fakebin/go"
-for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query-fails-no-path trailing-slash-home; do
+for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query-fails-no-path trailing-slash-home gobin-trailing-slash gobin-double-slash gobin-symlink; do
   go_gobin=""
   go_gopath="$fixture_home/go"
   go_path="$go_fakebin:$fixture_home/go/bin:$PATH"
@@ -4128,12 +4163,22 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
     query-fails-no-path) go_fail=1; go_path="$go_fakebin:$PATH" ;;
     # .zshenv appends ${HOME%/}/go/bin, so a trailing-slash HOME still matches.
     trailing-slash-home) go_home="$fixture_home/" ;;
+    # go env returns GOBIN as spelled (#329): the same ~/go/bin with a
+    # trailing `/` or a doubled `//` is matched by its spelling (no
+    # directory exists for these two), a symlink to it as the same dir.
+    gobin-trailing-slash) go_gobin="$fixture_home/go/bin/" ;;
+    gobin-double-slash) go_gobin="$fixture_home//go//bin" ;;
+    gobin-symlink)
+      mkdir -p "$fixture_home/go/bin"
+      ln -s "$fixture_home/go/bin" "$fixture_home/gobin-link"
+      go_gobin="$fixture_home/gobin-link"
+      ;;
   esac
   if go_out="$(HOME="$go_home" PATH="$go_path" FAKE_GOBIN="$go_gobin" FAKE_GOPATH="$go_gopath" \
       FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     go_ok=0
     case "$go_case" in
-      default-gopath|explicit-gobin|trailing-slash-home)
+      default-gopath|explicit-gobin|trailing-slash-home|gobin-trailing-slash|gobin-double-slash|gobin-symlink)
         grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
           && ! grep -Fq "go install target is" <<< "$go_out" \
           && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
@@ -4176,7 +4221,7 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
     status=1
   fi
 done
-rm -rf "${go_fakebin:?}"
+rm -rf "${go_fakebin:?}" "${fixture_home:?}/gobin-link" "${fixture_home:?}/go"
 # The new-shell step must actually drop an inherited GOBIN / GOPATH (a plain
 # `exec zsh -l` keeps exported values): check that this env(1) honors the
 # `-u` form the action prints, with a probe in place of the shell.

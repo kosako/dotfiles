@@ -314,6 +314,27 @@ else
   printf '%s\n' "$pf_out" >&2
   miss "git hook gates: a deploy without the identity gate must not be reported as complete"
 fi
+#     The capability alone arms nothing (#329): with the git-hook-gates module
+#     taken out of the profile, .chezmoiignore keeps the shims and
+#     hooks.gitconfig out of apply, so a complete deploy must be reported as a
+#     dangling capability, never as "apply arms the commit gates" (doctor
+#     reports the same case the same way). The deploy is complete again here,
+#     so only the module check can tell the two apart.
+printf '#!/bin/sh\nexit 0\n' > "$pf_hg_deploy/personal-git-identity-gate"
+chmod +x "$pf_hg_deploy/personal-git-identity-gate"
+pf_hg_root="$fixture_home/hook-gates-root"
+copy_repo_fixture "$pf_hg_root"
+remove_module_all "$pf_hg_root" git-hook-gates
+pf_rc=0
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$pf_hg_root/scripts/preflight.sh" personal 2>&1)" || pf_rc=$?
+if [[ "$pf_rc" -eq 0 ]] && grep -Fxq "[warn] enableGitHookGates=true but the git-hook-gates module is inactive for this profile (apply manages no shims or hooksPath — dangling capability)" <<< "$pf_out" \
+  && ! grep -Fq "apply arms the commit gates" <<< "$pf_out" \
+  && ! grep -Fq "[ok] deployed: $pf_hg_deploy/" <<< "$pf_out"; then
+  pass "git hook gates: the capability without the module is a dangling capability, not an armed apply"
+else
+  printf 'rc=%s\n%s\n' "$pf_rc" "$pf_out" >&2
+  miss "git hook gates: the capability without the module must be reported as dangling"
+fi
 
 # 5g. Values are never shown (#307): with a global identity, hooksPath and
 #     excludesFile set, and a usage-reader.json / herdr config present, the
