@@ -50,6 +50,16 @@ fail() {
 # them still shows as text (the report only states it; whoever reads it
 # treats it as data). Out of scope: the report's own constants, the catalog,
 # paths built from HOME and the environment, and chezmoi's target names.
+# shell_quote_safe VALUE — print VALUE quoted for a shell (printf %q), in the
+# C locale so every byte outside printable ASCII comes out as an octal escape:
+# a step a report prints can be pasted back exactly, and holds no raw byte a
+# terminal could act on (under a UTF-8 locale bash 3.2's %q leaves some bytes
+# raw, a bidi override's among them). For the paths in next-action steps.
+shell_quote_safe() {
+  local LC_ALL=C
+  printf '%q' "$1"
+}
+
 # display_safe VALUE — print VALUE (no newline) in a form safe to show on a
 # terminal: valid UTF-8 text is kept as is, and each control character (C0,
 # DEL, C1), bidirectional override / isolate (U+202A-U+202E, U+2066-U+2069)
@@ -173,14 +183,14 @@ require_yq() {
   local version major
   version="$(yq --version 2>/dev/null)"
   if [[ "$version" != *mikefarah* ]]; then
-    fail "wrong yq variant: need mikefarah/yq v4, got: ${version:-unknown}"
+    fail "wrong yq variant: need mikefarah/yq v4, got: $(display_safe "${version:-unknown}")"
     return 1
   fi
   major="${version##*version }"
   major="${major#v}"
   major="${major%%.*}"
   if [[ ! "$major" =~ ^[0-9]+$ ]] || ((major < 4)); then
-    fail "yq v4+ required, got: $version"
+    fail "yq v4+ required, got: $(display_safe "$version")"
     return 1
   fi
   return 0

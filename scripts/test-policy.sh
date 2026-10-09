@@ -697,6 +697,30 @@ run_fail_contains \
   "yq v4+ required" \
   env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal
 
+# The version text is another tool's output: shown through display_safe
+# (#335), so a terminal escape in it is a `?`, never a raw byte.
+for yq_case in variant old; do
+  make_fixture
+  mkdir -p "$fixture/fakebin"
+  if [[ "$yq_case" == variant ]]; then
+    printf '#!/bin/sh\nprintf "yq 3\\033[2J (python)\\n"\n' > "$fixture/fakebin/yq"
+    yq_want="wrong yq variant: need mikefarah/yq v4, got: yq 3?[2J (python)"
+  else
+    printf '#!/bin/sh\nprintf "yq (https://github.com/mikefarah/yq/) version v3\\033[2J\\n"\n' > "$fixture/fakebin/yq"
+    yq_want="yq v4+ required, got: yq (https://github.com/mikefarah/yq/) version v3?[2J"
+  fi
+  chmod +x "$fixture/fakebin/yq"
+  yq_rc=0
+  yq_out="$(env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal 2>&1)" || yq_rc=$?
+  if [[ "$yq_rc" -ne 0 ]] && grep -Fq -- "$yq_want" <<< "$yq_out" && ! grep -Fq $'\033' <<< "$yq_out"; then
+    ok "test passed: a yq version with a terminal escape is shown with ? ($yq_case)"
+  else
+    printf '%s\n' "$yq_out" | LC_ALL=C cat -v >&2
+    fail "test failed: a yq version with a terminal escape reached the output raw ($yq_case)"
+    exit 1
+  fi
+done
+
 # ---- Software catalog drift (report_catalog_drift) ----
 # report_catalog_drift probes real package managers, so tests run it against
 # fake brew / npm / go on a minimal PATH (only the fakes, a symlinked yq,

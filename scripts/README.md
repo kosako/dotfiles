@@ -80,7 +80,10 @@ package と go の実行ファイルの名前・`npm root -g`)。正しい UTF-8
 override / isolate(U+202A〜U+202E・U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする。判定は byte 単位で locale に
 依らない。terminal の escape 列で表示を崩したり偽装したりできなくするためで、文字列の中身(指示文など)は text のまま出る
 (読む側は data として扱う)。doctor 自身の定数、catalog の中身、HOME と環境変数から組む path(`command -v` の結果を含む)、
-`chezmoi status` の target 名(repo が決める)は対象外。
+`chezmoi status` の target 名(repo が決める)は対象外。next actions の手順に出す path は、同じ `lib-policy.sh` の
+`shell_quote_safe`(C locale の `printf %q`)で引用する。ASCII だけの引用になり、貼り付ければ元の path に戻る(UTF-8 locale の
+bash 3.2 の `%q` は一部の byte を生のまま残すため)。期限付きの probe(`bounded_probe`)の終了状態の行は呼び出しごとの
+nonce を持ち、probe した command が自分で出した行が終了状態として読まれることはない(#335)。
 
 - doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
 - chezmoi: chezmoi の version と source directory。
@@ -335,7 +338,8 @@ query だけを実機で実行する(書き込みはしない)。
   outdated・needs repair / status が非ゼロ exit(出力を採用しない)/ hang(期限で process tree ごと回収)/
   probe 稼働中に doctor を SIGTERM(trap で回収・rc 143)/ cap off の module active・inactive 別の表示 /
   module 除去の dangling。fake herdr は ok・fail・hang・interrupt・ok-nonl の mode を持つ。
-- herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、present + exit 0 → ok /
+- herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、`__rc=0` などの行を出してから
+  失敗しても終了状態として読まれないこと(#335)、present + exit 0 → ok /
   exit 1 → action / missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
   空値)と `XDG_CONFIG_HOME`(別 dir・空値)の振り替え → warn で、present なら検証しない(fake は exit 1 を返すので、
   走れば action が出る)、missing なら redirect warn と「既定値」と断定しない missing action の両方 /
@@ -420,7 +424,9 @@ query だけを実機で実行する(書き込みはしない)。
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
 - display_safe(#335): helper を lib-policy.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字・U+10000 と U+10FFFF)を残し、
   C0・DEL・C1・bidi の制御・不正な UTF-8(途中で切れた列・2〜4 byte の overlong・surrogate・U+10FFFF 超)を `?` にすることを、
-  `LC_ALL=C` と継承した locale の両方で確かめる。専用の HOME で 1 回 doctor を走らせ(C locale。macOS の UTF-8 locale では
+  `LC_ALL=C` と継承した locale の両方で、case ごとに `set -euo pipefail` の別の bash で(exit 0 も含めて)確かめる。
+  `shell_quote_safe` の結果が ASCII だけで、貼り付けると元の値に戻ることも確かめる。DS-2 は bidi の文字と日本語を含む
+  repo 名の Claude の設定 file が、warn と next actions の手順の両方で ASCII だけの引用で出ることを継承した locale で確かめる。専用の HOME で 1 回 doctor を走らせ(C locale。macOS の UTF-8 locale では
   bidi の文字も `[[:cntrl:]]` に当たり、go の行き先の検査が先に弾くため)、status.sh・herdr・npm・git・chezmoi・corepack・go・
   brew の出力、repo の dir 名、OpenCode の plugin の file 名(config の `plugin` 欄にも載るものを含む)、backup の marker、Codex の
   project の key、`core.excludesFile`、go の実行ファイル名に escape・BEL・C1・RLO・不正な byte を仕込み、それぞれが `?` で出る

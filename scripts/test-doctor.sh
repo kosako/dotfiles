@@ -687,12 +687,13 @@ hc_home="$fixture_home/hc"
 hc_managed="$hc_home/.config/herdr/config.toml"
 hc_fakebin="$fixture_home/hcfake"
 mkdir -p "$hc_fakebin"
-# write_fake_herdr_config_check RC — `herdr config check` exits RC; anything
-# else (the integration section's `herdr integration status`) exits 0 silently.
+# write_fake_herdr_config_check RC [LINE] — `herdr config check` prints LINE
+# (if given) and exits RC; anything else (the integration section's `herdr
+# integration status`) exits 0 silently.
 write_fake_herdr_config_check() {
   cat > "$hc_fakebin/herdr" <<SH
 #!/bin/sh
-if [ "\$1" = config ] && [ "\$2" = check ]; then exit $1; fi
+if [ "\$1" = config ] && [ "\$2" = check ]; then [ -n "${2:-}" ] && printf '%s\n' "${2:-}"; exit $1; fi
 exit 0
 SH
   chmod +x "$hc_fakebin/herdr"
@@ -775,6 +776,23 @@ write_fake_herdr_config_check 1
 hc_expect "rejected -> action with the herdr config check step in next actions" personal -- \
   "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" \
   "        \$ herdr config check"
+# HC-2b) the probed command cannot pass for its own exit status (#335): a
+#        line it prints that looks like the probe's old status line is its
+#        output, so `__rc=0` before exit 1 is still a failure, and `__rc=`
+#        followed by a terminal escape is never shown as the status.
+write_fake_herdr_config_check 1 "__rc=0"
+hc_expect "a printed __rc=0 before exit 1 is still a failure" personal -- \
+  "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file"
+write_fake_herdr_config_check 3 "__rc="$'\033'"[2J"
+if hc_run personal \
+  && grep -Fq "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 3)" <<< "$hc_out" \
+  && ! grep -Fq $'\033' <<< "$hc_out"; then
+  ok "test passed: a printed __rc= line with a terminal escape is not taken as the status (exit 3 shown, no raw escape)"
+else
+  printf '%s\n' "$hc_out" | LC_ALL=C cat -v >&2
+  fail "test failed: a probed command's own __rc= line was taken as its exit status"
+  status=1
+fi
 write_fake_herdr_config_check 0
 # HC-3) missing -> action whose steps are mkdir then apply, consecutive and %q-escaped.
 rm -f "$hc_managed"
@@ -4467,18 +4485,32 @@ rm -rf "$dr_home/.config/chezmoi"
 #     and expects each shown with `?` in its place and not one raw byte of
 #     them anywhere in the report. The usage reader's reason and the Codex
 #     rules file names are pinned in their own sections (UR-3b, AIP-5).
-ds_fns="$(sed -n '/^display_safe() {/,/^}/p' "$SCRIPT_DIR/lib-policy.sh")"
+ds_fns="$(sed -n '/^shell_quote_safe() {/,/^}/p; /^display_safe() {/,/^}/p' "$SCRIPT_DIR/lib-policy.sh")"
 # ds_misses LOCALE — run the helper cases under LC_ALL=LOCALE ('' keeps the
-# inherited locale); print each miss.
+# inherited locale), each in a bash of its own under set -euo pipefail (the
+# helper must return 0 and survive errexit); print each miss.
 ds_misses() {
   (
     [[ -z "$1" ]] || export LC_ALL="$1"
-    eval "$ds_fns"
     ds_case() {
-      local got
-      got="$(display_safe "$1")"
+      local got rc=0
+      got="$(bash -c 'set -euo pipefail; eval "$1"; display_safe "$2"; printf x' _ "$ds_fns" "$1")" || rc=$?
+      if [[ "$rc" -ne 0 || "$got" != *x ]]; then
+        printf '  [LC_ALL=%s] %q -> exit %s under set -euo pipefail\n' "${3:-inherited}" "$1" "$rc"
+        return 0
+      fi
+      got="${got%x}"
       [[ "$got" == "$2" ]] || printf '  [LC_ALL=%s] %q -> %q (expected %q)\n' "${3:-inherited}" "$1" "$got" "$2"
     }
+    eval "$ds_fns"
+    # shell_quote_safe: ASCII only, and pasted back it is the value again.
+    local q path=$'/r/re\xe2\x80\xaepo/\xe4\xb8\x80/'"it's"$'\033[1m x\xff'
+    q="$(shell_quote_safe "$path")"
+    if [[ "$q" == *[![:print:]]* ]] || LC_ALL=C grep -q $'[\x80-\xff]' <<< "$q"; then
+      printf '  [LC_ALL=%s] shell_quote_safe left a raw byte: %s\n' "${1:-inherited}" "$(printf '%s' "$q" | LC_ALL=C od -c | head -2 | tr -s ' ')"
+    elif [[ "$(eval "printf '%s' $q")" != "$path" ]]; then
+      printf '  [LC_ALL=%s] shell_quote_safe does not round-trip\n' "${1:-inherited}"
+    fi
     ds_case 'plain ascii 1.2-3_x' 'plain ascii 1.2-3_x' "$1"
     ds_case "a"$'\033'"[31mb" 'a?[31mb' "$1"
     ds_case "x"$'\r'"y"$'\n'"z"$'\t'"w"$'\177' 'x?y?z?w?' "$1"
@@ -4500,10 +4532,10 @@ ds_misses() {
   )
 }
 if [[ -z "$ds_fns" ]]; then
-  fail "test failed: display_safe not found in lib-policy.sh"
+  fail "test failed: display_safe / shell_quote_safe not found in lib-policy.sh"
   status=1
 elif ds_out="$(ds_misses C; ds_misses '')" && [[ -z "$ds_out" ]]; then
-  ok "test passed: display_safe keeps valid UTF-8 and turns controls, bidi overrides and invalid bytes into ? (locale-independent)"
+  ok "test passed: display_safe keeps valid UTF-8 and turns controls, bidi overrides and invalid bytes into ? (locale-independent, exit 0 under set -euo pipefail); shell_quote_safe is ASCII-only and round-trips"
 else
   fail "test failed: display_safe drifted:"
   printf '%s\n' "$ds_out" >&2
@@ -4643,6 +4675,28 @@ else
   status=1
 fi
 rm -rf "${ds_home:?}" "${ds_bin:?}"
+
+# DS-2) a repo directory with a bidi override, in the inherited locale (where
+#       bash 3.2's %q leaves bytes raw): the Claude allow watcher names its
+#       settings file in the warn line and in the next-actions step through
+#       shell_quote_safe, so the report holds no raw byte of it (an ordinary
+#       non-ASCII character in the name too: the quoting is ASCII-only).
+ds2_home="$fixture_home/ds2-home"
+ds2_file="$ds2_home/src/personal/rl${ds_rlo}o"$'\xe4\xb8\x80'"/.claude/settings.local.json"
+mkdir -p "${ds2_file%/*}"
+printf '{"permissions":{"allow":["Bash(sudo -v)"]}}\n' > "$ds2_file"
+ds2_quoted="$(shell_quote_safe "$ds2_file")"
+if ds_out="$(HOME="$ds2_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $ds2_quoted: 'sudo -v'" <<< "$ds_out" \
+  && grep -Fq "        edit $ds2_quoted: remove the allow rules" <<< "$ds_out" \
+  && ! LC_ALL=C grep -Fq -- "$ds_rlo" <<< "$ds_out"; then
+  ok "test passed: a Claude project path with a bidi override is quoted ASCII-only in the warn and the step"
+else
+  printf '%s\n' "$ds_out" | LC_ALL=C cat -v >&2
+  fail "test failed: a Claude project path with a bidi override reached the report raw"
+  status=1
+fi
+rm -rf "${ds2_home:?}"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
