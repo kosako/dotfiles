@@ -198,6 +198,23 @@ dump が 24h 以内の扱いになること(compinit は補完 file の数と zs
 ので、mtime を進めないと以後のすべての shell が遅い経路を通り続ける)、24h 以内の dump は速い経路
 (`compinit -C`)で手を付けないことを確かめる。CI の `zsh -n` は構文しか見ないので、この種の退行を検出できない。
 
+## test-zshrc-order.sh
+
+`dot_zshenv` と `dot_zshrc` を丸ごと、fixture の HOME・fake の mise・fixture の HOMEBREW_PREFIX(stub の brew bin と
+plugin)を持つ隔離 zsh(`zsh -f`、`env -i`)で対話 login shell の起動順(`~/.zshenv` → `brew shellenv` → `~/.zshrc`)
+どおりに source し、PATH の順序と読込順を固定する(#333)。実 HOME・実 mise・実 brew・実 `~/.zshrc.local` には触れない。
+判定は最終 PATH の文字列ではなく「どの `claude` が勝つか」(`command -v claude` の解決先)と order log で行う。
+
+- 非対話(`~/.zshenv` のみ): `~/.local/bin` が mise の shims より前(shims が PATH に届いていることを先に確かめ、
+  shims 不在での空振りを防ぐ)。
+- 対話: `brew shellenv` の前置で `~/.local/bin` が埋もれる対照を確かめたうえで、`~/.zshrc` が `mise activate` の後・
+  `~/.zshrc.local` の前に `~/.local/bin` を再前置すること(fake mise の前置が PATH に届いていることを先に確かめる)。
+- `~/.zshrc.local` が足した PATH entry はそれでも勝つこと。
+- 読込順が mise activate → `~/.zshrc.local` → zsh-autosuggestions → zsh-syntax-highlighting(最後)であること。
+
+fake の mise は「activate が PATH の先頭に dir を足す」形だけを模す(precmd の hook で installs の bin を足す側は対象外)。
+`dot_zprofile` は `/opt/homebrew` の絶対 path を見るので source せず、driver が `brew shellenv` の PATH 前置だけを模す。
+
 ## test-ai-clip.sh
 
 `dot_zshrc` の Ctrl-O helper(`_ai_clip_strip_ansi` / `_ai_clip_copy` / `_ai_clip_run`)を

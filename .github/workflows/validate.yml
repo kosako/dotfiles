@@ -73,6 +73,9 @@ jobs:
       - name: zshrc compinit daily cache tests
         run: ./scripts/test-zshrc-compinit.sh
 
+      - name: zshrc PATH and source order tests
+        run: ./scripts/test-zshrc-order.sh
+
       - name: gclone helper tests
         run: ./scripts/test-gclone.sh
 
