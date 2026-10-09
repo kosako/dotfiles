@@ -37,6 +37,12 @@
          duplicate (measured: settings.json stays
          byte-identical; Codex re-serializes hooks.json with the same
          content, which the next apply restores).
+       The home path reaches each command string through the shell-word
+       template (quoted only when it holds a character a shell would act
+       on; the herdr path is always single-quoted, as herdr writes it, with
+       each `'` as '\''), and every string is JSON-encoded with toJson, so
+       a home with a space or a quote neither breaks the JSON nor splits
+       the command; a normal home renders unchanged (#329).
        Every agent-tools body is deployed at the stable path
        <home>/<agentDir>/agent-tools/scripts/<name> (agent-tools#146);
        dotfiles references it by absolute path and distributes no script.
@@ -61,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{ $scripts }}/personal-safe-gh-hook"
+            "command": {{ includeTemplate "shell-word" (printf "%s/personal-safe-gh-hook" $scripts) | toJson }}
 {{- if hasKey . "timeout" }},
             "timeout": {{ .timeout }}
 {{- end }}
@@ -78,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{ $scripts }}/personal-fast-edit-check"
+            "command": {{ includeTemplate "shell-word" (printf "%s/personal-fast-edit-check" $scripts) | toJson }}
           }
         ]
       }
@@ -88,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{ $scripts }}/personal-changed-scope-qa"
+            "command": {{ includeTemplate "shell-word" (printf "%s/personal-changed-scope-qa" $scripts) | toJson }}
           }
         ]
       }
@@ -104,7 +110,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash '{{ $herdrHook }}' session",
+            "command": {{ printf "bash '%s' session" (replace "'" "'\\''" $herdrHook) | toJson }},
             "timeout": 10
           }
         ]

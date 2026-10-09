@@ -177,7 +177,7 @@
   "model": "opus[1m]",
   "statusLine": {
     "type": "command",
-    "command": "{{ .chezmoi.homeDir }}/go/bin/tacho statusline",
+    "command": {{ printf "%s statusline" (includeTemplate "shell-word" (printf "%s/go/bin/tacho" .chezmoi.homeDir)) | toJson }},
     "padding": 0
   },
   "enabledPlugins": {

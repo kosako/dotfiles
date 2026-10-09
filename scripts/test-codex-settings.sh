@@ -87,10 +87,10 @@ if ! render_personal_into "$DOTFILES_ROOT" "$home_root"; then
 fi
 home="$home_root/home"
 hooks_file="$home/.codex/hooks.json"
-expected_hook_cmd="$HOME/.codex/agent-tools/scripts/personal-safe-gh-hook"
-expected_edit_cmd="$HOME/.codex/agent-tools/scripts/personal-fast-edit-check"
-expected_stop_cmd="$HOME/.codex/agent-tools/scripts/personal-changed-scope-qa"
-expected_session_cmd="bash '$HOME/.codex/herdr-agent-state.sh' session"
+expected_hook_cmd="$(shell_word "$HOME/.codex/agent-tools/scripts/personal-safe-gh-hook")"
+expected_edit_cmd="$(shell_word "$HOME/.codex/agent-tools/scripts/personal-fast-edit-check")"
+expected_stop_cmd="$(shell_word "$HOME/.codex/agent-tools/scripts/personal-changed-scope-qa")"
+expected_session_cmd="bash $(shell_single_quote "$HOME/.codex/herdr-agent-state.sh") session"
 if [[ ! -f "$hooks_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/hooks.json (enableGitHubIsolatedReader is ON)"
   status=1

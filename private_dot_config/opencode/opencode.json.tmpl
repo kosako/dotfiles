@@ -83,7 +83,7 @@
   "autoupdate": false,
   "share": "disabled",
   "instructions": [
-    "{{ .chezmoi.homeDir }}/.claude/agent-tools/CLAUDE.md"
+    {{ printf "%s/.claude/agent-tools/CLAUDE.md" .chezmoi.homeDir | toJson }}
   ],
   "permission": {
     "read": {

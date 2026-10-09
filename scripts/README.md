@@ -630,6 +630,13 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   `codexWorkerEffort` / `npmHardeningMode`)が schema の値以外(未知の文字列・大文字違い・boolean・数値・null・
   配列・欠落)なら apply が fail して Codex の profile file を作らないこと。両 profile file template の
   execute-template も同じエラーで fail すること。
+- home path の escape(#329): JSON の特殊文字と shell の特殊文字(`"` `\` `&` `<` `'` 空白 `$`)を含む home で
+  render しても、`~/.claude/settings.json` / `~/.codex/hooks.json` / `~/.config/opencode/opencode.json` が妥当な
+  JSON で、statusLine と各 hook の command を shell が意図した単語(path は 1 語)に分けること。OpenCode の
+  instructions の path も一致すること。通常の文字だけの home(固定の `/dotfiles-render-test-home`。host の `$HOME` に
+  依らない。chezmoi はこの dir を作らない)では、statusLine・各 hook の command・instructions が引用符なしの
+  以前と同じ文字列であること。test-claude-settings / test-codex-settings の hook の期待値は、test-lib の
+  `shell_word` / `shell_single_quote`(template と同じ規則)で host の `$HOME` から作る。
 
 chezmoi が必要(CI では version pin して導入する)。
 

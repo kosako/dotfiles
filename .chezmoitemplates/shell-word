@@ -1,0 +1,13 @@
+{{- /* One path as one shell word, for a command string a shell parses (the
+       Claude statusLine, the hook commands in ~/.claude/settings.json and
+       ~/.codex/hooks.json). Input: the path string (via includeTemplate).
+       A path of plain characters comes back as is, so the render for a
+       normal home (/Users/<short name>, /home/<user>) does not change; any
+       other path (a space, a quote, `$`, `&` ...) is wrapped in single
+       quotes with each `'` written as '\'' (#329). The caller still JSON-
+       encodes the whole command (toJson). No trailing newline. */ -}}
+{{- if regexMatch "^[A-Za-z0-9_@%+=:,./-]+$" . -}}
+{{- . -}}
+{{- else -}}
+'{{ replace "'" "'\\''" . }}'
+{{- end -}}
