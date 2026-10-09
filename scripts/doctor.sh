@@ -419,7 +419,7 @@ else
     item "npm $key=$(display_safe "$value")"
   done
   npm_major="${npm_version%%.*}"
-  npm_minor="$(printf '%s' "$npm_version" | cut -d. -f2)"
+  npm_minor="$(printf '%s' "$npm_version" | LC_ALL=C cut -d. -f2 2>/dev/null)"
   # Guard before the arithmetic test: [[ -gt ]] evaluates its operands as
   # arithmetic, so a non-numeric component resolves as a variable name and
   # aborts the shell under set -u (the old 2>/dev/null hid even that) (#144).
@@ -1931,7 +1931,7 @@ fi
 # repair", "not installed"), or nothing when herdr gave no usable line.
 herdr_integration_state() {
   local line
-  line="$(grep -E "^$1: " <<< "$herdr_status" | head -n 1 || true)"
+  line="$(LC_ALL=C grep -E "^$1: " <<< "$herdr_status" 2>/dev/null | head -n 1 || true)"
   [[ -n "$line" ]] || return 0
   line="${line#"$1: "}"
   display_safe "${line%% (*}"

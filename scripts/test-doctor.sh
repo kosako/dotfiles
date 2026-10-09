@@ -4750,6 +4750,43 @@ else
 fi
 rm -rf "${ds3_copy:?}"
 
+# DS-4) text tools that parse another tool's output run in the C locale with
+#       stderr discarded: under a UTF-8 locale awk / cut / grep report an
+#       invalid byte with the input quoted, past every report helper. A
+#       remote URL, npm's version and herdr's answer carry an invalid byte and
+#       an escape; the run keeps the inherited locale, the remote is still
+#       flagged, and no raw byte of them reaches the report.
+ds4_home="$fixture_home/ds4-home"
+ds4_bin="$fixture_home/ds4-bin"
+mkdir -p "$ds4_bin"
+ds4_repo="$ds4_home/src/personal/repo"
+env -i PATH="$PATH" HOME="$ds4_home" GIT_CONFIG_NOSYSTEM=1 git init -q --template= "$ds4_repo"
+env -i PATH="$PATH" HOME="$ds4_home" GIT_CONFIG_NOSYSTEM=1 \
+  git -C "$ds4_repo" remote add origin "https://user:pw${ds_ff}${ds_esc}[2J@example.invalid/x.git"
+cat > "$ds4_bin/npm" <<SH
+#!/bin/sh
+case "\$1" in
+  --version) printf '%s\n' "1${ds_ff}.2${ds_esc}[2J" ;;
+esac
+exit 0
+SH
+cat > "$ds4_bin/herdr" <<SH
+#!/bin/sh
+[ "\$1" = integration ] && [ "\$2" = status ] || exit 0
+printf '%s\n' "claude: no${ds_ff}t${ds_esc}[2J (x)" "codex: not installed (y)" "opencode: not installed (z)"
+SH
+chmod +x "$ds4_bin/npm" "$ds4_bin/herdr"
+if ds_out="$(env -u LC_ALL HOME="$ds4_home" GIT_CONFIG_NOSYSTEM=1 PATH="$ds4_bin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fq "[warn] credential-like userinfo in remote URL: repo=$ds4_repo remote=origin (URL not shown)" <<< "$ds_out" \
+  && ! LC_ALL=C grep -Fq -- "$ds_esc" <<< "$ds_out" && ! LC_ALL=C grep -Fq -- "$ds_ff" <<< "$ds_out"; then
+  ok "test passed: another tool's output with an invalid byte is parsed in the C locale, its tools' stderr discarded (no raw byte in the report)"
+else
+  printf '%s\n' "$ds_out" | LC_ALL=C cat -v >&2
+  fail "test failed: a text tool's stderr or an invalid byte from another tool's output reached the report"
+  status=1
+fi
+rm -rf "${ds4_home:?}" "${ds4_bin:?}"
+
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
 fi

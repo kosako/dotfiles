@@ -586,7 +586,7 @@ installed_inventory() {
       find -H "$dir" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null ;;
     mas)
       inventory="$(mas list 2>/dev/null)" || return 1
-      printf '%s\n' "$inventory" | awk '{print $1}' ;;
+      printf '%s\n' "$inventory" | LC_ALL=C awk '{print $1}' 2>/dev/null ;;
     *) return 1 ;;
   esac
 }
@@ -1026,13 +1026,15 @@ git_excludes_file_setting() {
 # never printed.
 git_remotes_with_credentials() {
   local repo="$1"
+  # C locale and stderr discarded: the URLs are another repo's data, and awk
+  # under a UTF-8 locale reports an invalid byte with the input quoted (#335).
   git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null |
-    awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
+    LC_ALL=C awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
       name = $1
       sub(/^remote\./, "", name)
       sub(/\.(url|pushurl)$/, "", name)
       if (!seen[name]++) print name
-    }'
+    }' 2>/dev/null
 }
 
 command_status() {
