@@ -96,15 +96,17 @@ fi
 # 4b. An identity command that fails, or prints nothing, is refused before
 #     age runs (#330): the op seam's contract, not just age failing on an
 #     empty key.
-for ic_case in "false" "printf ''"; do
+# The third prints a valid key and then fails, so dropping only the exit
+# status check is caught too (Codex review, PR #352).
+for ic_case in "false" "printf ''" "$(printf 'cat %q; exit 3' "$fixture_home/keys/id.txt")"; do
   ic_rc=0
   ic_out="$(run verify --in "$archive" --identity-command "$ic_case" 2>&1)" || ic_rc=$?
   if [[ "$ic_rc" -eq 1 ]] && grep -Fxq "[fail] identity command produced no key; refusing" <<< "$ic_out" \
-    && ! grep -Fq "could not decrypt archive" <<< "$ic_out"; then
-    pass "verify refuses an identity command that yields no key ($ic_case)"
+    && ! grep -Fq "could not decrypt archive" <<< "$ic_out" && ! grep -Fq "decrypted to 0700 temp" <<< "$ic_out"; then
+    pass "verify refuses an identity command that yields no key (${ic_case%% *} ...)"
   else
     printf '%s\n' "$ic_out" >&2
-    miss "verify must refuse an identity command that yields no key ($ic_case, rc=$ic_rc)"
+    miss "verify must refuse an identity command that yields no key (${ic_case%% *} ..., rc=$ic_rc)"
   fi
 done
 
@@ -377,20 +379,47 @@ fi
 #      top-level name either, and the check accepts any pre-extraction
 #      refusal. The two crafted names need python3 (tar normalizes them when
 #      it writes).
+# "Before extraction" is checked on what tar was asked to do, not only on the
+# message (Codex review, PR #352): a regression that extracted first and
+# validated afterwards would print the same refusal. A tar on the front of
+# PATH records each call and runs the real one; no call may extract.
+tar_spy="$fixture_home/tar-spy"
+mkdir -p "$tar_spy"
+cat > "$tar_spy/tar" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$TAR_CALLS"
+exec "$REAL_TAR" "$@"
+SH
+chmod +x "$tar_spy/tar"
+# spy_verify ARCHIVE — verify ARCHIVE with the spy; sets spy_out, spy_rc and
+# spy_extracted (1 when some tar call extracted).
+spy_verify() {
+  local calls="$fixture_home/tar-calls"
+  : > "$calls"
+  spy_rc=0
+  spy_out="$(HOME="$fixture_home" TAR_CALLS="$calls" REAL_TAR="$(command -v tar)" \
+    PATH="$tar_spy:$fixture_home/fakebin:$PATH" "$PB" verify --in "$1" --identity "$fixture_home/keys/id.txt" 2>&1)" || spy_rc=$?
+  spy_extracted=0
+  grep -Eq '^-?x' "$calls" && spy_extracted=1
+  [[ -s "$calls" ]] || spy_extracted=unknown
+  return 0
+}
 hlink="$fixture_home/stage-plain-hardlink"
 mkdir -p "$hlink/files"
 printf 'x\n' > "$hlink/files/a"
 ln "$hlink/files/a" "$hlink/files/b"
 printf '{}\n' > "$hlink/manifest.json"
 make_archive "$hlink" "$fixture_home/out/plain-hardlink.age"
-hlink_rc=0
-out="$(run verify --in "$fixture_home/out/plain-hardlink.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || hlink_rc=$?
-if [[ "$hlink_rc" -ne 0 ]] && grep -Fq "archive has a non-regular member (symlink/hardlink/special); rejected before extraction" <<< "$out" \
+spy_verify "$fixture_home/out/plain-hardlink.age"
+hlink_rc="$spy_rc"
+out="$spy_out"
+if [[ "$hlink_rc" -ne 0 && "$spy_extracted" == 0 ]] \
+  && grep -Fq "archive has a non-regular member (symlink/hardlink/special); rejected before extraction" <<< "$out" \
   && ! grep -Fq "members validated, extracted" <<< "$out"; then
   pass "verify rejects a plain hardlink member before extraction"
 else
   printf '%s\n' "$out" >&2
-  miss "verify did not reject a plain hardlink member before extraction (exit $hlink_rc)"
+  miss "verify did not reject a plain hardlink member before extraction (exit $hlink_rc, extracted=$spy_extracted)"
 fi
 if command -v python3 >/dev/null 2>&1; then
   for crafted in "./files/../escaped" "/escaped-absolute"; do
@@ -413,14 +442,15 @@ with tarfile.open(out, mode="w", format=tarfile.USTAR_FORMAT) as tf:
         tf.addfile(ti, io.BytesIO(data))
 PY
     age -r "$recipient" -o "$fixture_home/out/crafted-name.age" "$crafted_tar"
-    crafted_rc=0
-    out="$(run verify --in "$fixture_home/out/crafted-name.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || crafted_rc=$?
-    if [[ "$crafted_rc" -ne 0 ]] && grep -Fq "; rejected before extraction" <<< "$out" \
+    spy_verify "$fixture_home/out/crafted-name.age"
+    crafted_rc="$spy_rc"
+    out="$spy_out"
+    if [[ "$crafted_rc" -ne 0 && "$spy_extracted" == 0 ]] && grep -Fq "; rejected before extraction" <<< "$out" \
       && ! grep -Fq "members validated, extracted" <<< "$out"; then
       pass "verify rejects a member named $crafted before extraction"
     else
       printf '%s\n' "$out" >&2
-      miss "verify did not reject a member named $crafted before extraction (exit $crafted_rc)"
+      miss "verify did not reject a member named $crafted before extraction (exit $crafted_rc, extracted=$spy_extracted)"
     fi
   done
 else
@@ -521,10 +551,16 @@ rdisp="$fixture_home/restore-dry-displace"
 mkdir -p "$rdisp/.ssh"
 printf 'local edit\n' > "$rdisp/.zshrc.local"
 printf 'local ssh\n' > "$rdisp/.ssh/config.local"
-tree_state() { (cd "$1" && find . -mindepth 1 -print | LC_ALL=C sort && find . -type f -exec cat {} +); }
+# The state is the path list plus a hash per file, so even a changed final
+# newline shows (Codex review, PR #352).
+tree_state() { (cd "$1" && find . -mindepth 1 -print | LC_ALL=C sort && find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort); }
 rdisp_before="$(tree_state "$rdisp")"
-out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdisp" 2>&1)" || true
-if grep -Fq "would" <<< "$out" && [[ "$(tree_state "$rdisp")" == "$rdisp_before" ]]; then
+rdisp_rc=0
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdisp" 2>&1)" || rdisp_rc=$?
+if [[ "$rdisp_rc" -eq 0 ]] \
+  && grep -Fxq "[info] - would overwrite (existing backed up first): .zshrc.local" <<< "$out" \
+  && grep -Fxq "[info] - would overwrite (existing backed up first): .ssh/config.local" <<< "$out" \
+  && [[ "$(tree_state "$rdisp")" == "$rdisp_before" ]]; then
   pass "restore dry-run over existing files changes nothing and makes no backup directory"
 else
   printf '%s\n' "$out" >&2
