@@ -259,7 +259,8 @@ fi
 # 8b2b. An archive that leaves a directory without permissions (mode 000,
 #       with a file under it) is rejected — the extracted tree cannot be
 #       walked — and the 0700 temp is still removed afterwards, its content
-#       included, with no archive-derived name in the output (#335). Run
+#       included, with no archive-derived name in the output (#335; bsdtar
+#       rejects it at the tree check, GNU tar already at extraction). Run
 #       with a TMPDIR of its own so a leftover temp shows. Skipped as root
 #       (root walks and removes the directory anyway).
 if command -v python3 >/dev/null 2>&1 && [[ "$(id -u)" != "0" ]]; then
@@ -291,8 +292,12 @@ PY
   locked_rc=0
   out="$(TMPDIR="$locked_tmp" run verify --in "$fixture_home/out/locked-dir.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || locked_rc=$?
   locked_left="$(find "$locked_tmp" -mindepth 1 -maxdepth 1 2>/dev/null)"
+  # bsdtar extracts it and the tree check rejects it; GNU tar fails to write
+  # under the directory and the extraction itself is rejected. Either way the
+  # temp must be gone afterwards.
   if [[ "$locked_rc" -ne 0 && -z "$locked_left" ]] \
-    && grep -Fq "could not inspect the extracted archive; rejected before anything is restored" <<< "$out" \
+    && grep -Eq "could not inspect the extracted archive; rejected before anything is restored|could not extract archive" <<< "$out" \
+    && ! grep -Fq "members validated, extracted" <<< "$out" \
     && ! grep -Fq "canary-pb-locked" <<< "$out"; then
     pass "verify rejects an archive that leaves a mode 000 directory, and its temp is still removed"
   else
