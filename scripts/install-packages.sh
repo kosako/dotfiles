@@ -116,7 +116,11 @@ main() {
   local name source pkg bin track_only canonical bincmd cap
   local planned=0 installed_now=0 skipped=0 failed=0 presence_status
   local INSTALL_CMD=()
-  while IFS='|' read -r name source pkg bin track_only; do
+  # The catalog rows come in on fd 3, not stdin: the inventory probes and the
+  # installers run inside this loop, and one that reads stdin would otherwise
+  # swallow the remaining rows, which then go unprocessed while the run
+  # still closes as "failed 0" (#329). They get this script's own stdin.
+  while IFS='|' read -r -u 3 name source pkg bin track_only; do
     [[ -z "$name$source" ]] && continue
     canonical="${pkg:-$name}"
     bincmd="${bin:-$name}"
@@ -171,7 +175,7 @@ main() {
     else
       item "would install: $name -> ${INSTALL_CMD[*]}"
     fi
-  done <<< "$rows"
+  done 3<<< "$rows"
 
   if [[ "$apply" -eq 1 ]]; then
     ok "done: $installed_now installed, $skipped skipped, $failed failed"
