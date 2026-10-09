@@ -140,6 +140,25 @@ else
   status=1
 fi
 
+# 3c) statusLine (#305 / #333): the managed status line runs the catalog's
+#     tacho from <home>/go/bin — the path doctor and install-packages.sh take
+#     as the managed argv[0] and the usage reader shares — as a command-type
+#     status line with no padding. Pinned per key against the home chezmoi
+#     rendered for (render_personal_into leaves HOME to chezmoi, as 8a's hook
+#     pins do; shell_word keeps a home with a space or quote comparable, #329;
+#     -o json -r because the YAML printer would quote a command that starts
+#     with a quote). test-render.sh pins the command's shell splitting for
+#     homes with special characters and the plain-home string.
+status_type="$(yq -p json '.statusLine.type // "absent"' "$off_file")"
+status_cmd="$(yq -p json -o json -r '.statusLine.command // "absent"' "$off_file")"
+status_pad="$(yq -p json '.statusLine.padding // "absent"' "$off_file")"
+if [[ "$status_type" == "command" && "$status_cmd" == "$(shell_word "$HOME/go/bin/tacho") statusline" && "$status_pad" == "0" ]]; then
+  ok "test passed: statusLine is a command-type status line running <home>/go/bin/tacho statusline with padding 0"
+else
+  fail "test failed: statusLine unexpected (type=$status_type command=$status_cmd padding=$status_pad)"
+  status=1
+fi
+
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
