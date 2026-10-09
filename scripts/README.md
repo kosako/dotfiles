@@ -180,7 +180,7 @@ test-*.sh が共有する fixture helper(source 専用、lib-policy.sh の後に
 `render_personal_into`(throwaway home への personal apply。root は呼び出し側が mktemp +
 cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp する形は cleanup trap から
 漏れる、#150)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
-限定 capability flip。boolean 専用)、`copy_repo_fixture`(scripts + .chezmoidata の最小
+限定 capability flip。boolean 専用。personal が宣言していない capability は fail する、#332)、`copy_repo_fixture`(scripts + .chezmoidata の最小
 repo copy)。
 
 ## test-shell-syntax.sh

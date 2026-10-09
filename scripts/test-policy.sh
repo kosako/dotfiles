@@ -628,7 +628,8 @@ run_ok \
 
 # The fixture helpers themselves must fail closed: a typo'd capability or
 # module silently no-oped in the old awk shape, leaving the following
-# assertion to pass against an unflipped fixture (#149).
+# assertion to pass against an unflipped fixture (#149). flip_personal_capability
+# had no guard until #332: a typo'd capability added a new key instead.
 make_fixture
 if set_capability_all "$fixture" noSuchCapability true 2>/dev/null; then
   fail "test failed: set_capability_all must reject an undeclared capability"
@@ -640,6 +641,11 @@ if remove_module_all "$fixture" no-such-module 2>/dev/null; then
   exit 1
 fi
 ok "test passed: remove_module_all fails closed on an unlisted module"
+if flip_personal_capability "$fixture" noSuchCapability true 2>/dev/null; then
+  fail "test failed: flip_personal_capability must reject a capability the personal profile does not declare"
+  exit 1
+fi
+ok "test passed: flip_personal_capability fails closed on an undeclared capability"
 # An empty profiles map must fail too: `[] | all` is vacuously true in yq,
 # so without the length guard the helper would "succeed" while setting
 # nothing (Codex review, #149).
@@ -649,6 +655,11 @@ if set_capability_all "$fixture" enforceAiSandbox true 2>/dev/null; then
   exit 1
 fi
 ok "test passed: set_capability_all fails closed on an empty profiles map"
+if flip_personal_capability "$fixture" enforceAiSandbox true 2>/dev/null; then
+  fail "test failed: flip_personal_capability must reject a profiles map without personal"
+  exit 1
+fi
+ok "test passed: flip_personal_capability fails closed when the personal profile is absent"
 
 # Capability registry (#151): a capability without implemented: true|false
 # fails closed, and implemented: false without a doctor disclosure (the
