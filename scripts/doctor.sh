@@ -10,6 +10,7 @@ source "$SCRIPT_DIR/lib-policy.sh"
 # list of things to run can be read (or redirected) without scanning the
 # full report. doctor writes no file itself: it stays report-only.
 profile=""
+profile_given=0
 actions_only=0
 for doctor_arg in "$@"; do
   case "$doctor_arg" in
@@ -22,7 +23,17 @@ for doctor_arg in "$@"; do
       fail "unknown option: $doctor_arg (usage: doctor.sh [PROFILE] [--actions-only])"
       exit 2
       ;;
-    *) profile="$doctor_arg" ;;
+    *)
+      # A second profile is rejected rather than silently replacing the
+      # first, so a typo never reads as the intended profile's report
+      # (preflight does the same, #309; #329).
+      if [[ "$profile_given" -eq 1 ]]; then
+        fail "too many arguments (usage: doctor.sh [PROFILE] [--actions-only])"
+        exit 2
+      fi
+      profile="$doctor_arg"
+      profile_given=1
+      ;;
   esac
 done
 profile="${profile:-personal}"
@@ -501,6 +512,17 @@ section "runtime and shell"
 # else (a GOBIN exported by a shell activated before the config was applied,
 # or GOBIN / GOPATH set elsewhere) means install-packages.sh installs where
 # those never look. Report-only.
+# fold_slashes PATH — print PATH with each run of `/` folded to one and a
+# trailing `/` dropped, so two spellings of one directory compare equal
+# without touching the filesystem. The replacement is a variable: bash 3.2
+# keeps the backslash of a literal `\/` in it.
+fold_slashes() {
+  local dir="$1" slash=/
+  while [[ "$dir" == *//* ]]; do
+    dir="${dir//\/\//$slash}"
+  done
+  printf '%s' "${dir%/}"
+}
 report_go_install_target() {
   local target home_dir
   home_dir="${HOME%/}"
@@ -518,7 +540,10 @@ report_go_install_target() {
     warn "go install target could not be determined (go env failed or gave an unusable path); not checked against ~/go/bin"
     return 0
   fi
-  if [[ "$target" == "$home_dir/go/bin" ]]; then
+  # go env returns GOBIN as spelled, so the same directory can come back with
+  # a trailing `/` or a doubled `//` (#329): compare the two with those
+  # folded away, or as the same directory (-ef), like the other sections.
+  if [[ "$(fold_slashes "$target")" == "$(fold_slashes "$home_dir/go/bin")" || "$target" -ef "$home_dir/go/bin" ]]; then
     ok "go install target: ~/go/bin (catalog go_install tools land where the managed statusLine and usage reader run them)"
   else
     # An action, not a warn: it must reach --actions-only, and ahead of the
@@ -771,7 +796,9 @@ section "managed-path orphans"
 # A file that carries the managed-by header but whose path is not
 # managed for this profile is likely left over from another profile
 # (e.g. ~/.npmrc after switching personal -> work). Report
-# only; nothing is removed. Only the header line is inspected.
+# only; nothing is removed. The header is searched for in the whole file,
+# not only on line 1: the git hook shims carry it on line 2, after the
+# shebang (#329).
 # Only declared FILE paths are inspected (every managed file has its own
 # line in modules.yaml; ancestor directories are derived by .chezmoiignore,
 # #207): recursing into directories swept unrelated tool data that merely
