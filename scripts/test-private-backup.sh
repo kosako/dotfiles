@@ -93,6 +93,21 @@ else
   pass "verify rejects a wrong identity"
 fi
 
+# 4b. An identity command that fails, or prints nothing, is refused before
+#     age runs (#330): the op seam's contract, not just age failing on an
+#     empty key.
+for ic_case in "false" "printf ''"; do
+  ic_rc=0
+  ic_out="$(run verify --in "$archive" --identity-command "$ic_case" 2>&1)" || ic_rc=$?
+  if [[ "$ic_rc" -eq 1 ]] && grep -Fxq "[fail] identity command produced no key; refusing" <<< "$ic_out" \
+    && ! grep -Fq "could not decrypt archive" <<< "$ic_out"; then
+    pass "verify refuses an identity command that yields no key ($ic_case)"
+  else
+    printf '%s\n' "$ic_out" >&2
+    miss "verify must refuse an identity command that yields no key ($ic_case, rc=$ic_rc)"
+  fi
+done
+
 # 5. A tampered ciphertext fails to decrypt.
 cp "$archive" "$fixture_home/out/tampered.age"
 # Overwrite the start of the file (the "age-encryption.org/v1" header) so
@@ -353,6 +368,65 @@ else
   fi
 fi
 
+# 8b4. The other member shapes the pre-extraction check must refuse (#330):
+#      a plain hardlink (both tars list it as "h"), a name that climbs out
+#      with "..", and an absolute name. Each is rejected before extraction
+#      (nothing is extracted). bsdtar lists the two crafted names as written
+#      (the ".." / "/" rules refuse them); GNU tar may strip their leading
+#      part when listing, so the remainder is chosen to be no allowed
+#      top-level name either, and the check accepts any pre-extraction
+#      refusal. The two crafted names need python3 (tar normalizes them when
+#      it writes).
+hlink="$fixture_home/stage-plain-hardlink"
+mkdir -p "$hlink/files"
+printf 'x\n' > "$hlink/files/a"
+ln "$hlink/files/a" "$hlink/files/b"
+printf '{}\n' > "$hlink/manifest.json"
+make_archive "$hlink" "$fixture_home/out/plain-hardlink.age"
+hlink_rc=0
+out="$(run verify --in "$fixture_home/out/plain-hardlink.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || hlink_rc=$?
+if [[ "$hlink_rc" -ne 0 ]] && grep -Fq "archive has a non-regular member (symlink/hardlink/special); rejected before extraction" <<< "$out" \
+  && ! grep -Fq "members validated, extracted" <<< "$out"; then
+  pass "verify rejects a plain hardlink member before extraction"
+else
+  printf '%s\n' "$out" >&2
+  miss "verify did not reject a plain hardlink member before extraction (exit $hlink_rc)"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  for crafted in "./files/../escaped" "/escaped-absolute"; do
+    crafted_tar="$fixture_home/out/crafted-name.tar"
+    python3 - "$crafted_tar" "$crafted" <<'PY'
+import io
+import sys
+import tarfile
+
+out, name = sys.argv[1], sys.argv[2]
+with tarfile.open(out, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+    ti = tarfile.TarInfo("./files")
+    ti.type = tarfile.DIRTYPE
+    ti.mode = 0o755
+    tf.addfile(ti)
+    for member, data in (("./manifest.json", b"{}\n"), (name, b"escaped\n")):
+        ti = tarfile.TarInfo(member)
+        ti.size = len(data)
+        ti.mode = 0o644
+        tf.addfile(ti, io.BytesIO(data))
+PY
+    age -r "$recipient" -o "$fixture_home/out/crafted-name.age" "$crafted_tar"
+    crafted_rc=0
+    out="$(run verify --in "$fixture_home/out/crafted-name.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || crafted_rc=$?
+    if [[ "$crafted_rc" -ne 0 ]] && grep -Fq "; rejected before extraction" <<< "$out" \
+      && ! grep -Fq "members validated, extracted" <<< "$out"; then
+      pass "verify rejects a member named $crafted before extraction"
+    else
+      printf '%s\n' "$out" >&2
+      miss "verify did not reject a member named $crafted before extraction (exit $crafted_rc)"
+    fi
+  done
+else
+  warn "python3 not found; skipping the crafted traversal / absolute member cases"
+fi
+
 # 8c. A mode mismatch (manifest mode != extracted file mode) is caught.
 mdir="$fixture_home/stage-mode"
 mkdir -p "$mdir/files"
@@ -431,11 +505,30 @@ fi
 rdst="$fixture_home/restore-dst"
 mkdir -p "$rdst"
 out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" 2>&1)" || true
-if grep -Fq "would create" <<< "$out" && [[ "$(find "$rdst" -type f | wc -l | tr -d ' ')" -eq 0 ]]; then
+# Nothing at all may appear under the target — no file, and no parent or
+# backup directory either (#330: counting files alone let those through).
+if grep -Fq "would create" <<< "$out" && [[ -z "$(find "$rdst" -mindepth 1 -print)" ]]; then
   pass "restore dry-run writes nothing"
 else
   printf '%s\n' "$out" >&2
   miss "restore dry-run wrote files or did not plan"
+fi
+
+# 12b. A dry-run over existing, differing files plans the displacement but
+#      makes no backup directory and changes nothing (#330): the target's
+#      tree and contents are the same before and after.
+rdisp="$fixture_home/restore-dry-displace"
+mkdir -p "$rdisp/.ssh"
+printf 'local edit\n' > "$rdisp/.zshrc.local"
+printf 'local ssh\n' > "$rdisp/.ssh/config.local"
+tree_state() { (cd "$1" && find . -mindepth 1 -print | LC_ALL=C sort && find . -type f -exec cat {} +); }
+rdisp_before="$(tree_state "$rdisp")"
+out="$(run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$rdisp" 2>&1)" || true
+if grep -Fq "would" <<< "$out" && [[ "$(tree_state "$rdisp")" == "$rdisp_before" ]]; then
+  pass "restore dry-run over existing files changes nothing and makes no backup directory"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore dry-run over existing files changed the target"
 fi
 
 # 13. restore --apply restores files with the original content.
@@ -589,6 +682,17 @@ if run restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-h
   miss "restore must refuse under a denied profile"
 else
   pass "restore refuses under a denied profile (work)"
+fi
+# 18b. verify goes through the same gate (#330): it decrypts, so a denied
+#      profile must not be able to read an archive either.
+verify_rc=0
+out="$(run verify --in "$archive" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -ne 0 ]] && grep -Fq "private-backup refuses to run here" <<< "$out" \
+  && ! grep -Fq "decrypted to 0700 temp" <<< "$out"; then
+  pass "verify refuses under a denied profile (work) before decrypting"
+else
+  printf '%s\n' "$out" >&2
+  miss "verify must refuse under a denied profile (rc=$verify_rc)"
 fi
 set_profile personal
 
@@ -804,7 +908,7 @@ assert_manifest_rejected() {
     rejected=0
   fi
   if [[ "$rejected" -eq 1 && "$(cat "$manifest_dst/.zshrc.local")" == "original" \
-    && ! -e "$manifest_dst/.ssh" && ! -e "$manifest_dst/.local" ]]; then
+    && "$(cd "$manifest_dst" && find . -mindepth 1 -print)" == "./.zshrc.local" ]]; then
     pass "manifest $label rejected by verify/dry-run/apply before any target write"
   else
     miss "manifest $label was accepted or changed the restore target"
@@ -892,7 +996,7 @@ sup_ok=1
 HOME="$sup_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$sup_home/s.age" --recipient "$recipient" --yes >/dev/null 2>&1 || sup_ok=0
 sup_out="$(run restore --in "$sup_home/s.age" --identity "$fixture_home/keys/id.txt" --target-home "$sup_dst" 2>&1)" || sup_ok=0
-if [[ "$sup_ok" -eq 1 ]] && grep -Fq "would create: $sup_rel" <<< "$sup_out" && [[ ! -e "$sup_dst/$sup_rel" ]]; then
+if [[ "$sup_ok" -eq 1 ]] && grep -Fq "would create: $sup_rel" <<< "$sup_out" && [[ -z "$(find "$sup_dst" -mindepth 1 -print)" ]]; then
   pass "restore dry-run plans the supplement at its canonical path and writes nothing"
 else
   printf '%s\n' "$sup_out" >&2
