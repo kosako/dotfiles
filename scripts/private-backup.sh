@@ -61,6 +61,20 @@ All refuse unless the host profile grants allowSecretsAccess.
 EOF
 }
 
+# require_option_value OPTION ARGC [NEXT] — a usage error (2) unless OPTION
+# is followed by a value. Called with the parser's $# and $2: without the
+# check, `shift 2` past the end ended the run under set -e with no message,
+# and `--out --yes` took "--yes" as the archive path (#330). A value that
+# starts with "-" is refused too, as the next option or a path that rm / mv
+# would read as one (write such a path as ./-name).
+require_option_value() {
+  if [[ "$2" -lt 2 || "${3:-}" == -* ]]; then
+    fail "$1 needs a value"
+    usage
+    return 2
+  fi
+}
+
 sha256_of() {
   shasum -a 256 < "$1" | awk '{print $1}'
 }
@@ -237,13 +251,23 @@ collect_declared() {
   # A valid file with no entries declares nothing (an empty here-string would
   # otherwise read as one blank row).
   [[ -n "$rows" ]] || return 0
-  local type category path
+  local type category path known_types
+  known_types="$(known_backup_path_types)"
   while IFS='|' read -r type category path; do
     # backup_paths_in validated the whole file (#246): an entry without a
     # path can no longer reach here, so treat one as a broken invariant
     # rather than skipping it silently.
     if [[ -z "$path" ]]; then
       fail "internal: empty backup path row after validation in $file"
+      return 1
+    fi
+    # The shared parser only checks that a type is a plain string, so an
+    # unknown one (`directory`) reached the manifest and stopped the backup
+    # at the self-check with an unexplained "invalid manifest schema" (#330).
+    # Name the entry here instead, by the rule validate-policy applies to
+    # the baseline.
+    if [[ -n "$type" ]] && ! grep -Fxq -- "$type" <<< "$known_types"; then
+      fail "unknown backup path type in $file: $path: $type (known: ${known_types//$'\n'/, })"
       return 1
     fi
     printf '%s|%s|%s|%s\n' "$origin" "$type" "$category" "$path" >> "$out"
@@ -256,10 +280,10 @@ cmd_backup() {
   local assume_yes=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --out) out="${2:-}"; shift 2 ;;
-      --recipient) recipient="${2:-}"; shift 2 ;;
-      --recipients-file) recipients_file="${2:-}"; shift 2 ;;
-      --local-supplement) local_supplement="${2:-}"; shift 2 ;;
+      --out) require_option_value --out "$#" "${2:-}" || return 2; out="$2"; shift 2 ;;
+      --recipient) require_option_value --recipient "$#" "${2:-}" || return 2; recipient="$2"; shift 2 ;;
+      --recipients-file) require_option_value --recipients-file "$#" "${2:-}" || return 2; recipients_file="$2"; shift 2 ;;
+      --local-supplement) require_option_value --local-supplement "$#" "${2:-}" || return 2; local_supplement="$2"; shift 2 ;;
       --yes) assume_yes=1; shift ;;
       *) fail "unknown backup argument: $1"; usage; return 2 ;;
     esac
@@ -731,9 +755,9 @@ cmd_verify() {
   local in="" identity="" identity_command=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --in) in="${2:-}"; shift 2 ;;
-      --identity) identity="${2:-}"; shift 2 ;;
-      --identity-command) identity_command="${2:-}"; shift 2 ;;
+      --in) require_option_value --in "$#" "${2:-}" || return 2; in="$2"; shift 2 ;;
+      --identity) require_option_value --identity "$#" "${2:-}" || return 2; identity="$2"; shift 2 ;;
+      --identity-command) require_option_value --identity-command "$#" "${2:-}" || return 2; identity_command="$2"; shift 2 ;;
       *) fail "unknown verify argument: $1"; usage; return 2 ;;
     esac
   done
@@ -776,12 +800,12 @@ cmd_restore() {
   local target_home="$HOME"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --in) in="${2:-}"; shift 2 ;;
-      --identity) identity="${2:-}"; shift 2 ;;
-      --identity-command) identity_command="${2:-}"; shift 2 ;;
+      --in) require_option_value --in "$#" "${2:-}" || return 2; in="$2"; shift 2 ;;
+      --identity) require_option_value --identity "$#" "${2:-}" || return 2; identity="$2"; shift 2 ;;
+      --identity-command) require_option_value --identity-command "$#" "${2:-}" || return 2; identity_command="$2"; shift 2 ;;
       --apply) apply=1; shift ;;
       --skip-existing) skip_existing=1; shift ;;
-      --target-home) target_home="${2:-}"; shift 2 ;;
+      --target-home) require_option_value --target-home "$#" "${2:-}" || return 2; target_home="$2"; shift 2 ;;
       *) fail "unknown restore argument: $1"; usage; return 2 ;;
     esac
   done
