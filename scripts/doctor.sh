@@ -57,17 +57,17 @@ done
 
 section "chezmoi"
 if command -v chezmoi >/dev/null 2>&1; then
-  ok "chezmoi: $(chezmoi --version 2>/dev/null | head -n 1)"
+  ok "chezmoi: $(display_safe "$(chezmoi --version 2>/dev/null | head -n 1)")"
 else
   warn "chezmoi not found"
 fi
-ok "source directory: $DOTFILES_ROOT"
+ok "source directory: $(display_safe "$DOTFILES_ROOT")"
 
 section "Git"
 if command -v git >/dev/null 2>&1; then
-  ok "git: $(git --version)"
-  use_config_only="$(git config --global --get user.useConfigOnly || true)"
-  credentials_in_url="$(git config --global --get transfer.credentialsInUrl || true)"
+  ok "git: $(display_safe "$(git --version 2>/dev/null)")"
+  use_config_only="$(git config --global --get user.useConfigOnly 2>/dev/null || true)"
+  credentials_in_url="$(git config --global --get transfer.credentialsInUrl 2>/dev/null || true)"
   if [[ "$use_config_only" == "true" ]]; then
     ok "user.useConfigOnly=true"
   else
@@ -116,14 +116,14 @@ if command -v git >/dev/null 2>&1; then
     esac
     if [[ ! -f "$managed_ignore" ]]; then
       action "global gitignore missing: $managed_ignore (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" \
-        "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
-        "\$ chezmoi apply $(printf '%q' "$HOME/.config/git") $(printf '%q' "$managed_ignore")"
+        "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
+        "\$ chezmoi apply $(shell_quote_safe "$HOME/.config/git") $(shell_quote_safe "$managed_ignore")"
     elif [[ "$excludes_setting" == error ]]; then
       warn "global gitignore: git cannot read its global/system config (core.excludesFile lookup failed), so whether the managed $managed_ignore is in effect is unknown — fix the config error first (git config --global --list / git config --system --list)"
     elif [[ "$excludes_setting" == empty ]]; then
       warn "global gitignore: core.excludesFile is explicitly empty (global or system config), so git reads NO global excludes file — the managed $managed_ignore is not in effect; unset the key to restore git's default location"
     elif [[ "$effective_ignore" != "$managed_ignore" && ! "$effective_ignore" -ef "$managed_ignore" ]]; then
-      warn "global gitignore: git reads $effective_ignore, not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
+      warn "global gitignore: git reads $(display_safe "$effective_ignore"), not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
     else
       missing_ignore_patterns=""
       for ignore_pattern in '.agent-packets/' '**/.claude/settings.local.json'; do
@@ -134,7 +134,7 @@ if command -v git >/dev/null 2>&1; then
         ok "global gitignore: managed $managed_ignore is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
       else
         action "global gitignore: $managed_ignore lacks: $missing_ignore_patterns (drifted from the managed file)" \
-          "\$ chezmoi apply $(printf '%q' "$managed_ignore")"
+          "\$ chezmoi apply $(shell_quote_safe "$managed_ignore")"
       fi
     fi
   else
@@ -187,7 +187,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       # hooks.gitconfig, and `git config --global --get` skips includes by
       # default when a scope file is given — without the flag a correctly
       # wired machine misreports as unwired (found in the #196 live smoke).
-      hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
+      hook_gates_path="$(git config --global --includes --get core.hooksPath 2>/dev/null || true)"
       # shellcheck disable=SC2088 # the first pattern is the literal value stored in gitconfig (git expands the tilde, not the shell)
       case "$hook_gates_path" in
         "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks")
@@ -231,7 +231,7 @@ else
   done
   if command -v git >/dev/null 2>&1; then
     # --includes for the same reason as the enabled branch above.
-    hook_gates_path="$(git config --global --includes --get core.hooksPath || true)"
+    hook_gates_path="$(git config --global --includes --get core.hooksPath 2>/dev/null || true)"
     # shellcheck disable=SC2088 # literal gitconfig value comparison, as above
     case "$hook_gates_path" in
       "~/.config/git-hook-gates/hooks" | "$hook_gates_dir/hooks") hook_gates_lingering=1 ;;
@@ -243,7 +243,7 @@ else
   elif [[ "$hook_gates_lingering" -eq 1 ]]; then
     hook_gates_leftovers=""
     for hook_gates_file in "$hook_gates_dir/hooks.gitconfig" "$hook_gates_dir/hooks/pre-commit" "$hook_gates_dir/hooks/commit-msg"; do
-      [[ -e "$hook_gates_file" ]] && hook_gates_leftovers+=" $(printf '%q' "$hook_gates_file")"
+      [[ -e "$hook_gates_file" ]] && hook_gates_leftovers+=" $(shell_quote_safe "$hook_gates_file")"
     done
     if [[ -n "$hook_gates_leftovers" ]]; then
       action "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present), left by another profile — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT remove it (#201); remove it by hand" \
@@ -277,8 +277,8 @@ if module_active_for_profile "$profile" git-profile; then
     # on a home without ~/.config the apply alone fails (README Quickstart
     # step 3 has the same mkdir for the same reason).
     action "identity reset file missing: $identity_reset_file — the fail-closed boundary of #202 is NOT in place: in a non-personal repo without its context file, a remote matching the personal patterns (hasconfig in ~/.gitconfig) inherits the personal identity instead of refusing to commit (other repos are still refused by useConfigOnly)" \
-      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
-      "\$ chezmoi apply $(printf '%q' "${identity_reset_file%/*}") $(printf '%q' "$identity_reset_file")"
+      "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
+      "\$ chezmoi apply $(shell_quote_safe "${identity_reset_file%/*}") $(shell_quote_safe "$identity_reset_file")"
   fi
 else
   item "identity reset not managed for this profile (git-profile module inactive)"
@@ -388,7 +388,7 @@ else
       while IFS= read -r remote_name; do
         [[ -z "$remote_name" ]] && continue
         flagged_remotes=$((flagged_remotes + 1))
-        warn "credential-like userinfo in remote URL: repo=$repo remote=$remote_name (URL not shown)"
+        warn "credential-like userinfo in remote URL: repo=$(display_safe "$repo") remote=$(display_safe "$remote_name") (URL not shown)"
       done < <(git_remotes_with_credentials "$repo")
     done < <(find "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)
   done
@@ -413,18 +413,18 @@ elif ! npm_version="$(npm --version 2>/dev/null)" || [[ -z "$npm_version" ]]; th
   # the report-only contract (#144).
   warn "npm on PATH but not runnable (shim without a runtime?); skipping npm checks"
 else
-  ok "npm: $npm_version"
+  ok "npm: $(display_safe "$npm_version")"
   for key in before ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
-    item "npm $key=$value"
+    item "npm $key=$(display_safe "$value")"
   done
   npm_major="${npm_version%%.*}"
-  npm_minor="$(printf '%s' "$npm_version" | cut -d. -f2)"
+  npm_minor="$(printf '%s' "$npm_version" | LC_ALL=C cut -d. -f2 2>/dev/null)"
   # Guard before the arithmetic test: [[ -gt ]] evaluates its operands as
   # arithmetic, so a non-numeric component resolves as a variable name and
   # aborts the shell under set -u (the old 2>/dev/null hid even that) (#144).
   if [[ ! "$npm_major" =~ ^[0-9]+$ || ! "$npm_minor" =~ ^[0-9]+$ ]]; then
-    warn "npm version '$npm_version' not recognized; cannot check min-release-age support"
+    warn "npm version '$(display_safe "$npm_version")' not recognized; cannot check min-release-age support"
   elif [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]]; then
     ok "npm supports min-release-age (>= 11.10)"
   else
@@ -437,7 +437,7 @@ else
       if [[ "$actual" == "$expected" ]]; then
         ok "npm $key=$expected"
       else
-        warn "enforce expects npm $key=$expected, current: $actual (apply pending?)"
+        warn "enforce expects npm $key=$expected, current: $(display_safe "$actual") (apply pending?)"
       fi
     done <<'EOF'
 ignore-scripts=true
@@ -459,9 +459,9 @@ EOF
       npm_before_epoch="$(node -e 'const t=Date.parse(process.argv[1]||"");process.stdout.write(Number.isNaN(t)?"":String(Math.floor(t/1000)))' "$npm_before" 2>/dev/null || true)"
     fi
     if npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
-      ok "npm min-release-age=7 honored (before=$npm_before)"
+      ok "npm min-release-age=7 honored (before=$(display_safe "$npm_before"))"
     else
-      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=${npm_before:-unset} (apply pending?)"
+      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=$(display_safe "${npm_before:-unset}") (apply pending?)"
     fi
   fi
 fi
@@ -474,7 +474,7 @@ if [[ "$corepack_mode" == "off" ]]; then
 elif ! command -v corepack >/dev/null 2>&1; then
   warn "corepack not found"
 else
-  ok "corepack: $(corepack --version 2>/dev/null || true)"
+  ok "corepack: $(display_safe "$(corepack --version 2>/dev/null || true)")"
   if [[ "$corepack_mode" == "enable" ]]; then
     for pm in pnpm yarn; do
       pm_path="$(command -v "$pm" 2>/dev/null || true)"
@@ -525,8 +525,8 @@ report_go_install_target() {
     # usage reader's install-packages step (later section), because the
     # installer judges "installed" by this same target and would skip a
     # tool already sitting in the old one.
-    action "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
-      "\$ chezmoi apply $(printf '%q' "$home_dir/.config/mise/config.toml") $(printf '%q' "$home_dir/.zshenv")   # leaves GOBIN unset; ~/go/bin on PATH" \
+    action "go install target is $(display_safe "$target"), not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
+      "\$ chezmoi apply $(shell_quote_safe "$home_dir/.config/mise/config.toml") $(shell_quote_safe "$home_dir/.zshenv")   # leaves GOBIN unset; ~/go/bin on PATH" \
       "\$ exec env -u GOBIN -u GOPATH zsh -l   # a new shell: an exported GOBIN / GOPATH is inherited otherwise (go.set_gobin only stops mise from setting it)" \
       "# and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local); then re-run doctor"
   fi
@@ -616,7 +616,8 @@ trap 'probe_cleanup; trap - INT; kill -INT $$' INT
 trap 'probe_cleanup; trap - TERM; kill -TERM $$' TERM
 # Bounded run WITHOUT a temp file: the probe's stdout comes through a
 # process substitution whose subshell appends the probe's exit status as a
-# `__rc=` line, preceded by a newline of its own so an output that ends
+# status line (a per-call nonce, then the status), preceded by a newline of
+# its own so an output that ends
 # without one cannot swallow it (the blank line that adds is dropped); each
 # read carries the remaining deadline. A read that fails while the deadline
 # has not produced the status line is the deadline (bash 3.2's read -t
@@ -625,12 +626,17 @@ trap 'probe_cleanup; trap - TERM; kill -TERM $$' TERM
 # seen is adopted: a clean exit 0, or a non-zero exit whose output the probed
 # command's contract defines (the usage reader's exit 2 reason line).
 bounded_probe() {
-  local started remaining line
+  local started remaining line sentinel
   probe_rc=""
   probe_lines=""
   started=$SECONDS
+  # The exit-status line carries a per-call nonce the probed command never
+  # sees (it is not exported), so a line it prints cannot pass for its own
+  # exit status (#335; a forged `__rc=0` read as a pass, any other text was
+  # shown raw).
+  sentinel="__doctor_probe_rc_${RANDOM}${RANDOM}${RANDOM}_$$="
   probe_launching=1
-  exec 3< <({ if "$@" 2>/dev/null </dev/null; then printf '\n__rc=0\n'; else printf '\n__rc=%s\n' "$?"; fi; } 2>/dev/null)
+  exec 3< <({ if "$@" 2>/dev/null </dev/null; then printf '\n%s0\n' "$sentinel"; else printf '\n%s%s\n' "$sentinel" "$?"; fi; } 2>/dev/null)
   probe_job=$!
   probe_launching=0
   while :; do
@@ -638,7 +644,7 @@ bounded_probe() {
     (( remaining > 0 )) || break
     IFS= read -r -t "$remaining" line <&3 || break
     case "$line" in
-      __rc=*) probe_rc="${line#__rc=}"; break ;;
+      "$sentinel"*) probe_rc="${line#"$sentinel"}"; break ;;
       "") ;;
       *) probe_lines+="$line"$'\n' ;;
     esac
@@ -723,12 +729,12 @@ fi
 
 # State marker: presence + last success + basename + count, nothing else.
 # The marker is repo-external and could be stale or hand-edited, so treat
-# its fields as untrusted: drop non-printable chars, basename the archive,
+# its fields as untrusted: display_safe them, basename the archive,
 # and require a numeric count — anything odd is shown as "unknown" rather
 # than echoed verbatim to the terminal.
 backup_marker="$HOME/.local/state/dotfiles/private-backup.json"
 if [[ -f "$backup_marker" ]]; then
-  bm() { yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null | tr -dc '[:print:]' || true; }
+  bm() { display_safe "$(yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null || true)"; }
   marker_last="$(bm '.last_success // ""')"
   marker_archive_raw="$(bm '.archive // ""')"
   marker_count="$(bm '.file_count // ""')"
@@ -784,7 +790,7 @@ while IFS= read -r module; do
     else
       orphan_count=$((orphan_count + 1))
       action "managed-by header but not managed for profile $profile: $target (orphan from another profile?)" \
-        "\$ rm -i $(printf '%q' "$target")   # if it is a leftover from another profile; keep it if this profile should manage it (then fix the module list)"
+        "\$ rm -i $(shell_quote_safe "$target")   # if it is a leftover from another profile; keep it if this profile should manage it (then fix the module list)"
     fi
   done < <(module_paths "$module")
 done < <(known_modules)
@@ -828,7 +834,7 @@ else
     # (" M x" / "MM x"), so the path starts at offset 3 — a split on the
     # first space would keep the second column (Codex review, PR #228).
     action "drift: $line (inspect with: chezmoi diff)" \
-      "\$ chezmoi diff $(printf '%q' "$HOME/${line:3}")   # then chezmoi apply that target, or absorb the live key into the template (docs/claude-settings.md)"
+      "\$ chezmoi diff $(shell_quote_safe "$HOME/${line:3}")   # then chezmoi apply that target, or absorb the live key into the template (docs/claude-settings.md)"
   done <<< "$drift_status"
   if [[ "$drift_lines" -eq 0 ]]; then
     ok "no drift: managed files match the source state"
@@ -992,10 +998,10 @@ report_codex_rules_probes() {
   else
     item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
   fi
-  # Names only (never the content); a name is attacker-shapeable, so anything
-  # outside printable ASCII is shown as '?'.
+  # Names only (never the content); a name is attacker-shapeable, so it is
+  # shown through display_safe.
   for rules_name in ${unmanaged_rules[@]+"${unmanaged_rules[@]}"}; do
-    warn "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/$(printf '%s' "$rules_name" | LC_ALL=C tr -c '[:print:]' '?') (not managed by dotfiles, so its grants never show as drift; probed below — remove it, or fold vetted rules into the managed baseline)"
+    warn "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/$(display_safe "$rules_name") (not managed by dotfiles, so its grants never show as drift; probed below — remove it, or fold vetted rules into the managed baseline)"
   done
   if [[ "${#rules_args[@]}" -gt 0 ]]; then
     # Rules semantics are delegated to Codex's own engine: a fixed probe list
@@ -1102,10 +1108,10 @@ report_codex_projects_trust() {
     [[ -z "$trusted_path" ]] && continue
     trusted_total=$((trusted_total + 1))
     if [[ "$trusted_path" == "$HOME" ]]; then
-      action "Codex projects trust covers the WHOLE home directory ($trusted_path) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
+      action "Codex projects trust covers the WHOLE home directory ($(display_safe "$trusted_path")) — every repo and file under ~ inherits trust; remove it in codex (config.toml is codex-owned, not managed here)" \
         "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)"
     elif [[ ! -d "$trusted_path" ]]; then
-      action "stale Codex projects trust (path no longer exists): $trusted_path — leftover grant; remove it in codex" \
+      action "stale Codex projects trust (path no longer exists): $(display_safe "$trusted_path") — leftover grant; remove it in codex" \
         "edit ~/.codex/config.toml: remove the project entry for this path"
     fi
   done <<< "$trusted_paths"
@@ -1327,7 +1333,7 @@ report_claude_project_allows() {
     dir_state="$(claude_settings_dir_state "$root")"
     [[ "$dir_state" == open && ! -r "$root" ]] && dir_state=error
     if [[ "$dir_state" == error ]]; then
-      item "the project root $(printf '%q' "$root") could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked"
+      item "the project root $(shell_quote_safe "$root") could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked"
       files_unreadable=$((files_unreadable + 1))
       continue
     fi
@@ -1354,7 +1360,7 @@ report_claude_project_allows() {
     shared_read=0
     dir_state="$(claude_settings_dir_state "$dir/.claude")"
     if [[ "$dir_state" == error ]]; then
-      item "the .claude directory of $(printf '%q' "$dir") could not be opened (permission denied, not a directory or a symlink loop); its settings not checked"
+      item "the .claude directory of $(shell_quote_safe "$dir") could not be opened (permission denied, not a directory or a symlink loop); its settings not checked"
       files_unreadable=$((files_unreadable + 1))
       continue
     fi
@@ -1365,7 +1371,7 @@ report_claude_project_allows() {
       file_state="$(claude_settings_file_state "$file")"
       [[ "$file_state" != absent ]] || continue
       if [[ "$file_state" == other ]] || ! claude_read_rules "$file"; then
-        item "the permission rules of $(printf '%q' "$file") could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)"
+        item "the permission rules of $(shell_quote_safe "$file") could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)"
         files_unreadable=$((files_unreadable + 1))
         continue
       fi
@@ -1401,8 +1407,8 @@ report_claude_project_allows() {
       shown="$(printf "'%s', " "${hits[@]:0:5}")"
       shown="${shown%, }"
       [[ "$hit_count" -gt 5 ]] && shown+=" and $((hit_count - 5)) more"
-      action "$hit_count outward probe(s) auto-allowed for Claude by project-level allow rules in $(printf '%q' "$file"): $shown — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" \
-        "edit $(printf '%q' "$file"): remove the allow rules covering those commands (approve them per use instead)"
+      action "$hit_count outward probe(s) auto-allowed for Claude by project-level allow rules in $(shell_quote_safe "$file"): $shown — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" \
+        "edit $(shell_quote_safe "$file"): remove the allow rules covering those commands (approve them per use instead)"
     done
   done
   if [[ "$files_flagged" -eq 0 && "$files_unreadable" -eq 0 ]]; then
@@ -1474,7 +1480,7 @@ if module_active_for_profile "$profile" opencode-settings; then
     ok "managed permission floor present: $opencode_floor (secret-floor deny, outward/escalation ask, autoupdate off, share disabled; drift shows in the managed drift section)"
   else
     action "opencode-settings module active but the managed floor is missing: $opencode_floor — OpenCode defaults to allow-all without it; run chezmoi apply for the directory and the file" \
-      "\$ chezmoi apply $(printf '%q' "${opencode_floor%/*}") $(printf '%q' "$opencode_floor")"
+      "\$ chezmoi apply $(shell_quote_safe "${opencode_floor%/*}") $(shell_quote_safe "$opencode_floor")"
   fi
 else
   ok "OpenCode permission floor not managed for this profile (opencode-settings module inactive)"
@@ -1508,7 +1514,7 @@ for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.js; do
 done
 for opencode_plugin_file in "$opencode_config_dir"/plugins/personal-*.ts "$opencode_config_dir"/plugins/personal-*.mjs "$opencode_config_dir"/plugin/personal-*; do
   [[ -e "$opencode_plugin_file" ]] || continue
-  warn "agent-tools plugin copy that OpenCode may load twice: $opencode_plugin_file (agent-tools deploys only plugins/personal-*.js; remove the extra copy)"
+  warn "agent-tools plugin copy that OpenCode may load twice: $(display_safe "$opencode_plugin_file") (agent-tools deploys only plugins/personal-*.js; remove the extra copy)"
 done
 if [[ "${#opencode_plugins[@]}" -eq 0 ]]; then
   item "no agent-tools plugin in ~/.config/opencode/plugins (agent-tools sync deploys personal-*.js there)"
@@ -1642,11 +1648,11 @@ else
       opencode_init_note="its init is not verifiable: only personal-agent-tools logs an init marker, and doctor does not run OpenCode"
     fi
     if plugin_listed_in "$opencode_listed_active" "$opencode_stem"; then
-      warn "agent-tools plugin $opencode_stem is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
+      warn "agent-tools plugin $(display_safe "$opencode_stem") is also listed in an OpenCode config's plugin key — OpenCode loads it twice; drop the config entry (the plugins dir already registers it)"
     else
-      ok "agent-tools plugin $opencode_plugin_name in the global plugins dir (OpenCode loads it at startup; $opencode_init_note)"
+      ok "agent-tools plugin $(display_safe "$opencode_plugin_name") in the global plugins dir (OpenCode loads it at startup; $opencode_init_note)"
       if plugin_listed_in "$opencode_listed_inactive" "$opencode_stem"; then
-        item "$opencode_stem is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it — it would then load twice"
+        item "$(display_safe "$opencode_stem") is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it — it would then load twice"
       fi
     fi
     if [[ "$opencode_stem" == personal-agent-tools ]]; then
@@ -1925,10 +1931,11 @@ fi
 # repair", "not installed"), or nothing when herdr gave no usable line.
 herdr_integration_state() {
   local line
-  line="$(grep -E "^$1: " <<< "$herdr_status" | head -n 1 || true)"
+  line="$(LC_ALL=C grep -E "^$1: " <<< "$herdr_status" 2>/dev/null | head -n 1 || true)"
   [[ -n "$line" ]] || return 0
   line="${line#"$1: "}"
-  printf '%s\n' "${line%% (*}"
+  display_safe "${line%% (*}"
+  printf '\n'
 }
 # herdr_integration_home DIR
 # Set the per-home facts for .claude / .codex: agent, settings module, the
@@ -2073,8 +2080,8 @@ if module_active_for_profile "$profile" herdr-config; then
       herdr_config_missing_effect="restoring it takes effect only once the redirect above is gone"
     fi
     action "herdr config missing: $herdr_config (herdr-config module) — $herdr_config_missing_effect" \
-      "\$ mkdir -p $(printf '%q' "$HOME/.config")" \
-      "\$ chezmoi apply $(printf '%q' "$HOME/.config/herdr") $(printf '%q' "$herdr_config")"
+      "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
+      "\$ chezmoi apply $(shell_quote_safe "$HOME/.config/herdr") $(shell_quote_safe "$herdr_config")"
   elif [[ "$herdr_config_redirected" -eq 1 ]]; then
     # herdr config check would validate the other file, not the managed one.
     item "herdr config: managed $herdr_config present (validity not checked: herdr reads another file here)"
@@ -2127,7 +2134,7 @@ for codex_profile_kind in review worker; do
     if [[ -z "$codex_profile_set" ]]; then
       if [[ -e "$codex_profile_file" ]]; then
         action "$codex_profile_state but $codex_profile_file exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
-          "\$ chezmoi apply $(printf '%q' "$codex_profile_file")"
+          "\$ chezmoi apply $(shell_quote_safe "$codex_profile_file")"
       else
         ok "$codex_profile_state; no $codex_profile_kind profile file (personal-codex-$codex_profile_kind uses the config.toml defaults)"
       fi
@@ -2135,7 +2142,7 @@ for codex_profile_kind in review worker; do
       ok "$codex_profile_state; $codex_profile_file present (read by personal-codex-$codex_profile_kind)"
     else
       action "$codex_profile_state but $codex_profile_file is missing — personal-codex-$codex_profile_kind falls back to the config.toml defaults" \
-        "\$ chezmoi apply $(printf '%q' "$codex_profile_file")"
+        "\$ chezmoi apply $(shell_quote_safe "$codex_profile_file")"
     fi
   else
     if [[ -n "$codex_profile_set" ]]; then
@@ -2213,8 +2220,8 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
   fi
   # Restores a missing file; also where --check finds none (exit 3).
   usage_reader_restore_steps=(
-    "\$ mkdir -p $(printf '%q' "$HOME/.config")"
-    "\$ chezmoi apply $(printf '%q' "$HOME/.config/agent-tools") $(printf '%q' "$usage_reader_config")"
+    "\$ mkdir -p $(shell_quote_safe "$HOME/.config")"
+    "\$ chezmoi apply $(shell_quote_safe "$HOME/.config/agent-tools") $(shell_quote_safe "$usage_reader_config")"
   )
   if [[ ! -e "$usage_reader_config" && ! -L "$usage_reader_config" ]]; then
     action "usage reader config missing: $usage_reader_config (agent-tools-usage-reader module) — $usage_reader_missing_effect" \
@@ -2223,12 +2230,12 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
     # A dangling symlink: the wrapper follows it, finds nothing and treats
     # the config as absent (exit 3), not as invalid (Codex review R3, PR #302).
     action "usage reader config $usage_reader_config is a symlink to nothing — $usage_reader_missing_effect" \
-      "\$ rm -i $(printf '%q' "$usage_reader_config")   # the dangling link" \
-      "\$ chezmoi apply $(printf '%q' "$usage_reader_config")"
+      "\$ rm -i $(shell_quote_safe "$usage_reader_config")   # the dangling link" \
+      "\$ chezmoi apply $(shell_quote_safe "$usage_reader_config")"
   elif [[ ! -f "$usage_reader_config" ]]; then
     action "usage reader config $usage_reader_config is not a regular file — $usage_reader_broken_effect" \
-      "\$ mv -i $(printf '%q' "$usage_reader_config") $(printf '%q' "$usage_reader_config.bak")   # keep it aside" \
-      "\$ chezmoi apply $(printf '%q' "$usage_reader_config")"
+      "\$ mv -i $(shell_quote_safe "$usage_reader_config") $(shell_quote_safe "$usage_reader_config.bak")   # keep it aside" \
+      "\$ chezmoi apply $(shell_quote_safe "$usage_reader_config")"
   else
     usage_reader_unchecked="usage reader config $usage_reader_config present; contract not checked"
     usage_reader_sync_step="re-run the agent-tools sync (see the agent-tools README) so the current personal-usage-reader is deployed"
@@ -2255,15 +2262,15 @@ if module_active_for_profile "$profile" agent-tools-usage-reader; then
             ok "usage reader config $usage_reader_config present and accepted by personal-usage-reader --check (the agent-tools contract, argv[0] included; the reader itself not run)"
             ;;
           2)
-            # The reason without the wrapper's name prefix, and with any
-            # terminal control stripped: it is another repo's output.
-            usage_reader_reason="$(printf '%s' "${probe_lines%%$'\n'*}" | LC_ALL=C tr -d '[:cntrl:]')"
+            # The reason without the wrapper's name prefix, through
+            # display_safe: it is another repo's output.
+            usage_reader_reason="$(display_safe "${probe_lines%%$'\n'*}")"
             usage_reader_reason="${usage_reader_reason#personal-usage-reader: }"
             if [[ -n "$usage_reader_reason" ]]; then
               usage_reader_reason=" ($usage_reader_reason)"
             fi
             action "usage reader config $usage_reader_config rejected by personal-usage-reader --check$usage_reader_reason — $usage_reader_broken_effect" \
-              "\$ chezmoi apply $(printf '%q' "$usage_reader_config")   # restores the managed content" \
+              "\$ chezmoi apply $(shell_quote_safe "$usage_reader_config")   # restores the managed content" \
               "\$ ./scripts/install-packages.sh   # when the reason is the executable: dry-run first; --apply installs the catalog's tacho, the managed argv[0] under ~/go/bin"
             ;;
           3)
@@ -2337,7 +2344,7 @@ else
   else
     # Null-safe queries plus `|| true` keep doctor report-only even if
     # the JSON is malformed (a failed substitution would trip set -e).
-    sj() { printf '%s' "$status_json" | yq -p json "$1" 2>/dev/null || true; }
+    sj() { display_safe "$(printf '%s' "$status_json" | yq -p json "$1" 2>/dev/null || true)"; }
     contract_version="$(sj '.contract_version // ""')"
     if [[ "$contract_version" != "3" ]]; then
       warn "agent-tools status contract_version=${contract_version:-unknown}, expected 3 (not interpreting fields)"
@@ -2348,7 +2355,7 @@ else
         ok "agent-tools working tree clean"
       else
         action "agent-tools working tree not clean" \
-          "\$ git -C $(printf '%q' "$agent_tools_dir") status   # commit or discard, then re-run its sync"
+          "\$ git -C $(shell_quote_safe "$agent_tools_dir") status   # commit or discard, then re-run its sync"
       fi
 
       item "assets: $(sj '.assets.total // 0') (manifest errors: $(sj '.assets.manifest_errors // 0'))"

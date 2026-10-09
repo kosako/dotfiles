@@ -72,6 +72,22 @@ policy validation が失敗した場合は exit 1。
 
 導入後または現状環境の健康診断を行う。section は出力順に次のとおり(最後に next actions の一覧。下記)。
 
+report の行は端末に安全な形で出す(#335)。`lib-policy.sh` の report の helper(`ok` / `info` / `section` / `item` / `warn` /
+`fail`)と next actions の一覧が、行全体を共通の `display_safe` に通すので、どこで組み立てた行でも、他の tool や repo の
+出力・他人が付けた名前・この checkout の path に含まれる terminal の escape 列や bidi の制御で、表示を崩したり偽装したり
+できない。`display_safe` は正しい UTF-8 の文字をそのまま残し、制御文字(C0・DEL・C1)、bidi の override / isolate
+(U+202A〜U+202E・U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする(byte 単位で locale に依らない。printable ASCII
+だけの行はそのまま通る)。外部由来の値を読む箇所(agent-tools の `status.sh`・usage reader の理由・herdr の状態・git /
+chezmoi / corepack / npm の版・npm の設定値・`go env`・`core.excludesFile`、repo の dir と git remote、OpenCode の plugin と
+Codex の rules の file 名、backup の marker の欄、Codex の project の key、catalog drift が manager から読む名前と
+`npm root -g`)でも明示的に通し、目印にしている(冪等なので二重でも結果は同じ)。文字列の中身(指示文など)は text の
+まま出る(読む側は data として扱う)。外部の command の stderr はこの helper を通らないので、doctor が直接呼ぶ command
+では捨てる。他の tool の出力を awk / cut / grep で切り出すときも C locale で走らせ、stderr を捨てる(UTF-8 locale では
+不正な byte を入力ごと引用した診断を出すため)。next actions の手順に出す path は `shell_quote_safe`(C locale の `printf %q`)で引用する。ASCII だけの引用に
+なり、貼り付ければ元の path に戻る(UTF-8 locale の bash 3.2 の `%q` は一部の byte を生のまま残すため)。期限付きの probe
+(`bounded_probe`)の終了状態の行は呼び出しごとの nonce を持ち、probe した command が自分で出した行が終了状態として
+読まれることはない。
+
 - doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
 - chezmoi: chezmoi の version と source directory。
 - Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 2 つを見る。
@@ -108,7 +124,7 @@ policy validation が失敗した場合は exit 1。
   wrapper が判定する(#303): `enableAgentToolsStatus=true` の opt-in の下でだけ、配備済みの
   `~/.claude/agent-tools/scripts/personal-usage-reader` の `--help` の 1 行目に `[--check]` があることを確かめてから
   `--check` を `XDG_CONFIG_HOME` を外して(= managed file に対して)`bounded_probe` で呼ぶ。exit 0 → ok、
-  exit 2 → wrapper の理由の 1 行(制御文字は除く)を添えた action(手順は `chezmoi apply` と、理由が実行ファイルなら
+  exit 2 → wrapper の理由の 1 行(`display_safe` を通す)を添えた action(手順は `chezmoi apply` と、理由が実行ファイルなら
   tacho の導入 `install-packages.sh`。読み先がずれていれば「ずれを直すまで効かない」と書く)、exit 3(有無の確認の
   後に消えた)→ 無いときと同じ手順の action、それ以外の exit・期限切れ → 未確認の warn。opt-in なし → 未確認の item、wrapper の未配備・`--check` 非対応の旧版 → 未確認で
   agent-tools の sync を示す action、`--help` が失敗する(起動できない wrapper もありうる)→ 未確認の warn。設定の値は表示しない。非 active な profile では手置きの file を中立に表示する(#301)。
@@ -325,7 +341,8 @@ query だけを実機で実行する(書き込みはしない)。
   outdated・needs repair / status が非ゼロ exit(出力を採用しない)/ hang(期限で process tree ごと回収)/
   probe 稼働中に doctor を SIGTERM(trap で回収・rc 143)/ cap off の module active・inactive 別の表示 /
   module 除去の dangling。fake herdr は ok・fail・hang・interrupt・ok-nonl の mode を持つ。
-- herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、present + exit 0 → ok /
+- herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、`__rc=0` などの行を出してから
+  失敗しても終了状態として読まれないこと(#335)、present + exit 0 → ok /
   exit 1 → action / missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
   空値)と `XDG_CONFIG_HOME`(別 dir・空値)の振り替え → warn で、present なら検証しない(fake は exit 1 を返すので、
   走れば action が出る)、missing なら redirect warn と「既定値」と断定しない missing action の両方 /
@@ -393,7 +410,7 @@ query だけを実機で実行する(書き込みはしない)。
   失敗したときも出す)、末尾 slash の HOME でも一致。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
-  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字は `?` に置換)、symlink の `default.rules` は
+  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、symlink の `default.rules` は
   baseline 無効として warn、読めない rules dir は INCOMPLETE(#316)、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
   取り出す(値は出さない、#309)。正当な書き方(`[projects]` table・inline table・dotted / quote / escape を含む key・
   複数行文字列)は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key が空か制御文字を含む、
@@ -408,6 +425,19 @@ query だけを実機で実行する(書き込みはしない)。
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。reader も取り出し、
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
+- display_safe(#335): report の helper と next actions の一覧が行全体を `display_safe` に通すことを、lib-policy.sh を別の bash で
+  読み込んで直接確かめる(DS-S)。名前に escape を含む checkout で data file が欠けたときの policy 検証の失敗が、exit 1 のまま
+  path を `?` で出すことも確かめる(DS-3)。remote の URL・npm の版・herdr の出力に不正な byte と escape を入れ、継承した locale で
+  走らせても report に生の byte が出ないことを確かめる(DS-4)。helper を lib-policy.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字・U+10000 と U+10FFFF)を残し、
+  C0・DEL・C1・bidi の制御・不正な UTF-8(途中で切れた列・2〜4 byte の overlong・surrogate・U+10FFFF 超)を `?` にすることを、
+  `LC_ALL=C` と継承した locale の両方で、case ごとに `set -euo pipefail` の別の bash で(exit 0 も含めて)確かめる。
+  `shell_quote_safe` の結果が ASCII だけで、貼り付けると元の値に戻ることも確かめる。DS-2 は bidi の文字と日本語を含む
+  repo 名の Claude の設定 file が、warn と next actions の手順の両方で ASCII だけの引用で出ることを継承した locale で確かめる。専用の HOME で 1 回 doctor を走らせ(C locale。macOS の UTF-8 locale では
+  bidi の文字も `[[:cntrl:]]` に当たり、go の行き先の検査が先に弾くため)、status.sh・herdr・npm・git・chezmoi・corepack・go・
+  brew の出力、repo の dir 名、OpenCode の plugin の file 名(config の `plugin` 欄にも載るものを含む)、backup の marker、Codex の
+  project の key、`core.excludesFile`、go の実行ファイル名、doctor を置いた checkout の dir 名、git の stderr に escape・BEL・C1・RLO・不正な byte を仕込み、それぞれが `?` で出る
+  ことと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の rules の file 名は AI policy の
+  case で固定する。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。

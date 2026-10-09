@@ -11,33 +11,149 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # Report line helpers. POLICY_REPORT_QUIET=1 (doctor --actions-only) mutes
 # every informational line so only the next-actions summary and any [fail]
 # reach the terminal; [fail] is never muted (it is the policy exit path).
+# Every line passes through display_safe here, at the one place it is
+# printed (#335), whatever it carries — see display_safe below.
 ok() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[ok] %s\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[ok] %s\n' "$__report_line"
 }
 
 info() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[info] %s\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[info] %s\n' "$__report_line"
 }
 
 section() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[info] == %s ==\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[info] == %s ==\n' "$__report_line"
 }
 
 item() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[info] - %s\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[info] - %s\n' "$__report_line"
 }
 
 warn() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[warn] %s\n' "$*" >&2
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[warn] %s\n' "$__report_line" >&2
 }
 
 fail() {
-  printf '[fail] %s\n' "$*" >&2
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[fail] %s\n' "$__report_line" >&2
+}
+
+# Report lines are terminal-safe (#335): the helpers above and report_actions
+# pass every line through display_safe, so a terminal escape or a bidi
+# override in a value a report did not make itself — another tool's or repo's
+# output, a name someone else chose, the checkout's own path — cannot restyle
+# or spoof the output, wherever the value was put into the line. The explicit
+# display_safe calls at those values (doctor: status.sh, the usage reader,
+# herdr, git, npm, go and corepack output; repo directories and remotes,
+# plugin and rules file names, the backup marker's fields, Codex project keys;
+# report_catalog_drift: the package names and the npm root the managers list)
+# mark them where they are read and stay correct on their own (the helper is
+# idempotent). Plain text in them still shows as text (the report only
+# states it; whoever reads it treats it as data). An external command's
+# stderr does not pass through these helpers: doctor discards it.
+# shell_quote_safe VALUE — print VALUE quoted for a shell (printf %q), in the
+# C locale so every byte outside printable ASCII comes out as an octal escape:
+# a step a report prints can be pasted back exactly, and holds no raw byte a
+# terminal could act on (under a UTF-8 locale bash 3.2's %q leaves some bytes
+# raw, a bidi override's among them). For the paths in next-action steps.
+shell_quote_safe() {
+  local LC_ALL=C
+  printf '%q' "$1"
+}
+
+# display_safe VALUE — print VALUE (no newline) in a form safe to show on a
+# terminal: valid UTF-8 text is kept as is, and each control character (C0,
+# DEL, C1), bidirectional override / isolate (U+202A-U+202E, U+2066-U+2069)
+# and byte that is not part of valid UTF-8 becomes `?`. Read byte by byte
+# under LC_ALL=C, so the result does not depend on the locale.
+# display_safe_into VAR VALUE — the same, into VAR without a subshell (the
+# report helpers call it for every line). Printable ASCII passes at once.
+display_safe_into() {
+  local LC_ALL=C
+  local __ds_var="$1" s="$2" out="" i=0 n need j b c cp seq valid
+  if [[ "$s" != *[!\ -~]* ]]; then
+    printf -v "$__ds_var" '%s' "$s"
+    return 0
+  fi
+  n=${#s}
+  while ((i < n)); do
+    c="${s:i:1}"
+    printf -v b '%d' "'$c"
+    ((b < 0)) && b=$((b + 256))
+    if ((b >= 32 && b < 127)); then
+      out+="$c"
+      i=$((i + 1))
+      continue
+    fi
+    if ((b >= 194 && b <= 223)); then
+      need=1
+      cp=$((b & 31))
+    elif ((b >= 224 && b <= 239)); then
+      need=2
+      cp=$((b & 15))
+    elif ((b >= 240 && b <= 244)); then
+      need=3
+      cp=$((b & 7))
+    else
+      out+='?'
+      i=$((i + 1))
+      continue
+    fi
+    seq="$c"
+    valid=1
+    for ((j = 1; j <= need; j++)); do
+      c="${s:i+j:1}"
+      if [[ -z "$c" ]]; then
+        valid=0
+        break
+      fi
+      printf -v b '%d' "'$c"
+      ((b < 0)) && b=$((b + 256))
+      if ((b < 128 || b > 191)); then
+        valid=0
+        break
+      fi
+      cp=$(((cp << 6) | (b & 63)))
+      seq+="$c"
+    done
+    # Malformed (truncated, overlong, a surrogate, above U+10FFFF): one `?`
+    # for the lead byte, the rest is read again. Well formed but a control
+    # or bidi character: one `?` for the whole character.
+    if ((valid == 0)) || ((need == 2 && cp < 2048)) || ((need == 3 && (cp < 65536 || cp > 1114111))) \
+      || ((cp >= 55296 && cp <= 57343)); then
+      out+='?'
+      i=$((i + 1))
+      continue
+    fi
+    if (((cp >= 128 && cp <= 159) || (cp >= 8234 && cp <= 8238) || (cp >= 8294 && cp <= 8297))); then
+      out+='?'
+    else
+      out+="$seq"
+    fi
+    i=$((i + need + 1))
+  done
+  printf -v "$__ds_var" '%s' "$out"
+}
+display_safe() {
+  local __ds_result
+  display_safe_into __ds_result "$1"
+  printf '%s' "$__ds_result"
 }
 
 # Next-actions register (#227). A warning that comes with a concrete remedy
@@ -69,7 +185,7 @@ action() {
 # report_actions — print the numbered summary of everything `action`
 # recorded (always printed, even under POLICY_REPORT_QUIET).
 report_actions() {
-  local total i step
+  local total i step line
   total="${#ACTION_REASONS[@]}"
   printf '[info] == next actions (%s) ==\n' "$total"
   if [[ "$total" -eq 0 ]]; then
@@ -77,9 +193,12 @@ report_actions() {
     return 0
   fi
   for ((i = 0; i < total; i++)); do
-    printf '[info] %s. %s\n' "$((i + 1))" "${ACTION_REASONS[$i]}"
+    display_safe_into line "${ACTION_REASONS[$i]}"
+    printf '[info] %s. %s\n' "$((i + 1))" "$line"
     while IFS= read -r step; do
-      [[ -n "$step" ]] && printf '        %s\n' "$step"
+      [[ -n "$step" ]] || continue
+      display_safe_into line "$step"
+      printf '        %s\n' "$line"
     done <<< "${ACTION_STEPS[$i]}"
   done
 }
@@ -95,14 +214,14 @@ require_yq() {
   local version major
   version="$(yq --version 2>/dev/null)"
   if [[ "$version" != *mikefarah* ]]; then
-    fail "wrong yq variant: need mikefarah/yq v4, got: ${version:-unknown}"
+    fail "wrong yq variant: need mikefarah/yq v4, got: $(display_safe "${version:-unknown}")"
     return 1
   fi
   major="${version##*version }"
   major="${major#v}"
   major="${major%%.*}"
   if [[ ! "$major" =~ ^[0-9]+$ ]] || ((major < 4)); then
-    fail "yq v4+ required, got: $version"
+    fail "yq v4+ required, got: $(display_safe "$version")"
     return 1
   fi
   return 0
@@ -467,7 +586,7 @@ installed_inventory() {
       find -H "$dir" -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null ;;
     mas)
       inventory="$(mas list 2>/dev/null)" || return 1
-      printf '%s\n' "$inventory" | awk '{print $1}' ;;
+      printf '%s\n' "$inventory" | LC_ALL=C awk '{print $1}' 2>/dev/null ;;
     *) return 1 ;;
   esac
 }
@@ -539,12 +658,12 @@ report_catalog_drift() {
     item "brew: not found (brew sources skipped)"
   fi
   if [[ "$have_npm" -eq 1 ]]; then
-    item "npm: $(command -v npm) (global root: $(npm root -g 2>/dev/null || echo unknown))"
+    item "npm: $(command -v npm) (global root: $(display_safe "$(npm root -g 2>/dev/null || echo unknown)"))"
   else
     item "npm: not found (npm_global sources skipped)"
   fi
   if [[ "$have_go" -eq 1 ]]; then
-    item "go bin: ${gobin:-unknown}"
+    item "go bin: $(display_safe "${gobin:-unknown}")"
   else
     item "go: not found (go_install sources skipped)"
   fi
@@ -658,7 +777,7 @@ report_catalog_drift() {
     while IFS= read -r f; do
       [[ -z "$f" ]] && continue
       grep -Fxq -- "$f" "$decl_brew_formula" || {
-        warn "undeclared: $f (brew_formula leaf not in catalog)"
+        warn "undeclared: $(display_safe "$f") (brew_formula leaf not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$brew_leaves"
@@ -667,7 +786,7 @@ report_catalog_drift() {
     while IFS= read -r c; do
       [[ -z "$c" ]] && continue
       grep -Fxq -- "$c" "$decl_brew_cask" || {
-        warn "undeclared: $c (brew_cask not in catalog)"
+        warn "undeclared: $(display_safe "$c") (brew_cask not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$brew_casks"
@@ -677,7 +796,7 @@ report_catalog_drift() {
       [[ -z "$n" ]] && continue
       case "$n" in npm|corepack) continue ;; esac
       grep -Fxq -- "$n" "$decl_npm" || {
-        warn "undeclared: $n (npm global not in catalog)"
+        warn "undeclared: $(display_safe "$n") (npm global not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$npm_globals"
@@ -696,7 +815,7 @@ report_catalog_drift() {
         go|gofmt) continue ;;
       esac
       grep -Fxq -- "$b" "$decl_go_bins" || {
-        warn "undeclared: $b (go binary not in catalog)"
+        warn "undeclared: $(display_safe "$b") (go binary not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$go_bins"
@@ -907,13 +1026,15 @@ git_excludes_file_setting() {
 # never printed.
 git_remotes_with_credentials() {
   local repo="$1"
+  # C locale and stderr discarded: the URLs are another repo's data, and awk
+  # under a UTF-8 locale reports an invalid byte with the input quoted (#335).
   git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null |
-    awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
+    LC_ALL=C awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
       name = $1
       sub(/^remote\./, "", name)
       sub(/\.(url|pushurl)$/, "", name)
       if (!seen[name]++) print name
-    }'
+    }' 2>/dev/null
 }
 
 command_status() {
