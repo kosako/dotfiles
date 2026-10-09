@@ -427,6 +427,50 @@ else
   miss "missing recipient should exit 2, got $rc"
 fi
 
+# 11b. The other recipient sources (#330): the default recipient file (the
+#      path the docs recommend) and --recipients-file each produce an archive
+#      the matching identity verifies; a missing --recipients-file, and both
+#      flags at once, are usage errors (exit 2) that write nothing.
+rcpt_home="$fixture_home/rcpt"
+mkdir -p "$rcpt_home/.ssh" "$rcpt_home/.config/dotfiles" "$rcpt_home/out"
+printf 'a\n' > "$rcpt_home/.zshrc.local"
+printf 'b\n' > "$rcpt_home/.ssh/config.local"
+printf '%s\n' "$recipient" > "$rcpt_home/recipients.txt"
+rcpt_run() { HOME="$rcpt_home" PATH="$fixture_home/fakebin:$PATH" "$PB" "$@"; }
+printf '%s\n' "$recipient" > "$rcpt_home/.config/dotfiles/private-backup.recipient"
+if rcpt_run backup --out "$rcpt_home/out/default.age" --yes >/dev/null 2>&1 \
+  && rcpt_run verify --in "$rcpt_home/out/default.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  pass "backup without a recipient flag encrypts to the default recipient file"
+else
+  miss "backup with only the default recipient file did not produce a verifiable archive"
+fi
+rm "$rcpt_home/.config/dotfiles/private-backup.recipient"
+if rcpt_run backup --out "$rcpt_home/out/file.age" --recipients-file "$rcpt_home/recipients.txt" --yes >/dev/null 2>&1 \
+  && rcpt_run verify --in "$rcpt_home/out/file.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  pass "backup --recipients-file encrypts to the listed recipient"
+else
+  miss "backup --recipients-file did not produce a verifiable archive"
+fi
+rcpt_rc=0
+rcpt_out="$(rcpt_run backup --out "$rcpt_home/out/missing.age" --recipients-file "$rcpt_home/no-such-file" --yes 2>&1)" || rcpt_rc=$?
+if [[ "$rcpt_rc" -eq 2 ]] && grep -Fxq "[fail] recipients file not found: $rcpt_home/no-such-file" <<< "$rcpt_out" \
+  && [[ ! -e "$rcpt_home/out/missing.age" ]]; then
+  pass "a missing --recipients-file is a usage error (exit 2) and writes nothing"
+else
+  printf '%s\n' "$rcpt_out" >&2
+  miss "a missing --recipients-file must exit 2 without an archive (rc=$rcpt_rc)"
+fi
+rcpt_rc=0
+rcpt_out="$(rcpt_run backup --out "$rcpt_home/out/both.age" --recipient "$recipient" \
+  --recipients-file "$rcpt_home/recipients.txt" --yes 2>&1)" || rcpt_rc=$?
+if [[ "$rcpt_rc" -eq 2 ]] && grep -Fxq "[fail] use only one of --recipient / --recipients-file" <<< "$rcpt_out" \
+  && [[ ! -e "$rcpt_home/out/both.age" ]]; then
+  pass "--recipient together with --recipients-file is a usage error (exit 2) and writes nothing"
+else
+  printf '%s\n' "$rcpt_out" >&2
+  miss "--recipient with --recipients-file must exit 2 without an archive (rc=$rcpt_rc)"
+fi
+
 # 12. restore dry-run writes nothing.
 rdst="$fixture_home/restore-dst"
 mkdir -p "$rdst"
@@ -1012,6 +1056,73 @@ if grep -Fq "checksum mismatch: $sup_rel" <<< "$out"; then
 else
   printf '%s\n' "$out" >&2
   miss "verify accepted a tampered supplement payload"
+fi
+
+# 25b. Nothing to back up is a failure, not an empty archive (#208, #330):
+#      with no baseline file and no supplement, and with a supplement whose
+#      declared targets are all absent (the list alone is not a backup),
+#      backup exits non-zero with the reason and writes no archive, no
+#      partial and no marker.
+for empty_case in nothing supplement-only; do
+  empty_home="$fixture_home/empty-$empty_case"
+  mkdir -p "$empty_home"
+  if [[ "$empty_case" == supplement-only ]]; then
+    mkdir -p "$empty_home/.config/dotfiles"
+    printf 'backup_paths:\n  - { path: absent-file, type: file }\n  - { path: absent-dir, type: dir }\n' \
+      > "$empty_home/.config/dotfiles/backup-paths.local"
+  fi
+  empty_rc=0
+  empty_out="$(HOME="$empty_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$empty_home/e.age" --recipient "$recipient" --yes 2>&1)" || empty_rc=$?
+  if [[ "$empty_rc" -ne 0 ]] && grep -Fxq "[fail] no files captured; refusing to write an empty archive" <<< "$empty_out" \
+    && [[ ! -e "$empty_home/e.age" && ! -e "$empty_home/e.age.partial" && ! -e "$empty_home/.local/state/dotfiles/private-backup.json" ]]; then
+    pass "backup with nothing to capture ($empty_case) fails without an archive or a marker"
+  else
+    printf '%s\n' "$empty_out" >&2
+    miss "backup with nothing to capture ($empty_case) must fail without writing (rc=$empty_rc)"
+  fi
+done
+
+# 25c. Declared targets of the wrong kind are skipped with a warning and
+#      never captured (#330): a symlink to a file and to a directory (the
+#      link target, outside the declarations, must not land in the archive
+#      under the declared name), a FIFO declared as a file, and a regular
+#      file declared as a directory. The backup itself still succeeds.
+kind_home="$fixture_home/kind"
+mkdir -p "$kind_home/.ssh" "$kind_home/.config/dotfiles" "$kind_home/outside-dir"
+printf 'a\n' > "$kind_home/.zshrc.local"
+printf 'b\n' > "$kind_home/.ssh/config.local"
+printf 'link target content\n' > "$kind_home/outside-file"
+printf 'inside the linked dir\n' > "$kind_home/outside-dir/inner"
+ln -s outside-file "$kind_home/link-file"
+ln -s outside-dir "$kind_home/link-dir"
+mkfifo "$kind_home/fifo"
+printf 'plain file\n' > "$kind_home/not-a-dir"
+printf 'backup_paths:\n  - { path: link-file, type: file }\n  - { path: link-dir, type: dir }\n  - { path: fifo, type: file }\n  - { path: not-a-dir, type: dir }\n' \
+  > "$kind_home/.config/dotfiles/backup-paths.local"
+kind_rc=0
+kind_out="$(HOME="$kind_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$kind_home/k.age" --recipient "$recipient" --yes 2>&1)" || kind_rc=$?
+kind_extract="$fixture_home/kind-extract"
+mkdir -p "$kind_extract"
+kind_files=""
+if [[ "$kind_rc" -eq 0 && -f "$kind_home/k.age" ]]; then
+  age -d -i "$fixture_home/keys/id.txt" "$kind_home/k.age" | tar -xpf - -C "$kind_extract"
+  kind_files="$(yq -p=json -o=tsv '.files[].path' "$kind_extract/manifest.json")"
+fi
+if [[ "$kind_rc" -eq 0 && -n "$kind_files" ]] \
+  && grep -Fxq "[warn] skip symlink (not captured): link-file" <<< "$kind_out" \
+  && grep -Fxq "[warn] skip symlink (not captured): link-dir" <<< "$kind_out" \
+  && grep -Fxq "[warn] declared file is not a regular file (skipped): fifo" <<< "$kind_out" \
+  && grep -Fxq "[warn] declared dir is not a directory (skipped): not-a-dir" <<< "$kind_out" \
+  && ! grep -Eq '^(link-file|link-dir|link-dir/.*|fifo|not-a-dir|outside-file|outside-dir/.*)$' <<< "$kind_files" \
+  && [[ -z "$(find "$kind_extract/files" \( -name 'link-*' -o -name fifo -o -name not-a-dir -o -name 'outside-*' -o -name inner \) -print)" ]] \
+  && ! grep -rqF "link target content" "$kind_extract/files" \
+  && ! grep -rqF "inside the linked dir" "$kind_extract/files"; then
+  pass "symlinks, a FIFO declared as a file and a file declared as a dir are skipped with warnings and never captured"
+else
+  printf 'rc=%s\n%s\nfiles:\n%s\n' "$kind_rc" "$kind_out" "$kind_files" >&2
+  miss "a declared target of the wrong kind was captured or not warned about"
 fi
 
 # 26. backup self-checks its staging with the verify/restore manifest test
