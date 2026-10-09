@@ -1123,7 +1123,12 @@ pb_kill_tree() {
   kill -KILL "$1" 2>/dev/null || true
 }
 kind_log="$fixture_home/kind-backup.log"
-HOME="$kind_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+# A TMPDIR of its own inside the fixture: a KILL skips backup's EXIT trap, and
+# the staging it made would otherwise outlive the suite's cleanup (Codex
+# review R3, PR #351).
+kind_tmp="$fixture_home/kind-tmp"
+mkdir -p "$kind_tmp"
+HOME="$kind_home" TMPDIR="$kind_tmp" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$kind_home/k.age" --recipient "$recipient" --yes > "$kind_log" 2>&1 &
 kind_pid=$!
 kind_deadline=$((SECONDS + 60))
