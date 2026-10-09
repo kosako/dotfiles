@@ -8,9 +8,9 @@ set -euo pipefail
 #   - a missing dump, or one older than 24h, takes the slow path (compinit -u)
 #     and leaves a dump that the next 24h of shells treat as recent;
 #   - a recent dump takes the fast path (compinit -C) and is left untouched.
-# compinit rewrites an existing dump only when the set of completion files
-# changed, so without the mtime refresh a day-old dump stayed old and every
-# shell kept taking the slow path. `zsh -n` in CI cannot see that.
+# compinit rewrites an existing dump only when the number of completion files
+# or the zsh version changed, so without the mtime refresh a day-old dump
+# stayed old and every shell kept taking the slow path. `zsh -n` in CI cannot see that.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh

@@ -193,7 +193,7 @@ CI の bash / zsh syntax check をそのまま取り出し、各入力ファイ�
 `dot_zshrc` の compinit の block(`autoload -Uz compinit` から fzf-tab の節の前まで)を managed file から
 抽出し、fixture の HOME を持つ隔離 zsh(`zsh -f`)で日次キャッシュの選び分けを検証する(#329)。実 home の
 `~/.zcompdump` には触れない。dump が無いとき・24h より古いときは遅い経路(`compinit -u`)を通り、その後の
-dump が 24h 以内の扱いになること(compinit は補完 file の集合が変わらない限り既存の dump を書き直さない
+dump が 24h 以内の扱いになること(compinit は補完 file の数と zsh の版が変わらない限り既存の dump を書き直さない
 ので、mtime を進めないと以後のすべての shell が遅い経路を通り続ける)、24h 以内の dump は速い経路
 (`compinit -C`)で手を付けないことを確かめる。CI の `zsh -n` は構文しか見ないので、この種の退行を検出できない。
 
