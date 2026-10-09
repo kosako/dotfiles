@@ -18,9 +18,36 @@ miss() {
   status=1
 }
 
+# Without age the suite cannot run. Locally that stays a skip; on CI (CI=true,
+# set by GitHub Actions) it is a failure, so a dropped install step or a
+# broken PATH cannot turn the whole suite green (#330).
 if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+  if [[ "${CI:-}" == "true" ]]; then
+    fail "age/age-keygen not found on CI; the private-backup tests must run there (the workflow installs a pinned age)"
+    exit 1
+  fi
   warn "age/age-keygen not found; skipping private-backup round-trip tests"
   exit 0
+fi
+# The rule above, checked by running this suite again with a PATH that has no
+# age (only the system dirs): CI=true must fail, a local run must skip. Done
+# only where the system dirs really lack age, so the inner run stops at the
+# check and never runs the suite again.
+if ! PATH=/usr/bin:/bin command -v age >/dev/null 2>&1; then
+  age_ci_rc=0
+  age_ci_out="$(env CI=true PATH=/usr/bin:/bin bash "${BASH_SOURCE[0]}" 2>&1)" || age_ci_rc=$?
+  age_local_rc=0
+  age_local_out="$(env -u CI PATH=/usr/bin:/bin bash "${BASH_SOURCE[0]}" 2>&1)" || age_local_rc=$?
+  if [[ "$age_ci_rc" -eq 1 ]] && grep -Fq "[fail] age/age-keygen not found on CI" <<< "$age_ci_out" \
+    && [[ "$age_local_rc" -eq 0 ]] && grep -Fq "[warn] age/age-keygen not found; skipping" <<< "$age_local_out"; then
+    ok "test passed: without age the suite fails on CI and skips locally"
+  else
+    printf 'CI run rc=%s\n%s\nlocal run rc=%s\n%s\n' "$age_ci_rc" "$age_ci_out" "$age_local_rc" "$age_local_out" >&2
+    fail "test failed: without age the suite must fail on CI (exit 1) and skip locally (exit 0)"
+    status=1
+  fi
+else
+  warn "age is in /usr/bin or /bin here; the no-age check of this suite is skipped"
 fi
 
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-pb-test.XXXXXX")"
@@ -80,7 +107,9 @@ else
 fi
 
 # 3. verify via --identity-command (the op seam) passes.
-if run verify --in "$archive" --identity-command "cat $fixture_home/keys/id.txt" >/dev/null 2>&1; then
+# The path is quoted for the shell that evals the command (a TMPDIR with a
+# space would split it otherwise; #330).
+if run verify --in "$archive" --identity-command "$(printf 'cat %q' "$fixture_home/keys/id.txt")" >/dev/null 2>&1; then
   pass "verify works through --identity-command"
 else
   miss "verify failed through --identity-command"
@@ -687,18 +716,25 @@ printf 'locked\n' > "$unr_home/box/locked-in-dir"
 chmod 000 "$unr_home/box/locked-in-dir"
 printf 'backup_paths:\n  - { path: "locked", type: file }\n  - { path: "box", type: dir }\n' \
   > "$unr_home/.config/dotfiles/backup-paths.local"
-unr_rc=0
-unr_out="$(HOME="$unr_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$unr_home/u.age" --recipient "$recipient" --yes 2>&1)" || unr_rc=$?
-chmod 600 "$unr_home/locked" "$unr_home/box/locked-in-dir" # so the EXIT trap can clean up
-if [[ "$unr_rc" -eq 0 && -f "$unr_home/u.age" ]] \
-  && grep -Fq "unreadable (skipped): locked" <<< "$unr_out" \
-  && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out"; then
-  pass "unreadable files (declared file and inside a dir) are skipped with a warning, backup still succeeds"
+# Mode 000 makes the files unreadable only where permissions bind (not as
+# root): there the case would fail on a correct implementation, so it is
+# skipped instead (#330; the same guard as test-doctor's OP-i10).
+if [[ ! -r "$unr_home/locked" && ! -r "$unr_home/box/locked-in-dir" ]]; then
+  unr_rc=0
+  unr_out="$(HOME="$unr_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$unr_home/u.age" --recipient "$recipient" --yes 2>&1)" || unr_rc=$?
+  if [[ "$unr_rc" -eq 0 && -f "$unr_home/u.age" ]] \
+    && grep -Fq "unreadable (skipped): locked" <<< "$unr_out" \
+    && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out"; then
+    pass "unreadable files (declared file and inside a dir) are skipped with a warning, backup still succeeds"
+  else
+    printf '%s\n' "$unr_out" >&2
+    miss "unreadable files should be skipped without aborting, got rc=$unr_rc"
+  fi
 else
-  printf '%s\n' "$unr_out" >&2
-  miss "unreadable files should be skipped without aborting, got rc=$unr_rc"
+  warn "mode 000 files are still readable here (root?); unreadable-file case skipped"
 fi
+chmod 600 "$unr_home/locked" "$unr_home/box/locked-in-dir" # so the EXIT trap can clean up
 
 # 23. Alias declarations must never make restore displace a target twice.
 alias_home="$fixture_home/alias-home"
