@@ -1718,38 +1718,50 @@ else
 fi
 
 # 33. A run interrupted after its plaintext exists leaves nothing in its
-#     temp (#358): backup (staging + self-check dir), verify and restore
-#     (decrypted tar + extracted tree) each get a SIGINT to their process
-#     group — what Ctrl-C sends — twice, the second while the cleanup is
-#     already removing the temp. With an EXIT trap alone the second signal
-#     ended the script half-way through that trap and the plaintext stayed
-#     (bash 3.2 and 5 alike; after a single signal the EXIT trap always
-#     finished). Each run is a background job under `set -m`, so it has a
-#     process group of its own to signal, like a foreground job in a
-#     terminal. Both signals are sent from inside the run's own tools, so
-#     there is no timing window (as test-doctor's herdr `interrupt` fixture
-#     does): a fake yq, at the `-e` manifest check on the temp (the first
-#     yq call once the plaintext is complete), snapshots the temp and
-#     interrupts the group; a fake rm, at the first removal under the temp
-#     (the cleanup under way), interrupts it again. Each fake hands its
-#     process to `sleep` first, so what the signal kills is a child doing
-#     the tool's work, as with the real tools; every other call goes to the
-#     real tool. A TMPDIR of its own per run, so a leftover shows and a KILL
-#     at the deadline (pb_kill_tree) cannot leak into the suite's temp.
-# SIGINT ignored at entry — the suite started as a background list of a
-# non-interactive shell (`./scripts/test-private-backup.sh &`) — is inherited
-# by every run and its tools and cannot be reset by bash, so the signals
-# below would do nothing and every run would finish: skipped with a warning
-# then. A probe that survives its own SIGINT tells. On CI (CI=true, set by
-# GitHub Actions) that is a failure instead, as without age (#330): the
-# workflow runs the suite in the foreground, so a skip there means the cases
-# did not run, not that they passed.
-if bash -c 'kill -INT $$; exit 0' 2>/dev/null; then
+#     temp and ends by the signal (#358): backup (staging + self-check dir),
+#     verify and restore (decrypted tar + extracted tree) each get SIGINT —
+#     what Ctrl-C sends — and SIGTERM to their process group, in a run
+#     with one signal and a run with two, the second arriving while the
+#     cleanup is already removing the temp. The second signal is what an
+#     EXIT trap alone did not survive: it ended the script half-way through
+#     that trap and the plaintext stayed (bash 3.2 and 5, INT and TERM
+#     alike). After one signal bash runs the EXIT trap before dying, so one
+#     signal cannot tell an INT / TERM trap from none; that run checks the
+#     other half of the contract instead: the script ends BY the signal
+#     (the trap re-raises it after the cleanup), not with an `exit 130`.
+#     bash's `wait` reports both as 130, so a python3 wrapper is the run's
+#     parent and records how the child ended from waitpid's status (ended
+#     by which signal, or exit with which code). After two signals that is
+#     not asserted: the second kills the rm inside the trap body and errexit
+#     may then end the script through the EXIT trap (bash 3.2 does, for
+#     backup); the temp is empty and the status 130 / 143 either way.
+#     Each run is a background job under `set -m`, so it has a process
+#     group of its own to signal, like a foreground job in a terminal (the
+#     wrapper ignores the two signals itself, being in that group). Both
+#     signals are sent from inside the run's own tools, so there is no
+#     timing window (as test-doctor's herdr `interrupt` fixture does): a
+#     fake yq, at the `-e` manifest check on the temp (the first yq call
+#     once the plaintext is complete), snapshots the temp and signals the
+#     group; a fake rm, at the first removal under the temp (the cleanup
+#     under way), signals it again and leaves a marker — unless the marker
+#     is already there, which the one-signal runs arrange. Each fake hands
+#     its process to `sleep` first, so what the signal kills is a child
+#     doing the tool's work, as with the real tools; every other call goes
+#     to the real tool. A TMPDIR of its own per run, so a leftover shows
+#     and a KILL at the deadline (pb_kill_tree) cannot leak into the
+#     suite's temp. The wrapper starts the run with the default SIGINT
+#     disposition, so the cases run even when the suite itself was started
+#     as a background list of a non-interactive shell (`… &`), where SIGINT
+#     is ignored at entry and bash cannot reset it. Without python3 the
+#     cases are skipped with a warning; on CI (CI=true, set by GitHub
+#     Actions) that is a failure instead, as without age (#330): a skip
+#     there means the cases did not run, not that they passed.
+if ! command -v python3 >/dev/null 2>&1; then
   if [[ "${CI:-}" == "true" ]]; then
-    fail "SIGINT is ignored on CI; the interrupt cases must run there (the workflow runs the suite in the foreground)"
+    fail "python3 not found on CI; the interrupt cases must run there"
     status=1
   else
-    warn "SIGINT is ignored here (suite started as a background job?); the interrupt cases are skipped"
+    warn "python3 not found; the interrupt cases are skipped"
   fi
 else
   sig_home="$fixture_home/sig-home"
@@ -1772,7 +1784,7 @@ if [ "$1" = -e ]; then
     case "$arg" in
       "$SIG_TMP"/*)
         find "$SIG_TMP" -type f > "$SIG_SNAPSHOT"
-        (sleep 0.2; kill -INT 0) &
+        (sleep 0.2; kill -"$SIG_NAME" 0) &
         exec sleep 20
         ;;
     esac
@@ -1787,7 +1799,7 @@ if [ ! -e "$SIG_MARKER" ]; then
     case "$arg" in
       "$SIG_TMP"/*)
         : > "$SIG_MARKER"
-        (sleep 0.2; kill -INT 0) &
+        (sleep 0.2; kill -"$SIG_NAME" 0) &
         exec sleep 20
         ;;
     esac
@@ -1795,57 +1807,106 @@ if [ ! -e "$SIG_MARKER" ]; then
 fi
 exec "$REAL_RM" "$@"
 SH
+  # ended.py ENDED_FILE CMD ARG... — run CMD as a child with the default
+  # INT / TERM dispositions (ignoring both itself) and write how it ended
+  # to ENDED_FILE: "signal N" or "exit N"; exit as a shell reports it.
+  cat > "$sig_fakebin/ended.py" <<'PY'
+import os
+import signal
+import sys
+
+ended, cmd = sys.argv[1], sys.argv[2:]
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pid = os.fork()
+if pid == 0:
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.execvp(cmd[0], cmd)
+_, st = os.waitpid(pid, 0)
+with open(ended, "w") as f:
+    if os.WIFSIGNALED(st):
+        f.write("signal %d\n" % os.WTERMSIG(st))
+        sys.exit(128 + os.WTERMSIG(st))
+    f.write("exit %d\n" % os.WEXITSTATUS(st))
+    sys.exit(os.WEXITSTATUS(st))
+PY
   chmod +x "$sig_fakebin/yq" "$sig_fakebin/rm"
-  for sig_cmd in backup verify restore; do
-    case "$sig_cmd" in
-      backup)
-        sig_args=(backup --out "$sig_home/again.age" --recipient "$recipient" --yes)
-        sig_section="self-check manifest" ;;
-      verify)
-        sig_args=(verify --in "$sig_archive" --identity "$fixture_home/keys/id.txt")
-        sig_section="verify manifest" ;;
-      restore)
-        sig_args=(restore --in "$sig_archive" --identity "$fixture_home/keys/id.txt" --target-home "$sig_home/target")
-        sig_section="verify before restore" ;;
+  for sig_name in INT TERM; do
+    case "$sig_name" in
+      INT) sig_num=2 ;;
+      TERM) sig_num=15 ;;
     esac
-    sig_tmp="$fixture_home/sig-tmp-$sig_cmd"
-    mkdir -p "$sig_tmp"
-    sig_log="$fixture_home/sig-$sig_cmd.log"
-    sig_snapshot="$fixture_home/sig-$sig_cmd.snapshot"
-    sig_marker="$fixture_home/sig-$sig_cmd.marker"
-    set -m
-    HOME="$sig_home" TMPDIR="$sig_tmp" SIG_TMP="$sig_tmp" SIG_SNAPSHOT="$sig_snapshot" SIG_MARKER="$sig_marker" \
-      REAL_YQ="$real_yq" REAL_RM="$real_rm" PATH="$sig_fakebin:$fixture_home/fakebin:$PATH" \
-      "$PB" "${sig_args[@]}" > "$sig_log" 2>&1 < /dev/null &
-    sig_pid=$!
-    set +m
-    sig_deadline=$((SECONDS + 60))
-    while kill -0 "$sig_pid" 2>/dev/null && [[ "$SECONDS" -lt "$sig_deadline" ]]; do
-      sleep 0.2
+    for sig_times in 1 2; do
+      for sig_cmd in backup verify restore; do
+        case "$sig_cmd" in
+          backup)
+            sig_args=(backup --out "$sig_home/again.age" --recipient "$recipient" --yes)
+            sig_section="self-check manifest" ;;
+          verify)
+            sig_args=(verify --in "$sig_archive" --identity "$fixture_home/keys/id.txt")
+            sig_section="verify manifest" ;;
+          restore)
+            sig_args=(restore --in "$sig_archive" --identity "$fixture_home/keys/id.txt" --target-home "$sig_home/target")
+            sig_section="verify before restore" ;;
+        esac
+        sig_run="$sig_name-$sig_times-$sig_cmd"
+        sig_tmp="$fixture_home/sig-tmp-$sig_run"
+        mkdir -p "$sig_tmp"
+        sig_log="$fixture_home/sig-$sig_run.log"
+        sig_snapshot="$fixture_home/sig-$sig_run.snapshot"
+        sig_marker="$fixture_home/sig-$sig_run.marker"
+        sig_ended="$fixture_home/sig-$sig_run.ended"
+        # The marker is what makes the fake rm pass its calls through: made
+        # beforehand, no second signal is sent.
+        [[ "$sig_times" -eq 1 ]] && : > "$sig_marker"
+        set -m
+        HOME="$sig_home" TMPDIR="$sig_tmp" SIG_TMP="$sig_tmp" SIG_SNAPSHOT="$sig_snapshot" SIG_MARKER="$sig_marker" \
+          SIG_NAME="$sig_name" REAL_YQ="$real_yq" REAL_RM="$real_rm" PATH="$sig_fakebin:$fixture_home/fakebin:$PATH" \
+          python3 "$sig_fakebin/ended.py" "$sig_ended" "$PB" "${sig_args[@]}" > "$sig_log" 2>&1 < /dev/null &
+        sig_pid=$!
+        set +m
+        sig_deadline=$((SECONDS + 60))
+        while kill -0 "$sig_pid" 2>/dev/null && [[ "$SECONDS" -lt "$sig_deadline" ]]; do
+          sleep 0.2
+        done
+        sig_timed_out=0
+        if kill -0 "$sig_pid" 2>/dev/null; then
+          sig_timed_out=1
+          pb_kill_tree "$sig_pid"
+        fi
+        sig_rc=0
+        wait "$sig_pid" 2>/dev/null || sig_rc=$?
+        sig_out="$(cat "$sig_log")"
+        sig_had="$(cat "$sig_snapshot" 2>/dev/null || true)"
+        sig_end="$(cat "$sig_ended" 2>/dev/null || true)"
+        sig_left="$(find "$sig_tmp" -mindepth 1 2>/dev/null)"
+        # Interrupted (128 + the signal) after the section that checks the
+        # plaintext began, with the plaintext in the temp at the first
+        # signal, nothing left afterwards, and: after two signals, the
+        # second sent with a removal under way; after one, ended by it.
+        sig_shape_ok=0
+        if [[ "$sig_times" -eq 2 ]]; then
+          sig_shape="interrupted twice by SIG$sig_name after its plaintext existed"
+          sig_claim="leaves nothing in its temp"
+          [[ -e "$sig_marker" ]] && sig_shape_ok=1
+        else
+          sig_shape="interrupted by SIG$sig_name after its plaintext existed"
+          sig_claim="leaves nothing in its temp and ends by that signal"
+          [[ "$sig_end" == "signal $sig_num" ]] && sig_shape_ok=1
+        fi
+        if [[ "$sig_timed_out" -eq 0 && "$sig_rc" -eq $((128 + sig_num)) && "$sig_shape_ok" -eq 1 && -z "$sig_left" ]] \
+          && grep -Fq "private-backup: $sig_section" <<< "$sig_out" \
+          && grep -Eq '/files/\.zshrc\.local$' <<< "$sig_had" && grep -Eq '/manifest\.json$' <<< "$sig_had"; then
+          pass "$sig_cmd $sig_shape $sig_claim"
+        else
+          printf 'signals=%s rc=%s timed_out=%s ended=%s marker=%s\nin the temp at the first signal:\n%s\nleft:\n%s\n%s\n' \
+            "$sig_times" "$sig_rc" "$sig_timed_out" "${sig_end:-unknown}" "$([[ -e "$sig_marker" ]] && echo yes || echo no)" \
+            "$sig_had" "$sig_left" "$sig_out" >&2
+          miss "$sig_cmd $sig_shape: not interrupted there, left its temp behind, or did not end as expected (rc=$sig_rc, ended=${sig_end:-unknown})"
+        fi
+      done
     done
-    sig_timed_out=0
-    if kill -0 "$sig_pid" 2>/dev/null; then
-      sig_timed_out=1
-      pb_kill_tree "$sig_pid"
-    fi
-    sig_rc=0
-    wait "$sig_pid" 2>/dev/null || sig_rc=$?
-    sig_out="$(cat "$sig_log")"
-    sig_had="$(cat "$sig_snapshot" 2>/dev/null || true)"
-    sig_left="$(find "$sig_tmp" -mindepth 1 2>/dev/null)"
-    # Interrupted (130, as bash reports both an exit 130 and a death by SIGINT)
-    # after the section that checks the plaintext began, with the plaintext
-    # in the temp at the first signal and a removal under way at the second,
-    # and nothing left afterwards.
-    if [[ "$sig_timed_out" -eq 0 && "$sig_rc" -eq 130 && -e "$sig_marker" && -z "$sig_left" ]] \
-      && grep -Fq "private-backup: $sig_section" <<< "$sig_out" \
-      && grep -Eq '/files/\.zshrc\.local$' <<< "$sig_had" && grep -Eq '/manifest\.json$' <<< "$sig_had"; then
-      pass "$sig_cmd interrupted twice after its plaintext existed leaves nothing in its temp"
-    else
-      printf 'rc=%s timed_out=%s second signal sent=%s\nin the temp at the first signal:\n%s\nleft:\n%s\n%s\n' \
-        "$sig_rc" "$sig_timed_out" "$([[ -e "$sig_marker" ]] && echo yes || echo no)" "$sig_had" "$sig_left" "$sig_out" >&2
-      miss "$sig_cmd interrupted twice left its temp behind, or was not interrupted after its plaintext existed (rc=$sig_rc)"
-    fi
   done
 fi
 

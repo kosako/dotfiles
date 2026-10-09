@@ -592,12 +592,16 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `directory enumeration incomplete` と `capture INCOMPLETE` を warn し、skip 1 件を計上し、marker の
   `capture_incomplete` が true になること。正常 run では false。その archive の verify は通ること
   (整合と完全性は別)。
-- 平文ができた後の中断で temp に何も残らないこと(#358): backup / verify / restore を `set -m` の background job
-  (自分の process group)にし、PATH 先頭の fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を記録してから
-  group へ SIGINT)と fake `rm`(temp 配下の最初の削除 = 後始末の途中で、もう一度 group へ SIGINT)で signal を run の
-  中から送る(timing の窓を作らない)。終了後に専用 TMPDIR が空で、rc が 130 であること。EXIT trap だけ
-  (INT の trap が無い)の実装では 3 case とも temp が残って fail する(bash 3.2 / 5 とも)。SIGINT が無視される
-  環境(非対話 shell の background list `… &` として suite を起動した場合。bash では戻せない)では手元は warn して
+- 平文ができた後の中断で temp に何も残らず、同じ signal で終わること(#358): backup / verify / restore を `set -m` の
+  background job(自分の process group)にし、SIGINT / SIGTERM それぞれを 1 回送る run と 2 回送る run を回す。signal は
+  run の中から送る(timing の窓を作らない): PATH 先頭の fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を
+  記録してから group へ)と fake `rm`(temp 配下の最初の削除 = 後始末の途中で、もう一度 group へ。1 回の run では送らない)。
+  終了後に専用 TMPDIR が空で、rc が 130 / 143 であること。1 回の run は python3 の wrapper を親にして waitpid の終了状態を
+  記録し、`exit 130` ではなく signal で死んだことも確かめる(2 回目の signal は trap の中の rm を殺し、errexit が EXIT trap
+  経由の exit で終えることがある(bash 3.2 の backup)ので、2 回の run は rc だけ)。EXIT trap だけ(INT / TERM の trap が
+  無い)の実装では 2 回の run の 6 case が temp を残して fail し(bash 3.2 / 5 とも。1 回なら bash が EXIT trap を走らせて
+  から死ぬので区別できない)、再送を exit に替えた実装では 1 回の run の 6 case が fail する。wrapper が SIGINT を既定に
+  戻すので、非対話 shell の background list(`… &`)として suite を起動しても走る。python3 が無ければ手元は warn して
   skip、CI(`CI=true`)では fail(age が無いときと同じ形。#330)。
 
 ## test-secrets-gate.sh
