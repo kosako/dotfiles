@@ -187,6 +187,8 @@ secret ではないが repo にはコミットしない)。
     bsdtar / GNU tar の既定の安全な展開に依る。
 - 復号物・一時展開は確実に削除(trap)し平文を残さない。verify / restore の temp は、archive が権限の無い dir(mode 000)を
   残しても、symlink を辿らずに dir を開けてから消す。それでも消せなければ temp の path を出して知らせる(#335)。
+  後始末は正常終了だけでなく Ctrl-C(SIGINT)/ SIGTERM でも走り、走り終えてから同じ signal で終わる(doctor と同じ形。
+  後始末の途中に 2 回目の Ctrl-C が届いても平文を残さない。#358)。
 - doctor は report-only。public baseline の解決と、marker 由来の要約(バックアップ有無 / 最終日時 /
   archive の basename / file 数 / 捕捉の完全性 = `capture_incomplete`。扱いは上記 #242 の項)のみ表示し、
   local 補足は **存在のみ**(中身・件数を出さない。`docs/local-overrides.md` の規約に従う)。
