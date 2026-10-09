@@ -23,12 +23,13 @@ setopt EXTENDED_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_ALL_DUPS \
        HIST_IGNORE_SPACE HIST_REDUCE_BLANKS HIST_VERIFY SHARE_HISTORY
 
 # Completion: put zsh-completions on fpath, then compinit with a daily cache.
-# Regenerate the dump only when it is missing or older than 24h; otherwise -C
-# takes the fast path and skips the security scan.
+# Check the dump (compinit -u rewrites it when the completion files changed)
+# only when it is missing or older than 24h; otherwise -C takes the fast path
+# and skips the security scan.
 [ -d "$HOMEBREW_PREFIX/share/zsh-completions" ] && \
   fpath=("$HOMEBREW_PREFIX/share/zsh-completions" $fpath)
 autoload -Uz compinit
-# Rebuild the dump on first run or once a day; otherwise take the fast path.
+# Check the dump on first run or once a day; otherwise take the fast path.
 # Capture the glob in an array: [[ ]] does not perform filename generation, so
 # a glob inside it never expands. -u uses Homebrew's admin-group-writable
 # completion dirs (its default; ours on a single-user mac) without the
@@ -37,6 +38,10 @@ autoload -Uz compinit
 zcompdump_recent=("$HOME"/.zcompdump(N.mh-24))
 if (( ${#zcompdump_recent} == 0 )); then
   compinit -u
+  # compinit rewrites an existing dump only when the set of completion files
+  # changed, so its mtime would stay old and every later shell would take
+  # this slow path again (#329): mark the daily check as done.
+  [[ -f "$HOME/.zcompdump" ]] && touch -- "$HOME/.zcompdump"
 else
   compinit -C
 fi
