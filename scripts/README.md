@@ -722,6 +722,8 @@ managed に書かない)、secret / email らしき文字列が無いこと、wo
 加えて rendered の bash map を OpenCode の規則(glob・last match wins)で評価し、doctor.sh の外向き probe と `gh` の
 mutation・短縮 flag・alias、deny、維持すべき read からなる固定 command 集合の判定が、`docs/ai-policy.md` から手で書いた
 期待値(allow / ask / deny。map からは導かない)と一致することを確認する(`*` 以外の pattern 文字を含む rule は fail、#240)。
+加えて doctor.sh の `outward_probe_commands` / `secret_read_probe_commands` を literal に読み出し(source しない)、全 probe が
+この command 集合の行にあることを機械的に確かめる(配列が読めない・plain な quoted 文字列でない entry があれば fail、#332)。
 chezmoi が必要(render job)。
 
 ## test-git-signing.sh

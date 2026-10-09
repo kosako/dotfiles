@@ -204,10 +204,10 @@ fi
 #     rendered map is also EVALUATED against a fixed command set with
 #     OpenCode's rule semantics (glob, last match wins). Expected decisions
 #     are written here by hand from docs/ai-policy.md — never derived from
-#     the map. The command set is the Codex probe list of doctor.sh (keep in
-#     sync; test-doctor.sh pins that list; the outward probes are the rows
-#     without a tab, expecting ask, and the secret-read probes of #334 carry
-#     their own expected decision) plus the forms the audit
+#     the map. The command set is the Codex probe list of doctor.sh (4c below
+#     checks every probe is a row; test-doctor.sh pins that list; the outward
+#     probes are the rows without a tab, expecting ask, and the secret-read
+#     probes of #334 carry their own expected decision) plus the forms the audit
 #     found: short-flag `gh api`, aliases, and the reads that must stay
 #     allowed. Only `*` is a metacharacter in OpenCode patterns; bash `case`
 #     also interprets `?`, `[`, `]` and `\`, so a rule containing those is
@@ -234,6 +234,7 @@ opencode_bash_decision() {
 }
 
 decision_failures=0
+case_cmds=""
 # Rows are "<expected>\t<command>". A row with no tab is one of doctor.sh's
 # outward_probes VERBATIM (argument-less forms included) and expects ask —
 # the same strings, so a decision regression on the bare forms is caught too.
@@ -243,6 +244,7 @@ while IFS=$'\t' read -r expected cmd; do
     cmd="$expected"
     expected="ask"
   fi
+  case_cmds+="$cmd"$'\n'
   actual="$(opencode_bash_decision "$cmd")"
   if [[ "$actual" == "$expected" ]]; then
     ok "test passed: $expected: $cmd"
@@ -495,6 +497,45 @@ allow	git commit -m "tidy cleanup"
 CASES
 if [[ "$decision_failures" -gt 0 ]]; then
   status=1
+fi
+
+# 4c) 上の command 集合は doctor.sh と同期している (#332 F59): outward_probe_commands /
+#     secret_read_probe_commands の全 probe が上の行にあるので、doctor に足した probe の
+#     family は OpenCode の床にも当たる。各配列は `name=(` と `)` の間の行を literal に
+#     読む (doctor.sh は source すると実行されるので source しない)。読み取りは fail
+#     closed: 配列が空 (改名) か、plain な double-quoted 文字列でない entry があれば
+#     fail し、ok は出さない。
+# doctor_probe_array NAME -> doctor.sh の配列 NAME の entry を 1 行に 1 つ出す。
+doctor_probe_array() {
+  awk -v name="$1" '
+    $0 == (name "=(") { inside = 1; next }
+    inside && $0 == ")" { inside = 0; next }
+    inside { sub(/^ *"/, ""); sub(/"$/, ""); print }
+  ' "$SCRIPT_DIR/doctor.sh"
+}
+doctor_probes=""
+probe_read_failed=0
+for probe_array in outward_probe_commands secret_read_probe_commands; do
+  probe_rows="$(doctor_probe_array "$probe_array")"
+  if [[ -z "$probe_rows" ]] || grep -q '["$\\]' <<< "$probe_rows"; then
+    fail "test failed: $probe_array of doctor.sh could not be read as plain quoted strings (renamed or reshaped? update this read deliberately)"
+    probe_read_failed=1
+    status=1
+  else
+    doctor_probes+="$probe_rows"$'\n'
+  fi
+done
+probe_misses=""
+while IFS= read -r probe; do
+  [[ -z "$probe" ]] && continue
+  grep -Fxq -- "$probe" <<< "$case_cmds" || probe_misses+="  $probe"$'\n'
+done <<< "$doctor_probes"
+if [[ -n "$probe_misses" ]]; then
+  fail "test failed: doctor.sh probes missing from the command set above (add each with its expected decision):"
+  printf '%s' "$probe_misses" >&2
+  status=1
+elif [[ "$probe_read_failed" -eq 0 ]]; then
+  ok "test passed: every doctor.sh probe ($(grep -c . <<< "$doctor_probes")) is a row of the command set above"
 fi
 
 # 5) Only the intended top-level keys: anything local (provider / model /
