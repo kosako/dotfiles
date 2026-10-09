@@ -2399,9 +2399,10 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 644 "$gs2_home/src/personal/locked/.git/config"
-  #     GS-2b) a root with a dir that cannot be opened and a root that cannot
-  #            be opened at all: both listings are INCOMPLETE, while the repos
-  #            the listing did print (and the now readable one) are flagged.
+  #     GS-2b) a root with a dir that cannot be opened (the listing fails
+  #            partway) and a root that cannot be opened at all (the open
+  #            probe fails): both are INCOMPLETE, while the repos the listing
+  #            did print (and the now readable one) are flagged.
   gs2_git init -q --template= "$gs2_home/src/work/flagged"
   gs2_git -C "$gs2_home/src/work/flagged" remote add origin "https://user:$gs2_canary@example.invalid/y.git"
   mkdir -p "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
@@ -2410,7 +2411,7 @@ if [[ "$(id -u)" != "0" ]]; then
     && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/personal/locked remote=origin (URL not shown)" <<< "$gs2_out" \
     && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/work/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
     && grep -Fxq "[warn] remote URL scan INCOMPLETE: repositories under $gs2_home/src/work could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked" <<< "$gs2_out" \
-    && grep -Fxq "[warn] remote URL scan INCOMPLETE: repositories under $gs2_home/src/client could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: root $gs2_home/src/client could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked" <<< "$gs2_out" \
     && grep -Fxq "[warn] remotes with credential-like userinfo: 2" <<< "$gs2_out" \
     && grep -Fxq "[warn] remote URL scan INCOMPLETE: 2 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
     && grep -Fxq "[ok] scanned repositories: 3" <<< "$gs2_out" \
@@ -2423,6 +2424,31 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  #     GS-2c) the parent of every standard root cannot be passed (~/src mode
+  #            000): a `-d` test reads all five roots as absent and would skip
+  #            them silently with the flagged repos under them, so each root
+  #            is named as not openable, nothing under them is counted, and
+  #            the clean ok is withheld.
+  chmod 000 "$gs2_home/src"
+  gs2_rc=0
+  gs2_out="$(gs2_run)" || gs2_rc=$?
+  gs2_roots_named=0
+  for gs2_root in personal work client sandbox agent; do
+    grep -Fxq "[warn] remote URL scan INCOMPLETE: root $gs2_home/src/$gs2_root could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked" <<< "$gs2_out" \
+      && gs2_roots_named=$((gs2_roots_named + 1))
+  done
+  if [[ "$gs2_rc" -eq 0 && "$gs2_roots_named" -eq 5 ]] \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 5 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 0" <<< "$gs2_out" \
+    && ! grep -Fq "credential-like userinfo" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a parent that cannot be passed reports every root under it INCOMPLETE instead of skipping them as absent"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: roots behind a parent that cannot be passed were skipped as absent (rc=$gs2_rc, roots named=$gs2_roots_named)"
+    status=1
+  fi
+  chmod 755 "$gs2_home/src"
   rm -rf "$gs2_home" "$gs2_copy"
 fi
 

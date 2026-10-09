@@ -17,7 +17,7 @@
 - report-only。remote の変更・削除はしない。warning だけでは exit code を変えない。
 - username のみの userinfo(`https://user@host`)は警告しない。Git の `credentialsInUrl` と同様に、password 部があるものだけを対象にする。
 - 検出ロジックは `scripts/lib-policy.sh` の `git_remotes_with_credentials` に置き、`scripts/test-gitconfig.sh` の fixture で検証する。
-- repo の探索(find)や remote 設定の読み取り(`git config`)に失敗した root / repo は未検査として扱う: それぞれを名指しで `remote URL scan INCOMPLETE` と warn し、clean の ok(`no credential-like userinfo in remote URLs`)は出さない。読めた repo の検出結果はそのまま報告し、`scanned repositories` は読めた repo だけを数える。remote の無い repo は失敗ではない。exit code は変えない(#359)。
+- root を開けない(root 自身や親 dir の permission denied、symlink loop など。`-d` ではなく errno で見て、存在しないと確かめられた root だけ skip する)、repo の探索(find)や remote 設定の読み取り(`git config`)に失敗した root / repo は未検査として扱う: それぞれを名指しで `remote URL scan INCOMPLETE` と warn し、clean の ok(`no credential-like userinfo in remote URLs`)は出さない。読めた repo の検出結果はそのまま報告し、`scanned repositories` は読めた repo だけを数える。remote の無い repo は失敗ではない。exit code は変えない(#359)。
 
 ## 検出された場合の対処
 

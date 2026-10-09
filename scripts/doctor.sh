@@ -393,10 +393,25 @@ else
   flagged_remotes=0
   remote_scan_failures=0
   for root in "$DOTFILES_ROOT" "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
-    [[ -d "$root" ]] || continue
-    # A listing that fails (the root itself or a dir under it cannot be
-    # opened) is INCOMPLETE, not empty: the markers it did print are still
-    # scanned, the rest is named as not checked (#359).
+    # Only a CONFIRMED absence is "no root here": `-d` reads every failure to
+    # stat as absence, so a root that exists but cannot be entered (permission
+    # denied on it or on a parent such as ~/src, not a directory, a symlink
+    # loop) would be skipped silently and its repos never named as not
+    # checked. The errno is taken from the builtin cd in a subshell, as for
+    # the Codex rules dir: the C locale keeps the message stable, the
+    # strerror is matched at the END only (the message embeds the path), and
+    # the raw error is never echoed (#359).
+    if ! root_error="$( (LC_ALL=C; cd -P -- "$root") 2>&1 )"; then
+      case "$root_error" in
+        *": No such file or directory") continue ;;
+      esac
+      remote_scan_failures=$((remote_scan_failures + 1))
+      warn "remote URL scan INCOMPLETE: root $(display_safe "$root") could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked"
+      continue
+    fi
+    # A listing that fails partway (a dir under the root cannot be opened)
+    # is INCOMPLETE, not empty: the markers it did print are still scanned,
+    # the rest is named as not checked (#359).
     if ! repo_markers="$(find "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)"; then
       remote_scan_failures=$((remote_scan_failures + 1))
       warn "remote URL scan INCOMPLETE: repositories under $(display_safe "$root") could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked"
