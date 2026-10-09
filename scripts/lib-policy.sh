@@ -607,17 +607,11 @@ report_catalog_drift() {
     return 0
   fi
 
-  local brew_formulae brew_leaves brew_casks npm_globals go_bins mas_ids
-  local decl_brew_formula decl_brew_cask decl_npm decl_go_bins
-  brew_formulae="$(mktemp)"; brew_leaves="$(mktemp)"; brew_casks="$(mktemp)"
-  npm_globals="$(mktemp)"; go_bins="$(mktemp)"; mas_ids="$(mktemp)"
-  decl_brew_formula="$(mktemp)"; decl_brew_cask="$(mktemp)"
-  decl_npm="$(mktemp)"; decl_go_bins="$(mktemp)"
-  local drift_tmp=(
-    "$brew_formulae" "$brew_leaves" "$brew_casks" "$npm_globals" "$go_bins"
-    "$mas_ids" "$decl_brew_formula" "$decl_brew_cask" "$decl_npm"
-    "$decl_go_bins"
-  )
+  # The inventories and declared sets are held in variables, one id per
+  # line, not temp files: an interrupt (Ctrl-C while brew / npm answer)
+  # then leaves nothing behind, and doctor writes no file (#329).
+  local brew_formulae="" brew_leaves="" brew_casks="" npm_globals="" go_bins="" mas_ids=""
+  local decl_brew_formula="" decl_brew_cask="" decl_npm="" decl_go_bins=""
 
   # A failed inventory is distinct from an absent manager. Keep successful
   # sources inspectable, but never infer absence or sprawl from failed ones.
@@ -625,24 +619,24 @@ report_catalog_drift() {
   local inventory_failures="" failed_source
   if manager_present brew_formula; then
     have_brew=1
-    installed_inventory brew_formula > "$brew_formulae" || inventory_failures+=$'brew_formula\n'
-    installed_inventory brew_leaves > "$brew_leaves" || inventory_failures+=$'brew_leaves\n'
-    installed_inventory brew_cask > "$brew_casks" || inventory_failures+=$'brew_cask\n'
+    brew_formulae="$(installed_inventory brew_formula)" || inventory_failures+=$'brew_formula\n'
+    brew_leaves="$(installed_inventory brew_leaves)" || inventory_failures+=$'brew_leaves\n'
+    brew_casks="$(installed_inventory brew_cask)" || inventory_failures+=$'brew_cask\n'
   fi
   if manager_present npm_global; then
     have_npm=1
-    installed_inventory npm_global > "$npm_globals" || inventory_failures+=$'npm_global\n'
+    npm_globals="$(installed_inventory npm_global)" || inventory_failures+=$'npm_global\n'
   fi
   # An absent manager is a skip; never guess GOPATH when go cannot answer.
   if manager_present go_install; then
     have_go=1
-    if ! gobin="$(go_bin_dir)" || ! installed_inventory go_install > "$go_bins"; then
+    if ! gobin="$(go_bin_dir)" || ! go_bins="$(installed_inventory go_install)"; then
       inventory_failures+=$'go_install\n'
     fi
   fi
   if manager_present mas; then
     have_mas=1
-    installed_inventory mas > "$mas_ids" || inventory_failures+=$'mas\n'
+    mas_ids="$(installed_inventory mas)" || inventory_failures+=$'mas\n'
   fi
   while IFS= read -r failed_source; do
     [[ -z "$failed_source" ]] && continue
@@ -683,10 +677,10 @@ report_catalog_drift() {
     # Accumulate declared sets (track-only included: a declared track-only
     # entry must not later surface as undeclared sprawl).
     case "$source" in
-      brew_formula) printf '%s\n' "$canonical" >> "$decl_brew_formula" ;;
-      brew_cask) printf '%s\n' "$canonical" >> "$decl_brew_cask" ;;
-      npm_global) printf '%s\n' "$canonical" >> "$decl_npm" ;;
-      go_install) printf '%s\n' "$bincmd" >> "$decl_go_bins" ;;
+      brew_formula) decl_brew_formula+="$canonical"$'\n' ;;
+      brew_cask) decl_brew_cask+="$canonical"$'\n' ;;
+      npm_global) decl_npm+="$canonical"$'\n' ;;
+      go_install) decl_go_bins+="$bincmd"$'\n' ;;
     esac
 
     # track-only / manual entries are inventory only; never installed by
@@ -709,7 +703,7 @@ report_catalog_drift() {
       brew_formula)
         if [[ "$have_brew" -eq 0 ]]; then
           item "skip $name: brew not available"
-        elif grep -Fxq -- "$canonical" "$brew_formulae"; then
+        elif grep -Fxq -- "$canonical" <<< "$brew_formulae"; then
           ok "installed: $name (brew_formula)"
         elif command -v "$bincmd" >/dev/null 2>&1; then
           info "source drift: $name declared brew_formula, absent from brew; '$bincmd' on PATH (installed elsewhere?)"
@@ -722,7 +716,7 @@ report_catalog_drift() {
       brew_cask)
         if [[ "$have_brew" -eq 0 ]]; then
           item "skip $name: brew not available"
-        elif grep -Fxq -- "$canonical" "$brew_casks"; then
+        elif grep -Fxq -- "$canonical" <<< "$brew_casks"; then
           ok "installed: $name (brew_cask)"
         else
           warn "not installed: $name (brew_cask)"
@@ -732,7 +726,7 @@ report_catalog_drift() {
       npm_global)
         if [[ "$have_npm" -eq 0 ]]; then
           item "skip $name: npm not available"
-        elif grep -Fxq -- "$canonical" "$npm_globals"; then
+        elif grep -Fxq -- "$canonical" <<< "$npm_globals"; then
           ok "installed: $name (npm_global)"
         elif command -v "$bincmd" >/dev/null 2>&1; then
           info "source drift: $name declared npm_global, absent from npm -g; '$bincmd' on PATH (installed elsewhere?)"
@@ -745,7 +739,7 @@ report_catalog_drift() {
       go_install)
         if [[ "$have_go" -eq 0 ]]; then
           item "skip $name: go not available"
-        elif grep -Fxq -- "$bincmd" "$go_bins"; then
+        elif grep -Fxq -- "$bincmd" <<< "$go_bins"; then
           ok "installed: $name (go_install)"
         elif command -v "$bincmd" >/dev/null 2>&1; then
           info "source drift: $name declared go_install, absent from go bin; '$bincmd' on PATH (installed elsewhere?)"
@@ -758,7 +752,7 @@ report_catalog_drift() {
       mas)
         if [[ "$have_mas" -eq 0 ]]; then
           item "skip $name: mas not available"
-        elif grep -Fxq -- "$canonical" "$mas_ids"; then
+        elif grep -Fxq -- "$canonical" <<< "$mas_ids"; then
           ok "installed: $name (mas)"
         else
           warn "not installed: $name (mas)"
@@ -776,30 +770,30 @@ report_catalog_drift() {
   if [[ "$have_brew" -eq 1 ]] && ! grep -Eq '^(brew_formula|brew_leaves)$' <<< "$inventory_failures"; then
     while IFS= read -r f; do
       [[ -z "$f" ]] && continue
-      grep -Fxq -- "$f" "$decl_brew_formula" || {
+      grep -Fxq -- "$f" <<< "$decl_brew_formula" || {
         warn "undeclared: $(display_safe "$f") (brew_formula leaf not in catalog)"
         drift_count=$((drift_count + 1))
       }
-    done < "$brew_leaves"
+    done <<< "$brew_leaves"
   fi
   if [[ "$have_brew" -eq 1 ]] && ! grep -Fxq brew_cask <<< "$inventory_failures"; then
     while IFS= read -r c; do
       [[ -z "$c" ]] && continue
-      grep -Fxq -- "$c" "$decl_brew_cask" || {
+      grep -Fxq -- "$c" <<< "$decl_brew_cask" || {
         warn "undeclared: $(display_safe "$c") (brew_cask not in catalog)"
         drift_count=$((drift_count + 1))
       }
-    done < "$brew_casks"
+    done <<< "$brew_casks"
   fi
   if [[ "$have_npm" -eq 1 ]] && ! grep -Fxq npm_global <<< "$inventory_failures"; then
     while IFS= read -r n; do
       [[ -z "$n" ]] && continue
       case "$n" in npm|corepack) continue ;; esac
-      grep -Fxq -- "$n" "$decl_npm" || {
+      grep -Fxq -- "$n" <<< "$decl_npm" || {
         warn "undeclared: $(display_safe "$n") (npm global not in catalog)"
         drift_count=$((drift_count + 1))
       }
-    done < "$npm_globals"
+    done <<< "$npm_globals"
   fi
   if [[ "$have_go" -eq 1 ]] && ! grep -Fxq go_install <<< "$inventory_failures"; then
     while IFS= read -r b; do
@@ -814,18 +808,17 @@ report_catalog_drift() {
       case "$b" in
         go|gofmt) continue ;;
       esac
-      grep -Fxq -- "$b" "$decl_go_bins" || {
+      grep -Fxq -- "$b" <<< "$decl_go_bins" || {
         warn "undeclared: $(display_safe "$b") (go binary not in catalog)"
         drift_count=$((drift_count + 1))
       }
-    done < "$go_bins"
+    done <<< "$go_bins"
   fi
 
   if [[ "$drift_count" -eq 0 && -z "$inventory_failures" ]]; then
     ok "no catalog drift"
   fi
 
-  rm -f "${drift_tmp[@]}"
   return 0
 }
 

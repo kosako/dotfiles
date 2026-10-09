@@ -132,6 +132,23 @@ make_fixture
 run_ok "validates all profiles" "$fixture/scripts/validate-policy.sh" --all
 run_ok_contains "lists profiles" "work" "$fixture/scripts/validate-policy.sh" --list-profiles
 
+# #329: validate-policy holds its lists in variables, so a run writes no temp
+# file that a Ctrl-C could leave behind (bash 3.2 runs no EXIT trap then).
+# A normal run used to clean its files up, so an empty TMPDIR alone proves
+# nothing: a PATH-front mktemp leaves a marker and fails, and TMPDIR (an
+# empty fixture dir) must stay empty too.
+mkdir "$fixture/tmpdir" "$fixture/no-mktemp"
+printf '#!/bin/sh\n: > "%s/mktemp-called"\nexit 1\n' "$fixture" > "$fixture/no-mktemp/mktemp"
+chmod +x "$fixture/no-mktemp/mktemp"
+run_ok "validates all profiles without mktemp" \
+  env PATH="$fixture/no-mktemp:$PATH" TMPDIR="$fixture/tmpdir" "$fixture/scripts/validate-policy.sh" --all
+if [[ -e "$fixture/mktemp-called" || -n "$(ls -A "$fixture/tmpdir")" ]]; then
+  ls -A "$fixture/tmpdir" >&2
+  fail "test failed: validate-policy --all called mktemp or left files in TMPDIR"
+  exit 1
+fi
+ok "test passed: validate-policy --all writes no temp file"
+
 make_fixture
 replace_once "$fixture/.chezmoidata/profiles.yaml" "      corepackMode: report" "      corepackMode: off"
 run_ok "accepts first enum capability value" "$fixture/scripts/validate-policy.sh" personal

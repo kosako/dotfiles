@@ -237,6 +237,35 @@ if ! grep -Fq 'catalog inventory INCOMPLETE: brew_formula' <<< "$output" \
   exit 1
 fi
 ok "catalog drift continues inspecting successful sources after a probe failure"
+# #329: the inventories and declared sets live in variables, so a run creates
+# no temp file an interrupt (Ctrl-C while brew / npm answer) could leave
+# behind. A normal run used to clean its files up, so the fixture's mktemp
+# is swapped for one that leaves a marker and fails, and TMPDIR (an empty
+# fixture dir) must stay empty; the drift report must still see every
+# source.
+mkdir "$fixture/tmpdir"
+rm "$fixture/bin/mktemp"
+printf '#!/bin/sh\n: > "$INVENTORY_TEST_ROOT/mktemp-called"\nexit 1\n' > "$fixture/bin/mktemp"
+chmod +x "$fixture/bin/mktemp"
+output="$(TMPDIR="$fixture/tmpdir" run_fixture bash -c \
+  'set -euo pipefail; source "$1"; report_catalog_drift' _ "$fixture/repo/scripts/lib-policy.sh" 2>&1)" || true
+rm "$fixture/bin/mktemp"
+ln -s "$(command -v mktemp)" "$fixture/bin/mktemp"
+for drift_name in fixture-formula:brew_formula fixture-cask:brew_cask fixture-npm:npm_global fixture-go:go_install fixture-mas:mas; do
+  if ! grep -Fxq "[ok] installed: ${drift_name%%:*} (${drift_name#*:})" <<< "$output"; then
+    printf '%s\n' "$output" >&2
+    fail "catalog drift must report ${drift_name%%:*} installed from the fixture inventories"
+    exit 1
+  fi
+done
+if ! grep -Fxq '[ok] no catalog drift' <<< "$output" || [[ -e "$fixture/mktemp-called" ]] \
+  || [[ -n "$(ls -A "$fixture/tmpdir")" ]]; then
+  printf '%s\n' "$output" >&2
+  ls -A "$fixture/tmpdir" >&2
+  fail "catalog drift must not call mktemp, must leave TMPDIR empty and report no drift for a matching inventory"
+  exit 1
+fi
+ok "catalog drift writes no temp file (inventories held in variables)"
 
 rm "$fixture/gobin/fixture-go"
 output="$(INVENTORY_TEST_STATE=empty run_fixture "$installer" 2>&1)"
