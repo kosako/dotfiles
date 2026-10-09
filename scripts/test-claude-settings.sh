@@ -671,17 +671,17 @@ fi
 # "async": true, timeout 10, and the given matcher (#353).
 check_record_entry() {
   local event="$1" index="$2" expected_matcher="$3" len matcher type cmd async timeout
-  len="$(yq -p json ".hooks.$event[$index].hooks | length" "$off_file")"
-  matcher="$(yq -p json ".hooks.$event[$index].matcher // \"absent\"" "$off_file")"
-  type="$(yq -p json ".hooks.$event[$index].hooks[0].type" "$off_file")"
-  cmd="$(yq -p json ".hooks.$event[$index].hooks[0].command" "$off_file")"
-  async="$(yq -p json ".hooks.$event[$index].hooks[0].async // \"absent\"" "$off_file")"
-  timeout="$(yq -p json ".hooks.$event[$index].hooks[0].timeout // \"absent\"" "$off_file")"
+  len="$(yq -p json ".hooks.${event}[${index}].hooks | length" "$off_file")"
+  matcher="$(yq -p json ".hooks.${event}[${index}].matcher // \"absent\"" "$off_file")"
+  type="$(yq -p json ".hooks.${event}[${index}].hooks[0].type" "$off_file")"
+  cmd="$(yq -p json ".hooks.${event}[${index}].hooks[0].command" "$off_file")"
+  async="$(yq -p json ".hooks.${event}[${index}].hooks[0].async // \"absent\"" "$off_file")"
+  timeout="$(yq -p json ".hooks.${event}[${index}].hooks[0].timeout // \"absent\"" "$off_file")"
   if [[ "$len" == "1" && "$matcher" == "$expected_matcher" && "$type" == "command" \
     && "$cmd" == "$expected_record_cmd" && "$async" == "true" && "$timeout" == "10" ]]; then
-    ok "test passed: $event[$index] is the record hook entry (matcher $expected_matcher, async, timeout 10, absolute path)"
+    ok "test passed: ${event}[${index}] is the record hook entry (matcher $expected_matcher, async, timeout 10, absolute path)"
   else
-    fail "test failed: $event[$index] record hook entry wrong (len=$len matcher=$matcher type=$type cmd=$cmd async=$async timeout=$timeout)"
+    fail "test failed: ${event}[${index}] record hook entry wrong (len=$len matcher=$matcher type=$type cmd=$cmd async=$async timeout=$timeout)"
     status=1
   fi
 }
