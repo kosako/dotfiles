@@ -118,5 +118,5 @@ hard な床(credential 隔離 / egress / CI required checks / server-side protec
 
 検証は `scripts/test-git-hook-gates.sh`(bare / partial deploy が武装しないことの
 pin + render 内容の exact pin + rendered `~/.gitconfig` で実 commit を通す
-end-to-end + cap-off の真の削除 + git-signing との独立性)。実機 smoke の記録は
-#196。
+end-to-end + cap-off の真の削除 + 配備消失後の同じ source での再 apply による
+disarm + git-signing との独立性)。実機 smoke の記録は #196。

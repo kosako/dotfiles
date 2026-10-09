@@ -23,6 +23,8 @@ set -euo pipefail
 #   - enableGitHookGates=false: already-applied wiring is REMOVED on the next
 #     apply (template self-gate renders empty -> chezmoi prunes; a `requires:`
 #     gate would leave a fail-closed shim lingering, the #184 lesson).
+#   - 武装後に deploy が消えた: 同じ source の再 apply でも配線を prune する
+#     (readiness 側の鍵。docs/git-hook-gates.md「配備が消えた場合」)。
 #   - enableGitSigning=false must NOT disturb the gates: they live OUTSIDE
 #     ~/.config/git on purpose, because chezmoiignore drops a disabled
 #     module's directory subtree wholesale (.config/git belongs to
@@ -347,6 +349,37 @@ elif gate_files_absent "$removal_root/home"; then
   ok "test passed: enableGitHookGates=false removes already-applied shims and hooks.gitconfig (no lingering fail-closed wiring)"
 else
   fail "test failed: enableGitHookGates=false left gate wiring lingering (a requires: gate regression?)"
+  status=1
+fi
+
+# 5a) 配備が消えたら次の apply が配線を disarm する (docs/git-hook-gates.md
+#     「配備が消えた場合」)。2 段 gate のもう片方: case 5 は intent (capability)
+#     を落とし、ここは readiness (deploy) を落とす。source は同じまま、cap ON で
+#     武装した home から agent-tools の scripts を消して再 apply すると、probe が
+#     unmet → 空 render → chezmoi が 3 file を prune する。消えるまでの commit は
+#     無い dispatcher を exec して止まるので残置は許されない。source を変えない
+#     のは意図的: source が変わったときだけ再評価する probe や、render 済み target
+#     を readiness と見なす probe は case 5 を通って、ここだけで落ちる。
+disarm_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-disarm.XXXXXX")"
+tmp_roots+=("$disarm_root")
+mkdir -p "$disarm_root/home"
+plant_gate_deploy "$disarm_root/home" "${GATE_SCRIPTS[@]}"
+if ! render_personal_into "$DOTFILES_ROOT" "$disarm_root"; then
+  fail "test failed: cap-on apply into disarm home did not render"
+  status=1
+elif gate_files_absent "$disarm_root/home"; then
+  fail "test failed: cap-on apply did not arm the gate wiring (disarm test precondition; deploy was planted)"
+  status=1
+elif ! rm -rf "$disarm_root/home/.claude/agent-tools/scripts"; then
+  fail "test failed: could not remove the planted deploy (disarm test fixture)"
+  status=1
+elif ! render_personal_into "$DOTFILES_ROOT" "$disarm_root"; then
+  fail "test failed: re-apply after the deploy removal did not render"
+  status=1
+elif gate_files_absent "$disarm_root/home"; then
+  ok "test passed: a removed agent-tools deploy disarms already-applied shims and hooks.gitconfig on the next apply (readiness alone un-arms, same source)"
+else
+  fail "test failed: re-apply after the deploy removal left gate wiring lingering (sticky readiness probe or prune regression?)"
   status=1
 fi
 
