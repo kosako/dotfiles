@@ -1256,6 +1256,33 @@ else
   status=1
 fi
 
+# P1b) tool call record hook (#353): committed personal has
+#      enableToolCallRecordHook ON with claude-settings active, so doctor reports
+#      the registration; flipped off it reports the declared-off state. Both
+#      stay exit 0 (report-only).
+if grep -Fq "enableToolCallRecordHook=true; managed ~/.claude/settings.json registers personal-tool-call-record-hook" <<< "$gh_out"; then
+  ok "test passed: enableToolCallRecordHook=true reported as wired in managed settings.json"
+else
+  fail "test failed: enableToolCallRecordHook=true not reported"
+  status=1
+fi
+record_root="$fixture_home/.dotfiles-recordhook"
+copy_repo_fixture "$record_root"
+set_capability_all "$record_root" enableToolCallRecordHook false
+if record_out="$(HOME="$fixture_home" "$record_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "enableToolCallRecordHook not active (false)" <<< "$record_out"; then
+    ok "test passed: enableToolCallRecordHook=false reported as not active"
+  else
+    printf '%s\n' "$record_out" >&2
+    fail "test failed: enableToolCallRecordHook=false not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$record_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableToolCallRecordHook=false)"
+  status=1
+fi
+
 # P2) trust list (#119 PR3): the injection-guard section points to the
 #     non-committed trust list, and the private-backup section reports its
 #     presence contents-blind (it is in backup-paths.yaml). The fixture HOME has

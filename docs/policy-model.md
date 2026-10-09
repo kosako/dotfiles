@@ -282,6 +282,17 @@ session restore 用。Claude の lifecycle state は引き続き画面検出)。
   (登録が無ければ呼ばれない。`herdr integration uninstall` が両方を消す)。
 - **状態**: personal=true(#225)、work=false。
 
+## tool call record hook(`enableToolCallRecordHook`、#353)
+
+Claude Code の tool 呼び出しを 1 件 1 行の JSON で記録する agent-tools の hook body `personal-tool-call-record-hook`(agent-tools#454)を、managed `~/.claude/settings.json` に登録する capability。
+
+- `enableToolCallRecordHook`(boolean): on のとき `SessionStart`(matcher なし)と `PreToolUse` / `PostToolUse` / `PostToolUseFailure` / `PermissionDenied`(matcher `*`)に同じ body を `async: true`、`timeout: 10` で登録する。`PreToolUse`・`PostToolUse`・`SessionStart` は既存の entry(safe-gh / fast-edit-check / herdr)の後ろに 2 つ目の entry として足し、既存の entry は変えない(herdr は entry 全体で照合するので、配列に entry が増えても managed と認識する)。off のときの出力が従来と JSON として同じことは `test-claude-settings.sh` が pin する(record の entry を消した on-render と正規化して比較)。byte 単位の同一は #355 の PR で変更前の render と diff を取って手で確認した(自動 test には無い)。
+- body の契約は agent-tools の `docs/tool-call-record-hook.md` が正本: 判断しない・stdout 無し・exit 0 固定(fail-open)。引数は key だけで値は書かない(例外は `PermissionDenied` の `reason`)。出力先は `${XDG_STATE_HOME:-~/.local/state}/agent-tools/personal-tool-call-record-hook/claude-code.jsonl`。`async: true` にするのは、async の hook は block できず、記録の失敗や遅延が tool call に届かないため(Claude Code 2.1.295 の hooks docs、2026-10-09 に確認)。
+- **強度ラベル**: 記録 / fail-open。主体は client の自己申告まで、JSONL は同じ OS user が書き換えられる。guardrail であって enforcement boundary ではない。
+- **Claude だけ**。Codex の `hooks.json` には出さない(agent-tools#454 の scope 外。必要になったら別 Issue)。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
+- **極性は `enableQualityLoopHooks` と同じ**(権限を付与しない)。`environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。
+- **状態**: personal=true、work=false(会社の Mac での記録の扱いは別に決める)。body が未配備(agent-tools の `sync --apply` 前)でも hook の欠落は non-blocking なので、先に登録しても安全。dangling は doctor が report。
+
 ## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264 / #299)
 
 agent-tools の `personal-codex-review` と `personal-codex-worker` が使う Codex の reasoning effort を、

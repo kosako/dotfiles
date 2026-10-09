@@ -131,6 +131,20 @@
        byte-identical). Session-id report only, from inside a herdr pane;
        exits 0 elsewhere.
 
+       enableToolCallRecordHook (#353, agent-tools#454) registers agent-tools'
+       personal-tool-call-record-hook on SessionStart (no matcher) and on
+       PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied
+       (matcher "*"), each with "async": true and timeout 10, so every Claude
+       Code tool call leaves one JSON line (argument KEYS only, never values)
+       in the user's state dir. Record / fail-open, Claude only (the Codex
+       hooks.json is unchanged): the body never blocks, an async hook cannot
+       block, the subject is the client's self-report and the JSONL is
+       writable by the same OS user — a guardrail, not a boundary. Where an
+       event already has an entry (PreToolUse: safe-gh, PostToolUse: fast-
+       edit-check, SessionStart: herdr) the recorder is appended as a second
+       entry and the existing entry is byte-identical (herdr matches its
+       WHOLE entry, so the extra array element does not disturb it).
+
        The whole "hooks" object is shared with the Codex registration via
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
        it is included only when at least one hook capability is on, so an
@@ -171,7 +185,7 @@
       "mcp__pencil"
     ]
   },
-{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") }}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") }}
 {{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
   "model": "opus[1m]",

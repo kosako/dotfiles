@@ -21,6 +21,9 @@
        {"systemMessage"} — a user-facing warning (shown as a Hook notice in
        the TUI, absent from `codex exec` output), not model context and never
        a block (fail-open).
+       enableToolCallRecordHook (#353, agent-tools#454) is Claude-only:
+       agent-hooks-json renders nothing for it on agentDir ".codex", so this
+       file never changes with it (Codex registration is out of scope there).
        enableHerdrIntegration (#225) registers herdr's SessionStart hook
        (matcher-less on Codex) the same way; the body is herdr's, written by
        `herdr integration install codex` to ~/.codex/herdr-agent-state.sh.
