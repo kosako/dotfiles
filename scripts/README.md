@@ -592,6 +592,12 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `directory enumeration incomplete` と `capture INCOMPLETE` を warn し、skip 1 件を計上し、marker の
   `capture_incomplete` が true になること。正常 run では false。その archive の verify は通ること
   (整合と完全性は別)。
+- 平文ができた後の中断で temp に何も残らないこと(#358): backup / verify / restore を `set -m` の background job
+  (自分の process group)にし、PATH 先頭の fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を記録してから
+  group へ SIGINT)と fake `rm`(temp 配下の最初の削除 = 後始末の途中で、もう一度 group へ SIGINT)で signal を run の
+  中から送る(timing の窓を作らない)。終了後に専用 TMPDIR が空で、rc が 130 であること。EXIT trap だけ
+  (INT の trap が無い)の実装では 3 case とも temp が残って fail する(bash 3.2 / 5 とも)。SIGINT が無視される
+  環境(非対話 shell の background list `… &` として suite を起動した場合。bash では戻せない)では warn して skip。
 
 ## test-secrets-gate.sh
 
