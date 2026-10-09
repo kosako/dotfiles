@@ -13,7 +13,10 @@ set -euo pipefail
 #     (brew shellenv / mise activate が埋めた native の claude を対話 shell でも勝たせる);
 #   - ~/.zshrc.local が PATH に足した entry はそれでも勝つ;
 #   - ~/.zshrc.local は mise activate の後に読まれ、その後は widget を wrap する plugin
-#     (autosuggestions → syntax-highlighting) だけが続く。
+#     (autosuggestions → syntax-highlighting) だけが続く;
+#   - ~/.zshrc.local は managed の keybinding (Ctrl-O) より後に読まれ、local の付け替えが
+#     source 完了後も残る (PATH の検査と order log だけでは、source を PATH 再前置の直後
+#     (alias / bindkey の前) へ動かしても通ってしまう)。
 # fake の mise は「activate が PATH の先頭に dir を足す」形だけを模す (実 mise が
 # precmd の hook で installs の bin を足す側は hermetic に再現できないので対象外)。
 # dot_zprofile は /opt/homebrew の絶対 path を見るので source せず、driver が
@@ -70,11 +73,16 @@ printf 'print -r -- autosuggestions >> "$ZSHRC_TEST_OUT/order"\n' \
 printf 'print -r -- syntax-highlighting >> "$ZSHRC_TEST_OUT/order"\n' \
   > "$brew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 
-# ~/.zshrc.local: 読まれた時点の claude の解決先を記録し、自分の PATH entry を前置する。
+# ~/.zshrc.local: 読まれた時点の claude の解決先と Ctrl-O の binding を記録し、自分の
+# PATH entry を前置して Ctrl-O を自分の widget に付け替える。
 cat > "$home/.zshrc.local" <<'ZSH'
 print -r -- local >> "$ZSHRC_TEST_OUT/order"
 command -v claude > "$ZSHRC_TEST_OUT/claude-at-local"
 export PATH="$ZSHRC_TEST_LOCAL_BIN:$PATH"
+bindkey '^O' > "$ZSHRC_TEST_OUT/ctrl-o-at-local"
+_zshrc_test_local_accept_line() { zle accept-line }
+zle -N zshrc-test-local-accept-line _zshrc_test_local_accept_line
+bindkey '^O' zshrc-test-local-accept-line
 ZSH
 
 # driver: 対話 login shell の起動順。値は環境変数で渡し、-c 文字列に path を埋めない。
@@ -87,6 +95,7 @@ command -v claude > "$ZSHRC_TEST_OUT/claude-before-zshrc"
 source "$ZSHRC_TEST_SOURCE/dot_zshrc"
 command -v claude > "$ZSHRC_TEST_OUT/claude-after-zshrc"
 print -r -- "$PATH" > "$ZSHRC_TEST_OUT/path-after-zshrc"
+bindkey '^O' > "$ZSHRC_TEST_OUT/ctrl-o-after-zshrc"
 ZSH
 
 if ! env -i PATH="$fixture/bin" HOME="$home" HOMEBREW_PREFIX="$brew" \
@@ -152,6 +161,20 @@ if [[ "$(read_out order)" == "$want_order" ]]; then
 else
   printf 'order:\n%s\n' "$(read_out order)" >&2
   fail "test failed: source order must be mise, local, autosuggestions, syntax-highlighting"
+  status=1
+fi
+
+# 6. ~/.zshrc.local の keybinding の上書きが残る。managed の Ctrl-O (ai-clip-accept-line) が
+#    local の読まれた時点でもう bind されていることを先に確かめる (bind されていなければ
+#    「上書きが残る」は空振りで成立する)。PATH の検査と order log は、source を PATH 再前置の
+#    直後 (alias / bindkey の前) へ動かしても通るので、この検査がその退行を捕まえる。
+if [[ "$(read_out ctrl-o-at-local)" != '"^O" ai-clip-accept-line' ]]; then
+  fail "test failed: the managed Ctrl-O widget must be bound before ~/.zshrc.local runs (got $(read_out ctrl-o-at-local))"
+  status=1
+elif [[ "$(read_out ctrl-o-after-zshrc)" == '"^O" zshrc-test-local-accept-line' ]]; then
+  ok "test passed: a Ctrl-O rebinding from ~/.zshrc.local survives (local is sourced after the managed keybindings)"
+else
+  fail "test failed: a Ctrl-O rebinding from ~/.zshrc.local must survive to the end of .zshrc (got $(read_out ctrl-o-after-zshrc))"
   status=1
 fi
 

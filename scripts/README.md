@@ -211,6 +211,9 @@ plugin)を持つ隔離 zsh(`zsh -f`、`env -i`)で対話 login shell の起動�
   `~/.zshrc.local` の前に `~/.local/bin` を再前置すること(fake mise の前置が PATH に届いていることを先に確かめる)。
 - `~/.zshrc.local` が足した PATH entry はそれでも勝つこと。
 - 読込順が mise activate → `~/.zshrc.local` → zsh-autosuggestions → zsh-syntax-highlighting(最後)であること。
+- `~/.zshrc.local` が managed の keybinding(Ctrl-O)より後に読まれ、local の付け替えが source 完了後も残ること
+  (local が読まれた時点で managed の Ctrl-O が bind 済みであることを先に確かめ、空振りを防ぐ。PATH の検査と
+  order log だけでは、source を PATH 再前置の直後へ動かす退行を捕まえられない)。
 
 fake の mise は「activate が PATH の先頭に dir を足す」形だけを模す(precmd の hook で installs の bin を足す側は対象外)。
 `dot_zprofile` は `/opt/homebrew` の絶対 path を見るので source せず、driver が `brew shellenv` の PATH 前置だけを模す。
