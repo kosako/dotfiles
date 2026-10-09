@@ -159,6 +159,24 @@ run_fail_contains \
   "unknown profile: unknown-profile" \
   "$fixture/scripts/validate-policy.sh" unknown-profile
 
+# environmentKind は後段の cross-check を駆動するので、無い profile や表に無い kind は
+# 「制約なし」として通さず fail closed にする。yq の del は key が無いと no-op になるが、
+# その場合は validate が通って run_fail_contains が落ちるので、変異の検証は assertion
+# 自身が担う (#151 の capability registry case と同じ論理)。
+make_fixture
+yq -i 'del(.profiles.personal.environmentKind)' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile without environmentKind" \
+  "profile has no environmentKind: personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: bogus"
+run_fail_contains \
+  "rejects unknown environmentKind" \
+  "unknown environmentKind for personal: bogus" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      - base" "      - missing-module"
 run_fail_contains \
@@ -199,6 +217,22 @@ insert_once "$fixture/.chezmoidata/profiles.yaml" "      installPackages: true" 
 run_fail_contains \
   "rejects duplicate capability" \
   "duplicate capability in personal: installPackages" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      - base" "      - base"
+run_fail_contains \
+  "rejects duplicate module" \
+  "duplicate module in personal: base" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+# schema が宣言する capability は全 profile が明示的に持つ。key の欠落は暗黙の既定値ではなく
+# hard fail (del が no-op なら validate が通って test が落ちる)。
+make_fixture
+yq -i 'del(.profiles.personal.capabilities.enableDirenv)' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile missing a declared capability" \
+  "missing capability in personal: enableDirenv" \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture
