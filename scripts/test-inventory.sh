@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Inventory regressions (#205/#209/#213), reached by test-install-packages.sh.
-# Only fake managers are on PATH. Installs and attempted toolchain downloads
-# become fixture markers; no real manager or user configuration is consulted.
+# Only fake managers are on PATH and HOME is an empty fixture dir. Installs and
+# attempted toolchain downloads become fixture markers; no real manager or user
+# configuration is consulted.
 # installer 本体の経路 (track-only / manager 不在 / install 失敗。#333) も末尾で通す。
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
@@ -12,7 +13,7 @@ source "$SCRIPT_DIR/lib-policy.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-inventory-test.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/bin" "$fixture/repo/scripts" "$fixture/repo/.chezmoidata" \
-  "$fixture/gobin" "$fixture/gopath/bin" "$fixture/caller"
+  "$fixture/gobin" "$fixture/gopath/bin" "$fixture/caller" "$fixture/home"
 cp "$SCRIPT_DIR/lib-policy.sh" "$SCRIPT_DIR/install-packages.sh" "$fixture/repo/scripts/"
 cp "$PROFILES_FILE" "$fixture/repo/.chezmoidata/profiles.yaml"
 cat > "$fixture/repo/.chezmoidata/packages.yaml" <<'YAML'
@@ -123,7 +124,7 @@ done
 run_fixture() {
   (
     cd "$fixture/caller"
-    env PATH="$fixture/bin" INVENTORY_TEST_ROOT="$fixture" \
+    env PATH="$fixture/bin" HOME="$fixture/home" INVENTORY_TEST_ROOT="$fixture" \
       GOTOOLCHAIN=go99.0.0 GO111MODULE=on GOWORK="$fixture/caller/go.work" "$@"
   )
 }

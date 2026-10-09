@@ -76,13 +76,16 @@ fi
 #    The yq refusal must stop before profile resolution can also fail with exit 1.
 fixture_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-install-test.XXXXXX")"
 trap 'rm -rf "$fixture_bin"' EXIT
+# installer の run には空の fixture HOME を渡す (実 home の設定を読ませない)。
+fixture_home="$fixture_bin/home"
+mkdir -p "$fixture_home"
 minimal_bin="$fixture_bin/minimal"
 mkdir -p "$minimal_bin"
 for tool in bash dirname; do
   ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
 done
 rc=0
-out="$(PATH="$minimal_bin" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
+out="$(HOME="$fixture_home" PATH="$minimal_bin" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
 if [[ "$rc" -eq 1 ]] && grep -Fq '[fail] yq not found; install mikefarah/yq v4' <<< "$out" &&
     ! grep -Fq '[fail] cannot resolve the machine profile from chezmoi config; refusing.' <<< "$out"; then
   pass "installer refuses missing yq with exit 1 before profile resolution"
@@ -93,7 +96,7 @@ fi
 
 ln -s "$(command -v yq)" "$minimal_bin/yq"
 rc=0
-out="$(PATH="$minimal_bin" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
+out="$(HOME="$fixture_home" PATH="$minimal_bin" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
 if [[ "$rc" -eq 1 ]] && grep -Fq '[fail] cannot resolve the machine profile from chezmoi config; refusing.' <<< "$out"; then
   pass "installer refuses missing chezmoi with exit 1 and a profile diagnostic"
 else
@@ -133,7 +136,7 @@ done
 #     別の理由の exit 1 (inventory 不明など) を拒否と取り違えない。
 fake_chezmoi '{"profile":"personal"}' 3
 rc=0
-out="$(PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
+out="$(HOME="$fixture_home" PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
 if [[ "$rc" -eq 1 ]] && grep -Fq '[fail] cannot resolve the machine profile from chezmoi config; refusing.' <<< "$out"; then
   pass "installer refuses on chezmoi non-zero exit (fail-closed resolve)"
 else
@@ -145,27 +148,30 @@ fi
 #     any probing, so this is deterministic and has no side effects).
 #     期待する skip 行と skipped の件数は catalog から組み立てる (#332 F04): gate を
 #     素通りした entry は件数と manager の記録の両方で見つかる。track_only の entry は
-#     gate の前に track-only として skip されるので、件数にだけ数える。
+#     gate の前に track-only として skip されるので、件数にだけ数える。gate を通る entry
+#     が 0 件 (catalog が空、または全 entry が track-only) なら何も確かめていないので fail。
 fake_chezmoi '{"profile":"work"}' 0
 rm -f "$manager_calls"
 rows="$(catalog_packages)"
-if out="$(PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)"; then
+if out="$(HOME="$fixture_home" PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)"; then
   gated=1
   catalog_count=0
+  gated_count=0
   while IFS='|' read -r name source _ _ track_only; do
     [[ -z "$name$source" ]] && continue
     catalog_count=$((catalog_count + 1))
     [[ "$track_only" == "true" ]] && continue
     cap="$(source_install_capability "$source")" || continue
+    gated_count=$((gated_count + 1))
     grep -Fxq "[info] - skip $name: $cap not granted for 'work' ($source)" <<< "$out" || gated=0
   done <<< "$rows"
-  if [[ "$gated" -eq 1 && ! -e "$manager_calls" ]] &&
+  if [[ "$gated" -eq 1 && "$gated_count" -gt 0 && ! -e "$manager_calls" ]] &&
       grep -Fxq "[ok] dry-run: 0 would be installed, $catalog_count skipped, 0 failed (pass --apply to perform)" <<< "$out"; then
     pass "work skips every catalog entry as not granted and consults no manager"
   else
     printf '%s\n' "$out" >&2
     if [[ -e "$manager_calls" ]]; then cat "$manager_calls" >&2; fi
-    miss "work must skip every catalog entry as not granted, plan zero installs and consult no manager"
+    miss "work must skip every catalog entry as not granted, plan zero installs and consult no manager (catalog entries: $catalog_count, gated: $gated_count)"
   fi
 else
   printf '%s\n' "$out" >&2
@@ -176,7 +182,7 @@ fi
 #    その診断文言と exit 1 まで固定する (#332 F52)。
 fake_chezmoi '{"profile":"no-such-profile"}' 0
 rc=0
-out="$(PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
+out="$(HOME="$fixture_home" PATH="$fixture_bin:$PATH" "$SCRIPT_DIR/install-packages.sh" 2>&1)" || rc=$?
 if [[ "$rc" -eq 1 ]] && grep -Fxq "[fail] machine profile 'no-such-profile' is not defined in profiles.yaml; refusing" <<< "$out"; then
   pass "installer refuses an undefined resolved profile"
 else

@@ -492,7 +492,8 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 `install-packages.sh` の gate と fail-closed 契約を検証する。source→capability の対応、
 `profile_installs_source` が personal のみ install を許し work 系は許さないこと、profile 未解決 / 未定義時の
 拒否(exit 1 と診断文言)、解決済み work profile の dry-run が全 entry を not granted で skip して 0 件を
-計画し、manager を一切呼ばないこと(呼び出しを記録する fake manager を PATH に前置)を確認する。
+計画し、manager を一切呼ばないこと(呼び出しを記録する fake manager を PATH に前置。gate を通る entry が
+0 件なら fail)を確認する。installer の run には空の fixture HOME を渡し、実 home の設定を読ませない。
 
 `test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続、track-only / manual entry の skip、manager 不在 source の skip + warn、install 失敗の集計と exit 1(#333)を確認する。実 manager・実 install・実 home は使わない。
 
