@@ -1202,6 +1202,28 @@ if HOME="$sv_ok" PATH="$fixture_home/fakebin:$PATH" "$PB" \
 else
   miss "backup with a valid free-form category label failed"
 fi
+# An unknown type (a misspelt `directory`) passes the shared parser, which
+# only checks that a type is a plain string. It must be refused while the
+# entries are collected, naming the file, the entry and the type, instead of
+# stopping the backup at the self-check with "invalid manifest schema"
+# (#330). No archive, no marker.
+sv_type="$fixture_home/sv-unknown-type"
+mkdir -p "$sv_type/.ssh" "$sv_type/.config/dotfiles" "$sv_type/.config/foo"
+printf 'a\n' > "$sv_type/.zshrc.local"
+printf 'b\n' > "$sv_type/.ssh/config.local"
+printf 'backup_paths:\n  - { path: .config/foo, type: directory }\n' > "$sv_type/.config/dotfiles/backup-paths.local"
+sv_type_rc=0
+sv_type_out="$(HOME="$sv_type" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$sv_type/s.age" --recipient "$recipient" --yes 2>&1)" || sv_type_rc=$?
+if [[ "$sv_type_rc" -ne 0 ]] \
+  && grep -Fxq "[fail] unknown backup path type in $sv_type/.config/dotfiles/backup-paths.local: .config/foo: directory (known: file, dir)" <<< "$sv_type_out" \
+  && ! grep -Fq "invalid manifest schema" <<< "$sv_type_out" \
+  && [[ ! -e "$sv_type/s.age" && ! -e "$sv_type/s.age.partial" && ! -e "$sv_type/.local/state/dotfiles/private-backup.json" ]]; then
+  pass "an unknown supplement entry type is refused by name before capture: no archive, no marker"
+else
+  printf '%s\n' "$sv_type_out" >&2
+  miss "an unknown supplement entry type was not refused by name (rc=$sv_type_rc)"
+fi
 
 # 29. --out names a file, never a directory (including directory symlinks).
 # Check both marker states and observe mktemp calls so cleanup cannot hide
@@ -1289,6 +1311,49 @@ if [[ "$race_rc" -eq 1 && -f "$race_home/backup.age/backup.age.partial" ]] \
   pass "backup detects a directory appearing at mv time and preserves the marker"
 else
   miss "backup reported success or changed the marker after mv into a directory (rc=$race_rc)"
+fi
+
+# 32. Every option that takes a value is a usage error (exit 2, with the
+#     reason) when the value is missing (#330): `shift 2` past the end used
+#     to end the run under set -e with no message at all.
+for ov_case in "backup --out" "backup --recipient" "backup --recipients-file" "backup --local-supplement" \
+  "verify --in" "verify --identity" "verify --identity-command" \
+  "restore --in" "restore --identity" "restore --identity-command" "restore --target-home"; do
+  ov_rc=0
+  # shellcheck disable=SC2086 # split on purpose: subcommand and option
+  ov_out="$(run $ov_case 2>&1)" || ov_rc=$?
+  if [[ "$ov_rc" -eq 2 ]] && grep -Fxq "[fail] ${ov_case#* } needs a value" <<< "$ov_out"; then
+    pass "$ov_case without a value is a usage error that names the option"
+  else
+    printf '%s\n' "$ov_out" >&2
+    miss "$ov_case without a value must exit 2 and say so (rc=$ov_rc)"
+  fi
+done
+# ...and the next option is not taken as the value: `--out --yes` used to
+# write the archive to a file named "--yes" in the current directory (and
+# drop the confirmation). Nothing may be written there, and the marker stays.
+ov_cwd="$fixture_home/ov-cwd"
+mkdir -p "$ov_cwd"
+cp "$marker" "$fixture_home/ov-marker-before"
+ov_rc=0
+ov_out="$(cd "$ov_cwd" && run backup --out --yes --recipient "$recipient" 2>&1)" || ov_rc=$?
+if [[ "$ov_rc" -eq 2 ]] && grep -Fxq "[fail] --out needs a value" <<< "$ov_out" \
+  && [[ -z "$(find "$ov_cwd" -mindepth 1 -print)" ]] && cmp -s "$marker" "$fixture_home/ov-marker-before"; then
+  pass "--out followed by another option is refused; nothing is written and the marker is unchanged"
+else
+  printf '%s\n' "$ov_out" >&2
+  miss "--out --yes must be refused without writing anything (rc=$ov_rc)"
+fi
+# A value that starts with "-" is refused as well (rm / mv would read it as
+# an option); such a path is written as ./-name.
+ov_rc=0
+ov_out="$(cd "$ov_cwd" && run backup --out -archive.age --recipient "$recipient" --yes 2>&1)" || ov_rc=$?
+if [[ "$ov_rc" -eq 2 ]] && grep -Fxq "[fail] --out needs a value" <<< "$ov_out" \
+  && [[ -z "$(find "$ov_cwd" -mindepth 1 -print)" ]]; then
+  pass "a dash-led --out value is refused without writing anything"
+else
+  printf '%s\n' "$ov_out" >&2
+  miss "a dash-led --out value must be refused (rc=$ov_rc)"
 fi
 
 if [[ "$status" -eq 0 ]]; then

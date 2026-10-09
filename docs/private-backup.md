@@ -56,7 +56,10 @@ entry の**構造**(map であること・`path` が非空文字列で制御文�
 文字列で `|` と制御文字を含まない)は共有 parser(`backup_paths_in`)が **file 全体を先に検査**し、
 1 件でも不正なら行を出さず fail する(#246)。baseline(validate-policy)と非コミットの local 補足
 (backup 実行時)の両入口が同じ規則で拒否され、補足の不正 entry が無言で落ちたり、`|` 入りの
-category で path が変わったりしない。不正な補足では backup は archive も marker も書かない。
+category で path が変わったりしない。`type` の値(`file` / `dir` 以外を拒否)は共有 parser では見ないので、
+補足の各 entry を集める時点で backup が検査し、file・entry・type を名指しして止める(#330。以前は
+manifest の自己検査まで進んで「invalid manifest schema」で止まり、原因が分からなかった)。不正な補足では
+backup は archive も marker も書かない。
 
 ## スクリプト
 
@@ -73,6 +76,9 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
                           [--apply] [--skip-existing] [--target-home DIR]
 ```
 
+- 値をとる option(`--out` / `--recipient` / `--in` / `--identity` / `--target-home` など)は、値が無いか、
+  次の語が `-` で始まると usage error(exit 2、`<option> needs a value`)にする(#330。`--out --yes` を
+  `--yes` という file への書き出しとして受け取らない)。`-` で始まる path は `./-name` と書く。
 - backup の `--out` は file の path を指定し、既存の directory (directory への symlink を含む) は拒否する。
 - recipient は flag か非コミットの `~/.config/dotfiles/private-backup.recipient` から取得。
   無ければ fail-closed(平文や宛先なしのアーカイブを作らない)。公開鍵は repo にコミットしない。
