@@ -15,7 +15,7 @@
 
 - **プロンプト**: starship(`~/.config/starship.toml`)。2行・git 状態・実行時間・exit code・関連 project でのみ runtime version を表示(mise 連動)・**git identity context**(personal=緑 / その他=黄+email / repo 内で identity 未解決=赤)で誤コミットを視覚的に防ぐ。identity の分類は runtime に local の `~/.config/git/personal.gitconfig` と照合し、managed file に identity 値を入れない([docs/git-identity.md](git-identity.md))。
 - **移動**: zoxide(`z` / `zi`)+ fzf(`Ctrl-R` 履歴 / `Ctrl-T` ファイル / `Alt-C` サブディレクトリ cd)。
-- **補完**: zsh-completions を fpath に足し、compinit はキャッシュ(dump が無い/24h 超で再生成、通常は `-C` の高速パス)。fzf-tab で TAB 補完を fzf 化。
+- **補完**: zsh-completions を fpath に足し、compinit はキャッシュ(dump が無い/24h 超のときだけ `compinit -u` で確かめ直し、補完 file の数か zsh の版が変わっていれば dump を書き直す。その後 dump の mtime を進めるので、次の 24h は `-C` の高速パス。#329、`scripts/test-zshrc-compinit.sh`)。fzf-tab で TAB 補完を fzf 化。
 - **入力補助**: zsh-autosuggestions(履歴ベース)+ zsh-syntax-highlighting。**syntax-highlighting は必ず最後に source**(直前までに定義した全 widget を wrap するため)。
 - **履歴**: 大容量・重複除去・セッション共有・タイムスタンプ。`HIST_IGNORE_SPACE` で行頭スペースのコマンドは記録しない(secret の手動オプトアウト。secret は op/direnv 供給でインライン入力しない = [docs/secrets.md](secrets.md))。off-machine 同期はしない。
 - **modern CLI**: eza(`ls` 系 alias)/ bat(`cat` alias、pager 無しで cat 風)。**alias は対話シェル限定**でスクリプトに影響せず、`command ls` / `command cat` で原本に届く。ripgrep / fd は単体で使う検索ツール(fzf の既定 walker は内蔵のもの。詳細は後述の fzf 節)。

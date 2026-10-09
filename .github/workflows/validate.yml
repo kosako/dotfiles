@@ -70,6 +70,9 @@ jobs:
       - name: ai-clip (Ctrl-O) helper tests
         run: ./scripts/test-ai-clip.sh
 
+      - name: zshrc compinit daily cache tests
+        run: ./scripts/test-zshrc-compinit.sh
+
       - name: gclone helper tests
         run: ./scripts/test-gclone.sh
 
