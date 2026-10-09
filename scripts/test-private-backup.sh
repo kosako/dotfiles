@@ -32,12 +32,14 @@ fi
 # The rule above, checked by running this suite again with a PATH that has no
 # age (only the system dirs): CI=true must fail, a local run must skip. Done
 # only where the system dirs really lack age, so the inner run stops at the
-# check and never runs the suite again.
-if ! PATH=/usr/bin:/bin command -v age >/dev/null 2>&1; then
+# check. The inner run never re-runs itself (PRIVATE_BACKUP_TEST_INNER), and
+# BASH_ENV is dropped so no startup file can put age back on its PATH
+# (Codex review, PR #354): the re-run is one level deep whatever happens.
+if [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]] && ! PATH=/usr/bin:/bin command -v age >/dev/null 2>&1; then
   age_ci_rc=0
-  age_ci_out="$(env CI=true PATH=/usr/bin:/bin bash "${BASH_SOURCE[0]}" 2>&1)" || age_ci_rc=$?
+  age_ci_out="$(env -u BASH_ENV CI=true PRIVATE_BACKUP_TEST_INNER=1 PATH=/usr/bin:/bin bash "${BASH_SOURCE[0]}" 2>&1)" || age_ci_rc=$?
   age_local_rc=0
-  age_local_out="$(env -u CI PATH=/usr/bin:/bin bash "${BASH_SOURCE[0]}" 2>&1)" || age_local_rc=$?
+  age_local_out="$(env -u BASH_ENV -u CI PRIVATE_BACKUP_TEST_INNER=1 PATH=/usr/bin:/bin bash "${BASH_SOURCE[0]}" 2>&1)" || age_local_rc=$?
   if [[ "$age_ci_rc" -eq 1 ]] && grep -Fq "[fail] age/age-keygen not found on CI" <<< "$age_ci_out" \
     && [[ "$age_local_rc" -eq 0 ]] && grep -Fq "[warn] age/age-keygen not found; skipping" <<< "$age_local_out"; then
     ok "test passed: without age the suite fails on CI and skips locally"
@@ -46,7 +48,7 @@ if ! PATH=/usr/bin:/bin command -v age >/dev/null 2>&1; then
     fail "test failed: without age the suite must fail on CI (exit 1) and skip locally (exit 0)"
     status=1
   fi
-else
+elif [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]]; then
   warn "age is in /usr/bin or /bin here; the no-age check of this suite is skipped"
 fi
 
