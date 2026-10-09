@@ -72,19 +72,20 @@ policy validation が失敗した場合は exit 1。
 
 導入後または現状環境の健康診断を行う。section は出力順に次のとおり(最後に next actions の一覧。下記)。
 
-doctor が自分で作っていない値は、`lib-policy.sh` の共通の `display_safe` を通してから表示する(#335)。対象は、他の
-tool や repo の出力(agent-tools の `status.sh`・usage reader の理由・herdr の状態・git / chezmoi / corepack / npm の版・
-npm の設定値・`go env` の行き先・`core.excludesFile`)と、他人が形を決められる名前(repo の dir と git remote、OpenCode
-の plugin と Codex の rules の file 名、backup の marker の欄、Codex の project の key、catalog drift が manager から読む
-package と go の実行ファイルの名前・`npm root -g`)。正しい UTF-8 の文字はそのまま残し、制御文字(C0・DEL・C1)、bidi の
-override / isolate(U+202A〜U+202E・U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする。判定は byte 単位で locale に
-依らない。terminal の escape 列で表示を崩したり偽装したりできなくするためで、文字列の中身(指示文など)は text のまま出る
-(読む側は data として扱う)。この repo の checkout の path も名前なので通す。外部の command の stderr は表示に使わず捨てる
-(通す経路が無いため)。doctor 自身の定数、catalog の中身、HOME と環境変数から組む path(`command -v` の結果を含む)、
-`chezmoi status` の target 名(repo が決める)は対象外。next actions の手順に出す path は、同じ `lib-policy.sh` の
-`shell_quote_safe`(C locale の `printf %q`)で引用する。ASCII だけの引用になり、貼り付ければ元の path に戻る(UTF-8 locale の
-bash 3.2 の `%q` は一部の byte を生のまま残すため)。期限付きの probe(`bounded_probe`)の終了状態の行は呼び出しごとの
-nonce を持ち、probe した command が自分で出した行が終了状態として読まれることはない(#335)。
+report の行は端末に安全な形で出す(#335)。`lib-policy.sh` の report の helper(`ok` / `info` / `section` / `item` / `warn` /
+`fail`)と next actions の一覧が、行全体を共通の `display_safe` に通すので、どこで組み立てた行でも、他の tool や repo の
+出力・他人が付けた名前・この checkout の path に含まれる terminal の escape 列や bidi の制御で、表示を崩したり偽装したり
+できない。`display_safe` は正しい UTF-8 の文字をそのまま残し、制御文字(C0・DEL・C1)、bidi の override / isolate
+(U+202A〜U+202E・U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする(byte 単位で locale に依らない。printable ASCII
+だけの行はそのまま通る)。外部由来の値を読む箇所(agent-tools の `status.sh`・usage reader の理由・herdr の状態・git /
+chezmoi / corepack / npm の版・npm の設定値・`go env`・`core.excludesFile`、repo の dir と git remote、OpenCode の plugin と
+Codex の rules の file 名、backup の marker の欄、Codex の project の key、catalog drift が manager から読む名前と
+`npm root -g`)でも明示的に通し、目印にしている(冪等なので二重でも結果は同じ)。文字列の中身(指示文など)は text の
+まま出る(読む側は data として扱う)。外部の command の stderr はこの helper を通らないので、doctor が直接呼ぶ command
+では捨てる。next actions の手順に出す path は `shell_quote_safe`(C locale の `printf %q`)で引用する。ASCII だけの引用に
+なり、貼り付ければ元の path に戻る(UTF-8 locale の bash 3.2 の `%q` は一部の byte を生のまま残すため)。期限付きの probe
+(`bounded_probe`)の終了状態の行は呼び出しごとの nonce を持ち、probe した command が自分で出した行が終了状態として
+読まれることはない。
 
 - doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
 - chezmoi: chezmoi の version と source directory。
@@ -423,7 +424,9 @@ query だけを実機で実行する(書き込みはしない)。
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。reader も取り出し、
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
-- display_safe(#335): helper を lib-policy.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字・U+10000 と U+10FFFF)を残し、
+- display_safe(#335): report の helper と next actions の一覧が行全体を `display_safe` に通すことを、lib-policy.sh を別の bash で
+  読み込んで直接確かめる(DS-S)。名前に escape を含む checkout で data file が欠けたときの policy 検証の失敗が、exit 1 のまま
+  path を `?` で出すことも確かめる(DS-3)。helper を lib-policy.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字・U+10000 と U+10FFFF)を残し、
   C0・DEL・C1・bidi の制御・不正な UTF-8(途中で切れた列・2〜4 byte の overlong・surrogate・U+10FFFF 超)を `?` にすることを、
   `LC_ALL=C` と継承した locale の両方で、case ごとに `set -euo pipefail` の別の bash で(exit 0 も含めて)確かめる。
   `shell_quote_safe` の結果が ASCII だけで、貼り付けると元の値に戻ることも確かめる。DS-2 は bidi の文字と日本語を含む

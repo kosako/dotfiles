@@ -4485,7 +4485,7 @@ rm -rf "$dr_home/.config/chezmoi"
 #     and expects each shown with `?` in its place and not one raw byte of
 #     them anywhere in the report. The usage reader's reason and the Codex
 #     rules file names are pinned in their own sections (UR-3b, AIP-5).
-ds_fns="$(sed -n '/^shell_quote_safe() {/,/^}/p; /^display_safe() {/,/^}/p' "$SCRIPT_DIR/lib-policy.sh")"
+ds_fns="$(sed -n '/^shell_quote_safe() {/,/^}/p; /^display_safe_into() {/,/^}/p; /^display_safe() {/,/^}/p' "$SCRIPT_DIR/lib-policy.sh")"
 # ds_misses LOCALE — run the helper cases under LC_ALL=LOCALE ('' keeps the
 # inherited locale), each in a bash of its own under set -euo pipefail (the
 # helper must return 0 and survive errexit); print each miss.
@@ -4539,6 +4539,27 @@ elif ds_out="$(ds_misses C; ds_misses '')" && [[ -z "$ds_out" ]]; then
 else
   fail "test failed: display_safe drifted:"
   printf '%s\n' "$ds_out" >&2
+  status=1
+fi
+
+# DS-S) the sink: every report helper (ok / info / section / item / warn /
+#       fail) and the next-actions summary pass the whole line through
+#       display_safe, whatever site built it — checked with lib-policy.sh
+#       sourced in a bash of its own, under the inherited locale.
+ds_sink_out="$(bash -c 'set -euo pipefail; SCRIPT_DIR="$1"; source "$SCRIPT_DIR/lib-policy.sh"
+  v=$'"'"'e\033[2Jb\xe2\x80\xaex\xff'"'"'
+  ok "o $v"; info "i $v"; section "s $v"; item "t $v"; warn "w $v"; fail "f $v"
+  action "a $v" "step $v"; report_actions' _ "$SCRIPT_DIR" 2>&1)" || true
+ds_sink_missing=""
+for ds_line in "[ok] o e?[2Jb?x?" "[info] i e?[2Jb?x?" "[info] == s e?[2Jb?x? ==" "[info] - t e?[2Jb?x?" \
+  "[warn] w e?[2Jb?x?" "[fail] f e?[2Jb?x?" "[warn] a e?[2Jb?x?" "[info] 1. a e?[2Jb?x?" "        step e?[2Jb?x?"; do
+  grep -Fxq -- "$ds_line" <<< "$ds_sink_out" || ds_sink_missing+="  $ds_line"$'\n'
+done
+if [[ -z "$ds_sink_missing" ]] && ! LC_ALL=C grep -q $'[\033\x80-\xff]' <<< "$ds_sink_out"; then
+  ok "test passed: every report helper and the next-actions summary show the whole line through display_safe"
+else
+  printf '%s\nmissing:\n%s' "$ds_sink_out" "$ds_sink_missing" | LC_ALL=C od -c | head -40 >&2
+  fail "test failed: a report helper printed a line without display_safe"
   status=1
 fi
 
@@ -4624,6 +4645,8 @@ ds_repo="$ds_home/src/personal/re${ds_esc}[31mpo"
 env -i PATH="$PATH" HOME="$ds_home" GIT_CONFIG_NOSYSTEM=1 git init -q --template= "$ds_repo"
 env -i PATH="$PATH" HOME="$ds_home" GIT_CONFIG_NOSYSTEM=1 \
   git -C "$ds_repo" remote add origin "https://user:canary-ds-335@example.invalid/x.git"
+env -i PATH="$PATH" HOME="$ds_home" GIT_CONFIG_NOSYSTEM=1 \
+  git -C "$ds_repo" remote add "ev${ds_rlo}il" "https://user:canary-ds-335@example.invalid/y.git"
 printf '// personal\n' > "$ds_home/.config/opencode/plugins/personal-x${ds_esc}[31m.js"
 printf '// copy\n' > "$ds_home/.config/opencode/plugins/personal-y${ds_rlo}z.ts"
 printf '// listed\n' > "$ds_home/.config/opencode/plugins/personal-w${ds_esc}[1m.js"
@@ -4658,6 +4681,7 @@ if ds_out="$(env -u OPENCODE_CONFIG -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u GIT_C
     "[warn] undeclared: le?[31maf (brew_formula leaf not in catalog)" \
     "[warn] undeclared: ca?sk (brew_cask not in catalog)" \
     "[warn] credential-like userinfo in remote URL: repo=$ds_home/src/personal/re?[31mpo remote=origin (URL not shown)" \
+    "[warn] credential-like userinfo in remote URL: repo=$ds_home/src/personal/re?[31mpo remote=ev?il (URL not shown)" \
     "[ok] agent-tools plugin personal-x?[31m.js in the global plugins dir" \
     "[warn] agent-tools plugin personal-w?[1m is also listed in an OpenCode config's plugin key" \
     "[ok] npm: 1?[2J" \
@@ -4707,6 +4731,24 @@ else
   status=1
 fi
 rm -rf "${ds2_home:?}"
+
+# DS-3) the policy validation's failure path names the checkout's data files:
+#       a checkout whose directory name carries an escape, with a data file
+#       missing, still fails (exit 1) and shows the path with `?`.
+ds3_copy="$fixture_home/mi${ds_esc}[1mss"
+copy_repo_fixture "$ds3_copy"
+rm -f "$ds3_copy/.chezmoidata/modules.yaml"
+ds3_rc=0
+ds_out="$(HOME="$fixture_home" "$ds3_copy/scripts/doctor.sh" personal 2>&1)" || ds3_rc=$?
+if [[ "$ds3_rc" -ne 0 ]] && grep -Fq "[fail] missing data file:" <<< "$ds_out" \
+  && grep -Fq "mi?[1mss/" <<< "$ds_out" && ! grep -Fq "$ds_esc" <<< "$ds_out"; then
+  ok "test passed: a failing policy validation in a checkout named with an escape fails and shows the path with ?"
+else
+  printf '%s\n' "$ds_out" | LC_ALL=C cat -v >&2
+  fail "test failed: the policy validation's failure path reached the report raw (exit $ds3_rc)"
+  status=1
+fi
+rm -rf "${ds3_copy:?}"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"

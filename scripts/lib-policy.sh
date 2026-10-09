@@ -11,45 +11,62 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # Report line helpers. POLICY_REPORT_QUIET=1 (doctor --actions-only) mutes
 # every informational line so only the next-actions summary and any [fail]
 # reach the terminal; [fail] is never muted (it is the policy exit path).
+# Every line passes through display_safe here, at the one place it is
+# printed (#335), whatever it carries — see display_safe below.
 ok() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[ok] %s\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[ok] %s\n' "$__report_line"
 }
 
 info() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[info] %s\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[info] %s\n' "$__report_line"
 }
 
 section() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[info] == %s ==\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[info] == %s ==\n' "$__report_line"
 }
 
 item() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[info] - %s\n' "$*"
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[info] - %s\n' "$__report_line"
 }
 
 warn() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
-  printf '[warn] %s\n' "$*" >&2
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[warn] %s\n' "$__report_line" >&2
 }
 
 fail() {
-  printf '[fail] %s\n' "$*" >&2
+  local __report_line
+  display_safe_into __report_line "$*"
+  printf '[fail] %s\n' "$__report_line" >&2
 }
 
-# Values a report did not make itself — another tool's or repo's output and
-# names others can shape (doctor: status.sh, the usage reader, herdr, git, npm,
-# go and corepack output; repo directories and remotes, plugin and rules file
-# names, the backup marker's fields, Codex project keys; report_catalog_drift:
-# the package names and the npm root the managers list) — pass through
-# display_safe before they reach a report line (#335), so a terminal escape or
-# a bidi override in them cannot restyle or spoof the output. Plain text in
-# them still shows as text (the report only states it; whoever reads it
-# treats it as data). Out of scope: the report's own constants, the catalog,
-# paths built from HOME and the environment, and chezmoi's target names.
+# Report lines are terminal-safe (#335): the helpers above and report_actions
+# pass every line through display_safe, so a terminal escape or a bidi
+# override in a value a report did not make itself — another tool's or repo's
+# output, a name someone else chose, the checkout's own path — cannot restyle
+# or spoof the output, wherever the value was put into the line. The explicit
+# display_safe calls at those values (doctor: status.sh, the usage reader,
+# herdr, git, npm, go and corepack output; repo directories and remotes,
+# plugin and rules file names, the backup marker's fields, Codex project keys;
+# report_catalog_drift: the package names and the npm root the managers list)
+# mark them where they are read and stay correct on their own (the helper is
+# idempotent). Plain text in them still shows as text (the report only
+# states it; whoever reads it treats it as data). An external command's
+# stderr does not pass through these helpers: doctor discards it.
 # shell_quote_safe VALUE — print VALUE quoted for a shell (printf %q), in the
 # C locale so every byte outside printable ASCII comes out as an octal escape:
 # a step a report prints can be pasted back exactly, and holds no raw byte a
@@ -65,9 +82,15 @@ shell_quote_safe() {
 # DEL, C1), bidirectional override / isolate (U+202A-U+202E, U+2066-U+2069)
 # and byte that is not part of valid UTF-8 becomes `?`. Read byte by byte
 # under LC_ALL=C, so the result does not depend on the locale.
-display_safe() {
+# display_safe_into VAR VALUE — the same, into VAR without a subshell (the
+# report helpers call it for every line). Printable ASCII passes at once.
+display_safe_into() {
   local LC_ALL=C
-  local s="$1" out="" i=0 n need j b c cp seq valid
+  local __ds_var="$1" s="$2" out="" i=0 n need j b c cp seq valid
+  if [[ "$s" != *[!\ -~]* ]]; then
+    printf -v "$__ds_var" '%s' "$s"
+    return 0
+  fi
   n=${#s}
   while ((i < n)); do
     c="${s:i:1}"
@@ -125,7 +148,12 @@ display_safe() {
     fi
     i=$((i + need + 1))
   done
-  printf '%s' "$out"
+  printf -v "$__ds_var" '%s' "$out"
+}
+display_safe() {
+  local __ds_result
+  display_safe_into __ds_result "$1"
+  printf '%s' "$__ds_result"
 }
 
 # Next-actions register (#227). A warning that comes with a concrete remedy
@@ -157,7 +185,7 @@ action() {
 # report_actions — print the numbered summary of everything `action`
 # recorded (always printed, even under POLICY_REPORT_QUIET).
 report_actions() {
-  local total i step
+  local total i step line
   total="${#ACTION_REASONS[@]}"
   printf '[info] == next actions (%s) ==\n' "$total"
   if [[ "$total" -eq 0 ]]; then
@@ -165,9 +193,12 @@ report_actions() {
     return 0
   fi
   for ((i = 0; i < total; i++)); do
-    printf '[info] %s. %s\n' "$((i + 1))" "${ACTION_REASONS[$i]}"
+    display_safe_into line "${ACTION_REASONS[$i]}"
+    printf '[info] %s. %s\n' "$((i + 1))" "$line"
     while IFS= read -r step; do
-      [[ -n "$step" ]] && printf '        %s\n' "$step"
+      [[ -n "$step" ]] || continue
+      display_safe_into line "$step"
+      printf '        %s\n' "$line"
     done <<< "${ACTION_STEPS[$i]}"
   done
 }
