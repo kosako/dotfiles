@@ -129,7 +129,11 @@ validate_tar_members() {
   fi
   # Type pass: the ls-style first character of `tar -tvf` is portable
   # across BSD (macOS) and GNU tar. Anything but "-" (regular) or "d"
-  # (directory) is rejected (symlink "l", hardlink "h", device/fifo).
+  # (directory) is rejected (symlink "l", hardlink "h", device/fifo). This
+  # is the listing, not the header: bsdtar takes the column from the
+  # header's mode, so a hardlink header carrying a regular file's mode
+  # lists as "-" (GNU tar goes by the type flag). What tar actually made is
+  # checked again after extraction (validate_extracted_tree, #335).
   local tc
   while IFS= read -r tc; do
     [[ -z "$tc" ]] && continue
@@ -153,6 +157,55 @@ validate_tar_members() {
       return 1
     fi
   done < "$tlist"
+  return 0
+}
+
+# validate_extracted_tree DIR — the second check on the member types, on
+# what tar actually made in the 0700 temp rather than on its listing (#335):
+# every entry must be a regular file or a directory, and no regular file
+# may carry a second link (a hardlink to another member, or to anything
+# outside the temp). Backup never writes either (it stages each file with
+# `cp -p`), so any of them means a crafted archive. Runs before anything is
+# read or copied out of the temp; names are not printed (they are archive
+# data). A tree find cannot fully walk (a directory the archive left
+# unreadable) is rejected too.
+validate_extracted_tree() {
+  local dir="$1" found
+  if ! found="$(find "$dir" -mindepth 1 ! -type f ! -type d -print 2>/dev/null)"; then
+    fail "could not inspect the extracted archive; rejected before anything is restored"
+    return 1
+  fi
+  if [[ -n "$found" ]]; then
+    fail "archive extracted a non-regular member (symlink/special); rejected after extraction, before anything is restored"
+    return 1
+  fi
+  if ! found="$(find "$dir" -type f -links +1 -print 2>/dev/null)"; then
+    fail "could not inspect the extracted archive; rejected before anything is restored"
+    return 1
+  fi
+  if [[ -n "$found" ]]; then
+    fail "archive extracted a hardlinked member; rejected after extraction, before anything is restored"
+    return 1
+  fi
+  return 0
+}
+
+# remove_workdir DIR — the EXIT cleanup of a 0700 temp a foreign archive
+# was extracted into (verify / restore). `tar -xp` restores the archive's
+# modes, so a crafted archive can leave a directory without permissions
+# (mode 000) that a plain `rm -rf` cannot empty as a non-root user, keeping
+# decrypted content on disk. Directories are opened first, without following
+# symlinks (find does not follow them, and -type d never matches one), then
+# removed; errors stay quiet (they would carry archive-derived names). What
+# still could not be removed is named by the temp's own path (#335).
+remove_workdir() {
+  local dir="$1"
+  [[ -n "$dir" && -e "$dir" ]] || return 0
+  find "$dir" -type d -exec chmod u+rwx {} \; 2>/dev/null || true
+  rm -rf "$dir" 2>/dev/null || true
+  if [[ -e "$dir" ]]; then
+    warn "could not remove the temp $dir completely; remove it by hand (it may hold decrypted content)"
+  fi
   return 0
 }
 
@@ -535,7 +588,8 @@ decrypt_and_extract() {
     fail "could not extract archive"
     return 1
   fi
-  ok "members validated and extracted to 0700 temp"
+  validate_extracted_tree "$extract" || return 1
+  ok "members validated, extracted to 0700 temp and checked again there (regular files and directories only, no hardlinks)"
   return 0
 }
 
@@ -705,7 +759,7 @@ cmd_verify() {
   # Script-global (not local) so the deferred EXIT trap still sees it.
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-verify.XXXXXX")"
   chmod 700 "$workdir"
-  trap 'rm -rf "$workdir"' EXIT
+  trap 'remove_workdir "$workdir"' EXIT
   local extract="$workdir/extract"
   mkdir -p "$extract"
 
@@ -753,7 +807,7 @@ cmd_restore() {
 
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-restore.XXXXXX")"
   chmod 700 "$workdir"
-  trap 'rm -rf "$workdir"' EXIT
+  trap 'remove_workdir "$workdir"' EXIT
   local extract="$workdir/extract"
   mkdir -p "$extract"
 

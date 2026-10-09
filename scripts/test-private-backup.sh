@@ -188,6 +188,171 @@ else
   miss "verify did not reject a disallowed member name"
 fi
 
+# 8b2. A hardlink header carrying a regular file's mode (#335): bsdtar lists
+#      it as "-", so the listing's type pass lets it through and extraction
+#      makes a second link; the check on the extracted tree must reject it
+#      (GNU tar lists it as "h", and the type pass rejects it first). The
+#      archive is written byte by byte (no tar writes this shape), so the
+#      case needs python3.
+if command -v python3 >/dev/null 2>&1; then
+  hl_tar="$fixture_home/out/hardlink-mode.tar"
+  python3 - "$hl_tar" <<'PY'
+import io
+import sys
+import tarfile
+
+out = sys.argv[1]
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+    ti = tarfile.TarInfo("./files")
+    ti.type = tarfile.DIRTYPE
+    ti.mode = 0o755
+    tf.addfile(ti)
+    for name, data in (("./manifest.json", b"{}\n"), ("./files/a", b"x\n")):
+        ti = tarfile.TarInfo(name)
+        ti.size = len(data)
+        ti.mode = 0o644
+        tf.addfile(ti, io.BytesIO(data))
+    ti = tarfile.TarInfo("./files/b")
+    ti.type = tarfile.LNKTYPE
+    ti.linkname = "./files/a"
+    ti.mode = 0o644
+    tf.addfile(ti)
+data = bytearray(buf.getvalue())
+off = 0
+patched = 0
+while off + 512 <= len(data):
+    hdr = bytes(data[off:off + 512])
+    if hdr == bytes(512):
+        break
+    size = int(hdr[124:136].strip(b"\0 ") or b"0", 8)
+    if hdr[0:100].rstrip(b"\0") == b"./files/b":
+        # Give the hardlink header a regular file's type bits in its mode.
+        data[off + 100:off + 108] = b"0100644\0"
+        data[off + 148:off + 156] = b" " * 8
+        data[off + 148:off + 156] = ("%06o\0 " % sum(data[off:off + 512])).encode()
+        patched += 1
+    off += 512 + ((size + 511) // 512) * 512
+if patched != 1:
+    sys.exit("member ./files/b not found")
+with open(out, "wb") as f:
+    f.write(data)
+PY
+  age -r "$recipient" -o "$fixture_home/out/hardlink-mode.age" "$hl_tar"
+  hl_rc=0
+  out="$(run verify --in "$fixture_home/out/hardlink-mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || hl_rc=$?
+  if [[ "$(tar -tvf "$hl_tar" 2>/dev/null | awk '$NF == "./files/a" && $(NF - 2) == "link" { print substr($1, 1, 1) }')" == "-" ]]; then
+    hl_expect="archive extracted a hardlinked member; rejected after extraction, before anything is restored"
+  else
+    hl_expect="archive has a non-regular member (symlink/hardlink/special); rejected before extraction"
+  fi
+  if [[ "$hl_rc" -ne 0 ]] && grep -Fq "$hl_expect" <<< "$out" && ! grep -Fq "members validated, extracted" <<< "$out"; then
+    pass "verify rejects a hardlink header carrying a regular mode (this tar: $hl_expect)"
+  else
+    printf '%s\n' "$out" >&2
+    miss "verify did not reject a hardlink header carrying a regular mode (expected: $hl_expect; exit $hl_rc)"
+  fi
+else
+  warn "python3 not found; skipping the crafted hardlink-mode archive case"
+fi
+
+# 8b2b. An archive that leaves a directory without permissions (mode 000,
+#       with a file under it) is rejected — the extracted tree cannot be
+#       walked — and the 0700 temp is still removed afterwards, its content
+#       included, with no archive-derived name in the output (#335; bsdtar
+#       rejects it at the tree check, GNU tar already at extraction). Run
+#       with a TMPDIR of its own so a leftover temp shows. Skipped as root
+#       (root walks and removes the directory anyway).
+if command -v python3 >/dev/null 2>&1 && [[ "$(id -u)" != "0" ]]; then
+  locked_tar="$fixture_home/out/locked-dir.tar"
+  python3 - "$locked_tar" <<'PY'
+import io
+import sys
+import tarfile
+
+out = sys.argv[1]
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+    for name, mode in (("./files", 0o755), ("./files/canary-pb-locked", 0o000)):
+        ti = tarfile.TarInfo(name)
+        ti.type = tarfile.DIRTYPE
+        ti.mode = mode
+        tf.addfile(ti)
+    for name, data in (("./manifest.json", b"{}\n"), ("./files/canary-pb-locked/x", b"secret\n")):
+        ti = tarfile.TarInfo(name)
+        ti.size = len(data)
+        ti.mode = 0o600
+        tf.addfile(ti, io.BytesIO(data))
+with open(out, "wb") as f:
+    f.write(buf.getvalue())
+PY
+  age -r "$recipient" -o "$fixture_home/out/locked-dir.age" "$locked_tar"
+  locked_tmp="$fixture_home/locked-tmp"
+  mkdir -p "$locked_tmp"
+  locked_rc=0
+  out="$(TMPDIR="$locked_tmp" run verify --in "$fixture_home/out/locked-dir.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || locked_rc=$?
+  locked_left="$(find "$locked_tmp" -mindepth 1 -maxdepth 1 2>/dev/null)"
+  # bsdtar extracts it and the tree check rejects it; GNU tar fails to write
+  # under the directory and the extraction itself is rejected. Either way the
+  # temp must be gone afterwards.
+  if [[ "$locked_rc" -ne 0 && -z "$locked_left" ]] \
+    && grep -Eq "could not inspect the extracted archive; rejected before anything is restored|could not extract archive" <<< "$out" \
+    && ! grep -Fq "members validated, extracted" <<< "$out" \
+    && ! grep -Fq "canary-pb-locked" <<< "$out"; then
+    pass "verify rejects an archive that leaves a mode 000 directory, and its temp is still removed"
+  else
+    printf '%s\nleft: %s\n' "$out" "$locked_left" >&2
+    miss "an archive leaving a mode 000 directory was not rejected, or its temp was left behind (exit $locked_rc)"
+  fi
+  find "$locked_tmp" -type d -exec chmod u+rwx {} \; 2>/dev/null || true
+fi
+
+# 8b3. The extracted-tree check itself, on trees tar may leave behind
+#      whatever its listing said: a symlink, a fifo and a hardlink are each
+#      rejected, a tree of regular files and directories passes, and a
+#      directory the check cannot walk is rejected (not read as clean).
+#      Extracted from private-backup.sh and run in a subshell.
+vt_fns="$(sed -n '/^validate_extracted_tree() {/,/^}/p' "$PB")"
+vt_root="$fixture_home/vt"
+# vt_case LABEL WANT DIR — WANT is "accepted" (return 0, nothing said) or
+# the failure message expected with a non-zero return.
+vt_case() {
+  local label="$1" want="$2" dir="$3" got rc=0
+  got="$(
+    fail() { printf '%s\n' "$*"; }
+    eval "$vt_fns"
+    validate_extracted_tree "$dir"
+  )" || rc=$?
+  if { [[ "$want" == accepted ]] && [[ "$rc" -eq 0 && -z "$got" ]]; } \
+    || { [[ "$want" != accepted ]] && [[ "$rc" -ne 0 && "$got" == *"$want"* ]]; }; then
+    pass "extracted-tree check: $label"
+  else
+    printf '%s\n' "$got" >&2
+    miss "extracted-tree check: $label (expected: $want; returned $rc)"
+  fi
+}
+if [[ -z "$vt_fns" ]]; then
+  miss "validate_extracted_tree not found in private-backup.sh"
+else
+  mkdir -p "$vt_root/clean/files/.ssh" "$vt_root/symlink/files" "$vt_root/fifo/files" "$vt_root/hardlink/files"
+  printf 'x\n' > "$vt_root/clean/files/.ssh/config"
+  printf '{}\n' > "$vt_root/clean/manifest.json"
+  ln -s /etc/passwd "$vt_root/symlink/files/evil"
+  mkfifo "$vt_root/fifo/files/pipe"
+  printf 'x\n' > "$vt_root/hardlink/files/a"
+  ln "$vt_root/hardlink/files/a" "$vt_root/hardlink/files/b"
+  vt_case "regular files and directories pass" "accepted" "$vt_root/clean"
+  vt_case "a symlink is rejected" "archive extracted a non-regular member (symlink/special)" "$vt_root/symlink"
+  vt_case "a fifo is rejected" "archive extracted a non-regular member (symlink/special)" "$vt_root/fifo"
+  vt_case "a hardlinked file is rejected" "archive extracted a hardlinked member" "$vt_root/hardlink"
+  if [[ "$(id -u)" != "0" ]]; then
+    mkdir -p "$vt_root/locked/files/sub"
+    chmod 000 "$vt_root/locked/files/sub"
+    vt_case "a directory it cannot walk is rejected" "could not inspect the extracted archive" "$vt_root/locked"
+    chmod 755 "$vt_root/locked/files/sub"
+  fi
+fi
+
 # 8c. A mode mismatch (manifest mode != extracted file mode) is caught.
 mdir="$fixture_home/stage-mode"
 mkdir -p "$mdir/files"

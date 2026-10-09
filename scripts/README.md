@@ -461,9 +461,12 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
   marker(`~/.local/state/dotfiles/private-backup.json`、最終成功時刻 / archive basename / 件数 /
   `capture_incomplete` のみ。#242)更新。捕捉 0 件(補足リストだけも含む)は空アーカイブを書かず fail。
 - **verify**: `--identity` / `--identity-command`(op seam)で 0700 temp に**復号**し、
-  **展開前に全 tar member を検査**(非正規 member = symlink/hardlink/special を拒否、
+  **展開前に全 tar member を検査**(一覧で非正規と分かる member = symlink/hardlink/special を拒否、
   絶対パス・`..`・制御文字・台帳外 member 名を拒否)してから展開。recipient は公開鍵なので
-  悪性アーカイブも復号可能 → 展開で HOME 外へ逃げないよう member 検査を前段に置く。展開後は
+  悪性アーカイブも復号可能 → 展開で HOME 外へ逃げないよう member 検査を前段に置く。展開の直後にも
+  0700 temp の中の実体を確かめ、展開後に残る通常の file と dir 以外と、link 数が 2 以上の file を拒否する(一覧の
+  表示に依らない 2 回目の種別の検査で、保証するのは最後の tree の状態。bsdtar は通常の file の mode を持つ hardlink の
+  header を `-` と一覧する。#335)。展開後は
   manifest と突き合わせ(checksum・mode・余剰ファイル・home-relative・symlink 拒否)。
   HOME には一切書かない read-only。復号物・展開物は trap で確実削除。
   `--identity-command` はユーザー指定の shell コマンド列(`op read op://...` 想定)で、
@@ -494,6 +497,11 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
 - `--identity-command`(op seam)経由でも verify できること。
 - manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
+- 通常の file の mode を持たせた hardlink の header(python3 で byte 単位に作る。無ければ skip)を verify が拒否すること
+  (bsdtar では展開後の検査で、GNU tar では展開前の一覧の検査で)。展開後の検査を private-backup.sh から取り出し、
+  symlink・fifo・hardlink を拒否し、通常の file と dir の tree を通し、辿れない dir を拒否することを、戻り値と message の両方で直接
+  確かめる。mode 000 の dir(中に file)を残す archive を verify が拒否し、その後に temp が中身ごと消え、archive 由来の名前が
+  出ないことも確かめる(root では飛ばす。#335)。
 - 拒否 profile(work)では backup が実行拒否し、アーカイブを書かないこと。
 - 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
 - local 補足リストの構造不正(#246): path の無い entry・category の `|`・path 内の改行・list の代わりの scalar
