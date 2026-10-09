@@ -411,8 +411,11 @@ else
     fi
     # A listing that fails partway (a dir under the root cannot be opened)
     # is INCOMPLETE, not empty: the markers it did print are still scanned,
-    # the rest is named as not checked (#359).
-    if ! repo_markers="$(find "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)"; then
+    # the rest is named as not checked. -H follows the root itself when it
+    # is a symlink (the probe above opened its target; without -H find would
+    # print nothing and exit 0, a false clean) but still not a symlinked
+    # entry below it, as for the Codex rules dir (#359).
+    if ! repo_markers="$(find -H "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)"; then
       remote_scan_failures=$((remote_scan_failures + 1))
       warn "remote URL scan INCOMPLETE: repositories under $(display_safe "$root") could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked"
     fi

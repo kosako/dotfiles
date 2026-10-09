@@ -70,7 +70,21 @@ fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # specific answer put their own fake in front of these, as before (#306).
 # Kept outside the fixture HOME so no section's cleanup removes it.
 host_stub_dir=""
-trap 'rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}' EXIT
+# Sections that plant a mode-000 dir or file under the fixture HOME (GS-2,
+# OP, AIP, CL-8) restore the mode on their normal path only: a run that
+# stops inside that window would leave a tree `rm -rf` cannot enter. The
+# modes are re-opened first (chmod -R visits a dir before reading it, so a
+# 000 dir is passed; best effort, the removal must still run), and the
+# cleanup is also wired to INT / TERM, so a second signal that lands
+# while it runs starts it over (modes first) instead of killing it
+# halfway (#359 review).
+cleanup_fixtures() {
+  chmod -R u+rwX "$fixture_home" 2>/dev/null || true
+  rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}
+}
+trap cleanup_fixtures EXIT
+trap 'cleanup_fixtures; trap - INT; kill -INT $$' INT
+trap 'cleanup_fixtures; trap - TERM; kill -TERM $$' TERM
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
 for host_tool in op herdr codex opencode; do
@@ -2367,9 +2381,10 @@ rm -rf "$gs_home"
 #       read and a root that cannot be listed completely are failures, not
 #       clean repos — each is named (the URL, a canary, never shown), the
 #       repos that could be read are still flagged and counted, the clean ok
-#       is withheld, and doctor stays exit 0. Run from a copy of the checkout
-#       so the scanned count is the fixture's alone. Skipped as root (root
-#       reads mode 000).
+#       is withheld, and doctor stays exit 0; a root that is a symlink is
+#       followed, not read as empty. Run from a copy of the checkout so the
+#       scanned count is the fixture's alone. Skipped as root (root reads
+#       mode 000).
 if [[ "$(id -u)" != "0" ]]; then
   gs2_home="$fixture_home/gs2-home"
   gs2_copy="$fixture_home/gs2-dotfiles"
@@ -2449,6 +2464,36 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$gs2_home/src"
+  #     GS-2d) a root that is a symlink to a dir outside every root (Codex
+  #            review R2): the open probe passes (cd -P opens the target),
+  #            but a find without -H does not follow the root, prints
+  #            nothing and exits 0 — with no other repo in this HOME, the
+  #            flagged and the unreadable repo behind the link would both
+  #            vanish into the clean ok. Followed, the flagged one is named
+  #            under the root path, the unreadable one INCOMPLETE.
+  rm -rf "$gs2_home/src"
+  mkdir -p "$gs2_home/src"
+  gs2_git init -q --template= "$gs2_home/elsewhere/sandbox/flagged"
+  gs2_git -C "$gs2_home/elsewhere/sandbox/flagged" remote add origin "https://user:$gs2_canary@example.invalid/z.git"
+  gs2_git init -q --template= "$gs2_home/elsewhere/sandbox/locked"
+  gs2_git -C "$gs2_home/elsewhere/sandbox/locked" remote add origin "https://user:$gs2_canary@example.invalid/w.git"
+  ln -s "$gs2_home/elsewhere/sandbox" "$gs2_home/src/sandbox"
+  chmod 000 "$gs2_home/elsewhere/sandbox/locked/.git/config"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/sandbox/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: the remote config of repo=$gs2_home/src/sandbox/locked could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remotes with credential-like userinfo: 1" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 1 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 1" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a root that is a symlink is followed (the repos behind it are flagged or named INCOMPLETE, no false clean)"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: the repos behind a root that is a symlink were read as clean"
+    status=1
+  fi
+  chmod 644 "$gs2_home/elsewhere/sandbox/locked/.git/config"
   rm -rf "$gs2_home" "$gs2_copy"
 fi
 
