@@ -528,7 +528,8 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
   表示に依らない 2 回目の種別の検査で、保証するのは最後の tree の状態。bsdtar は通常の file の mode を持つ hardlink の
   header を `-` と一覧する。#335)。展開後は
   manifest と突き合わせ(checksum・mode・余剰ファイル・home-relative・symlink 拒否)。
-  HOME には一切書かない read-only。復号物・展開物は trap で確実削除。
+  HOME には一切書かない read-only。復号物・展開物の temp は終了時に削除を試み、消しきれなければ temp の path を
+  出して手での削除を求める(restore の temp も同じ。#335)。
   `--identity-command` はユーザー指定の shell コマンド列(`op read op://...` 想定)で、
   quoting のため shell 実行する。アーカイブ由来ではなく呼び出し側が管理するため注入面ではない。
 - **restore**: verify を通った後のみ復元(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
