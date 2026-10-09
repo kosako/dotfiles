@@ -558,9 +558,11 @@ section "home path in the JSON settings and their command strings (#329)"
 # before (no quotes), which test-claude-settings / test-codex-settings pin
 # for the hooks and the statusLine check below pins here.
 # shell_words CMD — the words a shell makes of CMD, one per line (CMD is a
-# string this test rendered from a fixture home, not outside input).
+# string this test rendered from a fixture home, not outside input). A CMD
+# the shell cannot parse fails here: printing the untouched arguments instead
+# would pass an unquoted path off as one word.
 shell_words() {
-  bash -c 'eval "set -- $1"; printf "%s\n" "$@"' _ "$1"
+  bash -c 'eval "set -- $1" && printf "%s\n" "$@"' _ "$1"
 }
 # check_command LABEL CMD EXPECTED_WORD...
 check_command() {
@@ -648,6 +650,14 @@ write_config personal
 # chezmoi cleans the home path (a TMPDIR with a trailing slash leaves `//`).
 odd_home="${root//\/\//\/}/h\"o\\me & <x> 'q' \$v"
 mkdir -p "$odd_home"
+# The check must reject what the quoting prevents: this home's path left
+# unquoted does not come back from a shell as that one word.
+if [[ "$(shell_words "$odd_home/x" 2>/dev/null)" == "$odd_home/x" ]]; then
+  fail "test failed: shell_words takes the unquoted unusual home path for one word, so the checks below could not catch a missing quote"
+  status=1
+else
+  ok "test passed: the unquoted unusual home path is not one shell word (the checks below can catch a missing quote)"
+fi
 if HOME="$odd_home" throwaway_chezmoi apply >/dev/null 2>&1; then
   check_home_render "$root" "$odd_home"
 else
