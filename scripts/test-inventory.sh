@@ -43,6 +43,9 @@ FAKE
 for manager in brew npm mas; do
   cat > "$fixture/bin/$manager" <<'FAKE'
 #!/bin/sh
+# A manager that reads its stdin to the end (#329) must find no catalog rows
+# there (INVENTORY_TEST_READ_STDIN; the test's own stdin is /dev/null).
+[ -z "${INVENTORY_TEST_READ_STDIN:-}" ] || cat > /dev/null
 manager="${0##*/}"
 if [ "$1" = install ]; then
   printf '%s %s\n' "$manager" "$*" >> "$INVENTORY_TEST_ROOT/installs"
@@ -84,6 +87,9 @@ FAKE
 done
 cat > "$fixture/bin/go" <<'FAKE'
 #!/bin/sh
+# A manager that reads its stdin to the end (#329) must find no catalog rows
+# there (INVENTORY_TEST_READ_STDIN; the test's own stdin is /dev/null).
+[ -z "${INVENTORY_TEST_READ_STDIN:-}" ] || cat > /dev/null
 if [ "$1" = install ]; then
   printf 'go %s\n' "$*" >> "$INVENTORY_TEST_ROOT/installs"
   exit 0
@@ -251,3 +257,16 @@ if ! grep -Fq '5 installed, 0 skipped, 0 failed' <<< "$output" \
   exit 1
 fi
 ok "confirmed absence still permits installation (fake managers only)"
+# #329: the catalog rows are not the probes' and installers' stdin. With
+# fakes that read their stdin to the end on every call, all five entries are
+# still probed and installed; before, the first call swallowed the remaining
+# rows and the run closed as "1 installed, 0 skipped, 0 failed".
+: > "$fixture/installs"
+output="$(INVENTORY_TEST_STATE=empty INVENTORY_TEST_READ_STDIN=1 run_fixture "$installer" --apply 2>&1 </dev/null)"
+if ! grep -Fq '5 installed, 0 skipped, 0 failed' <<< "$output" \
+  || [[ "$(awk 'END { print NR }' "$fixture/installs")" != 5 ]]; then
+  printf '%s\n' "$output" >&2
+  fail "a probe or installer that reads its stdin must not swallow the remaining catalog rows"
+  exit 1
+fi
+ok "catalog rows reach every entry even when the managers read their stdin"
