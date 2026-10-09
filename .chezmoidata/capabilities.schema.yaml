@@ -74,6 +74,9 @@ capabilities:
   enableHerdrIntegration:
     type: boolean
     implemented: true
+  enableToolCallRecordHook:
+    type: boolean
+    implemented: true
   codexReviewEffort:
     type: enum
     implemented: true

@@ -6,7 +6,8 @@
        ".codex"), optional timeout (number; applied to the safe-gh hook only —
        Codex passes 10).
 
-       Three capabilities contribute events, each self-gated here:
+       Four capabilities contribute events, each self-gated here (the fourth,
+       enableToolCallRecordHook, is Claude-only; see the note at the body):
        - enableGitHubIsolatedReader: PreToolUse / matcher Bash ->
          personal-safe-gh-hook (GitHub read steering, #137 / #181).
        - enableQualityLoopHooks: PostToolUse / matcher Edit|Write ->
@@ -37,6 +38,17 @@
          duplicate (measured: settings.json stays
          byte-identical; Codex re-serializes hooks.json with the same
          content, which the next apply restores).
+       - enableToolCallRecordHook (#353, agent-tools#454): SessionStart (no
+         matcher) and PreToolUse / PostToolUse / PostToolUseFailure /
+         PermissionDenied (matcher "*") -> personal-tool-call-record-hook,
+         "async": true, timeout 10 (record / fail-open: one JSON line per
+         event, argument keys only, never blocks; an async hook cannot
+         block, Claude Code 2.1.295 hooks docs, 2026-10-09). CLAUDE ONLY —
+         the Codex side is out of scope in agent-tools#454, so on
+         agentDir ".codex" it contributes nothing and the Codex render is
+         unchanged. Where an event already has an entry it is appended as
+         the SECOND element and the first stays byte-identical (herdr's
+         whole-entry match is unaffected by a sibling element).
        The home path reaches each command string through the shell-word
        template (quoted only when it holds a character a shell would act
        on; the herdr path is always single-quoted, as herdr writes it, with
@@ -50,18 +62,36 @@
        is a non-blocking hook error in both harnesses), so rendering before
        agent-tools has synced or herdr has installed is a safe no-op.
 
-       Callers include this only when at least one of the three capabilities
-       is on (an empty "hooks": {} is never rendered). Renders at two-space
+       Callers include this only when at least one of the four capabilities
+       is on (an empty "hooks": {} is never rendered; the Codex caller keeps
+       gating on the three it renders). Renders at two-space
        indent with NO trailing comma and NO trailing newline — the caller
        owns both (Claude appends ",", Codex a bare newline). */ -}}
 {{- $scripts := printf "%s/%s/agent-tools/scripts" .homeDir .agentDir -}}
 {{- $herdrClaude := eq .agentDir ".claude" -}}
 {{- $herdrHook := printf "%s/%s/herdr-agent-state.sh" .homeDir .agentDir -}}
 {{- if $herdrClaude -}}{{- $herdrHook = printf "%s/%s/hooks/herdr-agent-state.sh" .homeDir .agentDir -}}{{- end -}}
+{{- $reader := index .caps "enableGitHubIsolatedReader" -}}
+{{- $quality := index .caps "enableQualityLoopHooks" -}}
+{{- $herdr := index .caps "enableHerdrIntegration" -}}
+{{- /* enableToolCallRecordHook (#353) is Claude-only: the Codex registration is
+       out of scope there (agent-tools#454), so the Codex render must not change.
+       The events are built event by event below so that a record entry can be
+       appended AFTER an existing entry of the same event (PreToolUse: safe-gh,
+       PostToolUse: fast-edit-check, SessionStart: herdr) without touching it,
+       and so that an event only the recorder uses (PostToolUseFailure,
+       PermissionDenied) is emitted only when the recorder is on. With the
+       recorder off the output is byte-identical to the previous per-capability
+       rendering (pinned by test-claude-settings.sh). */ -}}
+{{- $record := and (index .caps "enableToolCallRecordHook") $herdrClaude -}}
+{{- $recordCmd := includeTemplate "shell-word" (printf "%s/personal-tool-call-record-hook" $scripts) | toJson -}}
+{{- /* The record entry itself lives in agent-hooks-record-entry (a define
+       inside this file is not visible to chezmoi's template action). */ -}}
 {{- $sep := "" -}}
 {{ "" }}  "hooks": {
-{{- if index .caps "enableGitHubIsolatedReader" }}
+{{- if or $reader $record }}
     "PreToolUse": [
+{{- if $reader }}
       {
         "matcher": "Bash",
         "hooks": [
@@ -74,11 +104,17 @@
           }
         ]
       }
+{{- end }}
+{{- if and $reader $record }},{{ end }}
+{{- if $record }}
+{{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
+{{- end }}
     ]
 {{- $sep = "," -}}
 {{- end }}
-{{- if index .caps "enableQualityLoopHooks" }}{{ $sep }}
+{{- if or $quality $record }}{{ $sep }}
     "PostToolUse": [
+{{- if $quality }}
       {
         "matcher": "Edit|Write",
         "hooks": [
@@ -88,7 +124,15 @@
           }
         ]
       }
-    ],
+{{- end }}
+{{- if and $quality $record }},{{ end }}
+{{- if $record }}
+{{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
+{{- end }}
+    ]
+{{- $sep = "," -}}
+{{- end }}
+{{- if $quality }}{{ $sep }}
     "Stop": [
       {
         "hooks": [
@@ -101,8 +145,9 @@
     ]
 {{- $sep = "," -}}
 {{- end }}
-{{- if index .caps "enableHerdrIntegration" }}{{ $sep }}
+{{- if or $herdr $record }}{{ $sep }}
     "SessionStart": [
+{{- if $herdr }}
       {
 {{- if $herdrClaude }}
         "matcher": "^(startup|resume|clear|compact|fork)$",
@@ -115,6 +160,20 @@
           }
         ]
       }
+{{- end }}
+{{- if and $herdr $record }},{{ end }}
+{{- if $record }}
+{{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd) }}
+{{- end }}
+    ]
+{{- $sep = "," -}}
+{{- end }}
+{{- if $record }}{{ $sep }}
+    "PostToolUseFailure": [
+{{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
+    ],
+    "PermissionDenied": [
+{{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
     ]
 {{- end }}
   }

@@ -607,6 +607,15 @@ run_ok \
   "enableHerdrIntegration=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
+# enableToolCallRecordHook (#353) only registers agent-tools' tool-call record
+# hook (a local JSONL of argument keys) and grants no install / secret /
+# network privilege, so it must NOT be in the forbidden table either.
+make_fixture
+set_capability_all "$fixture" enableToolCallRecordHook true
+run_ok \
+  "enableToolCallRecordHook=true is allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 # codexReviewEffort / codexWorkerEffort (#264) only pick the reasoning effort
 # agent-tools' Codex review / worker run with and grant no install / secret /
 # network privilege, so no value is forbidden for any environmentKind.

@@ -1,0 +1,25 @@
+{{- /* One hooks[] entry for agent-tools' personal-tool-call-record-hook
+       (#353, agent-tools#454), included by agent-hooks-json once per event.
+       dict args: cmd (the JSON-encoded command string, already passed
+       through shell-word + toJson by the caller), optional matcher (string;
+       omitted for SessionStart, "*" for the tool events). "async": true so
+       the hook can never block a tool call (an async hook cannot block —
+       Claude Code 2.1.295 hooks docs, 2026-10-09) and a fixed timeout of 10
+       seconds (one JSON line of argument keys; the body never waits on
+       anything but the claude --version subprocess at SessionStart).
+       Renders at the six-space indent of a hooks[] element with NO leading
+       and NO trailing newline — the caller owns both. */ -}}
+{{ "" }}      {
+{{- if hasKey . "matcher" }}
+        "matcher": {{ .matcher | toJson }},
+{{- end }}
+        "hooks": [
+          {
+            "type": "command",
+            "command": {{ .cmd }},
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+{{- /* no trailing newline: see the header comment */ -}}

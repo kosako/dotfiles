@@ -139,6 +139,18 @@ profiles:
       # hook error, so registering first is safe. Codex: inert until a
       # one-time `/hooks` trust, like the other hooks.
       enableHerdrIntegration: true
+      # #353 (agent-tools#454): register agent-tools' personal-tool-call-record-hook
+      # in the managed ~/.claude/settings.json on SessionStart and on PreToolUse /
+      # PostToolUse / PostToolUseFailure / PermissionDenied (matcher "*", async,
+      # timeout 10) so every Claude Code tool call leaves one JSON line (argument
+      # keys only, never values) in the user state dir. Record / fail-open: the
+      # body never blocks, an async hook cannot block, the subject is the client
+      # self-report and the JSONL is writable by the same OS user — a guardrail,
+      # not a boundary. Claude only: the Codex hooks.json is unchanged (Codex
+      # registration is out of scope in agent-tools#454). Same split as the hooks
+      # above: registration=dotfiles, body=agent-tools (sync --apply deploys it;
+      # a missing body is a non-blocking hook error, so registering first is safe).
+      enableToolCallRecordHook: true
       # #264 (agent-tools#339 hand-off): reasoning effort for agent-tools'
       # Codex review / worker, rendered by codex-settings into the Codex
       # profile files ~/.codex/agent-tools-review.config.toml and
@@ -204,6 +216,7 @@ profiles:
       # unmanaged ~/.claude/settings.json / ~/.codex/hooks.json (doctor shows
       # herdr's own view there).
       enableHerdrIntegration: false
+      enableToolCallRecordHook: false
       # #264: off — codex-settings is not part of work, and whether (and at
       # which values) a work machine gets the profile files is decided
       # separately (plan / billing differ). A hand-placed file still works:
