@@ -98,15 +98,46 @@ fi
 #     empty key.
 # The third prints a valid key and then fails, so dropping only the exit
 # status check is caught too (Codex review, PR #352).
+# "Before age runs" is checked on the age calls, not only on the messages
+# (Codex review R2, PR #352): a refusal moved after `age -d` would print the
+# same text. An age on the front of PATH records each call and runs the real
+# one; the control run below proves the record works.
+age_spy="$fixture_home/age-spy"
+mkdir -p "$age_spy"
+cat > "$age_spy/age" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$AGE_CALLS"
+exec "$REAL_AGE" "$@"
+SH
+chmod +x "$age_spy/age"
+# age_spy_run ARGS... — run private-backup with the age spy; sets
+# age_spy_out, age_spy_rc and age_spy_calls (the number of age calls).
+age_spy_run() {
+  local calls="$fixture_home/age-calls"
+  : > "$calls"
+  age_spy_rc=0
+  age_spy_out="$(HOME="$fixture_home" AGE_CALLS="$calls" REAL_AGE="$(command -v age)" \
+    PATH="$age_spy:$fixture_home/fakebin:$PATH" "$PB" "$@" 2>&1)" || age_spy_rc=$?
+  age_spy_calls="$(awk 'END { print NR }' "$calls")"
+  return 0
+}
+age_spy_run verify --in "$archive" --identity "$fixture_home/keys/id.txt"
+if [[ "$age_spy_rc" -eq 0 && "$age_spy_calls" -ge 1 ]]; then
+  pass "the age spy records the calls of a good verify (control)"
+else
+  printf '%s\n' "$age_spy_out" >&2
+  miss "the age spy recorded no call for a good verify (rc=$age_spy_rc, calls=$age_spy_calls)"
+fi
 for ic_case in "false" "printf ''" "$(printf 'cat %q; exit 3' "$fixture_home/keys/id.txt")"; do
-  ic_rc=0
-  ic_out="$(run verify --in "$archive" --identity-command "$ic_case" 2>&1)" || ic_rc=$?
-  if [[ "$ic_rc" -eq 1 ]] && grep -Fxq "[fail] identity command produced no key; refusing" <<< "$ic_out" \
+  age_spy_run verify --in "$archive" --identity-command "$ic_case"
+  ic_rc="$age_spy_rc"
+  ic_out="$age_spy_out"
+  if [[ "$ic_rc" -eq 1 && "$age_spy_calls" -eq 0 ]] && grep -Fxq "[fail] identity command produced no key; refusing" <<< "$ic_out" \
     && ! grep -Fq "could not decrypt archive" <<< "$ic_out" && ! grep -Fq "decrypted to 0700 temp" <<< "$ic_out"; then
     pass "verify refuses an identity command that yields no key (${ic_case%% *} ...)"
   else
     printf '%s\n' "$ic_out" >&2
-    miss "verify must refuse an identity command that yields no key (${ic_case%% *} ..., rc=$ic_rc)"
+    miss "verify must refuse an identity command that yields no key (${ic_case%% *} ..., rc=$ic_rc, age calls=$age_spy_calls)"
   fi
 done
 
@@ -721,14 +752,15 @@ else
 fi
 # 18b. verify goes through the same gate (#330): it decrypts, so a denied
 #      profile must not be able to read an archive either.
-verify_rc=0
-out="$(run verify --in "$archive" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
-if [[ "$verify_rc" -ne 0 ]] && grep -Fq "private-backup refuses to run here" <<< "$out" \
+age_spy_run verify --in "$archive" --identity "$fixture_home/keys/id.txt"
+verify_rc="$age_spy_rc"
+out="$age_spy_out"
+if [[ "$verify_rc" -ne 0 && "$age_spy_calls" -eq 0 ]] && grep -Fq "private-backup refuses to run here" <<< "$out" \
   && ! grep -Fq "decrypted to 0700 temp" <<< "$out"; then
   pass "verify refuses under a denied profile (work) before decrypting"
 else
   printf '%s\n' "$out" >&2
-  miss "verify must refuse under a denied profile (rc=$verify_rc)"
+  miss "verify must refuse under a denied profile (rc=$verify_rc, age calls=$age_spy_calls)"
 fi
 set_profile personal
 
