@@ -37,8 +37,10 @@ fail_duplicates() {
 validate_modules() {
   local status=0
   local module path capability value type paths_count requires_count
-  local all_paths_file
-  all_paths_file="$(mktemp)"
+  # Collected in a variable, not a temp file, so an interrupt leaves nothing
+  # behind (#329; the same holds for the lists in validate_packages and
+  # validate_backup_paths).
+  local all_paths=""
 
   while IFS= read -r module; do
     [[ -z "$module" ]] && continue
@@ -62,7 +64,7 @@ validate_modules() {
           ;;
         *)
           ok "module path: $module: $path"
-          printf '%s\n' "$path" >> "$all_paths_file"
+          all_paths+="$path"$'\n'
           ;;
       esac
     done < <(module_paths "$module")
@@ -71,7 +73,7 @@ validate_modules() {
     while read -r capability value; do
       [[ -z "$capability" ]] && continue
       requires_count=$((requires_count + 1))
-      if ! grep -Fxq -- "$capability" "$known_caps_file"; then
+      if ! grep -Fxq -- "$capability" <<< "$known_caps_list"; then
         fail "unknown capability in $module requires: $capability"
         status=1
         continue
@@ -112,12 +114,11 @@ validate_modules() {
       fail "module has requires but no paths: $module"
       status=1
     fi
-  done < "$known_modules_file"
+  done <<< "$known_modules_list"
 
   # A path claimed by two modules would make the ignore gate ambiguous.
   fail_duplicates "path declared by multiple modules: " \
-    < <(sort "$all_paths_file" | uniq -d) || status=1
-  rm -f "$all_paths_file"
+    < <(sort <<< "$all_paths" | uniq -d) || status=1
 
   if [[ "$status" -eq 0 ]]; then
     ok "module validation passed"
@@ -167,7 +168,7 @@ validate_capability_registry() {
         status=1
         ;;
     esac
-  done < "$known_caps_file"
+  done <<< "$known_caps_list"
 
   if [[ "$status" -eq 0 ]]; then
     ok "capability registry validation passed"
@@ -185,21 +186,17 @@ validate_capability_registry() {
 validate_packages() {
   local status=0
   local name source pkg bin track_only entry_ok rows
-  local sources_file names_file
-  sources_file="$(mktemp)"
-  names_file="$(mktemp)"
-  known_package_sources | sort > "$sources_file"
+  local sources names=""
+  sources="$(known_package_sources)"
 
   # Fail closed: a yq error or a missing/empty packages list must not pass
   # vacuously (mirrors the profiles / modules / capabilities guards).
   if ! rows="$(catalog_packages)"; then
     fail "could not parse packages from $PACKAGES_FILE"
-    rm -f "$sources_file" "$names_file"
     return 1
   fi
   if [[ -z "$rows" ]]; then
     fail "no packages parsed from $PACKAGES_FILE"
-    rm -f "$sources_file" "$names_file"
     return 1
   fi
 
@@ -216,12 +213,12 @@ validate_packages() {
       status=1
       continue
     fi
-    if ! grep -Fxq -- "$source" "$sources_file"; then
+    if ! grep -Fxq -- "$source" <<< "$sources"; then
       fail "unknown package source: $name: $source"
       status=1
       continue
     fi
-    printf '%s\n' "$name" >> "$names_file"
+    names+="$name"$'\n'
     case "$track_only" in
       true | false | "") ;;
       *)
@@ -243,8 +240,7 @@ validate_packages() {
   done <<< "$rows"
 
   fail_duplicates "duplicate package name: " \
-    < <(sort "$names_file" | uniq -d) || status=1
-  rm -f "$sources_file" "$names_file"
+    < <(sort <<< "$names" | uniq -d) || status=1
 
   if [[ "$status" -eq 0 ]]; then
     ok "package validation passed"
@@ -264,20 +260,16 @@ validate_packages() {
 validate_backup_paths() {
   local status=0
   local path type _category entry_ok rows
-  local types_file paths_file
-  types_file="$(mktemp)"
-  paths_file="$(mktemp)"
-  known_backup_path_types | sort > "$types_file"
+  local types paths=""
+  types="$(known_backup_path_types)"
 
   # Fail closed: a yq error or a missing/empty list must not pass vacuously.
   if ! rows="$(backup_paths)"; then
     fail "could not parse backup paths from $BACKUP_PATHS_FILE"
-    rm -f "$types_file" "$paths_file"
     return 1
   fi
   if [[ -z "$rows" ]]; then
     fail "no backup paths parsed from $BACKUP_PATHS_FILE"
-    rm -f "$types_file" "$paths_file"
     return 1
   fi
 
@@ -309,18 +301,17 @@ validate_backup_paths() {
         *) fail "unsafe backup path: $path" ;;
       esac
     fi
-    if [[ -n "$type" ]] && ! grep -Fxq -- "$type" "$types_file"; then
+    if [[ -n "$type" ]] && ! grep -Fxq -- "$type" <<< "$types"; then
       fail "unknown backup path type: $path: $type"
       status=1
       entry_ok=0
     fi
-    printf '%s\n' "$path" >> "$paths_file"
+    paths+="$path"$'\n'
     [[ "$entry_ok" -eq 1 ]] && ok "backup path: $path"
   done <<< "$rows"
 
   fail_duplicates "duplicate backup path: " \
-    < <(sort "$paths_file" | uniq -d) || status=1
-  rm -f "$types_file" "$paths_file"
+    < <(sort <<< "$paths" | uniq -d) || status=1
 
   if [[ "$status" -eq 0 ]]; then
     ok "backup path validation passed"
@@ -356,7 +347,7 @@ validate_profile() {
 
   while IFS= read -r module; do
     [[ -z "$module" ]] && continue
-    if grep -Fxq -- "$module" "$known_modules_file"; then
+    if grep -Fxq -- "$module" <<< "$known_modules_list"; then
       ok "module allowed: $module"
     else
       fail "unknown module in $profile: $module"
@@ -366,7 +357,7 @@ validate_profile() {
 
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
-    if grep -Fxq -- "$capability" "$known_caps_file"; then
+    if grep -Fxq -- "$capability" <<< "$known_caps_list"; then
       ok "capability allowed: $capability"
     else
       fail "unknown capability in $profile: $capability"
@@ -414,7 +405,7 @@ validate_profile() {
         status=1
         ;;
     esac
-  done < "$known_caps_file"
+  done <<< "$known_caps_list"
 
   # environmentKind cross-check: boolean capabilities the environmentKind
   # forbids must be false, and enum capabilities must not carry a forbidden
@@ -506,20 +497,19 @@ case "$command" in
     ;;
 esac
 
-known_modules_file="$(mktemp)"
-known_caps_file="$(mktemp)"
-trap 'rm -f "$known_modules_file" "$known_caps_file"' EXIT
-
-known_modules | sort > "$known_modules_file"
-known_capabilities | sort > "$known_caps_file"
+# The known lists are held in variables, not temp files behind an EXIT
+# trap: bash 3.2 runs no EXIT trap when Ctrl-C ends the script, so such
+# files were left in TMPDIR (#329).
+known_modules_list="$(known_modules | sort)"
+known_caps_list="$(known_capabilities | sort)"
 
 # Fail closed if the parsers return nothing: an empty known list would
 # otherwise validate zero items and pass vacuously.
-if [[ ! -s "$known_modules_file" ]]; then
+if [[ -z "$known_modules_list" ]]; then
   fail "no modules parsed from $MODULES_FILE"
   exit 1
 fi
-if [[ ! -s "$known_caps_file" ]]; then
+if [[ -z "$known_caps_list" ]]; then
   fail "no capabilities parsed from $CAPABILITIES_FILE"
   exit 1
 fi
