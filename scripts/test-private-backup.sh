@@ -1740,9 +1740,17 @@ fi
 # non-interactive shell (`./scripts/test-private-backup.sh &`) — is inherited
 # by every run and its tools and cannot be reset by bash, so the signals
 # below would do nothing and every run would finish: skipped with a warning
-# then. A probe that survives its own SIGINT tells.
+# then. A probe that survives its own SIGINT tells. On CI (CI=true, set by
+# GitHub Actions) that is a failure instead, as without age (#330): the
+# workflow runs the suite in the foreground, so a skip there means the cases
+# did not run, not that they passed.
 if bash -c 'kill -INT $$; exit 0' 2>/dev/null; then
-  warn "SIGINT is ignored here (suite started as a background job?); the interrupt cases are skipped"
+  if [[ "${CI:-}" == "true" ]]; then
+    fail "SIGINT is ignored on CI; the interrupt cases must run there (the workflow runs the suite in the foreground)"
+    status=1
+  else
+    warn "SIGINT is ignored here (suite started as a background job?); the interrupt cases are skipped"
+  fi
 else
   sig_home="$fixture_home/sig-home"
   mkdir -p "$sig_home/.ssh" "$sig_home/target"

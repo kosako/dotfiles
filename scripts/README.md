@@ -597,7 +597,8 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   group へ SIGINT)と fake `rm`(temp 配下の最初の削除 = 後始末の途中で、もう一度 group へ SIGINT)で signal を run の
   中から送る(timing の窓を作らない)。終了後に専用 TMPDIR が空で、rc が 130 であること。EXIT trap だけ
   (INT の trap が無い)の実装では 3 case とも temp が残って fail する(bash 3.2 / 5 とも)。SIGINT が無視される
-  環境(非対話 shell の background list `… &` として suite を起動した場合。bash では戻せない)では warn して skip。
+  環境(非対話 shell の background list `… &` として suite を起動した場合。bash では戻せない)では手元は warn して
+  skip、CI(`CI=true`)では fail(age が無いときと同じ形。#330)。
 
 ## test-secrets-gate.sh
 
