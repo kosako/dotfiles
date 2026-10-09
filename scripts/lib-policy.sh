@@ -40,6 +40,84 @@ fail() {
   printf '[fail] %s\n' "$*" >&2
 }
 
+# Values a report did not make itself — another tool's or repo's output and
+# names others can shape (doctor: status.sh, the usage reader, herdr, git, npm,
+# go and corepack output; repo directories and remotes, plugin and rules file
+# names, the backup marker's fields, Codex project keys; report_catalog_drift:
+# the package names and the npm root the managers list) — pass through
+# display_safe before they reach a report line (#335), so a terminal escape or
+# a bidi override in them cannot restyle or spoof the output. Plain text in
+# them still shows as text (the report only states it; whoever reads it
+# treats it as data). Out of scope: the report's own constants, the catalog,
+# paths built from HOME and the environment, and chezmoi's target names.
+# display_safe VALUE — print VALUE (no newline) in a form safe to show on a
+# terminal: valid UTF-8 text is kept as is, and each control character (C0,
+# DEL, C1), bidirectional override / isolate (U+202A-U+202E, U+2066-U+2069)
+# and byte that is not part of valid UTF-8 becomes `?`. Read byte by byte
+# under LC_ALL=C, so the result does not depend on the locale.
+display_safe() {
+  local LC_ALL=C
+  local s="$1" out="" i=0 n need j b c cp seq valid
+  n=${#s}
+  while ((i < n)); do
+    c="${s:i:1}"
+    printf -v b '%d' "'$c"
+    ((b < 0)) && b=$((b + 256))
+    if ((b >= 32 && b < 127)); then
+      out+="$c"
+      i=$((i + 1))
+      continue
+    fi
+    if ((b >= 194 && b <= 223)); then
+      need=1
+      cp=$((b & 31))
+    elif ((b >= 224 && b <= 239)); then
+      need=2
+      cp=$((b & 15))
+    elif ((b >= 240 && b <= 244)); then
+      need=3
+      cp=$((b & 7))
+    else
+      out+='?'
+      i=$((i + 1))
+      continue
+    fi
+    seq="$c"
+    valid=1
+    for ((j = 1; j <= need; j++)); do
+      c="${s:i+j:1}"
+      if [[ -z "$c" ]]; then
+        valid=0
+        break
+      fi
+      printf -v b '%d' "'$c"
+      ((b < 0)) && b=$((b + 256))
+      if ((b < 128 || b > 191)); then
+        valid=0
+        break
+      fi
+      cp=$(((cp << 6) | (b & 63)))
+      seq+="$c"
+    done
+    # Malformed (truncated, overlong, a surrogate, above U+10FFFF): one `?`
+    # for the lead byte, the rest is read again. Well formed but a control
+    # or bidi character: one `?` for the whole character.
+    if ((valid == 0)) || ((need == 2 && cp < 2048)) || ((need == 3 && (cp < 65536 || cp > 1114111))) \
+      || ((cp >= 55296 && cp <= 57343)); then
+      out+='?'
+      i=$((i + 1))
+      continue
+    fi
+    if (((cp >= 128 && cp <= 159) || (cp >= 8234 && cp <= 8238) || (cp >= 8294 && cp <= 8297))); then
+      out+='?'
+    else
+      out+="$seq"
+    fi
+    i=$((i + need + 1))
+  done
+  printf '%s' "$out"
+}
+
 # Next-actions register (#227). A warning that comes with a concrete remedy
 # is reported through `action` instead of `warn`: the [warn] line is emitted
 # unchanged (so the inline reading and the tests keep working) AND the reason
@@ -539,12 +617,12 @@ report_catalog_drift() {
     item "brew: not found (brew sources skipped)"
   fi
   if [[ "$have_npm" -eq 1 ]]; then
-    item "npm: $(command -v npm) (global root: $(npm root -g 2>/dev/null || echo unknown))"
+    item "npm: $(command -v npm) (global root: $(display_safe "$(npm root -g 2>/dev/null || echo unknown)"))"
   else
     item "npm: not found (npm_global sources skipped)"
   fi
   if [[ "$have_go" -eq 1 ]]; then
-    item "go bin: ${gobin:-unknown}"
+    item "go bin: $(display_safe "${gobin:-unknown}")"
   else
     item "go: not found (go_install sources skipped)"
   fi
@@ -658,7 +736,7 @@ report_catalog_drift() {
     while IFS= read -r f; do
       [[ -z "$f" ]] && continue
       grep -Fxq -- "$f" "$decl_brew_formula" || {
-        warn "undeclared: $f (brew_formula leaf not in catalog)"
+        warn "undeclared: $(display_safe "$f") (brew_formula leaf not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$brew_leaves"
@@ -667,7 +745,7 @@ report_catalog_drift() {
     while IFS= read -r c; do
       [[ -z "$c" ]] && continue
       grep -Fxq -- "$c" "$decl_brew_cask" || {
-        warn "undeclared: $c (brew_cask not in catalog)"
+        warn "undeclared: $(display_safe "$c") (brew_cask not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$brew_casks"
@@ -677,7 +755,7 @@ report_catalog_drift() {
       [[ -z "$n" ]] && continue
       case "$n" in npm|corepack) continue ;; esac
       grep -Fxq -- "$n" "$decl_npm" || {
-        warn "undeclared: $n (npm global not in catalog)"
+        warn "undeclared: $(display_safe "$n") (npm global not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$npm_globals"
@@ -696,7 +774,7 @@ report_catalog_drift() {
         go|gofmt) continue ;;
       esac
       grep -Fxq -- "$b" "$decl_go_bins" || {
-        warn "undeclared: $b (go binary not in catalog)"
+        warn "undeclared: $(display_safe "$b") (go binary not in catalog)"
         drift_count=$((drift_count + 1))
       }
     done < "$go_bins"

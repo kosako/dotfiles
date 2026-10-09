@@ -5,81 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 
-# Values doctor did not make itself — another tool's or repo's output (status.sh,
-# the usage reader, herdr, npm) and names others can shape (repo directories
-# and remotes, plugin and rules file names, the backup marker's fields, Codex
-# project keys) — pass through display_safe before they reach a report line
-# (#335), so a terminal escape or a bidi override in them cannot restyle or
-# spoof doctor's output. Plain text in them still shows as text (doctor only
-# reports it; whoever reads the report treats it as data).
-# display_safe VALUE — print VALUE (no newline) in a form safe to show on a
-# terminal: valid UTF-8 text is kept as is, and each control character (C0,
-# DEL, C1), bidirectional override / isolate (U+202A-U+202E, U+2066-U+2069)
-# and byte that is not part of valid UTF-8 becomes `?`. Read byte by byte
-# under LC_ALL=C, so the result does not depend on the locale.
-display_safe() {
-  local LC_ALL=C
-  local s="$1" out="" i=0 n need j b c cp seq valid
-  n=${#s}
-  while ((i < n)); do
-    c="${s:i:1}"
-    printf -v b '%d' "'$c"
-    ((b < 0)) && b=$((b + 256))
-    if ((b >= 32 && b < 127)); then
-      out+="$c"
-      i=$((i + 1))
-      continue
-    fi
-    if ((b >= 194 && b <= 223)); then
-      need=1
-      cp=$((b & 31))
-    elif ((b >= 224 && b <= 239)); then
-      need=2
-      cp=$((b & 15))
-    elif ((b >= 240 && b <= 244)); then
-      need=3
-      cp=$((b & 7))
-    else
-      out+='?'
-      i=$((i + 1))
-      continue
-    fi
-    seq="$c"
-    valid=1
-    for ((j = 1; j <= need; j++)); do
-      c="${s:i+j:1}"
-      if [[ -z "$c" ]]; then
-        valid=0
-        break
-      fi
-      printf -v b '%d' "'$c"
-      ((b < 0)) && b=$((b + 256))
-      if ((b < 128 || b > 191)); then
-        valid=0
-        break
-      fi
-      cp=$(((cp << 6) | (b & 63)))
-      seq+="$c"
-    done
-    # Malformed (truncated, overlong, a surrogate, above U+10FFFF): one `?`
-    # for the lead byte, the rest is read again. Well formed but a control
-    # or bidi character: one `?` for the whole character.
-    if ((valid == 0)) || ((need == 2 && cp < 2048)) || ((need == 3 && (cp < 65536 || cp > 1114111))) \
-      || ((cp >= 55296 && cp <= 57343)); then
-      out+='?'
-      i=$((i + 1))
-      continue
-    fi
-    if (((cp >= 128 && cp <= 159) || (cp >= 8234 && cp <= 8238) || (cp >= 8294 && cp <= 8297))); then
-      out+='?'
-    else
-      out+="$seq"
-    fi
-    i=$((i + need + 1))
-  done
-  printf '%s' "$out"
-}
-
 # Arguments: [PROFILE] [--actions-only]. --actions-only mutes every report
 # line except [fail] and the closing next-actions summary (#227), so the
 # list of things to run can be read (or redirected) without scanning the
@@ -132,7 +57,7 @@ done
 
 section "chezmoi"
 if command -v chezmoi >/dev/null 2>&1; then
-  ok "chezmoi: $(chezmoi --version 2>/dev/null | head -n 1)"
+  ok "chezmoi: $(display_safe "$(chezmoi --version 2>/dev/null | head -n 1)")"
 else
   warn "chezmoi not found"
 fi
@@ -140,7 +65,7 @@ ok "source directory: $DOTFILES_ROOT"
 
 section "Git"
 if command -v git >/dev/null 2>&1; then
-  ok "git: $(git --version)"
+  ok "git: $(display_safe "$(git --version)")"
   use_config_only="$(git config --global --get user.useConfigOnly || true)"
   credentials_in_url="$(git config --global --get transfer.credentialsInUrl || true)"
   if [[ "$use_config_only" == "true" ]]; then
@@ -198,7 +123,7 @@ if command -v git >/dev/null 2>&1; then
     elif [[ "$excludes_setting" == empty ]]; then
       warn "global gitignore: core.excludesFile is explicitly empty (global or system config), so git reads NO global excludes file — the managed $managed_ignore is not in effect; unset the key to restore git's default location"
     elif [[ "$effective_ignore" != "$managed_ignore" && ! "$effective_ignore" -ef "$managed_ignore" ]]; then
-      warn "global gitignore: git reads $effective_ignore, not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
+      warn "global gitignore: git reads $(display_safe "$effective_ignore"), not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
     else
       missing_ignore_patterns=""
       for ignore_pattern in '.agent-packets/' '**/.claude/settings.local.json'; do
@@ -549,7 +474,7 @@ if [[ "$corepack_mode" == "off" ]]; then
 elif ! command -v corepack >/dev/null 2>&1; then
   warn "corepack not found"
 else
-  ok "corepack: $(corepack --version 2>/dev/null || true)"
+  ok "corepack: $(display_safe "$(corepack --version 2>/dev/null || true)")"
   if [[ "$corepack_mode" == "enable" ]]; then
     for pm in pnpm yarn; do
       pm_path="$(command -v "$pm" 2>/dev/null || true)"
@@ -600,7 +525,7 @@ report_go_install_target() {
     # usage reader's install-packages step (later section), because the
     # installer judges "installed" by this same target and would skip a
     # tool already sitting in the old one.
-    action "go install target is $target, not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
+    action "go install target is $(display_safe "$target"), not ~/go/bin — catalog go_install tools (e.g. tacho for the statusLine and the usage reader) land outside the managed path, and install-packages.sh judges them installed there" \
       "\$ chezmoi apply $(printf '%q' "$home_dir/.config/mise/config.toml") $(printf '%q' "$home_dir/.zshenv")   # leaves GOBIN unset; ~/go/bin on PATH" \
       "\$ exec env -u GOBIN -u GOPATH zsh -l   # a new shell: an exported GOBIN / GOPATH is inherited otherwise (go.set_gobin only stops mise from setting it)" \
       "# and do not set GOBIN / GOPATH elsewhere (e.g. ~/.zshrc.local); then re-run doctor"
@@ -1067,8 +992,8 @@ report_codex_rules_probes() {
   else
     item "Codex approval-rules baseline not applied yet (chezmoi apply deploys ~/.codex/rules/default.rules)"
   fi
-  # Names only (never the content); a name is attacker-shapeable, so anything
-  # outside printable ASCII is shown as '?'.
+  # Names only (never the content); a name is attacker-shapeable, so it is
+  # shown through display_safe.
   for rules_name in ${unmanaged_rules[@]+"${unmanaged_rules[@]}"}; do
     warn "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/$(display_safe "$rules_name") (not managed by dotfiles, so its grants never show as drift; probed below — remove it, or fold vetted rules into the managed baseline)"
   done

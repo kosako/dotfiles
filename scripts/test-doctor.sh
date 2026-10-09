@@ -4457,16 +4457,17 @@ rm -rf "$dr_home/.config/chezmoi"
 
 # DS) display_safe (#335): values doctor did not make itself reach a report
 #     line only through display_safe. DS-U checks the helper itself
-#     (extracted from doctor.sh, run under LC_ALL=C and the inherited
+#     (extracted from lib-policy.sh, run under LC_ALL=C and the inherited
 #     locale); DS-1 plants a terminal escape, a BEL, a C1 control, a bidi
-#     override and invalid UTF-8 in every such source at once — another
-#     tool's output (agent-tools status.sh, herdr, npm) and names others can
-#     shape (a repo directory, OpenCode plugin files, the backup marker, a
-#     Codex project key) — and expects each shown with `?` in its place and
-#     not one raw byte of them anywhere in the report. The usage reader's
-#     reason and the Codex rules file names are pinned in their own sections
-#     (UR-3b, AIP-5).
-ds_fns="$(sed -n '/^display_safe() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+#     override and an invalid byte in every such source at once — another
+#     tool's output (agent-tools status.sh, herdr, npm, git, chezmoi,
+#     corepack, go, brew, as doctor and its catalog drift read them) and
+#     names others can shape (a repo directory, OpenCode plugin files, the
+#     backup marker, a Codex project key, core.excludesFile, a go binary) —
+#     and expects each shown with `?` in its place and not one raw byte of
+#     them anywhere in the report. The usage reader's reason and the Codex
+#     rules file names are pinned in their own sections (UR-3b, AIP-5).
+ds_fns="$(sed -n '/^display_safe() {/,/^}/p' "$SCRIPT_DIR/lib-policy.sh")"
 # ds_misses LOCALE — run the helper cases under LC_ALL=LOCALE ('' keeps the
 # inherited locale); print each miss.
 ds_misses() {
@@ -4491,13 +4492,15 @@ ds_misses() {
     ds_case "overlong"$'\xc0\xaf'" "$'\xe0\x80\xaf' 'overlong?? ???' "$1"
     ds_case "surrogate"$'\xed\xa0\x80' 'surrogate???' "$1"
     ds_case "emoji"$'\xf0\x9f\x98\x80' "emoji"$'\xf0\x9f\x98\x80' "$1"
+    ds_case "min4"$'\xf0\x90\x80\x80'" max"$'\xf4\x8f\xbf\xbf' "min4"$'\xf0\x90\x80\x80'" max"$'\xf4\x8f\xbf\xbf' "$1"
+    ds_case "overlong4"$'\xf0\x80\x80\x80' 'overlong4????' "$1"
     ds_case "toohigh"$'\xf4\x90\x80\x80' 'toohigh????' "$1"
     ds_case "q'and\"dq" "q'and\"dq" "$1"
     ds_case '' '' "$1"
   )
 }
 if [[ -z "$ds_fns" ]]; then
-  fail "test failed: display_safe not found in doctor.sh"
+  fail "test failed: display_safe not found in lib-policy.sh"
   status=1
 elif ds_out="$(ds_misses C; ds_misses '')" && [[ -z "$ds_out" ]]; then
   ok "test passed: display_safe keeps valid UTF-8 and turns controls, bidi overrides and invalid bytes into ? (locale-independent)"
@@ -4513,6 +4516,8 @@ ds_esc=$'\033'
 ds_bel=$'\007'
 ds_c1=$'\xc2\x9b'
 ds_rlo=$'\xe2\x80\xae'
+ds_ff=$'\xff'
+ds_real_git="$(command -v git)"
 mkdir -p "$ds_home/.config/opencode/plugins" "$ds_home/.local/state/dotfiles" "$ds_home/.codex" "$ds_bin" "$ds_home/at/scripts"
 # another tool's output: agent-tools status.sh, herdr, npm
 write_root_pinned_status_sh "$ds_home/at/scripts/status.sh" \
@@ -4530,11 +4535,54 @@ cat > "$ds_bin/npm" <<SH
 #!/bin/sh
 case "\$1" in
   --version) printf '%s\n' "1${ds_esc}[2J" ;;
-  config) [ "\$3" = userconfig ] && printf '%s\n' "/x${ds_c1}y/.npmrc" || printf 'true\n' ;;
+  config) [ "\$3" = userconfig ] && printf '%s\n' "/x${ds_c1}y${ds_ff}z/.npmrc" || printf 'true\n' ;;
+  root) printf '%s\n' "/r${ds_esc}[1moot" ;;
+  ls) printf '%s\n' '{"dependencies":{"ev\\u001b[31mil":{}}}' ;;
 esac
 exit 0
 SH
-chmod +x "$ds_bin/herdr" "$ds_bin/opencode" "$ds_bin/npm"
+cat > "$ds_bin/git" <<SH
+#!/bin/sh
+if [ "\$1" = --version ]; then printf '%s\n' "git version 2${ds_esc}[2J"; exit 0; fi
+exec "$ds_real_git" "\$@"
+SH
+cat > "$ds_bin/chezmoi" <<SH
+#!/bin/sh
+if [ "\$1" = --version ]; then printf '%s\n' "chezmoi version v2${ds_bel}x"; exit 0; fi
+exit 1
+SH
+cat > "$ds_bin/corepack" <<SH
+#!/bin/sh
+printf '%s\n' "0.3${ds_rlo}1"
+SH
+cat > "$ds_bin/brew" <<SH
+#!/bin/sh
+case "\$*" in
+  leaves*) printf '%s\n' "le${ds_esc}[31maf" ;;
+  "list --cask"*) printf '%s\n' "ca${ds_c1}sk" ;;
+esac
+exit 0
+SH
+# A bidi override, not a control: go_bin_dir refuses a path with a control
+# character, and under a UTF-8 locale macOS counts U+202E as one too, so the
+# run is in the C locale (display_safe does not depend on it; DS-U checks).
+ds_gobin="$ds_home/g${ds_rlo}o/bin"
+mkdir -p "$ds_gobin"
+: > "$ds_gobin/b${ds_esc}[31min"
+chmod +x "$ds_gobin/b${ds_esc}[31min"
+cat > "$ds_bin/go" <<SH
+#!/bin/sh
+[ "\$1" = env ] || exit 2
+case "\$2" in
+  GOBIN) printf '%s\n' "$ds_gobin" ;;
+  GOPATH) printf '%s\n' "$ds_home/go" ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$ds_bin/herdr" "$ds_bin/opencode" "$ds_bin/npm" "$ds_bin/git" "$ds_bin/chezmoi" "$ds_bin/corepack" "$ds_bin/brew" "$ds_bin/go"
+printf '[core]\n\texcludesFile = /ex%scl%sudes\n' "$ds_esc" "$ds_rlo" > "$ds_home/.gitconfig"
+mkdir -p "$ds_home/.config/git"
+: > "$ds_home/.config/git/ignore"
 # names others can shape: a repo directory, plugin files, the marker, a
 # Codex project key
 ds_repo="$ds_home/src/personal/re${ds_esc}[31mpo"
@@ -4548,14 +4596,25 @@ printf '{"plugin":["personal-w\\u001b[1m"]}\n' > "$ds_home/.config/opencode/open
 printf '{"schema_version":1,"last_success":"2026%s[2J","archive":"a%sb.age","file_count":2,"capture_incomplete":false}\n' "$ds_esc" "$ds_rlo" \
   > "$ds_home/.local/state/dotfiles/private-backup.json"
 printf '[projects."/gone\\u202eproj"]\ntrust_level = "trusted"\n' > "$ds_home/.codex/config.toml"
-if ds_out="$(env -u OPENCODE_CONFIG -u XDG_DATA_HOME -u XDG_CONFIG_HOME HOME="$ds_home" AGENT_TOOLS="$ds_home/at" \
-    PATH="$ds_bin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if ds_out="$(env -u OPENCODE_CONFIG -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u GIT_CONFIG_GLOBAL HOME="$ds_home" AGENT_TOOLS="$ds_home/at" \
+    GIT_CONFIG_NOSYSTEM=1 LC_ALL=C PATH="$ds_bin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   ds_missing=""
   for ds_line in \
     "[warn] check manifest_validation: fail?[2J" \
     "[warn] agent-tools sync conflicts (unmanaged same-name targets; tools: co?]0;x?dex); sync must not change them" \
     "[info] - herdr's own view: opencode integration not?[2J installed (" \
-    "[info] - npm userconfig=/x?y/.npmrc" \
+    "[info] - npm userconfig=/x?y?z/.npmrc" \
+    "[ok] git: git version 2?[2J" \
+    "[ok] chezmoi: chezmoi version v2?x" \
+    "[ok] corepack: 0.3?1" \
+    "[warn] global gitignore: git reads /ex?cl?udes, not the managed" \
+    "[warn] go install target is $ds_home/g?o/bin, not ~/go/bin" \
+    "[info] - go bin: $ds_home/g?o/bin" \
+    "[warn] undeclared: b?[31min (go binary not in catalog)" \
+    "(global root: /r?[1moot)" \
+    "[warn] undeclared: ev?[31mil (npm global not in catalog)" \
+    "[warn] undeclared: le?[31maf (brew_formula leaf not in catalog)" \
+    "[warn] undeclared: ca?sk (brew_cask not in catalog)" \
     "[warn] credential-like userinfo in remote URL: repo=$ds_home/src/personal/re?[31mpo remote=origin (URL not shown)" \
     "[ok] agent-tools plugin personal-x?[31m.js in the global plugins dir" \
     "[warn] agent-tools plugin personal-w?[1m is also listed in an OpenCode config's plugin key" \
@@ -4567,7 +4626,7 @@ if ds_out="$(env -u OPENCODE_CONFIG -u XDG_DATA_HOME -u XDG_CONFIG_HOME HOME="$d
     grep -Fq -- "$ds_line" <<< "$ds_out" || ds_missing+="  $ds_line"$'\n'
   done
   ds_raw=""
-  for ds_byte in "$ds_esc" "$ds_bel" "$ds_c1" "$ds_rlo"; do
+  for ds_byte in "$ds_esc" "$ds_bel" "$ds_c1" "$ds_rlo" "$ds_ff"; do
     LC_ALL=C grep -Fq -- "$ds_byte" <<< "$ds_out" && ds_raw+=" $(printf '%q' "$ds_byte")"
   done
   if [[ -z "$ds_missing" && -z "$ds_raw" ]] && ! grep -Fq "canary-ds-335" <<< "$ds_out"; then

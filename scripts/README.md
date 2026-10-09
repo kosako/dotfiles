@@ -72,13 +72,15 @@ policy validation が失敗した場合は exit 1。
 
 導入後または現状環境の健康診断を行う。section は出力順に次のとおり(最後に next actions の一覧。下記)。
 
-doctor が自分で作っていない値 — 他の tool や repo の出力(agent-tools の `status.sh`・usage reader の理由・herdr の状態・
-npm の版と設定値)と、他人が形を決められる名前(repo の dir と git remote、OpenCode の plugin と Codex の rules の
-file 名、backup の marker の欄、Codex の project の key)— は、共通の `display_safe` を通してから表示する(#335)。
-正しい UTF-8 の文字はそのまま残し、制御文字(C0・DEL・C1)、bidi の override / isolate(U+202A〜U+202E・
-U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする。判定は byte 単位で locale に依らない。terminal の escape 列で
-表示を崩したり偽装したりできなくするためで、文字列の中身(指示文など)は text のまま出る(読む側は data として扱う)。
-doctor 自身の定数、HOME と環境変数から組む path、`chezmoi status` の target 名(repo が決める)は対象外。
+doctor が自分で作っていない値は、`lib-policy.sh` の共通の `display_safe` を通してから表示する(#335)。対象は、他の
+tool や repo の出力(agent-tools の `status.sh`・usage reader の理由・herdr の状態・git / chezmoi / corepack / npm の版・
+npm の設定値・`go env` の行き先・`core.excludesFile`)と、他人が形を決められる名前(repo の dir と git remote、OpenCode
+の plugin と Codex の rules の file 名、backup の marker の欄、Codex の project の key、catalog drift が manager から読む
+package と go の実行ファイルの名前・`npm root -g`)。正しい UTF-8 の文字はそのまま残し、制御文字(C0・DEL・C1)、bidi の
+override / isolate(U+202A〜U+202E・U+2066〜U+2069)、UTF-8 として不正な byte を `?` にする。判定は byte 単位で locale に
+依らない。terminal の escape 列で表示を崩したり偽装したりできなくするためで、文字列の中身(指示文など)は text のまま出る
+(読む側は data として扱う)。doctor 自身の定数、catalog の中身、HOME と環境変数から組む path(`command -v` の結果を含む)、
+`chezmoi status` の target 名(repo が決める)は対象外。
 
 - doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
 - chezmoi: chezmoi の version と source directory。
@@ -416,12 +418,14 @@ query だけを実機で実行する(書き込みはしない)。
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。reader も取り出し、
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
-- display_safe(#335): helper を doctor.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字)を残し、C0・DEL・C1・bidi の
-  制御・不正な UTF-8(途中で切れた列・overlong・surrogate・U+10FFFF 超)を `?` にすることを、`LC_ALL=C` と継承した locale の
-  両方で確かめる。専用の HOME で 1 回 doctor を走らせ、status.sh・herdr・npm の出力、repo の dir 名、OpenCode の plugin の
-  file 名(config の `plugin` 欄にも載るものを含む)、backup の marker、Codex の project の key に escape・BEL・C1・RLO を
-  仕込み、それぞれが `?` で出ることと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の
-  rules の file 名は AI policy の case で固定する。
+- display_safe(#335): helper を lib-policy.sh から取り出し、正しい UTF-8(日本語・NBSP・絵文字・U+10000 と U+10FFFF)を残し、
+  C0・DEL・C1・bidi の制御・不正な UTF-8(途中で切れた列・2〜4 byte の overlong・surrogate・U+10FFFF 超)を `?` にすることを、
+  `LC_ALL=C` と継承した locale の両方で確かめる。専用の HOME で 1 回 doctor を走らせ(C locale。macOS の UTF-8 locale では
+  bidi の文字も `[[:cntrl:]]` に当たり、go の行き先の検査が先に弾くため)、status.sh・herdr・npm・git・chezmoi・corepack・go・
+  brew の出力、repo の dir 名、OpenCode の plugin の file 名(config の `plugin` 欄にも載るものを含む)、backup の marker、Codex の
+  project の key、`core.excludesFile`、go の実行ファイル名に escape・BEL・C1・RLO・不正な byte を仕込み、それぞれが `?` で出る
+  ことと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の rules の file 名は AI policy の
+  case で固定する。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
