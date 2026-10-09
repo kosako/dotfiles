@@ -190,6 +190,25 @@ validate_extracted_tree() {
   return 0
 }
 
+# remove_workdir DIR — the EXIT cleanup of a 0700 temp a foreign archive
+# was extracted into (verify / restore). `tar -xp` restores the archive's
+# modes, so a crafted archive can leave a directory without permissions
+# (mode 000) that a plain `rm -rf` cannot empty as a non-root user, keeping
+# decrypted content on disk. Directories are opened first, without following
+# symlinks (find does not follow them, and -type d never matches one), then
+# removed; errors stay quiet (they would carry archive-derived names). What
+# still could not be removed is named by the temp's own path (#335).
+remove_workdir() {
+  local dir="$1"
+  [[ -n "$dir" && -e "$dir" ]] || return 0
+  find "$dir" -type d -exec chmod u+rwx {} \; 2>/dev/null || true
+  rm -rf "$dir" 2>/dev/null || true
+  if [[ -e "$dir" ]]; then
+    warn "could not remove the temp $dir completely; remove it by hand (it may hold decrypted content)"
+  fi
+  return 0
+}
+
 # Require age and yq up front; both are fail-closed dependencies.
 require_tools() {
   local missing=0
@@ -740,7 +759,7 @@ cmd_verify() {
   # Script-global (not local) so the deferred EXIT trap still sees it.
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-verify.XXXXXX")"
   chmod 700 "$workdir"
-  trap 'rm -rf "$workdir"' EXIT
+  trap 'remove_workdir "$workdir"' EXIT
   local extract="$workdir/extract"
   mkdir -p "$extract"
 
@@ -788,7 +807,7 @@ cmd_restore() {
 
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-restore.XXXXXX")"
   chmod 700 "$workdir"
-  trap 'rm -rf "$workdir"' EXIT
+  trap 'remove_workdir "$workdir"' EXIT
   local extract="$workdir/extract"
   mkdir -p "$extract"
 

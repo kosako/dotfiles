@@ -498,7 +498,9 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
 - 通常の file の mode を持たせた hardlink の header(python3 で byte 単位に作る。無ければ skip)を verify が拒否すること
   (bsdtar では展開後の検査で、GNU tar では展開前の一覧の検査で)。展開後の検査を private-backup.sh から取り出し、
-  symlink・fifo・hardlink を拒否し、通常の file と dir の tree を通し、辿れない dir を拒否することを直接確かめる(#335)。
+  symlink・fifo・hardlink を拒否し、通常の file と dir の tree を通し、辿れない dir を拒否することを、戻り値と message の両方で直接
+  確かめる。mode 000 の dir(中に file)を残す archive を verify が拒否し、その後に temp が中身ごと消え、archive 由来の名前が
+  出ないことも確かめる(root では飛ばす。#335)。
 - 拒否 profile(work)では backup が実行拒否し、アーカイブを書かないこと。
 - 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
 - local 補足リストの構造不正(#246): path の無い entry・category の `|`・path 内の改行・list の代わりの scalar

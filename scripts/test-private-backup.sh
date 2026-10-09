@@ -239,20 +239,67 @@ with open(out, "wb") as f:
     f.write(data)
 PY
   age -r "$recipient" -o "$fixture_home/out/hardlink-mode.age" "$hl_tar"
-  out="$(run verify --in "$fixture_home/out/hardlink-mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
+  hl_rc=0
+  out="$(run verify --in "$fixture_home/out/hardlink-mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || hl_rc=$?
   if [[ "$(tar -tvf "$hl_tar" 2>/dev/null | awk '$NF == "./files/a" && $(NF - 2) == "link" { print substr($1, 1, 1) }')" == "-" ]]; then
     hl_expect="archive extracted a hardlinked member; rejected after extraction, before anything is restored"
   else
     hl_expect="archive has a non-regular member (symlink/hardlink/special); rejected before extraction"
   fi
-  if grep -Fq "$hl_expect" <<< "$out" && ! grep -Fq "members validated, extracted" <<< "$out"; then
+  if [[ "$hl_rc" -ne 0 ]] && grep -Fq "$hl_expect" <<< "$out" && ! grep -Fq "members validated, extracted" <<< "$out"; then
     pass "verify rejects a hardlink header carrying a regular mode (this tar: $hl_expect)"
   else
     printf '%s\n' "$out" >&2
-    miss "verify did not reject a hardlink header carrying a regular mode (expected: $hl_expect)"
+    miss "verify did not reject a hardlink header carrying a regular mode (expected: $hl_expect; exit $hl_rc)"
   fi
 else
   warn "python3 not found; skipping the crafted hardlink-mode archive case"
+fi
+
+# 8b2b. An archive that leaves a directory without permissions (mode 000,
+#       with a file under it) is rejected — the extracted tree cannot be
+#       walked — and the 0700 temp is still removed afterwards, its content
+#       included, with no archive-derived name in the output (#335). Run
+#       with a TMPDIR of its own so a leftover temp shows. Skipped as root
+#       (root walks and removes the directory anyway).
+if command -v python3 >/dev/null 2>&1 && [[ "$(id -u)" != "0" ]]; then
+  locked_tar="$fixture_home/out/locked-dir.tar"
+  python3 - "$locked_tar" <<'PY'
+import io
+import sys
+import tarfile
+
+out = sys.argv[1]
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+    for name, mode in (("./files", 0o755), ("./files/canary-pb-locked", 0o000)):
+        ti = tarfile.TarInfo(name)
+        ti.type = tarfile.DIRTYPE
+        ti.mode = mode
+        tf.addfile(ti)
+    for name, data in (("./manifest.json", b"{}\n"), ("./files/canary-pb-locked/x", b"secret\n")):
+        ti = tarfile.TarInfo(name)
+        ti.size = len(data)
+        ti.mode = 0o600
+        tf.addfile(ti, io.BytesIO(data))
+with open(out, "wb") as f:
+    f.write(buf.getvalue())
+PY
+  age -r "$recipient" -o "$fixture_home/out/locked-dir.age" "$locked_tar"
+  locked_tmp="$fixture_home/locked-tmp"
+  mkdir -p "$locked_tmp"
+  locked_rc=0
+  out="$(TMPDIR="$locked_tmp" run verify --in "$fixture_home/out/locked-dir.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || locked_rc=$?
+  locked_left="$(find "$locked_tmp" -mindepth 1 -maxdepth 1 2>/dev/null)"
+  if [[ "$locked_rc" -ne 0 && -z "$locked_left" ]] \
+    && grep -Fq "could not inspect the extracted archive; rejected before anything is restored" <<< "$out" \
+    && ! grep -Fq "canary-pb-locked" <<< "$out"; then
+    pass "verify rejects an archive that leaves a mode 000 directory, and its temp is still removed"
+  else
+    printf '%s\nleft: %s\n' "$out" "$locked_left" >&2
+    miss "an archive leaving a mode 000 directory was not rejected, or its temp was left behind (exit $locked_rc)"
+  fi
+  find "$locked_tmp" -type d -exec chmod u+rwx {} \; 2>/dev/null || true
 fi
 
 # 8b3. The extracted-tree check itself, on trees tar may leave behind
@@ -262,18 +309,21 @@ fi
 #      Extracted from private-backup.sh and run in a subshell.
 vt_fns="$(sed -n '/^validate_extracted_tree() {/,/^}/p' "$PB")"
 vt_root="$fixture_home/vt"
+# vt_case LABEL WANT DIR — WANT is "accepted" (return 0, nothing said) or
+# the failure message expected with a non-zero return.
 vt_case() {
-  local label="$1" want="$2" dir="$3" got
+  local label="$1" want="$2" dir="$3" got rc=0
   got="$(
     fail() { printf '%s\n' "$*"; }
     eval "$vt_fns"
-    if validate_extracted_tree "$dir"; then echo accepted; fi
-  )"
-  if [[ "$got" == *"$want"* ]]; then
+    validate_extracted_tree "$dir"
+  )" || rc=$?
+  if { [[ "$want" == accepted ]] && [[ "$rc" -eq 0 && -z "$got" ]]; } \
+    || { [[ "$want" != accepted ]] && [[ "$rc" -ne 0 && "$got" == *"$want"* ]]; }; then
     pass "extracted-tree check: $label"
   else
     printf '%s\n' "$got" >&2
-    miss "extracted-tree check: $label (expected: $want)"
+    miss "extracted-tree check: $label (expected: $want; returned $rc)"
   fi
 }
 if [[ -z "$vt_fns" ]]; then

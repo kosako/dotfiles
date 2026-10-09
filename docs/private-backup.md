@@ -175,7 +175,8 @@ secret ではないが repo にはコミットしない)。
     archive にどちらも入らない。find が辿れない dir が残った場合も拒否する。
   - 展開の途中で temp の外へ書かれないこと(絶対 path や `..` を含む link 先)は、展開前の名前の検査と、
     bsdtar / GNU tar の既定の安全な展開に依る。
-- 復号物・一時展開は確実に削除(trap)し平文を残さない。
+- 復号物・一時展開は確実に削除(trap)し平文を残さない。verify / restore の temp は、archive が権限の無い dir(mode 000)を
+  残しても、symlink を辿らずに dir を開けてから消す。それでも消せなければ temp の path を出して知らせる(#335)。
 - doctor は report-only。public baseline の解決と、marker 由来の要約(バックアップ有無 / 最終日時 /
   archive の basename / file 数 / 捕捉の完全性 = `capture_incomplete`。扱いは上記 #242 の項)のみ表示し、
   local 補足は **存在のみ**(中身・件数を出さない。`docs/local-overrides.md` の規約に従う)。
