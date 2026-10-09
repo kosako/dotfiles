@@ -21,7 +21,7 @@
 - **modern CLI**: eza(`ls` 系 alias)/ bat(`cat` alias、pager 無しで cat 風)。**alias は対話シェル限定**でスクリプトに影響せず、`command ls` / `command cat` で原本に届く。ripgrep / fd は単体で使う検索ツール(fzf の既定 walker は内蔵のもの。詳細は後述の fzf 節)。
 - **runtime/env(別レイヤを compose)**: mise activate(対話)+ direnv hook。mise = runtime version、direnv = project env / op secret 注入([docs/runtime.md](runtime.md) / [docs/secrets.md](secrets.md))。新しい version スイッチャ(nvm/pyenv 等)は入れない(mise と競合)。
 
-読み込み順序は widget の wrap 関係に従う: compinit → fzf-tab → fzf / zoxide / starship / direnv / mise → alias → local override → zsh-autosuggestions → zsh-syntax-highlighting(最後)。
+読み込み順序は widget の wrap 関係に従う: compinit → fzf-tab → fzf / zoxide / starship / direnv / mise → alias → local override → zsh-autosuggestions → zsh-syntax-highlighting(最後)。mise 以降の順序と PATH の前後関係は `scripts/test-zshrc-order.sh` が固定する(#333)。
 
 ## 使い方(対話シェル操作、#96)
 
