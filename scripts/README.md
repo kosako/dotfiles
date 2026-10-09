@@ -423,6 +423,9 @@ query だけを実機で実行する(書き込みはしない)。
 - Git の節(#307): global の `user.useConfigOnly=true` / `transfer.credentialsInUrl=die` でなければ warn、そうなら ok。remote URL の
   scan が `~/src` の personal / work / client / sandbox / agent のすべてを巡り、credential らしい userinfo の remote を URL を
   出さずに warn すること(canary で pin)。
+- remote URL scan の INCOMPLETE(#359): `.git/config` が読めない repo、配下に開けない dir がある root、root 自身が開けないとき、
+  それぞれを名指しで warn し(URL は canary で非表示を pin)、読めた repo の flag と件数はそのまま、`scanned repositories` は
+  読めた repo だけを数え、clean の ok を出さず exit 0。root では skip。
 - git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
   欠けた旧 deploy、または実行 bit の無い gate → commit が止まる warn / 配線なし + dispatcher だけ → 両方が不完全の warn。
   doctor の一覧が短くなれば落ちる。

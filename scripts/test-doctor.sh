@@ -2363,6 +2363,69 @@ else
 fi
 rm -rf "$gs_home"
 
+# GS-2) remote URL scan INCOMPLETE (#359): a remote config that cannot be
+#       read and a root that cannot be listed completely are failures, not
+#       clean repos — each is named (the URL, a canary, never shown), the
+#       repos that could be read are still flagged and counted, the clean ok
+#       is withheld, and doctor stays exit 0. Run from a copy of the checkout
+#       so the scanned count is the fixture's alone. Skipped as root (root
+#       reads mode 000).
+if [[ "$(id -u)" != "0" ]]; then
+  gs2_home="$fixture_home/gs2-home"
+  gs2_copy="$fixture_home/gs2-dotfiles"
+  gs2_canary="canary-remote-userinfo-359"
+  rm -rf "$gs2_home" "$gs2_copy"
+  copy_repo_fixture "$gs2_copy"
+  mkdir -p "$gs2_home"
+  : > "$gs2_home/.gitconfig"
+  gs2_git() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+  gs2_run() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 "$gs2_copy/scripts/doctor.sh" personal 2>&1; }
+  #     GS-2a) a repo whose .git/config cannot be read, next to a repo with no
+  #            remote: the former is INCOMPLETE, the latter scanned (count 1).
+  gs2_git init -q --template= "$gs2_home/src/personal/locked"
+  gs2_git -C "$gs2_home/src/personal/locked" remote add origin "https://user:$gs2_canary@example.invalid/x.git"
+  gs2_git init -q --template= "$gs2_home/src/personal/clean"
+  chmod 000 "$gs2_home/src/personal/locked/.git/config"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: the remote config of repo=$gs2_home/src/personal/locked could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 1 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 1" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a remote config that cannot be read reports the scan INCOMPLETE (named, not counted, no false clean)"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: an unreadable remote config was read as clean"
+    status=1
+  fi
+  chmod 644 "$gs2_home/src/personal/locked/.git/config"
+  #     GS-2b) a root with a dir that cannot be opened and a root that cannot
+  #            be opened at all: both listings are INCOMPLETE, while the repos
+  #            the listing did print (and the now readable one) are flagged.
+  gs2_git init -q --template= "$gs2_home/src/work/flagged"
+  gs2_git -C "$gs2_home/src/work/flagged" remote add origin "https://user:$gs2_canary@example.invalid/y.git"
+  mkdir -p "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  chmod 000 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/personal/locked remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/work/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: repositories under $gs2_home/src/work could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: repositories under $gs2_home/src/client could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remotes with credential-like userinfo: 2" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 2 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 3" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a root that cannot be listed completely reports the scan INCOMPLETE while the repos it did list are still flagged"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: a root that cannot be listed completely was read as clean or its listed repos were dropped"
+    status=1
+  fi
+  chmod 755 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  rm -rf "$gs2_home" "$gs2_copy"
+fi
+
 # HG) git hook gates readiness on a module-active profile (#307): the
 #     observer side of the two-key gate. Each case plants the agent-tools
 #     deploy (all four scripts, a subset, or one not executable) and the
