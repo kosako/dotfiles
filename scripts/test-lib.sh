@@ -115,3 +115,22 @@ copy_repo_fixture() {
   cp -R "$DOTFILES_ROOT/scripts" "$dest/scripts"
   cp "$DOTFILES_ROOT/.chezmoidata/"*.yaml "$dest/.chezmoidata/"
 }
+
+# shell_single_quote VALUE — VALUE in single quotes, each ' written as '\''.
+# shell_word VALUE — VALUE as .chezmoitemplates/shell-word renders a path into
+# a command string: unchanged when it holds only plain characters, else
+# single-quoted (#329). For expected command strings built from the host's
+# $HOME, so a home with a space or a quote does not break the comparison.
+# sed, not ${VALUE//...}: bash 3.2 keeps quotes and backslashes of the
+# replacement string literally.
+shell_single_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+shell_word() {
+  local re='^[A-Za-z0-9_@%+=:,./-]+$'
+  if [[ "$1" =~ $re ]]; then
+    printf '%s' "$1"
+  else
+    shell_single_quote "$1"
+  fi
+}

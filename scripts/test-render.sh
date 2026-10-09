@@ -610,13 +610,32 @@ check_home_render() {
   fi
 }
 
+# A normal home renders every command exactly as before the quoting: a fixed
+# plain home, so the expectation does not depend on the host's $HOME (chezmoi
+# renders for it without creating it; the destination is the fixture).
+plain_home="/dotfiles-render-test-home"
 make_root
 write_config personal
-if throwaway_chezmoi apply >/dev/null 2>&1; then
-  if [[ "$(yq -p json -o json -r '.statusLine.command' "$root/home/.claude/settings.json")" == "$HOME/go/bin/tacho statusline" ]]; then
-    ok "test passed: a normal home renders the statusLine command unquoted"
+if HOME="$plain_home" throwaway_chezmoi apply >/dev/null 2>&1; then
+  plain_got="$(yq -p json -o json -r '.statusLine.command, .hooks.PreToolUse[0].hooks[0].command, .hooks.PostToolUse[0].hooks[0].command, .hooks.Stop[0].hooks[0].command, .hooks.SessionStart[0].hooks[0].command' "$root/home/.claude/settings.json"
+    yq -p json -o json -r '.hooks.PreToolUse[0].hooks[0].command, .hooks.PostToolUse[0].hooks[0].command, .hooks.Stop[0].hooks[0].command, .hooks.SessionStart[0].hooks[0].command' "$root/home/.codex/hooks.json"
+    yq -p json -o json -r '.instructions[0]' "$root/home/.config/opencode/opencode.json")"
+  plain_want="$(printf '%s\n' \
+    "$plain_home/go/bin/tacho statusline" \
+    "$plain_home/.claude/agent-tools/scripts/personal-safe-gh-hook" \
+    "$plain_home/.claude/agent-tools/scripts/personal-fast-edit-check" \
+    "$plain_home/.claude/agent-tools/scripts/personal-changed-scope-qa" \
+    "bash '$plain_home/.claude/hooks/herdr-agent-state.sh' session" \
+    "$plain_home/.codex/agent-tools/scripts/personal-safe-gh-hook" \
+    "$plain_home/.codex/agent-tools/scripts/personal-fast-edit-check" \
+    "$plain_home/.codex/agent-tools/scripts/personal-changed-scope-qa" \
+    "bash '$plain_home/.codex/herdr-agent-state.sh' session" \
+    "$plain_home/.claude/agent-tools/CLAUDE.md")"
+  if [[ "$plain_got" == "$plain_want" ]]; then
+    ok "test passed: a normal home renders the statusLine, hook commands and instructions path unquoted, as before"
   else
-    fail "test failed: the statusLine command changed for a normal home"
+    diff <(printf '%s\n' "$plain_want") <(printf '%s\n' "$plain_got") >&2 || true
+    fail "test failed: a command string changed for a normal home"
     status=1
   fi
 else

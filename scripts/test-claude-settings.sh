@@ -641,10 +641,10 @@ section "claude settings hook registration (#137 / #199 / #225)"
 #     set, matcher, hook count, type, full command path, timeouts), not just
 #     "a hooks key exists": this is security / gate wiring, so a swapped
 #     matcher or an extra registered event must fail the test (#129 lesson).
-expected_hook_cmd="$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook"
-expected_edit_cmd="$HOME/.claude/agent-tools/scripts/personal-fast-edit-check"
-expected_stop_cmd="$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa"
-expected_session_cmd="bash '$HOME/.claude/hooks/herdr-agent-state.sh' session"
+expected_hook_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook")"
+expected_edit_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-fast-edit-check")"
+expected_stop_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa")"
+expected_session_cmd="bash $(shell_single_quote "$HOME/.claude/hooks/herdr-agent-state.sh") session"
 hook_events="$(yq -p json -o json '.hooks | keys | sort' "$off_file" | tr -d ' \n')"
 pre_len="$(yq -p json '.hooks.PreToolUse | length' "$off_file")"
 pre_matcher="$(yq -p json '.hooks.PreToolUse[0].matcher' "$off_file")"
