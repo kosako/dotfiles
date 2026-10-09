@@ -494,7 +494,7 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 拒否(exit 1 と診断文言)、解決済み work profile の dry-run が全 entry を not granted で skip して 0 件を
 計画し、manager を一切呼ばないこと(呼び出しを記録する fake manager を PATH に前置)を確認する。
 
-`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続を確認する。実 manager・実 install・実 home は使わない。
+`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続、track-only / manual entry の skip、manager 不在 source の skip + warn、install 失敗の集計と exit 1(#333)を確認する。実 manager・実 install・実 home は使わない。
 
 ## private-backup.sh
 

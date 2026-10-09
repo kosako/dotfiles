@@ -4,6 +4,7 @@ set -euo pipefail
 # Inventory regressions (#205/#209/#213), reached by test-install-packages.sh.
 # Only fake managers are on PATH. Installs and attempted toolchain downloads
 # become fixture markers; no real manager or user configuration is consulted.
+# installer 本体の経路 (track-only / manager 不在 / install 失敗。#333) も末尾で通す。
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
@@ -49,6 +50,8 @@ for manager in brew npm mas; do
 manager="${0##*/}"
 if [ "$1" = install ]; then
   printf '%s %s\n' "$manager" "$*" >> "$INVENTORY_TEST_ROOT/installs"
+  # INVENTORY_TEST_INSTALL_FAIL で名指しした manager の install は、記録してから失敗する (#333)。
+  [ "${INVENTORY_TEST_INSTALL_FAIL:-}" != "$manager" ] || exit 1
   exit 0
 fi
 if [ "${INVENTORY_TEST_STATE:-present}" = fail ]; then
@@ -299,3 +302,43 @@ if ! grep -Fq '5 installed, 0 skipped, 0 failed' <<< "$output" \
   exit 1
 fi
 ok "catalog rows reach every entry even when the managers read their stdin"
+
+# #333: docs が約束する installer の契約を、installer 本体の経路で固定する:
+# track-only / manual の entry は inventory のみで install しない、manager が PATH に
+# 無い source は warn して skip (exit 0)、install の失敗は計上・報告して run を exit 1
+# にする (他の entry は install される)。ここから先の fixture catalog は track-only の
+# 2 entry を足した 7 entry。npm は最初の run の間だけ fixture の PATH から外す。
+cat >> "$fixture/repo/.chezmoidata/packages.yaml" <<'YAML'
+  - {name: fixture-tracked, source: brew_formula, track_only: true}
+  - {name: fixture-manual, source: manual}
+YAML
+mv "$fixture/bin/npm" "$fixture/saved-npm"
+: > "$fixture/installs"
+if ! output="$(INVENTORY_TEST_STATE=empty run_fixture "$installer" --apply 2>&1)" \
+  || ! grep -Fxq '[info] - skip fixture-tracked: track-only (brew_formula)' <<< "$output" \
+  || ! grep -Fxq '[info] - skip fixture-manual: track-only (manual)' <<< "$output" \
+  || ! grep -Fxq '[warn] skip fixture-npm: manager for npm_global not on PATH (runtime not ready?)' <<< "$output" \
+  || ! grep -Fxq '[ok] done: 4 installed, 3 skipped, 0 failed' <<< "$output" \
+  || grep -Eq 'fixture-tracked|fixture-manual|^npm ' "$fixture/installs" \
+  || [[ "$(awk 'END { print NR }' "$fixture/installs")" != 4 ]]; then
+  printf '%s\n' "$output" >&2
+  fail "track-only / manual entries and a source without its manager must be skipped (exit 0) while the rest install"
+  exit 1
+fi
+mv "$fixture/saved-npm" "$fixture/bin/npm"
+ok "track-only / manual entries and a manager-less source are skipped, never installed"
+: > "$fixture/installs"
+if output="$(INVENTORY_TEST_STATE=empty INVENTORY_TEST_INSTALL_FAIL=mas run_fixture "$installer" --apply 2>&1)"; then
+  fail "a failed install must fail the installer"
+  exit 1
+else
+  install_exit=$?
+fi
+if [[ "$install_exit" -ne 1 ]] || ! grep -Fxq '[warn] install failed: fixture-mas (mas)' <<< "$output" \
+  || ! grep -Fxq '[ok] done: 4 installed, 2 skipped, 1 failed' <<< "$output" \
+  || [[ "$(awk 'END { print NR }' "$fixture/installs")" != 5 ]]; then
+  printf '%s\n' "$output" >&2
+  fail "a failed install must be counted, reported and exit 1 while the other entries still install"
+  exit 1
+fi
+ok "a failed install is reported, counted and fails the run after the other entries install"
