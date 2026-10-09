@@ -1110,27 +1110,34 @@ mkfifo "$kind_home/fifo"
 printf 'plain file\n' > "$kind_home/not-a-dir"
 printf 'backup_paths:\n  - { path: link-file, type: file }\n  - { path: link-dir, type: dir }\n  - { path: fifo, type: file }\n  - { path: not-a-dir, type: dir }\n' \
   > "$kind_home/.config/dotfiles/backup-paths.local"
-# A regression that reads the FIFO (no regular-file check) would block
-# forever on a FIFO with no writer and never reach the assertions (Codex
-# review, PR #351). While backup runs, a feeder keeps opening and closing
-# the FIFO for writing, so every open finds a writer and every read ends in
-# EOF (stage_file opens its source several times: cp, wc, shasum). Such a
-# regression then captures the FIFO as an empty file and the case fails; a
-# correct run never opens it. The feeder stops on a stop file and is reaped.
-feed_fifo() { # FIFO STOPFILE
-  while [[ ! -e "$2" ]]; do
-    exec 9<>"$1"
-    sleep 0.2
-    exec 9>&-
+# The backup runs under a deadline: a regression that reads the FIFO (no
+# regular-file check) blocks for good on a FIFO with no writer and would
+# never reach the assertions (Codex review, PR #351). Past the deadline the
+# run and everything it started are killed and the case fails.
+# pb_kill_tree PID — KILL PID and its descendants (collected before the kill).
+pb_kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    pb_kill_tree "$child"
   done
+  kill -KILL "$1" 2>/dev/null || true
 }
-feed_fifo "$kind_home/fifo" "$fixture_home/kind-feeder-stop" &
-kind_feeder=$!
+kind_log="$fixture_home/kind-backup.log"
+HOME="$kind_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$kind_home/k.age" --recipient "$recipient" --yes > "$kind_log" 2>&1 &
+kind_pid=$!
+kind_deadline=$((SECONDS + 60))
+while kill -0 "$kind_pid" 2>/dev/null && [[ "$SECONDS" -lt "$kind_deadline" ]]; do
+  sleep 0.2
+done
+kind_timed_out=0
+if kill -0 "$kind_pid" 2>/dev/null; then
+  kind_timed_out=1
+  pb_kill_tree "$kind_pid"
+fi
 kind_rc=0
-kind_out="$(HOME="$kind_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$kind_home/k.age" --recipient "$recipient" --yes 2>&1)" || kind_rc=$?
-: > "$fixture_home/kind-feeder-stop"
-wait "$kind_feeder" 2>/dev/null || true
+wait "$kind_pid" 2>/dev/null || kind_rc=$?
+kind_out="$(cat "$kind_log")"
 kind_extract="$fixture_home/kind-extract"
 mkdir -p "$kind_extract"
 kind_files=""
@@ -1138,7 +1145,7 @@ if [[ "$kind_rc" -eq 0 && -f "$kind_home/k.age" ]]; then
   age -d -i "$fixture_home/keys/id.txt" "$kind_home/k.age" | tar -xpf - -C "$kind_extract"
   kind_files="$(yq -p=json -o=tsv '.files[].path' "$kind_extract/manifest.json")"
 fi
-if [[ "$kind_rc" -eq 0 && -n "$kind_files" ]] \
+if [[ "$kind_timed_out" -eq 0 && "$kind_rc" -eq 0 && -n "$kind_files" ]] \
   && grep -Fxq "[warn] skip symlink (not captured): link-file" <<< "$kind_out" \
   && grep -Fxq "[warn] skip symlink (not captured): link-dir" <<< "$kind_out" \
   && grep -Fxq "[warn] declared file is not a regular file (skipped): fifo" <<< "$kind_out" \
@@ -1149,8 +1156,8 @@ if [[ "$kind_rc" -eq 0 && -n "$kind_files" ]] \
   && ! grep -rqF "inside the linked dir" "$kind_extract/files"; then
   pass "symlinks, a FIFO declared as a file and a file declared as a dir are skipped with warnings and never captured"
 else
-  printf 'rc=%s\n%s\nfiles:\n%s\n' "$kind_rc" "$kind_out" "$kind_files" >&2
-  miss "a declared target of the wrong kind was captured or not warned about"
+  printf 'rc=%s timed_out=%s\n%s\nfiles:\n%s\n' "$kind_rc" "$kind_timed_out" "$kind_out" "$kind_files" >&2
+  miss "a declared target of the wrong kind was captured or not warned about (or backup hung)"
 fi
 
 # 26. backup self-checks its staging with the verify/restore manifest test
