@@ -609,6 +609,7 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 - 全 profile が template エラーなしで apply できること。
 - 各 profile の managed target 一覧が期待値と一致すること(profile を追加・変更したら期待値の更新が必要)。
 - render した mise config が `go.set_gobin = false`(GOBIN を設定させない)で、`.zshenv` が `~/go/bin` を PATH の末尾に足すこと(#305)。
+- render した mise config が `not_found_auto_install = false` で、shim が無い runtime を勝手に install しないこと(#333)。
 - allowlist 契約(#207): source の複製に未宣言の root file / subtree / 宣言済み directory 配下の
   sibling を置いても、全 profile で managed set が期待値のままで、apply がそれらを作らず、
   home に既にある未管理 file にも触れないこと。
