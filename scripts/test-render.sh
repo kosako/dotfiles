@@ -548,6 +548,94 @@ for enum_cap in codexReviewEffort codexWorkerEffort npmHardeningMode; do
   done
 done
 
+section "home path in the JSON settings and their command strings (#329)"
+
+# The home path reaches three JSON files: the Claude statusLine and hook
+# commands, the Codex hook commands (a shell parses each command string) and
+# the OpenCode instructions path. A home with JSON- or shell-special
+# characters must still give valid JSON whose commands a shell splits into
+# exactly the intended words; a normal home must render the command as
+# before (no quotes), which test-claude-settings / test-codex-settings pin
+# for the hooks and the statusLine check below pins here.
+# shell_words CMD — the words a shell makes of CMD, one per line (CMD is a
+# string this test rendered from a fixture home, not outside input).
+shell_words() {
+  bash -c 'eval "set -- $1"; printf "%s\n" "$@"' _ "$1"
+}
+# check_command LABEL CMD EXPECTED_WORD...
+check_command() {
+  local label="$1" cmd="$2" got want
+  shift 2
+  got="$(shell_words "$cmd")" || got="<shell error>"
+  want="$(printf '%s\n' "$@")"
+  if [[ "$got" == "$want" ]]; then
+    ok "test passed: $label splits into the intended $# word(s)"
+  else
+    printf 'command: %s\ngot:\n%s\nwant:\n%s\n' "$cmd" "$got" "$want" >&2
+    fail "test failed: $label does not split into the intended words"
+    status=1
+  fi
+}
+# check_home_render ROOT HOME — the three files rendered for HOME.
+check_home_render() {
+  local root="$1" home="$2" agent file cmd
+  for file in .claude/settings.json .codex/hooks.json .config/opencode/opencode.json; do
+    if ! yq -p json -o json '.' "$root/home/$file" >/dev/null 2>&1; then
+      fail "test failed: $file is not valid JSON for home $home"
+      status=1
+      return 0
+    fi
+  done
+  cmd="$(yq -p json -o json -r '.statusLine.command' "$root/home/.claude/settings.json")"
+  check_command "Claude statusLine" "$cmd" "$home/go/bin/tacho" statusline
+  for agent in claude codex; do
+    file="$root/home/.$agent/settings.json"
+    [[ "$agent" == codex ]] && file="$root/home/.codex/hooks.json"
+    cmd="$(yq -p json -o json -r '.hooks.PreToolUse[0].hooks[0].command' "$file")"
+    check_command "$agent PreToolUse hook" "$cmd" "$home/.$agent/agent-tools/scripts/personal-safe-gh-hook"
+    cmd="$(yq -p json -o json -r '.hooks.PostToolUse[0].hooks[0].command' "$file")"
+    check_command "$agent PostToolUse hook" "$cmd" "$home/.$agent/agent-tools/scripts/personal-fast-edit-check"
+    cmd="$(yq -p json -o json -r '.hooks.Stop[0].hooks[0].command' "$file")"
+    check_command "$agent Stop hook" "$cmd" "$home/.$agent/agent-tools/scripts/personal-changed-scope-qa"
+  done
+  cmd="$(yq -p json -o json -r '.hooks.SessionStart[0].hooks[0].command' "$root/home/.claude/settings.json")"
+  check_command "claude SessionStart (herdr) hook" "$cmd" bash "$home/.claude/hooks/herdr-agent-state.sh" session
+  cmd="$(yq -p json -o json -r '.hooks.SessionStart[0].hooks[0].command' "$root/home/.codex/hooks.json")"
+  check_command "codex SessionStart (herdr) hook" "$cmd" bash "$home/.codex/herdr-agent-state.sh" session
+  if [[ "$(yq -p json -o json -r '.instructions[0]' "$root/home/.config/opencode/opencode.json")" == "$home/.claude/agent-tools/CLAUDE.md" ]]; then
+    ok "test passed: OpenCode instructions name <home>/.claude/agent-tools/CLAUDE.md"
+  else
+    fail "test failed: OpenCode instructions path differs for home $home"
+    status=1
+  fi
+}
+
+make_root
+write_config personal
+if throwaway_chezmoi apply >/dev/null 2>&1; then
+  if [[ "$(yq -p json -o json -r '.statusLine.command' "$root/home/.claude/settings.json")" == "$HOME/go/bin/tacho statusline" ]]; then
+    ok "test passed: a normal home renders the statusLine command unquoted"
+  else
+    fail "test failed: the statusLine command changed for a normal home"
+    status=1
+  fi
+else
+  fail "test failed: personal apply did not render (normal home)"
+  status=1
+fi
+
+make_root
+write_config personal
+# chezmoi cleans the home path (a TMPDIR with a trailing slash leaves `//`).
+odd_home="${root//\/\//\/}/h\"o\\me & <x> 'q' \$v"
+mkdir -p "$odd_home"
+if HOME="$odd_home" throwaway_chezmoi apply >/dev/null 2>&1; then
+  check_home_render "$root" "$odd_home"
+else
+  fail "test failed: personal apply with an unusual home path did not render"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "render tests passed"
 fi

@@ -621,6 +621,10 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   `codexWorkerEffort` / `npmHardeningMode`)が schema の値以外(未知の文字列・大文字違い・boolean・数値・null・
   配列・欠落)なら apply が fail して Codex の profile file を作らないこと。両 profile file template の
   execute-template も同じエラーで fail すること。
+- home path の escape(#329): JSON の特殊文字と shell の特殊文字(`"` `\` `&` `<` `'` 空白 `$`)を含む home で
+  render しても、`~/.claude/settings.json` / `~/.codex/hooks.json` / `~/.config/opencode/opencode.json` が妥当な
+  JSON で、statusLine と各 hook の command を shell が意図した単語(path は 1 語)に分けること。OpenCode の
+  instructions の path も一致すること。通常の home では statusLine の command が引用符なしのままであること。
 
 chezmoi が必要(CI では version pin して導入する)。
 
