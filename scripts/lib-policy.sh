@@ -313,11 +313,25 @@ capability_value() {
 
 # Runtime permission gates do not necessarily run validate-policy first.
 # Compare the YAML type and value together so a quoted "true" grants nothing.
-profile_capability_is_true() {
-  local profile="$1" capability="$2" granted
-  granted="$(p="$profile" c="$capability" yq \
+# profile_capability_bool prints "true" for the YAML boolean true and "false"
+# for any other value or an absent key; it returns 1, printing nothing, when
+# the read fails (yq errors, or prints anything but one true / false), so a
+# caller that must not read a failure as "false" can tell the two apart
+# (profile_environment_kind_violations, #357).
+profile_capability_bool() {
+  local profile="$1" capability="$2" read_value
+  read_value="$(p="$profile" c="$capability" yq \
     '.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool") and (. == true))' \
     "$PROFILES_FILE")" || return 1
+  case "$read_value" in
+    true | false) printf '%s\n' "$read_value" ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_capability_is_true() {
+  local granted
+  granted="$(profile_capability_bool "$1" "$2")" || return 1
   [[ "$granted" == "true" ]]
 }
 
@@ -427,6 +441,88 @@ environment_kind_forbidden_capabilities() {
   esac
 }
 
+# profile_environment_kind_violations PROFILE — the boolean capabilities
+# PROFILE sets true although its environmentKind forbids them (the table
+# above), one per line; nothing when the profile keeps within its kind.
+# Returns 1, printing nothing, when PROFILE is undefined, its environmentKind
+# is missing or unknown (no row applies, and "no violations" must not be
+# read from that), or a value cannot be read. The one listing of the boolean
+# rule (#357): validate-policy.sh reports each line and
+# require_environment_kind_limits refuses on it, so the static check and the
+# runtime entry points cannot apply the table differently. A value counts
+# when it is the text "true" (as the validator always compared; a quoted
+# "true" is listed, and is never granted) or when the runtime gates read it
+# as the YAML boolean true (profile_capability_bool), which also follows an
+# alias or a merge key that capability_value does not see. Either read
+# failing returns 1 (#357 review): a failed read is not "false", or one
+# unreadable value would let require_environment_kind_limits pass and an
+# entry point act on the profile's other, granted capabilities.
+profile_environment_kind_violations() {
+  local profile="$1" kind forbidden value granted violations=""
+  profile_exists "$profile" || return 1
+  kind="$(profile_environment_kind "$profile")" || return 1
+  is_allowed_environment_kind "$kind" || return 1
+  while IFS= read -r forbidden; do
+    [[ -z "$forbidden" ]] && continue
+    value="$(capability_value "$profile" "$forbidden")" || return 1
+    granted="$(profile_capability_bool "$profile" "$forbidden")" || return 1
+    if [[ "$value" == "true" || "$granted" == "true" ]]; then
+      violations+="$forbidden"$'\n'
+    fi
+  done < <(environment_kind_forbidden_capabilities "$kind")
+  printf '%s' "$violations"
+}
+
+# profile_grants_capability PROFILE CAPABILITY — whether PROFILE may use the
+# boolean CAPABILITY at run time (#357): the profile is defined, its
+# environmentKind is known and does not forbid CAPABILITY (the table above),
+# and the value is the YAML boolean true (profile_capability_is_true).
+# Fail-closed; prints nothing. A capability the kind forbids is never
+# granted, whatever its value, so this never grants what
+# profile_environment_kind_violations would list. The permission behind the
+# runtime gates (profile_installs_source, profile_allows_secrets_access),
+# which do not run validate-policy first. The row is matched in bash, not
+# with grep: a grep that is missing or fails must not read as "not
+# forbidden".
+profile_grants_capability() {
+  local profile="$1" capability="$2" kind forbidden_list forbidden
+  profile_exists "$profile" || return 1
+  kind="$(profile_environment_kind "$profile")" || return 1
+  is_allowed_environment_kind "$kind" || return 1
+  forbidden_list="$(environment_kind_forbidden_capabilities "$kind")"
+  while IFS= read -r forbidden; do
+    if [[ "$forbidden" == "$capability" ]]; then
+      return 1
+    fi
+  done <<< "$forbidden_list"
+  profile_capability_is_true "$profile" "$capability"
+}
+
+# require_environment_kind_limits PROFILE REFUSAL — the runtime refusal of a
+# profile that breaks its environmentKind (#357), for the entry points with
+# side effects (install-packages.sh, require_secrets_access). Prints one
+# [fail] line ending in REFUSAL (the wording of the caller's other refusals:
+# "refusing" / "refusing private-backup") and returns 1 when PROFILE has no
+# valid environmentKind, its values cannot be read, or it sets any
+# capability its kind forbids, whichever capability the caller acts on: such
+# data fails validate-policy, and is refused loudly here rather than read as
+# "not granted". Silent 0 otherwise.
+require_environment_kind_limits() {
+  local profile="$1" refusal="$2" violations kind cap list=""
+  if ! violations="$(profile_environment_kind_violations "$profile")"; then
+    fail "machine profile '$profile' has no valid environmentKind in profiles.yaml, or its capabilities could not be read; $refusal"
+    return 1
+  fi
+  [[ -z "$violations" ]] && return 0
+  kind="$(profile_environment_kind "$profile")"
+  while IFS= read -r cap; do
+    [[ -z "$cap" ]] && continue
+    list+="${list:+, }$cap=true"
+  done <<< "$violations"
+  fail "machine profile '$profile' sets $list, which environmentKind $kind forbids; $refusal. Run: ./scripts/validate-policy.sh $(shell_quote_safe "$profile")"
+  return 1
+}
+
 # Enum capability VALUES that are forbidden for a given environmentKind
 # (#45, the enum counterpart of the boolean table above). An enum row
 # forbids exactly one value and leaves the rest to the profile: work /
@@ -500,17 +596,17 @@ manager_present() {
   esac
 }
 
-# Whether PROFILE may install SOURCE: the gating capability must be literally
-# true. Fail-closed — an unknown profile, an uninstallable source (manual /
-# unknown), or a non-true / absent capability all return 1. No side effects;
-# prints nothing. environmentKind constraints already force installPackages /
-# installGuiApps false on work / client / agent (sandbox forbids only secret
-# access), so this gate keeps the catalog installer from acting on those kinds.
+# Whether PROFILE may install SOURCE: the profile must be granted the gating
+# capability (profile_grants_capability: literally true, and not forbidden by
+# the profile's environmentKind — work / client / agent forbid installPackages
+# / installGuiApps; sandbox forbids only secret access). Fail-closed — an
+# unknown profile, an uninstallable source (manual / unknown), or a non-true,
+# absent or forbidden capability all return 1. No side effects; prints
+# nothing.
 profile_installs_source() {
   local profile="$1" source="$2" cap
   cap="$(source_install_capability "$source")" || return 1
-  profile_exists "$profile" || return 1
-  profile_capability_is_true "$profile" "$cap"
+  profile_grants_capability "$profile" "$cap"
 }
 
 # Report drift between the declared catalog (packages.yaml) and what is
@@ -921,22 +1017,24 @@ resolve_runtime_profile() {
 }
 
 # Pure capability check for a named profile (no chezmoi dependency, so it
-# is unit-testable). Returns 0 only when the profile is defined and its
-# allowSecretsAccess capability is literally true. A missing profile, a
-# missing capability, or any non-true value (false / absent) returns 1.
+# is unit-testable). Returns 0 only when the profile is granted
+# allowSecretsAccess (profile_grants_capability): literally true, and not
+# forbidden by its environmentKind (work / client / agent / sandbox all
+# forbid it). A missing profile, a missing capability, any non-true value
+# (false / absent) or a forbidden true returns 1.
 profile_allows_secrets_access() {
   local profile="$1"
-  profile_exists "$profile" || return 1
-  profile_capability_is_true "$profile" allowSecretsAccess
+  profile_grants_capability "$profile" allowSecretsAccess
 }
 
 # Runtime gate for the private-backup tooling (issue #60). The archive may
 # contain secrets, so backup / restore may run only where the host's real
 # profile grants allowSecretsAccess (personal today; work / client / agent
-# / sandbox are forbidden by policy). Fail-closed at every step: an
-# unresolvable profile, an unknown profile, or allowSecretsAccess != true
-# all refuse with exit-worthy non-zero. Prints a one-line reason; never
-# prints secrets or paths.
+# / sandbox are forbidden by policy, and that is checked here too: #357).
+# Fail-closed at every step: an unresolvable profile, an unknown profile, a
+# profile that breaks its environmentKind, or allowSecretsAccess != true all
+# refuse with exit-worthy non-zero. Prints a one-line reason; never prints
+# secrets or paths.
 require_secrets_access() {
   local profile
   if ! profile="$(resolve_runtime_profile)"; then
@@ -947,6 +1045,7 @@ require_secrets_access() {
     fail "machine profile '$profile' is not defined in profiles.yaml; refusing private-backup"
     return 1
   fi
+  require_environment_kind_limits "$profile" "refusing private-backup" || return 1
   if ! profile_allows_secrets_access "$profile"; then
     fail "profile '$profile' does not grant secret access (allowSecretsAccess != true); private-backup refuses to run here"
     return 1

@@ -150,3 +150,27 @@ shell_word() {
     shell_single_quote "$1"
   fi
 }
+
+# set_environment_kind ROOT PROFILE KIND
+# Retag PROFILE in ROOT/.chezmoidata/profiles.yaml to environmentKind KIND,
+# for the rows of the forbidden table that have no profile of their own
+# (client / sandbox / agent) and for an unknown kind (#357). Fails, leaving
+# the file as it was, when PROFILE is not defined or carries no
+# environmentKind: a typo would otherwise add a new profile, and the
+# assertion would run against the untouched one (the same fail-closed rule
+# as set_capability_all; test-secrets-gate.sh pins it). KIND is written as a
+# string.
+set_environment_kind() {
+  local root="$1" profile="$2" kind="$3"
+  local file="$root/.chezmoidata/profiles.yaml"
+  if [[ ! -f "$file" ]]; then
+    fail "set_environment_kind: missing $file"
+    return 1
+  fi
+  if [[ "$(P="$profile" yq '.profiles // {} | has(strenv(P))' "$file")" != "true" ]] ||
+    [[ "$(P="$profile" yq '.profiles[strenv(P)] | has("environmentKind")' "$file")" != "true" ]]; then
+    fail "set_environment_kind: profile '$profile' with an environmentKind is not defined in $file"
+    return 1
+  fi
+  P="$profile" K="$kind" yq -i '.profiles[strenv(P)].environmentKind = strenv(K)' "$file"
+}

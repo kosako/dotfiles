@@ -325,7 +325,7 @@ validate_backup_paths() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type forbidden ek_violations
+  local environment_kind module capability value type forbidden ek_violations ek_list
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -416,15 +416,22 @@ validate_profile() {
   # above, and must not print "satisfied".
   if is_allowed_environment_kind "$environment_kind"; then
     ek_violations=0
-    while IFS= read -r forbidden; do
-      [[ -z "$forbidden" ]] && continue
-      value="$(capability_value "$profile" "$forbidden")"
-      if [[ "$value" == "true" ]]; then
+    # The boolean rows go through the listing the runtime gates refuse on
+    # (profile_environment_kind_violations, #357), so the static check and
+    # install / private-backup cannot apply the table differently. A failed
+    # read is a failure, never "no violations".
+    if ek_list="$(profile_environment_kind_violations "$profile")"; then
+      while IFS= read -r forbidden; do
+        [[ -z "$forbidden" ]] && continue
         fail "environmentKind $environment_kind forbids $forbidden=true (profile $profile)"
         status=1
         ek_violations=$((ek_violations + 1))
-      fi
-    done < <(environment_kind_forbidden_capabilities "$environment_kind")
+      done <<< "$ek_list"
+    else
+      fail "could not read the environmentKind constraints of profile $profile"
+      status=1
+      ek_violations=$((ek_violations + 1))
+    fi
     while IFS= read -r pair; do
       [[ -z "$pair" ]] && continue
       # The table row itself is checked fail-closed: a malformed pair or a
