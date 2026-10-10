@@ -89,10 +89,12 @@ main() {
   require_yq || return 1
   [[ -f "$PACKAGES_FILE" ]] || { fail "catalog missing: $PACKAGES_FILE"; return 1; }
 
-  # Fail-closed profile resolution: never assume a default. work / client /
-  # agent then gate out via installPackages / installGuiApps = false (forced by
-  # environmentKind); sandbox forbids only secret access, so it installs iff its
-  # profile sets them true.
+  # Fail-closed profile resolution: never assume a default. A profile that
+  # breaks its environmentKind (a capability its kind forbids set true) is
+  # refused before any manager is probed or run, whether or not
+  # validate-policy ran first (#357). work / client / agent then gate out via
+  # installPackages / installGuiApps, which their kind forbids; sandbox
+  # forbids only secret access, so it installs iff its profile sets them true.
   local profile
   if ! profile="$(resolve_runtime_profile)"; then
     fail "cannot resolve the machine profile from chezmoi config; refusing. Run: chezmoi init --source ~/dotfiles"
@@ -102,6 +104,7 @@ main() {
     fail "machine profile '$profile' is not defined in profiles.yaml; refusing"
     return 1
   fi
+  require_environment_kind_limits "$profile" "refusing" || return 1
 
   section "catalog install (profile: $profile)"
   if [[ "$apply" -eq 1 ]]; then
@@ -131,8 +134,9 @@ main() {
       skipped=$((skipped + 1)); continue
     fi
 
-    # Capability gate (fail-closed per source). Keeps work / client / agent
-    # from installing anything: their installPackages / installGuiApps = false.
+    # Capability gate (fail-closed per source; profile_grants_capability, so
+    # the environmentKind table applies here too). Keeps work / client / agent
+    # from installing anything.
     if ! profile_installs_source "$profile" "$source"; then
       cap="$(source_install_capability "$source" 2>/dev/null || echo '?')"
       item "skip $name: $cap not granted for '$profile' ($source)"
