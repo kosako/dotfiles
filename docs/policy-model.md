@@ -60,7 +60,7 @@ installer は inventory の不明と正常な空リストを区別する。取�
 
 environmentKind は飾りラベルではなく、capability の不変条件を駆動する。`validate-policy.sh` が各 profile を検証するとき、environmentKind が禁止する boolean capability が `true` だと **hard fail**(report-only の warning ではない)する。「work 環境なのに `installPackages=true`」のような矛盾を CI で止めるための invariant(2026-06-14 決定)。
 
-boolean の制約は静的な検証(`validate-policy.sh`)と、副作用のある入口(`install-packages.sh`、`private-backup.sh` の backup / verify / restore)での実行時の拒否の 2 層で当て、違反の判定は `lib-policy.sh` の `profile_environment_kind_violations` の 1 か所にまとめてある(#357)。入口は validate-policy を経ずに起動されうるため、その profile にどれか 1 つでも違反があれば、その入口が使う capability に限らず `[fail] machine profile '<profile>' sets <capability>=true, ..., which environmentKind <kind> forbids; refusing ...` で拒否して exit 1 する。environmentKind が欠落・未知の profile も、制約なしとは読まずに拒否する。doctor / preflight は先に validate-policy を走らせて違反なら exit 1 で止まるので、表示は変わらない。
+boolean の制約は静的な検証(`validate-policy.sh`)と、副作用のある入口(`install-packages.sh`、`private-backup.sh` の backup / verify / restore)での実行時の拒否の 2 層で当て、違反の判定は `lib-policy.sh` の `profile_environment_kind_violations` の 1 か所にまとめてある(#357)。入口は validate-policy を経ずに起動されうるため、その profile にどれか 1 つでも違反があれば、その入口が使う capability に限らず `[fail] machine profile '<profile>' sets <capability>=true, ..., which environmentKind <kind> forbids; refusing ...` で拒否して exit 1 する。environmentKind が欠落・未知の profile も、制約なしとは読まずに拒否する。表が禁じる capability の値を読めない(yq が失敗する)profile も、違反なしとは読まずに拒否し、validate-policy も fail にする。doctor / preflight は先に validate-policy を走らせて違反なら exit 1 で止まるので、表示は変わらない。
 
 | environmentKind | false 必須の capability |
 | --- | --- |

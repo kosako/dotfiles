@@ -313,11 +313,25 @@ capability_value() {
 
 # Runtime permission gates do not necessarily run validate-policy first.
 # Compare the YAML type and value together so a quoted "true" grants nothing.
-profile_capability_is_true() {
-  local profile="$1" capability="$2" granted
-  granted="$(p="$profile" c="$capability" yq \
+# profile_capability_bool prints "true" for the YAML boolean true and "false"
+# for any other value or an absent key; it returns 1, printing nothing, when
+# the read fails (yq errors, or prints anything but one true / false), so a
+# caller that must not read a failure as "false" can tell the two apart
+# (profile_environment_kind_violations, #357).
+profile_capability_bool() {
+  local profile="$1" capability="$2" read_value
+  read_value="$(p="$profile" c="$capability" yq \
     '.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool") and (. == true))' \
     "$PROFILES_FILE")" || return 1
+  case "$read_value" in
+    true | false) printf '%s\n' "$read_value" ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_capability_is_true() {
+  local granted
+  granted="$(profile_capability_bool "$1" "$2")" || return 1
   [[ "$granted" == "true" ]]
 }
 
@@ -438,19 +452,21 @@ environment_kind_forbidden_capabilities() {
 # runtime entry points cannot apply the table differently. A value counts
 # when it is the text "true" (as the validator always compared; a quoted
 # "true" is listed, and is never granted) or when the runtime gates read it
-# as the YAML boolean true (profile_capability_is_true), which also follows
-# an alias or a merge key that capability_value does not see. The second
-# read's own failure is not a violation: that read failing grants nothing
-# either, and its stderr would add lines to the validator's report.
+# as the YAML boolean true (profile_capability_bool), which also follows an
+# alias or a merge key that capability_value does not see. Either read
+# failing returns 1 (#357 review): a failed read is not "false", or one
+# unreadable value would let require_environment_kind_limits pass and an
+# entry point act on the profile's other, granted capabilities.
 profile_environment_kind_violations() {
-  local profile="$1" kind forbidden value violations=""
+  local profile="$1" kind forbidden value granted violations=""
   profile_exists "$profile" || return 1
   kind="$(profile_environment_kind "$profile")" || return 1
   is_allowed_environment_kind "$kind" || return 1
   while IFS= read -r forbidden; do
     [[ -z "$forbidden" ]] && continue
     value="$(capability_value "$profile" "$forbidden")" || return 1
-    if [[ "$value" == "true" ]] || profile_capability_is_true "$profile" "$forbidden" 2>/dev/null; then
+    granted="$(profile_capability_bool "$profile" "$forbidden")" || return 1
+    if [[ "$value" == "true" || "$granted" == "true" ]]; then
       violations+="$forbidden"$'\n'
     fi
   done < <(environment_kind_forbidden_capabilities "$kind")

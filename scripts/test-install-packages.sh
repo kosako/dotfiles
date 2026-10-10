@@ -259,15 +259,17 @@ else
   printf '%s\n' "$ek_out" >&2
   miss "fixture must be the forbidden combination validate-policy rejects (rc=$ek_rc)"
 fi
-# ek_install ROOT MODE — run ROOT's installer (dry-run, or --apply) with the
-# recording managers; sets ek_rc / ek_out and starts a fresh call record.
+# ek_install ROOT MODE [BIN] — run ROOT's installer (dry-run, or --apply) with
+# the recording managers, and BIN's tools ahead of them when given; sets
+# ek_rc / ek_out and starts a fresh call record.
 ek_install() {
+  local ek_path="${3:+$3:}$ek_bin:$PATH"
   rm -f "$ek_calls"
   ek_rc=0
   if [[ "$2" == apply ]]; then
-    ek_out="$(HOME="$ek_home" PATH="$ek_bin:$PATH" "$1/scripts/install-packages.sh" --apply 2>&1)" || ek_rc=$?
+    ek_out="$(HOME="$ek_home" PATH="$ek_path" "$1/scripts/install-packages.sh" --apply 2>&1)" || ek_rc=$?
   else
-    ek_out="$(HOME="$ek_home" PATH="$ek_bin:$PATH" "$1/scripts/install-packages.sh" 2>&1)" || ek_rc=$?
+    ek_out="$(HOME="$ek_home" PATH="$ek_path" "$1/scripts/install-packages.sh" 2>&1)" || ek_rc=$?
   fi
 }
 ek_refusal="[fail] machine profile 'work' sets installPackages=true, installGuiApps=true, which environmentKind work forbids; refusing. Run: ./scripts/validate-policy.sh work"
@@ -347,6 +349,82 @@ if [[ "$ek_rc" -eq 0 && -z "$ek_out" ]]; then
 else
   printf '%s\n' "$ek_out" >&2
   miss "sandbox must not be refused for install (its row forbids only secret access; rc=$ek_rc)"
+fi
+# A failed read is not "false" (#357 review): on the same sandbox data (the
+# control just above accepts it), a yq that fails only the gate's typed read
+# of the forbidden allowSecretsAccess must make the installer refuse — exit 1
+# and the unreadable-profile line, with no manager probed or run — and
+# validate-policy fail, rather than read "no violation" and install on the
+# granted installPackages. The premise is checked first through the same
+# stand-in: that read fails, installPackages still reads true, and
+# profile_installs_source grants a source, so the install path is open and
+# only the refusal can stop it. The stand-in yq and chezmoi (profile
+# personal) sit ahead of the recording managers; every other yq call runs
+# the real one. While the file ek-shim/empty exists, the stand-in instead
+# answers that read with nothing and exit 0 (the last check below).
+ek_shim="$fixture_bin/ek-shim"
+mkdir -p "$ek_shim"
+ek_typed_read='.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool") and (. == true))'
+{
+  printf '%s\n' '#!/bin/sh' \
+    "if [ \"\${c-}\" = allowSecretsAccess ] && [ \"\${1-}\" = $(shell_single_quote "$ek_typed_read") ]; then" \
+    "  if [ -e $(shell_single_quote "$ek_shim/empty") ]; then exit 0; fi" \
+    "  echo 'Error: injected read failure' >&2" \
+    '  exit 1' \
+    'fi'
+  printf 'exec %s "$@"\n' "$(shell_single_quote "$(command -v yq)")"
+} > "$ek_shim/yq"
+chmod +x "$ek_shim/yq"
+cat > "$ek_shim/chezmoi" <<'SH'
+#!/bin/sh
+printf '%s\n' '{"profile":"personal"}'
+SH
+chmod +x "$ek_shim/chezmoi"
+if env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" PATH="$ek_shim:$PATH" bash -c '
+  source "$FIXTURE_LIB" || exit 2
+  if profile_capability_bool personal allowSecretsAccess >/dev/null 2>&1; then exit 1; fi
+  [[ "$(profile_capability_bool personal installPackages)" == true ]] || exit 1
+  profile_installs_source personal brew_formula || exit 1
+'; then
+  pass "fixture: the stand-in yq fails only the typed read of allowSecretsAccess, and the install path is open"
+else
+  miss "fixture: the stand-in yq must fail only the typed read of allowSecretsAccess on a profile that installs"
+fi
+ek_unreadable="[fail] machine profile 'personal' has no valid environmentKind in profiles.yaml, or its capabilities could not be read; refusing"
+for ek_mode in dry-run apply; do
+  ek_install "$ek_root" "$ek_mode" "$ek_shim"
+  if [[ "$ek_rc" -eq 1 && ! -e "$ek_calls" ]] && grep -Fxq "$ek_unreadable" <<< "$ek_out" \
+    && ! grep -Fq "catalog install (profile:" <<< "$ek_out"; then
+    pass "installer ($ek_mode) refuses a profile whose forbidden capability cannot be read, before probing any manager"
+  else
+    printf '%s\n' "$ek_out" >&2
+    if [[ -e "$ek_calls" ]]; then cat "$ek_calls" >&2; fi
+    miss "installer ($ek_mode) must refuse when a forbidden capability's typed read fails (rc=$ek_rc)"
+  fi
+done
+ek_vrc=0
+ek_vout="$(PATH="$ek_shim:$PATH" "$ek_root/scripts/validate-policy.sh" personal 2>&1)" || ek_vrc=$?
+if [[ "$ek_vrc" -eq 1 ]] && grep -Fxq "[fail] could not read the environmentKind constraints of profile personal" <<< "$ek_vout"; then
+  pass "validate-policy fails when a forbidden capability's typed read fails"
+else
+  printf '%s\n' "$ek_vout" >&2
+  miss "validate-policy must fail when a forbidden capability's typed read fails (rc=$ek_vrc)"
+fi
+# A read that exits 0 with neither true nor false is no answer either: the
+# typed read fails and the entry refusal holds.
+: > "$ek_shim/empty"
+ek_rc=0
+ek_out="$(env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" PATH="$ek_shim:$PATH" bash -c '
+  source "$FIXTURE_LIB" || exit 2
+  if profile_capability_bool personal allowSecretsAccess >/dev/null; then exit 3; fi
+  require_environment_kind_limits personal refusing
+' 2>&1)" || ek_rc=$?
+rm -f "$ek_shim/empty"
+if [[ "$ek_rc" -eq 1 ]] && grep -Fxq "$ek_unreadable" <<< "$ek_out"; then
+  pass "a typed read that answers neither true nor false is refused like a failed one"
+else
+  printf '%s\n' "$ek_out" >&2
+  miss "a typed read that answers neither true nor false must be refused (rc=$ek_rc)"
 fi
 # An unknown kind picks no row: refused at the entry point, and no source is
 # granted by the permission either (it must not read as unconstrained).
