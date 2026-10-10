@@ -9,6 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 PB="$SCRIPT_DIR/private-backup.sh"
 status=0
@@ -560,6 +562,55 @@ else
   pass "backup refuses under a denied profile (work)"
 fi
 [[ -f "$fixture_home/out/denied.age" ]] && miss "denied backup must not write an archive"
+
+# 9b. environmentKind limits hold at run time, not only in validate-policy
+#     (#357): in a repo copy where work sets allowSecretsAccess=true
+#     (set_capability_all; the work row forbids it), backup, verify and
+#     restore refuse with the environmentKind refusal (exit 1) before
+#     anything is read or written: no archive and the marker unchanged
+#     (backup), the restore target still empty, and no age call (the spy's
+#     record). The copy's validate-policy rejecting the same data shows the
+#     fixture is the forbidden combination.
+ek_repo="$fixture_home/ek-repo"
+ek_target="$fixture_home/ek-target"
+mkdir -p "$ek_repo" "$ek_target"
+copy_repo_fixture "$ek_repo"
+set_capability_all "$ek_repo" allowSecretsAccess true
+ek_refusal="[fail] machine profile 'work' sets allowSecretsAccess=true, which environmentKind work forbids; refusing private-backup. Run: ./scripts/validate-policy.sh work"
+cp "$marker" "$fixture_home/ek-marker-before"
+ek_vrc=0
+ek_vout="$("$ek_repo/scripts/validate-policy.sh" work 2>&1)" || ek_vrc=$?
+if [[ "$ek_vrc" -eq 1 ]] && grep -Fxq "[fail] environmentKind work forbids allowSecretsAccess=true (profile work)" <<< "$ek_vout"; then
+  pass "fixture: validate-policy rejects work with allowSecretsAccess=true"
+else
+  printf '%s\n' "$ek_vout" >&2
+  miss "fixture: validate-policy must reject work with allowSecretsAccess=true (rc=$ek_vrc)"
+fi
+# The copy's private-backup.sh, through the age spy (PB is set for the call).
+PB="$ek_repo/scripts/private-backup.sh" age_spy_run backup --out "$fixture_home/out/ek.age" --recipient "$recipient" --yes
+if [[ "$age_spy_rc" -eq 1 && "$age_spy_calls" -eq 0 && ! -e "$fixture_home/out/ek.age" ]] \
+  && grep -Fxq "$ek_refusal" <<< "$age_spy_out" && cmp -s "$marker" "$fixture_home/ek-marker-before"; then
+  pass "backup refuses a work profile with a forbidden allowSecretsAccess=true (no archive, marker unchanged)"
+else
+  printf '%s\n' "$age_spy_out" >&2
+  miss "backup must refuse a profile that breaks its environmentKind (rc=$age_spy_rc, age calls=$age_spy_calls)"
+fi
+PB="$ek_repo/scripts/private-backup.sh" age_spy_run verify --in "$archive" --identity "$fixture_home/keys/id.txt"
+if [[ "$age_spy_rc" -eq 1 && "$age_spy_calls" -eq 0 ]] && grep -Fxq "$ek_refusal" <<< "$age_spy_out"; then
+  pass "verify refuses a work profile with a forbidden allowSecretsAccess=true before decrypting"
+else
+  printf '%s\n' "$age_spy_out" >&2
+  miss "verify must refuse a profile that breaks its environmentKind before decrypting (rc=$age_spy_rc, age calls=$age_spy_calls)"
+fi
+PB="$ek_repo/scripts/private-backup.sh" age_spy_run restore --in "$archive" --identity "$fixture_home/keys/id.txt" \
+  --target-home "$ek_target" --apply
+if [[ "$age_spy_rc" -eq 1 && "$age_spy_calls" -eq 0 && -z "$(find "$ek_target" -mindepth 1 -print)" ]] \
+  && grep -Fxq "$ek_refusal" <<< "$age_spy_out"; then
+  pass "restore --apply refuses a work profile with a forbidden allowSecretsAccess=true and writes nothing"
+else
+  printf '%s\n' "$age_spy_out" >&2
+  miss "restore must refuse a profile that breaks its environmentKind before writing (rc=$age_spy_rc, age calls=$age_spy_calls)"
+fi
 set_profile personal
 
 # 10. Defence in depth: an unsafe path in the (unvalidated) local

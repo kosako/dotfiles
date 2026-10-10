@@ -13,6 +13,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 status=0
 pass() { ok "test passed: $*"; }
@@ -216,6 +218,156 @@ if (PATH="$fixture_bin:$PATH" is_installed brew_cask absent-cask no-such-bin); t
   miss "is_installed must not report an absent cask as installed"
 else
   pass "is_installed still reports a genuinely absent cask as not installed"
+fi
+
+# 9. environmentKind limits hold at run time, not only in validate-policy
+#    (#357). In a repo copy where work sets installPackages / installGuiApps
+#    true (set_capability_all writes every profile; work's row forbids both),
+#    the installer must refuse outright — exit 1 and the refusal line, with
+#    no manager probed or run — instead of planning installs. The copy's
+#    validate-policy rejecting the same data shows the fixture is the
+#    forbidden combination, so the case cannot pass on an unflipped copy.
+#    The fake managers record every call and live in a directory of this
+#    case's own, ahead of the real ones on PATH; HOME is an empty directory.
+ek_root="$fixture_bin/ek-repo"
+ek_bin="$fixture_bin/ek-bin"
+ek_home="$fixture_bin/ek-home"
+ek_calls="$fixture_bin/ek-calls"
+mkdir -p "$ek_root" "$ek_bin" "$ek_home"
+copy_repo_fixture "$ek_root"
+set_capability_all "$ek_root" installPackages true
+set_capability_all "$ek_root" installGuiApps true
+for manager in brew npm go mas; do
+  cat > "$ek_bin/$manager" <<SH
+#!/bin/sh
+printf '%s %s\n' "\${0##*/}" "\$*" >> "$ek_calls"
+exit 0
+SH
+  chmod +x "$ek_bin/$manager"
+done
+cat > "$ek_bin/chezmoi" <<'SH'
+#!/bin/sh
+printf '%s\n' '{"profile":"work"}'
+SH
+chmod +x "$ek_bin/chezmoi"
+ek_rc=0
+ek_out="$("$ek_root/scripts/validate-policy.sh" work 2>&1)" || ek_rc=$?
+if [[ "$ek_rc" -eq 1 ]] && grep -Fxq "[fail] environmentKind work forbids installPackages=true (profile work)" <<< "$ek_out" \
+  && grep -Fxq "[fail] environmentKind work forbids installGuiApps=true (profile work)" <<< "$ek_out"; then
+  pass "fixture: work with the install capabilities true is rejected by validate-policy"
+else
+  printf '%s\n' "$ek_out" >&2
+  miss "fixture must be the forbidden combination validate-policy rejects (rc=$ek_rc)"
+fi
+# ek_install ROOT MODE — run ROOT's installer (dry-run, or --apply) with the
+# recording managers; sets ek_rc / ek_out and starts a fresh call record.
+ek_install() {
+  rm -f "$ek_calls"
+  ek_rc=0
+  if [[ "$2" == apply ]]; then
+    ek_out="$(HOME="$ek_home" PATH="$ek_bin:$PATH" "$1/scripts/install-packages.sh" --apply 2>&1)" || ek_rc=$?
+  else
+    ek_out="$(HOME="$ek_home" PATH="$ek_bin:$PATH" "$1/scripts/install-packages.sh" 2>&1)" || ek_rc=$?
+  fi
+}
+ek_refusal="[fail] machine profile 'work' sets installPackages=true, installGuiApps=true, which environmentKind work forbids; refusing. Run: ./scripts/validate-policy.sh work"
+for ek_mode in dry-run apply; do
+  ek_install "$ek_root" "$ek_mode"
+  if [[ "$ek_rc" -eq 1 && ! -e "$ek_calls" ]] && grep -Fxq "$ek_refusal" <<< "$ek_out" \
+    && ! grep -Fq "catalog install (profile:" <<< "$ek_out"; then
+    pass "installer ($ek_mode) refuses a work profile with forbidden install capabilities before probing any manager"
+  else
+    printf '%s\n' "$ek_out" >&2
+    if [[ -e "$ek_calls" ]]; then cat "$ek_calls" >&2; fi
+    miss "installer ($ek_mode) must refuse a profile that breaks its environmentKind (rc=$ek_rc)"
+  fi
+done
+# The permission itself, not only the entry point: profile_installs_source in
+# the same copy grants no source to work (and still every source to personal,
+# the control that the copy's lib runs at all).
+if env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" bash -c '
+  source "$FIXTURE_LIB" || exit 2
+  for source in brew_formula npm_global go_install brew_cask mas; do
+    profile_installs_source personal "$source" || exit 1
+    if profile_installs_source work "$source"; then exit 1; fi
+  done
+'; then
+  pass "profile_installs_source grants no source for a forbidden install capability"
+else
+  miss "profile_installs_source must deny a capability the environmentKind forbids"
+fi
+# The same true reached through a YAML alias (work's capabilities are an
+# alias of personal's map): the runtime gate reads it as true, so the table
+# must too, or the alias would install where validate-policy refuses. The
+# premise is checked first (the gate's own read sees true), and the copy's
+# validate-policy must list the same line (the static check and the gate
+# read the table the same way).
+ek_alias="$fixture_bin/ek-alias"
+mkdir -p "$ek_alias"
+copy_repo_fixture "$ek_alias"
+yq -i '.profiles.personal.capabilities anchor = "PC" | .profiles.work.capabilities alias = "PC"' \
+  "$ek_alias/.chezmoidata/profiles.yaml"
+ek_vrc=0
+ek_vout="$("$ek_alias/scripts/validate-policy.sh" work 2>&1)" || ek_vrc=$?
+ek_install "$ek_alias" dry-run
+if env FIXTURE_LIB="$ek_alias/scripts/lib-policy.sh" bash -c '
+  source "$FIXTURE_LIB" || exit 2
+  profile_capability_is_true work installPackages || exit 1
+  for source in brew_formula npm_global go_install brew_cask mas; do
+    if profile_installs_source work "$source"; then exit 1; fi
+  done
+' && [[ "$ek_vrc" -eq 1 ]] \
+  && grep -Fxq "[fail] environmentKind work forbids installPackages=true (profile work)" <<< "$ek_vout" \
+  && [[ "$ek_rc" -eq 1 && ! -e "$ek_calls" ]] \
+  && grep -Eq "^\[fail\] machine profile 'work' sets .*installPackages=true.*, which environmentKind work forbids; refusing\. Run: \./scripts/validate-policy\.sh work$" <<< "$ek_out"; then
+  pass "an install capability made true through a YAML alias is refused like a literal one"
+else
+  printf '%s\n' "$ek_out" >&2
+  miss "a forbidden install capability reached through an alias must be refused (rc=$ek_rc)"
+fi
+# sandbox forbids only secret access: personal retagged to sandbox (secret
+# access off) still installs every source, so the refusal follows the table's
+# row, not "anything but personal". The retag is checked to have taken (the
+# kind reads sandbox, and the copy's validate-policy accepts personal as a
+# valid sandbox profile), so the case cannot pass on personal's empty row.
+set_environment_kind "$ek_root" personal sandbox
+set_capability_all "$ek_root" allowSecretsAccess false
+ek_rc=0
+ek_out="$(env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" bash -c '
+  source "$FIXTURE_LIB" || exit 2
+  [[ "$(profile_environment_kind personal)" == sandbox ]] || exit 1
+  "$DOTFILES_ROOT/scripts/validate-policy.sh" personal >/dev/null 2>&1 || exit 1
+  require_environment_kind_limits personal refusing || exit 1
+  for source in brew_formula npm_global go_install brew_cask mas; do
+    profile_installs_source personal "$source" || exit 1
+  done
+' 2>&1)" || ek_rc=$?
+if [[ "$ek_rc" -eq 0 && -z "$ek_out" ]]; then
+  pass "a sandbox profile with secret access off may still install every source"
+else
+  printf '%s\n' "$ek_out" >&2
+  miss "sandbox must not be refused for install (its row forbids only secret access; rc=$ek_rc)"
+fi
+# An unknown kind picks no row: refused at the entry point, and no source is
+# granted by the permission either (it must not read as unconstrained).
+set_environment_kind "$ek_root" personal no-such-kind
+ek_rc=0
+ek_out="$(env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" bash -c '
+  source "$FIXTURE_LIB" || exit 2
+  require_environment_kind_limits personal refusing
+' 2>&1)" || ek_rc=$?
+if [[ "$ek_rc" -eq 1 ]] \
+  && grep -Fxq "[fail] machine profile 'personal' has no valid environmentKind in profiles.yaml, or its capabilities could not be read; refusing" <<< "$ek_out" \
+  && env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" bash -c '
+    source "$FIXTURE_LIB" || exit 2
+    for source in brew_formula npm_global go_install brew_cask mas; do
+      if profile_installs_source personal "$source"; then exit 1; fi
+    done
+  '; then
+  pass "an unknown environmentKind is refused at the entry point and grants no source"
+else
+  printf '%s\n' "$ek_out" >&2
+  miss "an unknown environmentKind must be refused at the entry point and grant no source (rc=$ek_rc)"
 fi
 
 "$SCRIPT_DIR/test-inventory.sh" || status=1
