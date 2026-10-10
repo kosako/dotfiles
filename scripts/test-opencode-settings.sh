@@ -503,26 +503,36 @@ fi
 #     secret_read_probe_commands の全 probe が上の行にあるので、doctor に足した probe の
 #     family は OpenCode の床にも当たる。各配列は `name=(` と `)` の間の行を literal に
 #     読む (doctor.sh は source すると実行されるので source しない)。読み取りは fail
-#     closed: 配列が空 (改名) か、plain な double-quoted 文字列でない entry があれば
-#     fail し、ok は出さない。
-# doctor_probe_array NAME -> doctor.sh の配列 NAME の entry を 1 行に 1 つ出す。
+#     closed: 配列が無い (改名) か空か、entry の行が「plain な double-quoted 文字列 1 つ」
+#     の形 (先頭の空白の後が `"..."` だけで、中に `"` `$` `\` `` ` `` が無い) に完全一致
+#     しなければ fail し、ok は出さない。引用符を外した後で検査すると、引用符の無い
+#     `git push` の行 (bash では 2 要素) が上の行と一致してしまう (Codex review, PR #368)。
+# doctor_probe_array NAME -> doctor.sh の配列 NAME の entry を 1 行に 1 つ出す。形式の
+# 違う行か配列が無ければ exit 1 (出力は使わない)。
 doctor_probe_array() {
   awk -v name="$1" '
-    $0 == (name "=(") { inside = 1; next }
+    $0 == (name "=(") { inside = 1; found = 1; next }
     inside && $0 == ")" { inside = 0; next }
-    inside { sub(/^ *"/, ""); sub(/"$/, ""); print }
+    inside {
+      entry = $0
+      sub(/^[ \t]+/, "", entry)
+      if (length(entry) < 3 || substr(entry, 1, 1) != "\"" || substr(entry, length(entry)) != "\"") { bad = 1; next }
+      entry = substr(entry, 2, length(entry) - 2)
+      if (index(entry, "\"") || index(entry, "$") || index(entry, "\\") || index(entry, "`")) { bad = 1; next }
+      print entry
+    }
+    END { if (bad || !found || inside) exit 1 }
   ' "$SCRIPT_DIR/doctor.sh"
 }
 doctor_probes=""
 probe_read_failed=0
 for probe_array in outward_probe_commands secret_read_probe_commands; do
-  probe_rows="$(doctor_probe_array "$probe_array")"
-  if [[ -z "$probe_rows" ]] || grep -q '["$\\]' <<< "$probe_rows"; then
-    fail "test failed: $probe_array of doctor.sh could not be read as plain quoted strings (renamed or reshaped? update this read deliberately)"
+  if probe_rows="$(doctor_probe_array "$probe_array")" && [[ -n "$probe_rows" ]]; then
+    doctor_probes+="$probe_rows"$'\n'
+  else
+    fail "test failed: $probe_array of doctor.sh could not be read as plain quoted strings (renamed, empty or reshaped? update this read deliberately)"
     probe_read_failed=1
     status=1
-  else
-    doctor_probes+="$probe_rows"$'\n'
   fi
 done
 probe_misses=""

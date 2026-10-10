@@ -4876,83 +4876,81 @@ rm -rf "${ds4_home:?}" "${ds4_bin:?}"
 # NT) network tunnels (#333 F34): PATH 上の tunnel tool の報告は allowNetworkTunnels
 #     だけで決まる (work = false は warn、personal = true は中立の item)。PATH に
 #     無ければその旨の ok。doctor は tool を探すだけで実行しない: fake は呼び出しを
-#     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は
-#     herdr-absent case と同じ組み立て (fake dir、次に /usr/bin:/bin だけ。yq と
-#     op / herdr / codex / opencode の stub は fake dir に link) で、開発機に入って
-#     いる tailscale / cloudflared / ngrok / zerotier-cli はどの run にも届かない。
-#     system dir にあれば doctor を回さずに fail する。
+#     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は fake dir
+#     (fake の tailscale、yq と op / herdr / codex / opencode の stub の link) と
+#     system dir の写し (/usr/bin と /bin の全 entry への symlink から tunnel tool の
+#     名前だけを除いた dir) に固定する。tunnel tool の有無は fake dir だけで決まり、
+#     開発機や CI の runner に入っている tailscale / cloudflared / ngrok /
+#     zerotier-cli (apt の package は /usr/bin に置く) はどの run にも届かない
+#     (Codex review, PR #368)。
 nt_home="$fixture_home/nt-home"
 nt_fakebin="$fixture_home/nt-bin"
+nt_sysbin="$fixture_home/nt-sysbin"
 nt_calls="$fixture_home/nt-calls"
-mkdir -p "$nt_home" "$nt_fakebin"
+mkdir -p "$nt_home" "$nt_fakebin" "$nt_sysbin"
 ln -sf "$(command -v yq)" "$nt_fakebin/yq"
 for host_tool in op herdr codex opencode; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$nt_fakebin/$host_tool"
 done
+# /bin を先に link し /usr/bin を -f で上書きする: 同名は /usr/bin が勝つ (PATH
+# "/usr/bin:/bin" と同じ順。merged-usr の Linux では /bin と /usr/bin は同じ entry)。
+ln -s /bin/* "$nt_sysbin/"
+ln -sf /usr/bin/* "$nt_sysbin/"
+rm -f "$nt_sysbin/tailscale" "$nt_sysbin/cloudflared" "$nt_sysbin/ngrok" "$nt_sysbin/zerotier-cli"
+nt_path="$nt_fakebin:$nt_sysbin"
 printf '#!/bin/sh\nprintf "%%s\\n" tailscale >> %q\nexit 1\n' "$nt_calls" > "$nt_fakebin/tailscale"
 chmod +x "$nt_fakebin/tailscale"
-nt_leak=""
-for nt_tool in tailscale cloudflared ngrok zerotier-cli; do
-  if (PATH="/usr/bin:/bin"; hash -r; command -v "$nt_tool" >/dev/null 2>&1); then
-    nt_leak+=" $nt_tool"
+# NT-1) work (allowNetworkTunnels=false): warn が出て、item と「無い」の行は出ない。
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] allowNetworkTunnels=false" <<< "$nt_out" \
+    && grep -Fxq "[warn] tunnel tool present but allowNetworkTunnels=false: tailscale (not removed automatically)" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present: tailscale" <<< "$nt_out" \
+    && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
+    ok "test passed: a tunnel tool on PATH warns under allowNetworkTunnels=false (work) and is never run"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: tunnel tool under allowNetworkTunnels=false (work) not reported as a warn, or the fake was run"
+    status=1
   fi
-done
-if [[ -n "$nt_leak" ]]; then
-  fail "test failed: the network tunnels cases need /usr/bin:/bin without a tunnel tool, but it has:$nt_leak (doctor not run)"
-  status=1
 else
-  # NT-1) work (allowNetworkTunnels=false): warn が出て、item と「無い」の行は出ない。
-  if nt_out="$(HOME="$nt_home" PATH="$nt_fakebin:/usr/bin:/bin" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
-    if grep -Fxq "[ok] allowNetworkTunnels=false" <<< "$nt_out" \
-      && grep -Fxq "[warn] tunnel tool present but allowNetworkTunnels=false: tailscale (not removed automatically)" <<< "$nt_out" \
-      && ! grep -Fq "tunnel tool present: tailscale" <<< "$nt_out" \
-      && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
-      ok "test passed: a tunnel tool on PATH warns under allowNetworkTunnels=false (work) and is never run"
-    else
-      printf '%s\n' "$nt_out" >&2
-      fail "test failed: tunnel tool under allowNetworkTunnels=false (work) not reported as a warn, or the fake was run"
-      status=1
-    fi
-  else
-    printf '%s\n' "$nt_out" >&2
-    fail "test failed: doctor must stay exit 0 (tunnel tool present, work)"
-    status=1
-  fi
-  # NT-2) personal (allowNetworkTunnels=true): 中立の item が出て、warn は出ない。
-  if nt_out="$(HOME="$nt_home" PATH="$nt_fakebin:/usr/bin:/bin" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-    if grep -Fxq "[ok] allowNetworkTunnels=true" <<< "$nt_out" \
-      && grep -Fxq "[info] - tunnel tool present: tailscale" <<< "$nt_out" \
-      && ! grep -Fq "tunnel tool present but allowNetworkTunnels=false" <<< "$nt_out" \
-      && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
-      ok "test passed: a tunnel tool on PATH is a neutral item under allowNetworkTunnels=true (personal) and is never run"
-    else
-      printf '%s\n' "$nt_out" >&2
-      fail "test failed: tunnel tool under allowNetworkTunnels=true (personal) not reported as an item, or the fake was run"
-      status=1
-    fi
-  else
-    printf '%s\n' "$nt_out" >&2
-    fail "test failed: doctor must stay exit 0 (tunnel tool present, personal)"
-    status=1
-  fi
-  # NT-3) PATH に tunnel tool が無い: 「無い」の ok が出て、warn も item も出ない。
-  rm -f "$nt_fakebin/tailscale"
-  if nt_out="$(HOME="$nt_home" PATH="$nt_fakebin:/usr/bin:/bin" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
-    if grep -Fxq "[ok] no tunnel tools found" <<< "$nt_out" \
-      && ! grep -Fq "tunnel tool present" <<< "$nt_out"; then
-      ok "test passed: no tunnel tool on PATH reports none found"
-    else
-      printf '%s\n' "$nt_out" >&2
-      fail "test failed: absent tunnel tools not reported as none found"
-      status=1
-    fi
-  else
-    printf '%s\n' "$nt_out" >&2
-    fail "test failed: doctor must stay exit 0 (no tunnel tools)"
-    status=1
-  fi
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (tunnel tool present, work)"
+  status=1
 fi
-rm -rf "${nt_home:?}" "${nt_fakebin:?}" "$nt_calls"
+# NT-2) personal (allowNetworkTunnels=true): 中立の item が出て、warn は出ない。
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] allowNetworkTunnels=true" <<< "$nt_out" \
+    && grep -Fxq "[info] - tunnel tool present: tailscale" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present but allowNetworkTunnels=false" <<< "$nt_out" \
+    && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
+    ok "test passed: a tunnel tool on PATH is a neutral item under allowNetworkTunnels=true (personal) and is never run"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: tunnel tool under allowNetworkTunnels=true (personal) not reported as an item, or the fake was run"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (tunnel tool present, personal)"
+  status=1
+fi
+# NT-3) PATH に tunnel tool が無い: 「無い」の ok が出て、warn も item も出ない。
+rm -f "$nt_fakebin/tailscale"
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] no tunnel tools found" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present" <<< "$nt_out"; then
+    ok "test passed: no tunnel tool on PATH reports none found"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: absent tunnel tools not reported as none found"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (no tunnel tools)"
+  status=1
+fi
+rm -rf "${nt_home:?}" "${nt_fakebin:?}" "${nt_sysbin:?}" "$nt_calls"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"
