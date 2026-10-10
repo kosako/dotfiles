@@ -140,6 +140,25 @@ else
   status=1
 fi
 
+# 3c) statusLine (#305 / #333): the managed status line runs the catalog's
+#     tacho from <home>/go/bin — the path doctor and install-packages.sh take
+#     as the managed argv[0] and the usage reader shares — as a command-type
+#     status line with no padding. Pinned per key against the home chezmoi
+#     rendered for (render_personal_into leaves HOME to chezmoi, as 8a's hook
+#     pins do; shell_word keeps a home with a space or quote comparable, #329;
+#     -o json -r because the YAML printer would quote a command that starts
+#     with a quote). test-render.sh pins the command's shell splitting for
+#     homes with special characters and the plain-home string.
+status_type="$(yq -p json '.statusLine.type // "absent"' "$off_file")"
+status_cmd="$(yq -p json -o json -r '.statusLine.command // "absent"' "$off_file")"
+status_pad="$(yq -p json '.statusLine.padding // "absent"' "$off_file")"
+if [[ "$status_type" == "command" && "$status_cmd" == "$(shell_word "$HOME/go/bin/tacho") statusline" && "$status_pad" == "0" ]]; then
+  ok "test passed: statusLine is a command-type status line running <home>/go/bin/tacho statusline with padding 0"
+else
+  fail "test failed: statusLine unexpected (type=$status_type command=$status_cmd padding=$status_pad)"
+  status=1
+fi
+
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
@@ -528,49 +547,59 @@ else
   ok "test passed: context-gated writes (merge/PR/comment/label) are not statically gated"
 fi
 
-# 6) gateGitHubMcp=true: the GitHub MCP server is denied entirely. Flip in a
-#    throwaway copy so the committed default stays false.
+# 6) gateGitHubMcp=false: the gate adds exactly the github MCP deny, so the
+#    render is the committed one (gateGitHubMcp is ON for personal; 4 pins
+#    mcp__github in place) minus that one entry, still valid JSON (comma
+#    regression guard for the conditional deny). The true direction is the
+#    committed render itself (4 / 5 / 6c); flipping true was a no-op (#332).
+#    Validity is checked first in its own branch: a command substitution in
+#    a plain assignment would abort the suite under set -e on invalid JSON,
+#    and yq prints the first document before failing on trailing garbage, so
+#    a `|| true` would let the comparison pass on it.
 mcp_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-mcp.XXXXXX")"
 tmp_roots+=("$mcp_src")
 make_flipped_source "$mcp_src"
-flip_personal_capability "$mcp_src/src" gateGitHubMcp true
+flip_personal_capability "$mcp_src/src" gateGitHubMcp false
 mcp_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
 tmp_roots+=("$mcp_root")
 if ! render_personal_into "$mcp_src/src" "$mcp_root"; then
-  fail "test failed: personal apply (gateGitHubMcp=true) did not render"
+  fail "test failed: personal apply (gateGitHubMcp=false) did not render"
   exit 1
 fi
 mcp_file="$mcp_root/home/.claude/settings.json"
-# Valid JSON (comma regression guard for the conditional deny block) + the bare
-# server-name deny (mcp__github covers all tools; mcp__github__* is redundant).
-if yq -p json '.' "$mcp_file" >/dev/null 2>&1 \
-  && grep -Fq '"mcp__github"' "$mcp_file"; then
-  ok "test passed: gateGitHubMcp=true denies the github MCP server (valid JSON)"
+if ! yq -p json '.' "$mcp_file" >/dev/null 2>&1; then
+  fail "test failed: gateGitHubMcp=false settings.json is not valid JSON"
+  status=1
+elif [[ "$(yq -p json -o json '.' "$mcp_file")" == "$(yq -p json -o json 'del(.permissions.deny[] | select(. == "mcp__github"))' "$off_file")" ]] \
+  && ! grep -Fq 'mcp__github' "$mcp_file"; then
+  ok "test passed: gateGitHubMcp=false drops the github MCP deny and nothing else (valid JSON)"
 else
-  fail "test failed: gateGitHubMcp=true did not deny the github MCP server (or invalid JSON)"
+  fail "test failed: gateGitHubMcp=false render is not the committed render minus the github MCP deny (mcp__github still denied or another change leaked)"
   status=1
 fi
 
-# 6b) Both gates on: the deny/ask blocks plus sandbox must still be valid JSON
-#     (catches a comma regression when several conditional keys are present).
+# 6b) gateGitHubMcp=false with enforceAiSandbox=true: the deny block built from
+#     the floor and the sandbox entries without the MCP entry must still be
+#     valid JSON with the write gate present (comma regression when several
+#     conditional keys are present).
 both_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-both.XXXXXX")"
 tmp_roots+=("$both_src")
 make_flipped_source "$both_src"
-flip_personal_capability "$both_src/src" gateGitHubMcp true
+flip_personal_capability "$both_src/src" gateGitHubMcp false
 flip_personal_capability "$both_src/src" enforceAiSandbox true
 both_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
 tmp_roots+=("$both_root")
 if ! render_personal_into "$both_src/src" "$both_root"; then
-  fail "test failed: personal apply (both gates true) did not render"
+  fail "test failed: personal apply (gateGitHubMcp=false, enforceAiSandbox=true) did not render"
   exit 1
 fi
 both_file="$both_root/home/.claude/settings.json"
 if yq -p json '.' "$both_file" >/dev/null 2>&1 \
-  && grep -Fq '"mcp__github"' "$both_file" \
+  && ! grep -Fq 'mcp__github' "$both_file" \
   && grep -Fq '"Bash(git push * main)"' "$both_file"; then
-  ok "test passed: both gates on -> valid JSON with combined MCP + write deny"
+  ok "test passed: gate off + sandbox on -> valid JSON with the write gate and no MCP deny"
 else
-  fail "test failed: both gates on produced invalid JSON or missing matchers"
+  fail "test failed: gate off + sandbox on produced invalid JSON, kept the MCP deny, or lost the write gate"
   status=1
 fi
 

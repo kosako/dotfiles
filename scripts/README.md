@@ -180,7 +180,7 @@ test-*.sh が共有する fixture helper(source 専用、lib-policy.sh の後に
 `render_personal_into`(throwaway home への personal apply。root は呼び出し側が mktemp +
 cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp する形は cleanup trap から
 漏れる、#150)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
-限定 capability flip。boolean 専用)、`copy_repo_fixture`(scripts + .chezmoidata の最小
+限定 capability flip。boolean 専用。personal が宣言していない capability は fail する、#332)、`copy_repo_fixture`(scripts + .chezmoidata の最小
 repo copy)。
 
 ## test-shell-syntax.sh
@@ -679,7 +679,7 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 `--force-with-lease`・`feature-f` のような branch 名・branch の作成と切替・merge 済みの `-d`・`--soft` などの日常の git と、
 `cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
 として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
-取り込んだ global preference キーの保持、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
+取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
 chezmoi が必要(render job)。
 
