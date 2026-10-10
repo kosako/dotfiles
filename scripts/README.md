@@ -769,7 +769,8 @@ deploy(agent-tools#281 以前の 3 本)、実行 bit の無い dispatcher のど
 `hooks.gitconfig`(`core.hooksPath`)が exact な内容で render されること、render した `~/.gitconfig` 経由の実 commit で
 dispatcher が pre-commit → commit-msg の順に呼ばれること、失敗する dispatcher が commit を止めること、`--no-verify` で
 両方を迂回できること(best-effort の既知の限界)を確認する。`enableGitHookGates=false` の apply で適用済みの配線が
-**削除される**こと、`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
+**削除される**こと、配備(deploy 4 本)が消えた後の同じ source での再 apply でも配線が削除されること、
+`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
 `--includes` 付きで読むこと(静的 pin)と、deploy 4 本の一覧が武装の template・doctor・preflight・この test で同じであること
 (静的 pin、#307。doctor / preflight の部分 deploy での振る舞いは test-doctor / test-preflight が固定する)も確認する。
 throwaway destination に render し、実 home には触れない。
