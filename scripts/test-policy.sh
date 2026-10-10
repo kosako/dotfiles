@@ -159,6 +159,24 @@ run_fail_contains \
   "unknown profile: unknown-profile" \
   "$fixture/scripts/validate-policy.sh" unknown-profile
 
+# environmentKind は後段の cross-check を駆動するので、無い profile や表に無い kind は
+# 「制約なし」として通さず fail closed にする。yq の del は key が無いと no-op になるが、
+# その場合は validate が通って run_fail_contains が落ちるので、変異の検証は assertion
+# 自身が担う (#151 の capability registry case と同じ論理)。
+make_fixture
+yq -i 'del(.profiles.personal.environmentKind)' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile without environmentKind" \
+  "profile has no environmentKind: personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: bogus"
+run_fail_contains \
+  "rejects unknown environmentKind" \
+  "unknown environmentKind for personal: bogus" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 make_fixture
 insert_once "$fixture/.chezmoidata/profiles.yaml" "      - base" "      - missing-module"
 run_fail_contains \
@@ -199,6 +217,22 @@ insert_once "$fixture/.chezmoidata/profiles.yaml" "      installPackages: true" 
 run_fail_contains \
   "rejects duplicate capability" \
   "duplicate capability in personal: installPackages" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+make_fixture
+insert_once "$fixture/.chezmoidata/profiles.yaml" "      - base" "      - base"
+run_fail_contains \
+  "rejects duplicate module" \
+  "duplicate module in personal: base" \
+  "$fixture/scripts/validate-policy.sh" personal
+
+# schema が宣言する capability は全 profile が明示的に持つ。key の欠落は暗黙の既定値ではなく
+# hard fail (del が no-op なら validate が通って test が落ちる)。
+make_fixture
+yq -i 'del(.profiles.personal.capabilities.enableDirenv)' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile missing a declared capability" \
+  "missing capability in personal: enableDirenv" \
   "$fixture/scripts/validate-policy.sh" personal
 
 make_fixture
@@ -469,46 +503,44 @@ run_fail_contains \
   "no backup paths parsed" \
   "$fixture/scripts/validate-policy.sh" personal
 
-# environmentKind cross-check. Every deny entry for work/client/agent
-# must actually fire: retag personal (already elevated) to work and force
-# the one cap it leaves false to true, then assert all five are flagged.
-make_fixture
-replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: work"
-replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
-ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1 || true)"
-ek_missing=""
-for cap in installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools; do
-  grep -Fq "environmentKind work forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
+# environmentKind cross-check. work / client / agent の deny 表 (lib-policy の
+# environment_kind_forbidden_capabilities) の 5 つが kind ごとに全部発火することを
+# 確かめる: personal (元から elevated) を各 kind に付け替え、唯一 false の enableAiTools
+# も true にして、5 つすべての文言を assert する。client / agent に profile はまだ無い
+# ので、この付け替えが表の行の証明になる。cap 名は表から導かず test に固定する (表から
+# 行が落ちる退行を検出するため)。docs/policy-model.md の契約は hard fail なので、
+# 文言だけでなく exit code も pin する。
+for ek_kind in work client agent; do
+  make_fixture
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
+  ek_rc=0
+  ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || ek_rc=$?
+  if [[ "$ek_rc" -eq 0 ]]; then
+    printf '%s\n' "$ek_output" >&2
+    fail "test unexpectedly passed: $ek_kind deny must hard-fail"
+    exit 1
+  fi
+  ek_missing=""
+  for cap in installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools; do
+    grep -Fq "environmentKind $ek_kind forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
+  done
+  if [[ -z "$ek_missing" ]]; then
+    ok "test passed: every $ek_kind deny capability is enforced"
+  else
+    printf '%s\n' "$ek_output" >&2
+    fail "test failed: $ek_kind deny not enforced for:$ek_missing"
+    exit 1
+  fi
 done
-if [[ -z "$ek_missing" ]]; then
-  ok "test passed: every work deny capability is enforced"
-else
-  printf '%s\n' "$ek_output" >&2
-  fail "test failed: work deny not enforced for:$ek_missing"
-  exit 1
-fi
 
-# client / sandbox / agent have no profile yet; retag personal (which has
-# elevated capabilities) to prove each row's constraint fires.
-make_fixture
-replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: client"
-run_fail_contains \
-  "client environmentKind forbids elevated capabilities" \
-  "environmentKind client forbids" \
-  "$fixture/scripts/validate-policy.sh" personal
-
+# sandbox が禁止するのは allowSecretsAccess だけ。sandbox にも profile はまだ無いので、
+# personal (elevated) を付け替えてこの行が発火することを証明する。
 make_fixture
 replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: sandbox"
 run_fail_contains \
   "sandbox environmentKind forbids allowSecretsAccess" \
   "environmentKind sandbox forbids allowSecretsAccess=true" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: agent"
-run_fail_contains \
-  "agent environmentKind forbids elevated capabilities" \
-  "environmentKind agent forbids" \
   "$fixture/scripts/validate-policy.sh" personal
 
 # enum cross-check (#45): work / client / agent forbid npmHardeningMode=off

@@ -258,7 +258,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 
 - `validate-policy.sh --all` が全 profile を検証すること。
 - enum capability の許可値を正しく受け入れること。
-- unknown profile / module / capability(module の `requires:` 内も)、重複 capability、enum の不正値を拒否すること。
+- unknown profile / module / capability(module の `requires:` 内も)、重複 capability / module、enum の不正値、
+  environmentKind の欠落 / 未知の値、schema が宣言する capability の欠落を拒否すること。
 - boolean capability・`requires:`・`implemented:` は YAML boolean の小文字 `true` / `false` だけを受け入れ、
   文字列 / 数値 / null / 大文字綴りを拒否すること(#206)。
 - 同一 path を複数 module が宣言したら fail、`requires:` を持つ module は `paths:` 必須。
