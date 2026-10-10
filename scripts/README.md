@@ -351,7 +351,8 @@ query だけを実機で実行する(書き込みはしない)。
   「not initialized」の item で skip、あれば `chezmoi status` を示す action(#309。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
   managed-by header の欠落も warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
-  warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ /
+  warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ(不正 JSON は
+  contract_version unknown として field を解釈しないことを、contract version 不一致と同じ sentinel の不在で pin、#332)/
   `AGENT_TOOLS` override(#71 / #73)。
 - private-backup: marker 不在は allowSecretsAccess=true の profile だけ warn(false は中立)、marker
   ありで最終成功時刻 / archive / 件数、不正 marker は unreadable、local 補足は**存在のみ**(#174)。marker の
@@ -439,6 +440,10 @@ query だけを実機で実行する(書き込みはしない)。
 - go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が action(`--actions-only` に mise config の apply と、継承した GOBIN / GOPATH を外す `exec env -u GOBIN -u GOPATH zsh -l` の手順が出る。その形で継承値が消えることも確認)、
   `go env` の失敗は「確かめられない」の warn(ok を出さない)、PATH に `~/go/bin` が無ければ info(`go env` が
   失敗したときも出す)、末尾 slash の HOME でも一致。
+- network tunnels(#333): PATH を fake dir + system dir の写し(`/usr/bin` と `/bin` の全 entry への symlink から tunnel tool の
+  名前だけを除いた dir。host に入っている tunnel tool はどの run にも届かない)に固定し、fake の tailscale が在れば
+  work(`allowNetworkTunnels=false`)では warn・personal(true)では中立の item、無ければ `no tunnel tools found`。fake は
+  呼び出しを記録し、doctor が tool を実行しないこと(記録の不在)も pin。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
   `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、symlink の `default.rules` は
@@ -722,6 +727,9 @@ managed に書かない)、secret / email らしき文字列が無いこと、wo
 加えて rendered の bash map を OpenCode の規則(glob・last match wins)で評価し、doctor.sh の外向き probe と `gh` の
 mutation・短縮 flag・alias、deny、維持すべき read からなる固定 command 集合の判定が、`docs/ai-policy.md` から手で書いた
 期待値(allow / ask / deny。map からは導かない)と一致することを確認する(`*` 以外の pattern 文字を含む rule は fail、#240)。
+加えて doctor.sh の `outward_probe_commands` / `secret_read_probe_commands` を literal に読み出し(source しない)、全 probe が
+この command 集合の行にあることを機械的に確かめる(配列が読めない・行が `"..."` だけの plain な quoted 文字列の形に
+完全一致しない entry があれば fail、#332)。
 chezmoi が必要(render job)。
 
 ## test-git-signing.sh

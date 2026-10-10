@@ -331,7 +331,11 @@ else
   status=1
 fi
 
-# G) Opt-in + malformed status JSON: doctor must not break, exit 0.
+# G) Opt-in + 壊れた status JSON: 契約の gate が未知の version と同じく拒否する
+#    (yq が何も返さないので contract_version は unknown と読まれる) こと、field を
+#    1 つも解釈しないこと、exit 0 を固定する (#332 F58)。C と同じ sentinel の不在も
+#    assert する: 壊れた JSON では query が全部空になるので、解釈を続ける doctor は
+#    "" を「0 でない」と読んで sync conflicts の warn を出す。
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
 json=0
@@ -340,9 +344,19 @@ for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 echo 'this is not json {{{'
 SH
 chmod +x "$agent_scripts/status.sh"
-if HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal >/dev/null 2>&1; then
-  ok "test passed: malformed status JSON keeps doctor at exit 0"
+if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] agent-tools status contract_version=unknown, expected 3 (not interpreting fields)" <<< "$at_out" \
+    && ! grep -Fq "agent-tools working tree clean" <<< "$at_out" \
+    && ! grep -Fq "sync conflicts" <<< "$at_out" \
+    && ! grep -Fq "deployed-but-inactive sync targets" <<< "$at_out"; then
+    ok "test passed: malformed status JSON is refused as contract_version unknown and not interpreted (exit 0)"
+  else
+    printf '%s\n' "$at_out" >&2
+    fail "test failed: malformed status JSON must warn as contract_version unknown and interpret no field"
+    status=1
+  fi
 else
+  printf '%s\n' "$at_out" >&2
   fail "test failed: malformed status JSON must not break doctor"
   status=1
 fi
@@ -4858,6 +4872,85 @@ else
   status=1
 fi
 rm -rf "${ds4_home:?}" "${ds4_bin:?}"
+
+# NT) network tunnels (#333 F34): PATH 上の tunnel tool の報告は allowNetworkTunnels
+#     だけで決まる (work = false は warn、personal = true は中立の item)。PATH に
+#     無ければその旨の ok。doctor は tool を探すだけで実行しない: fake は呼び出しを
+#     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は fake dir
+#     (fake の tailscale、yq と op / herdr / codex / opencode の stub の link) と
+#     system dir の写し (/usr/bin と /bin の全 entry への symlink から tunnel tool の
+#     名前だけを除いた dir) に固定する。tunnel tool の有無は fake dir だけで決まり、
+#     開発機や CI の runner に入っている tailscale / cloudflared / ngrok /
+#     zerotier-cli (apt の package は /usr/bin に置く) はどの run にも届かない
+#     (Codex review, PR #368)。
+nt_home="$fixture_home/nt-home"
+nt_fakebin="$fixture_home/nt-bin"
+nt_sysbin="$fixture_home/nt-sysbin"
+nt_calls="$fixture_home/nt-calls"
+mkdir -p "$nt_home" "$nt_fakebin" "$nt_sysbin"
+ln -sf "$(command -v yq)" "$nt_fakebin/yq"
+for host_tool in op herdr codex opencode; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$nt_fakebin/$host_tool"
+done
+# /bin を先に link し /usr/bin を -f で上書きする: 同名は /usr/bin が勝つ (PATH
+# "/usr/bin:/bin" と同じ順。merged-usr の Linux では /bin と /usr/bin は同じ entry)。
+ln -s /bin/* "$nt_sysbin/"
+ln -sf /usr/bin/* "$nt_sysbin/"
+rm -f "$nt_sysbin/tailscale" "$nt_sysbin/cloudflared" "$nt_sysbin/ngrok" "$nt_sysbin/zerotier-cli"
+nt_path="$nt_fakebin:$nt_sysbin"
+printf '#!/bin/sh\nprintf "%%s\\n" tailscale >> %q\nexit 1\n' "$nt_calls" > "$nt_fakebin/tailscale"
+chmod +x "$nt_fakebin/tailscale"
+# NT-1) work (allowNetworkTunnels=false): warn が出て、item と「無い」の行は出ない。
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] allowNetworkTunnels=false" <<< "$nt_out" \
+    && grep -Fxq "[warn] tunnel tool present but allowNetworkTunnels=false: tailscale (not removed automatically)" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present: tailscale" <<< "$nt_out" \
+    && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
+    ok "test passed: a tunnel tool on PATH warns under allowNetworkTunnels=false (work) and is never run"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: tunnel tool under allowNetworkTunnels=false (work) not reported as a warn, or the fake was run"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (tunnel tool present, work)"
+  status=1
+fi
+# NT-2) personal (allowNetworkTunnels=true): 中立の item が出て、warn は出ない。
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] allowNetworkTunnels=true" <<< "$nt_out" \
+    && grep -Fxq "[info] - tunnel tool present: tailscale" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present but allowNetworkTunnels=false" <<< "$nt_out" \
+    && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
+    ok "test passed: a tunnel tool on PATH is a neutral item under allowNetworkTunnels=true (personal) and is never run"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: tunnel tool under allowNetworkTunnels=true (personal) not reported as an item, or the fake was run"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (tunnel tool present, personal)"
+  status=1
+fi
+# NT-3) PATH に tunnel tool が無い: 「無い」の ok が出て、warn も item も出ない。
+rm -f "$nt_fakebin/tailscale"
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] no tunnel tools found" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present" <<< "$nt_out"; then
+    ok "test passed: no tunnel tool on PATH reports none found"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: absent tunnel tools not reported as none found"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (no tunnel tools)"
+  status=1
+fi
+rm -rf "${nt_home:?}" "${nt_fakebin:?}" "${nt_sysbin:?}" "$nt_calls"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"

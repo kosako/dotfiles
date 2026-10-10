@@ -134,7 +134,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
   assert する(#240): doctor の Codex probe 39 本(外向き・昇格 27 + 認証情報の表示 3、#287 + secret の読み出し 9、#334。secret の読み出しは期待する判定つき)に、短縮 flag / alias / read 形、
-  認証情報を扱う command の置き方(#315)、#304 の git の形を足した集合。edit の rule map も同じ glob で、参照先 note と
+  認証情報を扱う command の置き方(#315)、#304 の git の形を足した集合。doctor.sh の 2 つの配列を literal に読み出し、全 probe がこの集合の行にあることも機械的に確かめる(#332)。edit の rule map も同じ glob で、参照先 note と
   名前の似た file の path に当てて判定する(#304)。期待値は
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
