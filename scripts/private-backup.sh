@@ -30,6 +30,13 @@ SUPPLEMENT_HOME_PATH=".config/dotfiles/backup-paths.local"
 DEFAULT_LOCAL_SUPPLEMENT="$HOME/$SUPPLEMENT_HOME_PATH"
 DEFAULT_RECIPIENT_FILE="$HOME/.config/dotfiles/private-backup.recipient"
 MARKER_FILE="$HOME/.local/state/dotfiles/private-backup.json"
+# The temps a run may make, script-global (not local) so cleanup_temps,
+# registered once at the bottom, sees them after the function that made
+# them returned; empty until made, so the cleanup can run before that
+# under set -u (#358). backup: the 0700 staging (plaintext config), the
+# self-check dir and three list files. verify / restore: the 0700 workdir
+# the archive is decrypted and extracted into.
+staging="" selfcheck="" declared="" seen_paths="" dir_listing="" workdir=""
 
 usage() {
   cat >&2 <<EOF
@@ -204,7 +211,7 @@ validate_extracted_tree() {
   return 0
 }
 
-# remove_workdir DIR — the EXIT cleanup of a 0700 temp a foreign archive
+# remove_workdir DIR — the cleanup of a 0700 temp a foreign archive
 # was extracted into (verify / restore). `tar -xp` restores the archive's
 # modes, so a crafted archive can leave a directory without permissions
 # (mode 000) that a plain `rm -rf` cannot empty as a non-root user, keeping
@@ -220,6 +227,33 @@ remove_workdir() {
   if [[ -e "$dir" ]]; then
     warn "could not remove the temp $dir completely; remove it by hand (it may hold decrypted content)"
   fi
+  return 0
+}
+
+# cleanup_temps — remove whatever temp the run made (the variables above):
+# backup's staging, self-check dir and list files, and the workdir of
+# verify / restore through remove_workdir. Registered once, at the bottom,
+# for EXIT and for INT / TERM (#358): with an EXIT trap alone, a second
+# Ctrl-C arriving while that trap was already removing the temp ended the
+# script half-way through it and left the plaintext behind (bash 3.2 and 5
+# alike). On INT / TERM the cleanup runs first; then the trap is dropped and
+# the same signal ends the script, so the caller still sees an interrupted
+# run, and the EXIT trap runs the cleanup once more, which is harmless:
+# every step skips what is unset or already gone. Each trap ignores INT
+# and TERM while it cleans up (see the bottom), so no further signal kills
+# an rm half-way; a removal that fails all the same is warned about, not
+# left to errexit, which would skip the removals after it and end the run
+# by an exit before an INT / TERM trap re-sends its signal (#358 review).
+# Returns 0 like remove_workdir (a trap body runs under set -e).
+cleanup_temps() {
+  local t
+  for t in "$staging" "$selfcheck"; do
+    [[ -z "$t" ]] || rm -rf "$t" || warn "could not remove the temp $t; remove it by hand (it may hold plaintext)"
+  done
+  for t in "$declared" "$seen_paths" "$dir_listing"; do
+    [[ -z "$t" ]] || rm -f "$t" || warn "could not remove the temp $t; remove it by hand"
+  done
+  remove_workdir "$workdir"
   return 0
 }
 
@@ -326,9 +360,8 @@ cmd_backup() {
 
   section "private-backup: resolve targets"
 
-  # Script-global (not local) so the deferred EXIT trap can still see them
-  # after the function returns; one EXIT trap suffices since the script
-  # runs a single subcommand then exits.
+  # Script-global; cleanup_temps removes them (the 0700 staging holds
+  # plaintext config).
   declared="$(mktemp)"
   seen_paths="$(mktemp)"
   # Per-directory find listing (NUL-delimited), outside the staging so it
@@ -336,8 +369,6 @@ cmd_backup() {
   dir_listing="$(mktemp)"
   staging="$(mktemp -d "${TMPDIR:-/tmp}/private-backup.XXXXXX")"
   chmod 700 "$staging"
-  # Clean up the 0700 staging (plaintext config) and temp lists on exit.
-  trap 'rm -rf "$staging"; rm -f "$declared" "$seen_paths" "$dir_listing"' EXIT
 
   collect_declared "$BACKUP_PATHS_FILE" baseline "$declared" || return 1
   if [[ -f "$local_supplement" ]]; then
@@ -497,10 +528,9 @@ cmd_backup() {
   # write below.
   local partial="$out.partial"
   rm -f "$partial"
-  # Script-global for the EXIT trap, like staging.
+  # Script-global for cleanup_temps, like staging.
   selfcheck="$(mktemp -d "${TMPDIR:-/tmp}/private-backup-check.XXXXXX")"
   chmod 700 "$selfcheck"
-  trap 'rm -rf "$staging" "$selfcheck"; rm -f "$declared" "$seen_paths" "$dir_listing"' EXIT
   if ! check_manifest "$staging" "$selfcheck"; then
     fail "staging failed self-check; no archive written"
     return 1
@@ -780,10 +810,9 @@ cmd_verify() {
   require_secrets_access || return 1
   require_tools || return 1
 
-  # Script-global (not local) so the deferred EXIT trap still sees it.
+  # Script-global; cleanup_temps removes it.
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-verify.XXXXXX")"
   chmod 700 "$workdir"
-  trap 'remove_workdir "$workdir"' EXIT
   local extract="$workdir/extract"
   mkdir -p "$extract"
 
@@ -831,7 +860,6 @@ cmd_restore() {
 
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/private-restore.XXXXXX")"
   chmod 700 "$workdir"
-  trap 'remove_workdir "$workdir"' EXIT
   local extract="$workdir/extract"
   mkdir -p "$extract"
 
@@ -942,4 +970,19 @@ main() {
   esac
 }
 
+# Registered before any temp exists, so there is no moment in which a temp
+# has been made but no cleanup is set (see cleanup_temps; the form of
+# doctor.sh, plus the first step). Each trap first ignores INT and TERM,
+# and the rm / find / chmod it runs inherit that, so no further Ctrl-C or
+# TERM (a second press, a held key) can cut the removal short; the INT /
+# TERM traps then restore their signal and end the script by it. A signal
+# arriving while the EXIT trap cleans up after a normal end is dropped, and
+# that run ends with its own status. Without the first step (#358 review)
+# a second signal killed the rm under way and errexit ended the run by an
+# exit instead of the signal (bash 3.2), and a signal at every removal kept
+# the plaintext: bash 3.2 ended with it left, and bash 5 re-ran the trap
+# without finishing for as long as the signals came.
+trap 'trap "" INT TERM; cleanup_temps' EXIT
+trap 'trap "" INT TERM; cleanup_temps; trap - INT; kill -INT $$' INT
+trap 'trap "" INT TERM; cleanup_temps; trap - TERM; kill -TERM $$' TERM
 main "$@"

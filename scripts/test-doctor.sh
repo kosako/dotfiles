@@ -70,7 +70,21 @@ fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # specific answer put their own fake in front of these, as before (#306).
 # Kept outside the fixture HOME so no section's cleanup removes it.
 host_stub_dir=""
-trap 'rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}' EXIT
+# Sections that plant a mode-000 dir or file under the fixture HOME (GS-2,
+# OP, AIP, CL-8) restore the mode on their normal path only: a run that
+# stops inside that window would leave a tree `rm -rf` cannot enter. The
+# modes are re-opened first (chmod -R visits a dir before reading it, so a
+# 000 dir is passed; best effort, the removal must still run), and the
+# cleanup is also wired to INT / TERM, so a second signal that lands
+# while it runs starts it over (modes first) instead of killing it
+# halfway (#359 review).
+cleanup_fixtures() {
+  chmod -R u+rwX "$fixture_home" 2>/dev/null || true
+  rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}
+}
+trap cleanup_fixtures EXIT
+trap 'cleanup_fixtures; trap - INT; kill -INT $$' INT
+trap 'cleanup_fixtures; trap - TERM; kill -TERM $$' TERM
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
 for host_tool in op herdr codex opencode; do
@@ -331,7 +345,11 @@ else
   status=1
 fi
 
-# G) Opt-in + malformed status JSON: doctor must not break, exit 0.
+# G) Opt-in + 壊れた status JSON: 契約の gate が未知の version と同じく拒否する
+#    (yq が何も返さないので contract_version は unknown と読まれる) こと、field を
+#    1 つも解釈しないこと、exit 0 を固定する (#332 F58)。C と同じ sentinel の不在も
+#    assert する: 壊れた JSON では query が全部空になるので、解釈を続ける doctor は
+#    "" を「0 でない」と読んで sync conflicts の warn を出す。
 cat > "$agent_scripts/status.sh" <<'SH'
 #!/bin/sh
 json=0
@@ -340,9 +358,19 @@ for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 echo 'this is not json {{{'
 SH
 chmod +x "$agent_scripts/status.sh"
-if HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal >/dev/null 2>&1; then
-  ok "test passed: malformed status JSON keeps doctor at exit 0"
+if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] agent-tools status contract_version=unknown, expected 3 (not interpreting fields)" <<< "$at_out" \
+    && ! grep -Fq "agent-tools working tree clean" <<< "$at_out" \
+    && ! grep -Fq "sync conflicts" <<< "$at_out" \
+    && ! grep -Fq "deployed-but-inactive sync targets" <<< "$at_out"; then
+    ok "test passed: malformed status JSON is refused as contract_version unknown and not interpreted (exit 0)"
+  else
+    printf '%s\n' "$at_out" >&2
+    fail "test failed: malformed status JSON must warn as contract_version unknown and interpret no field"
+    status=1
+  fi
 else
+  printf '%s\n' "$at_out" >&2
   fail "test failed: malformed status JSON must not break doctor"
   status=1
 fi
@@ -2362,6 +2390,126 @@ else
   status=1
 fi
 rm -rf "$gs_home"
+
+# GS-2) remote URL scan INCOMPLETE (#359): a remote config that cannot be
+#       read and a root that cannot be listed completely are failures, not
+#       clean repos — each is named (the URL, a canary, never shown), the
+#       repos that could be read are still flagged and counted, the clean ok
+#       is withheld, and doctor stays exit 0; a root that is a symlink is
+#       followed, not read as empty. Run from a copy of the checkout so the
+#       scanned count is the fixture's alone. Skipped as root (root reads
+#       mode 000).
+if [[ "$(id -u)" != "0" ]]; then
+  gs2_home="$fixture_home/gs2-home"
+  gs2_copy="$fixture_home/gs2-dotfiles"
+  gs2_canary="canary-remote-userinfo-359"
+  rm -rf "$gs2_home" "$gs2_copy"
+  copy_repo_fixture "$gs2_copy"
+  mkdir -p "$gs2_home"
+  : > "$gs2_home/.gitconfig"
+  gs2_git() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+  gs2_run() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 "$gs2_copy/scripts/doctor.sh" personal 2>&1; }
+  #     GS-2a) a repo whose .git/config cannot be read, next to a repo with no
+  #            remote: the former is INCOMPLETE, the latter scanned (count 1).
+  gs2_git init -q --template= "$gs2_home/src/personal/locked"
+  gs2_git -C "$gs2_home/src/personal/locked" remote add origin "https://user:$gs2_canary@example.invalid/x.git"
+  gs2_git init -q --template= "$gs2_home/src/personal/clean"
+  chmod 000 "$gs2_home/src/personal/locked/.git/config"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: the remote config of repo=$gs2_home/src/personal/locked could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 1 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 1" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a remote config that cannot be read reports the scan INCOMPLETE (named, not counted, no false clean)"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: an unreadable remote config was read as clean"
+    status=1
+  fi
+  chmod 644 "$gs2_home/src/personal/locked/.git/config"
+  #     GS-2b) a root with a dir that cannot be opened (the listing fails
+  #            partway) and a root that cannot be opened at all (the open
+  #            probe fails): both are INCOMPLETE, while the repos the listing
+  #            did print (and the now readable one) are flagged.
+  gs2_git init -q --template= "$gs2_home/src/work/flagged"
+  gs2_git -C "$gs2_home/src/work/flagged" remote add origin "https://user:$gs2_canary@example.invalid/y.git"
+  mkdir -p "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  chmod 000 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/personal/locked remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/work/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: repositories under $gs2_home/src/work could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: root $gs2_home/src/client could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remotes with credential-like userinfo: 2" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 2 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 3" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a root that cannot be listed completely reports the scan INCOMPLETE while the repos it did list are still flagged"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: a root that cannot be listed completely was read as clean or its listed repos were dropped"
+    status=1
+  fi
+  chmod 755 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  #     GS-2c) the parent of every standard root cannot be passed (~/src mode
+  #            000): a `-d` test reads all five roots as absent and would skip
+  #            them silently with the flagged repos under them, so each root
+  #            is named as not openable, nothing under them is counted, and
+  #            the clean ok is withheld.
+  chmod 000 "$gs2_home/src"
+  gs2_rc=0
+  gs2_out="$(gs2_run)" || gs2_rc=$?
+  gs2_roots_named=0
+  for gs2_root in personal work client sandbox agent; do
+    grep -Fxq "[warn] remote URL scan INCOMPLETE: root $gs2_home/src/$gs2_root could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked" <<< "$gs2_out" \
+      && gs2_roots_named=$((gs2_roots_named + 1))
+  done
+  if [[ "$gs2_rc" -eq 0 && "$gs2_roots_named" -eq 5 ]] \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 5 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 0" <<< "$gs2_out" \
+    && ! grep -Fq "credential-like userinfo" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a parent that cannot be passed reports every root under it INCOMPLETE instead of skipping them as absent"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: roots behind a parent that cannot be passed were skipped as absent (rc=$gs2_rc, roots named=$gs2_roots_named)"
+    status=1
+  fi
+  chmod 755 "$gs2_home/src"
+  #     GS-2d) a root that is a symlink to a dir outside every root (Codex
+  #            review R2): the open probe passes (cd -P opens the target),
+  #            but a find without -H does not follow the root, prints
+  #            nothing and exits 0 — with no other repo in this HOME, the
+  #            flagged and the unreadable repo behind the link would both
+  #            vanish into the clean ok. Followed, the flagged one is named
+  #            under the root path, the unreadable one INCOMPLETE.
+  rm -rf "$gs2_home/src"
+  mkdir -p "$gs2_home/src"
+  gs2_git init -q --template= "$gs2_home/elsewhere/sandbox/flagged"
+  gs2_git -C "$gs2_home/elsewhere/sandbox/flagged" remote add origin "https://user:$gs2_canary@example.invalid/z.git"
+  gs2_git init -q --template= "$gs2_home/elsewhere/sandbox/locked"
+  gs2_git -C "$gs2_home/elsewhere/sandbox/locked" remote add origin "https://user:$gs2_canary@example.invalid/w.git"
+  ln -s "$gs2_home/elsewhere/sandbox" "$gs2_home/src/sandbox"
+  chmod 000 "$gs2_home/elsewhere/sandbox/locked/.git/config"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/sandbox/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: the remote config of repo=$gs2_home/src/sandbox/locked could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remotes with credential-like userinfo: 1" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 1 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 1" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a root that is a symlink is followed (the repos behind it are flagged or named INCOMPLETE, no false clean)"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: the repos behind a root that is a symlink were read as clean"
+    status=1
+  fi
+  chmod 644 "$gs2_home/elsewhere/sandbox/locked/.git/config"
+  rm -rf "$gs2_home" "$gs2_copy"
+fi
 
 # HG) git hook gates readiness on a module-active profile (#307): the
 #     observer side of the two-key gate. Each case plants the agent-tools
@@ -4858,6 +5006,85 @@ else
   status=1
 fi
 rm -rf "${ds4_home:?}" "${ds4_bin:?}"
+
+# NT) network tunnels (#333 F34): PATH 上の tunnel tool の報告は allowNetworkTunnels
+#     だけで決まる (work = false は warn、personal = true は中立の item)。PATH に
+#     無ければその旨の ok。doctor は tool を探すだけで実行しない: fake は呼び出しを
+#     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は fake dir
+#     (fake の tailscale、yq と op / herdr / codex / opencode の stub の link) と
+#     system dir の写し (/usr/bin と /bin の全 entry への symlink から tunnel tool の
+#     名前だけを除いた dir) に固定する。tunnel tool の有無は fake dir だけで決まり、
+#     開発機や CI の runner に入っている tailscale / cloudflared / ngrok /
+#     zerotier-cli (apt の package は /usr/bin に置く) はどの run にも届かない
+#     (Codex review, PR #368)。
+nt_home="$fixture_home/nt-home"
+nt_fakebin="$fixture_home/nt-bin"
+nt_sysbin="$fixture_home/nt-sysbin"
+nt_calls="$fixture_home/nt-calls"
+mkdir -p "$nt_home" "$nt_fakebin" "$nt_sysbin"
+ln -sf "$(command -v yq)" "$nt_fakebin/yq"
+for host_tool in op herdr codex opencode; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$nt_fakebin/$host_tool"
+done
+# /bin を先に link し /usr/bin を -f で上書きする: 同名は /usr/bin が勝つ (PATH
+# "/usr/bin:/bin" と同じ順。merged-usr の Linux では /bin と /usr/bin は同じ entry)。
+ln -s /bin/* "$nt_sysbin/"
+ln -sf /usr/bin/* "$nt_sysbin/"
+rm -f "$nt_sysbin/tailscale" "$nt_sysbin/cloudflared" "$nt_sysbin/ngrok" "$nt_sysbin/zerotier-cli"
+nt_path="$nt_fakebin:$nt_sysbin"
+printf '#!/bin/sh\nprintf "%%s\\n" tailscale >> %q\nexit 1\n' "$nt_calls" > "$nt_fakebin/tailscale"
+chmod +x "$nt_fakebin/tailscale"
+# NT-1) work (allowNetworkTunnels=false): warn が出て、item と「無い」の行は出ない。
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] allowNetworkTunnels=false" <<< "$nt_out" \
+    && grep -Fxq "[warn] tunnel tool present but allowNetworkTunnels=false: tailscale (not removed automatically)" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present: tailscale" <<< "$nt_out" \
+    && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
+    ok "test passed: a tunnel tool on PATH warns under allowNetworkTunnels=false (work) and is never run"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: tunnel tool under allowNetworkTunnels=false (work) not reported as a warn, or the fake was run"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (tunnel tool present, work)"
+  status=1
+fi
+# NT-2) personal (allowNetworkTunnels=true): 中立の item が出て、warn は出ない。
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] allowNetworkTunnels=true" <<< "$nt_out" \
+    && grep -Fxq "[info] - tunnel tool present: tailscale" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present but allowNetworkTunnels=false" <<< "$nt_out" \
+    && ! grep -Fq "no tunnel tools found" <<< "$nt_out" && [[ ! -e "$nt_calls" ]]; then
+    ok "test passed: a tunnel tool on PATH is a neutral item under allowNetworkTunnels=true (personal) and is never run"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: tunnel tool under allowNetworkTunnels=true (personal) not reported as an item, or the fake was run"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (tunnel tool present, personal)"
+  status=1
+fi
+# NT-3) PATH に tunnel tool が無い: 「無い」の ok が出て、warn も item も出ない。
+rm -f "$nt_fakebin/tailscale"
+if nt_out="$(HOME="$nt_home" PATH="$nt_path" "$SCRIPT_DIR/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] no tunnel tools found" <<< "$nt_out" \
+    && ! grep -Fq "tunnel tool present" <<< "$nt_out"; then
+    ok "test passed: no tunnel tool on PATH reports none found"
+  else
+    printf '%s\n' "$nt_out" >&2
+    fail "test failed: absent tunnel tools not reported as none found"
+    status=1
+  fi
+else
+  printf '%s\n' "$nt_out" >&2
+  fail "test failed: doctor must stay exit 0 (no tunnel tools)"
+  status=1
+fi
+rm -rf "${nt_home:?}" "${nt_fakebin:?}" "${nt_sysbin:?}" "$nt_calls"
 
 if [[ "$status" -eq 0 ]]; then
   ok "doctor tests passed"

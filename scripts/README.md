@@ -96,7 +96,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
   - global gitignore: `git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定(末尾の `/` はすべて落とし、`-ef` でも同じ file と判定する、#309)— と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない(#248)。
 - git hook gates(report-only): `enableGitHookGates` が true で module が active なら、shim 2 本(`~/.config/git-hook-gates/hooks/pre-commit` / `commit-msg`)が実行可能に置かれているか、global `core.hooksPath`(`--includes` 付きで読む)が managed shim directory を指すか(別の値なら値は出さずに warn)、agent-tools deploy 4 本(dispatcher + gate 3 本)が揃っているかを report する。配線済みなのに deploy が欠けていれば commit が fail-closed で止まる旨を warn し、`core.hooksPath` が未設定なら action。capability true で module inactive なら dangling として warn。capability=false で shim / hooksPath が残っていれば action(lingering)。git-hook-gates module が active な profile では apply で除去する手順、module が非 active な profile(profile 切替後の残置。#201)では apply が触れないので、残っている file を `rm -i` で消す手順と、`core.hooksPath` が managed shim directory を指さなくなったかの確認(まだ指すなら表示された設定元の行を消す)を出す(managed file が無く `core.hooksPath` だけが残るときは設定元を探す手順。#258)。`--no-verify` と repo-local `core.hooksPath` で迂回できる best-effort である旨も表示する(#196 / #239。詳細は `docs/git-hook-gates.md`)。
 - Git identity contexts: `git-profile` module が active な profile では、managed な identity reset `~/.config/git-profile/identity-reset.gitconfig` の presence を見る — 中身は見ない。無ければ、context file の無い非 personal repo で personal pattern に一致する remote が personal identity を継承して commit 拒否にならないので、`mkdir -p ~/.config` → `chezmoi apply`(dir と file)を action にする(#241)。各 context の identity file が存在するか、意図的に未設定かも見る。存在する file は `user.name` / `user.email` の有無だけを見て partial を action 化し、値の無い key(`=` なし。git が identity 全体を拒否する)は別の action、git が parse できない file は warn — 値は出さない。partial は managed な identity reset が塞げない唯一の状態なので doctor が主な検出手段になる(#202)。
-- Git remote URLs: credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない。
+- Git remote URLs: credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない。root を開けない(root 自身や親 dir の permission denied、symlink loop など。存在しないと確かめられた root だけ skip する)、repo の探索(find。root 自身が symlink なら link 先を辿る)や remote 設定の読み取り(`git config`)に失敗した root / repo は名指しで INCOMPLETE として warn し、clean の ok は出さない。`scanned repositories` は読めた repo だけを数える(#359)。
 - npm hardening / Corepack: 検査内容は下記の docs に従う。
 - software catalog(report-only): catalog 宣言 vs 実機の brew/npm/go/mas。declared-missing / undeclared-sprawl / source-mismatch を report-only で表示。
 - runtime and shell: mise(`enableRuntimeManagement`)・direnv(`enableDirenv`)・zsh・starship の有無。mise を管理する profile では `go install` の行き先(`go env GOBIN`、空なら GOPATH の先頭の `bin`)が `~/go/bin` かを確かめ、違えば action(mise config の apply と、古い GOBIN を持たない新しい shell。installer は同じ行き先で導入済みを判定するので、usage reader の installer の案内より前に出る。#305)、PATH に `~/go/bin` が無ければ info。
@@ -181,7 +181,7 @@ test-*.sh が共有する fixture helper(source 専用、lib-policy.sh の後に
 `render_personal_into`(throwaway home への personal apply。root は呼び出し側が mktemp +
 cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp する形は cleanup trap から
 漏れる、#150)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
-限定 capability flip。boolean 専用)、`copy_repo_fixture`(scripts + .chezmoidata の最小
+限定 capability flip。boolean 専用。personal が宣言していない capability は fail する、#332)、`copy_repo_fixture`(scripts + .chezmoidata の最小
 repo copy)。
 
 ## test-shell-syntax.sh
@@ -259,7 +259,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 
 - `validate-policy.sh --all` が全 profile を検証すること。
 - enum capability の許可値を正しく受け入れること。
-- unknown profile / module / capability(module の `requires:` 内も)、重複 capability、enum の不正値を拒否すること。
+- unknown profile / module / capability(module の `requires:` 内も)、重複 capability / module、enum の不正値、
+  environmentKind の欠落 / 未知の値、schema が宣言する capability の欠落を拒否すること。
 - boolean capability・`requires:`・`implemented:` は YAML boolean の小文字 `true` / `false` だけを受け入れ、
   文字列 / 数値 / null / 大文字綴りを拒否すること(#206)。
 - 同一 path を複数 module が宣言したら fail、`requires:` を持つ module は `paths:` 必須。
@@ -351,7 +352,8 @@ query だけを実機で実行する(書き込みはしない)。
   「not initialized」の item で skip、あれば `chezmoi status` を示す action(#309。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
   managed-by header の欠落も warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
-  warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ /
+  warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ(不正 JSON は
+  contract_version unknown として field を解釈しないことを、contract version 不一致と同じ sentinel の不在で pin、#332)/
   `AGENT_TOOLS` override(#71 / #73)。
 - private-backup: marker 不在は allowSecretsAccess=true の profile だけ warn(false は中立)、marker
   ありで最終成功時刻 / archive / 件数、不正 marker は unreadable、local 補足は**存在のみ**(#174)。marker の
@@ -424,6 +426,11 @@ query だけを実機で実行する(書き込みはしない)。
 - Git の節(#307): global の `user.useConfigOnly=true` / `transfer.credentialsInUrl=die` でなければ warn、そうなら ok。remote URL の
   scan が `~/src` の personal / work / client / sandbox / agent のすべてを巡り、credential らしい userinfo の remote を URL を
   出さずに warn すること(canary で pin)。
+- remote URL scan の INCOMPLETE(#359): `.git/config` が読めない repo、配下に開けない dir がある root、root 自身が開けないとき、
+  親 dir(`~/src`)を通過できず root を存在しないと確かめられないとき、それぞれを名指しで warn し(URL は canary で非表示を
+  pin)、読めた repo の flag と件数はそのまま、`scanned repositories` は読めた repo だけを数え、clean の ok を出さず exit 0。
+  root が symlink のときは link 先を辿り、その配下の flag と読めない config の INCOMPLETE が出ること(辿らなければ
+  clean の ok になる)。root では skip。
 - git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
   欠けた旧 deploy、または実行 bit の無い gate → commit が止まる warn / 配線なし + dispatcher だけ → 両方が不完全の warn。
   doctor の一覧が短くなれば落ちる。
@@ -439,6 +446,10 @@ query だけを実機で実行する(書き込みはしない)。
 - go install target(#305): fake `go` の `go env GOBIN` / `GOPATH` で、既定の GOPATH・GOBIN の明示が ok、別の dir が action(`--actions-only` に mise config の apply と、継承した GOBIN / GOPATH を外す `exec env -u GOBIN -u GOPATH zsh -l` の手順が出る。その形で継承値が消えることも確認)、
   `go env` の失敗は「確かめられない」の warn(ok を出さない)、PATH に `~/go/bin` が無ければ info(`go env` が
   失敗したときも出す)、末尾 slash の HOME でも一致。
+- network tunnels(#333): PATH を fake dir + system dir の写し(`/usr/bin` と `/bin` の全 entry への symlink から tunnel tool の
+  名前だけを除いた dir。host に入っている tunnel tool はどの run にも届かない)に固定し、fake の tailscale が在れば
+  work(`allowNetworkTunnels=false`)では warn・personal(true)では中立の item、無ければ `no tunnel tools found`。fake は
+  呼び出しを記録し、doctor が tool を実行しないこと(記録の不在)も pin。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
   `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、symlink の `default.rules` は
@@ -492,10 +503,12 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 ## test-install-packages.sh
 
 `install-packages.sh` の gate と fail-closed 契約を検証する。source→capability の対応、
-`profile_installs_source` が personal のみ install を許し work 系は許さないこと、profile 未解決時の
-拒否、解決済み work profile の dry-run が 0 件を計画すること(副作用なし)を確認する。
+`profile_installs_source` が personal のみ install を許し work 系は許さないこと、profile 未解決 / 未定義時の
+拒否(exit 1 と診断文言)、解決済み work profile の dry-run が全 entry を not granted で skip して 0 件を
+計画し、manager を一切呼ばないこと(呼び出しを記録する fake manager を PATH に前置。gate を通る entry が
+0 件なら fail)を確認する。installer の run には空の fixture HOME を渡し、実 home の設定を読ませない。
 
-`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続を確認する。実 manager・実 install・実 home は使わない。
+`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続、track-only / manual entry の skip、manager 不在 source の skip + warn、install 失敗の集計と exit 1(#333)を確認する。実 manager・実 install・実 home は使わない。
 
 ## private-backup.sh
 
@@ -531,7 +544,8 @@ environmentKind が禁じる capability を true にした profile も、その�
   表示に依らない 2 回目の種別の検査で、保証するのは最後の tree の状態。bsdtar は通常の file の mode を持つ hardlink の
   header を `-` と一覧する。#335)。展開後は
   manifest と突き合わせ(checksum・mode・余剰ファイル・home-relative・symlink 拒否)。
-  HOME には一切書かない read-only。復号物・展開物は trap で確実削除。
+  HOME には一切書かない read-only。復号物・展開物の temp は終了時に削除を試み、消しきれなければ temp の path を
+  出して手での削除を求める(restore の temp も同じ。#335)。
   `--identity-command` はユーザー指定の shell コマンド列(`op read op://...` 想定)で、
   quoting のため shell 実行する。アーカイブ由来ではなく呼び出し側が管理するため注入面ではない。
 - **restore**: verify を通った後のみ復元(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
@@ -598,6 +612,36 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `directory enumeration incomplete` と `capture INCOMPLETE` を warn し、skip 1 件を計上し、marker の
   `capture_incomplete` が true になること。正常 run では false。その archive の verify は通ること
   (整合と完全性は別)。
+- 平文ができた後の中断で temp に何も残らず、同じ signal で終わること(#358): backup / verify / restore を `set -m` の
+  background job(自分の process group)にし、SIGINT / SIGTERM それぞれで 4 種の run を回す: once(1 回)/ twice(後始末の
+  途中にもう 1 回)/ every(temp 配下の削除のたびにもう 1 回 = key の押しっぱなし)/ rmfail(1 回。temp 配下の最初の削除が
+  signal なしに失敗する)。正常終了の後始末も 2 種の run で確かめる(#358 review): endsig(manifest 検査では送らずに正常
+  終了まで進め、EXIT の後始末の temp 配下の削除のたびに 1 回)/ endrmfail(その後始末の temp 配下の最初の削除が signal
+  なしに失敗する。signal を使わないので INT の回だけ)。signal は run の中から送る(timing の窓を作らない): PATH 先頭の
+  fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を記録してから group へ。正常終了の run は記録だけ)と fake
+  `rm`(temp 配下の削除 = 後始末の途中で group へ送り、届くのを待ってから本物の rm に渡す。signal で死ぬ rm はそこで死に、
+  無視する rm は削除を続ける)。引数なしの `mktemp`(backup の一覧 file 3 つ)も fake `mktemp` が専用 TMPDIR に作らせる
+  (BSD の mktemp = macOS は引数なしだと TMPDIR を見ずに user ごとの temp dir に作るので、消し忘れが残留の検査に映らず、期限の
+  KILL では残っていた。Codex review R5)。backup の run は、その 3 つが manifest 検査の時点で専用 TMPDIR にあったことも確かめる。
+  中断の run は、終了後に専用 TMPDIR が空で、rc が 130 / 143 で、python3 の wrapper を親に
+  して記録した waitpid の終了状態が `exit 130` ではなく signal であること。rmfail は失敗した削除の warn も確かめる。正常
+  終了の run は、rc 0 で終了状態が `exit 0` であること(signal は捨て、削除の失敗は warn だけで終了状態を変えない)。endsig
+  は TMPDIR が空、endrmfail は失敗した temp だけが残り(warn がその path を名指しする)、後続の削除は済んでいること。
+  変異での検出(bash 3.2 / 5 とも): main の版(EXIT trap だけで、後始末の間も INT / TERM を通す)は twice / every / rmfail
+  の 18 case と endsig の 6 case、endrmfail の backup が fail(once は bash が EXIT trap を走らせてから死ぬので区別できない)。
+  INT / TERM の trap だけを外す(EXIT の trap は無視を保つ)と rmfail の 6 case が fail。再送を exit に替えた実装は中断の
+  24 case すべてが fail。後始末の間も INT / TERM を通す実装(3 つの trap とも)は every と endsig の 12 case が平文を残して
+  fail(bash 3.2 は signal で終わり、bash 5 は signal のたびに trap をやり直して期限で kill される)。EXIT の trap だけが
+  通す実装は endsig の 6 case が signal で終わって fail(temp は INT / TERM の trap が空にする)。削除の失敗を errexit に
+  任せる実装は rmfail と endrmfail の backup の 3 case が exit 1 で終わって fail。失敗した削除で後始末をやめる実装は
+  endrmfail の backup だけが self-check の dir を残して fail(中断の run は EXIT の trap が後始末をもう一度回すので通る)。
+  `remove_workdir` が残りを warn しない実装は rmfail と endrmfail の verify / restore の 6 case が fail。一覧 file の削除を
+  外す実装は backup の 11 case(endrmfail を含む)が一覧 file を残して fail(fake `mktemp` の前は macOS で通っていた)。一覧 file
+  を専用 TMPDIR の外に作る実装は同じ 11 case が「3 つが TMPDIR に無い」で fail。通す実装と
+  errexit を併せた形(#358 review の前)では every / endsig の 12 case と rmfail / endrmfail の backup の 3 case が fail し、
+  bash 3.2 では加えて twice の SIGINT の backup が exit で終わって fail する(bash 5 の twice は通る)。wrapper が SIGINT を既定に
+  戻すので、非対話 shell の background list(`… &`)として suite を起動しても走る。python3 が無ければ手元は warn して
+  skip、CI(`CI=true`)では fail(age が無いときと同じ形。#330)。
 
 ## test-secrets-gate.sh
 
@@ -690,7 +734,7 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 `--force-with-lease`・`feature-f` のような branch 名・branch の作成と切替・merge 済みの `-d`・`--soft` などの日常の git と、
 `cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
 として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
-取り込んだ global preference キーの保持、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
+取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
 chezmoi が必要(render job)。
 
@@ -730,6 +774,9 @@ managed に書かない)、secret / email らしき文字列が無いこと、wo
 加えて rendered の bash map を OpenCode の規則(glob・last match wins)で評価し、doctor.sh の外向き probe と `gh` の
 mutation・短縮 flag・alias、deny、維持すべき read からなる固定 command 集合の判定が、`docs/ai-policy.md` から手で書いた
 期待値(allow / ask / deny。map からは導かない)と一致することを確認する(`*` 以外の pattern 文字を含む rule は fail、#240)。
+加えて doctor.sh の `outward_probe_commands` / `secret_read_probe_commands` を literal に読み出し(source しない)、全 probe が
+この command 集合の行にあることを機械的に確かめる(配列が読めない・行が `"..."` だけの plain な quoted 文字列の形に
+完全一致しない entry があれば fail、#332)。
 chezmoi が必要(render job)。
 
 ## test-git-signing.sh
@@ -777,7 +824,8 @@ deploy(agent-tools#281 以前の 3 本)、実行 bit の無い dispatcher のど
 `hooks.gitconfig`(`core.hooksPath`)が exact な内容で render されること、render した `~/.gitconfig` 経由の実 commit で
 dispatcher が pre-commit → commit-msg の順に呼ばれること、失敗する dispatcher が commit を止めること、`--no-verify` で
 両方を迂回できること(best-effort の既知の限界)を確認する。`enableGitHookGates=false` の apply で適用済みの配線が
-**削除される**こと、`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
+**削除される**こと、配備(deploy 4 本)が消えた後の同じ source での再 apply でも配線が削除されること、
+`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
 `--includes` 付きで読むこと(静的 pin)と、deploy 4 本の一覧が武装の template・doctor・preflight・この test で同じであること
 (静的 pin、#307。doctor / preflight の部分 deploy での振る舞いは test-doctor / test-preflight が固定する)も確認する。
 throwaway destination に render し、実 home には触れない。

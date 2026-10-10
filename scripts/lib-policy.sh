@@ -1116,11 +1116,22 @@ git_excludes_file_setting() {
 # in remote.<name>.pushurl with a clean fetch url (#144). Each remote is
 # printed once even when both url and pushurl are flagged. URL values are
 # never printed.
+# Returns 0 when the remote config was read (a repo without remotes included)
+# and 1 when it could not be read (permission denied, not a repository, a
+# dangling gitdir pointer, an unparsable config): the caller must not read
+# that as clean (#359). The git status is taken from the capture, not from
+# PIPESTATUS, so the answer does not depend on the caller's pipefail setting.
 git_remotes_with_credentials() {
-  local repo="$1"
+  local repo="$1" remote_lines="" git_status=0
   # C locale and stderr discarded: the URLs are another repo's data, and awk
   # under a UTF-8 locale reports an invalid byte with the input quoted (#335).
-  git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null |
+  remote_lines="$(git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null)" || git_status=$?
+  case "$git_status" in
+    0) ;;
+    1) return 0 ;;  # no key matched: a repo without remotes
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$remote_lines" |
     LC_ALL=C awk '$2 ~ /:\/\/[^\/@]*:[^\/@]+@/ {
       name = $1
       sub(/^remote\./, "", name)

@@ -1768,6 +1768,301 @@ else
   miss "a dash-led --out value must be refused (rc=$ov_rc)"
 fi
 
+# 33. A run interrupted after its plaintext exists leaves nothing in its
+#     temp and ends by the signal (#358): backup (staging + self-check dir),
+#     verify and restore (decrypted tar + extracted tree) each get SIGINT —
+#     what Ctrl-C sends — and SIGTERM to their process group, in four runs:
+#     once (one signal); twice (the second arriving while the cleanup is
+#     already removing the temp); every (one more at every removal under
+#     the temp, a held key); and rmfail (one signal, the first removal
+#     under the temp failing without one). The second signal is what an
+#     EXIT trap alone did not survive: it ended the script half-way through
+#     that trap and the plaintext stayed (bash 3.2 and 5, INT and TERM
+#     alike). With INT / TERM traps whose cleanup still let the signals
+#     through (#358 review), the second killed the rm under way and
+#     errexit ended backup by an exit, not the signal (bash 3.2), and the
+#     every run kept the plaintext (bash 3.2 ended with it left; bash 5
+#     re-ran the trap until the deadline); a removal that fails ends the
+#     run the same way, by errexit before the signal is re-sent. After one
+#     signal bash runs the EXIT trap before dying, so the once run cannot
+#     tell an INT / TERM trap from none; it checks the other half of the
+#     contract, which every run checks too: the script ends BY the signal
+#     (the trap re-raises it after the cleanup), not with an `exit 130`.
+#     bash's `wait` reports both as 130, so a python3 wrapper is the run's
+#     parent and records how the child ended from waitpid's status (ended
+#     by which signal, or exit with which code). Two more runs end normally
+#     instead, for the cleanup's contract after a normal end (#358 review):
+#     endsig (no signal at the manifest check, then one at every removal
+#     under the temp, that is in the EXIT cleanup, a key held as the run
+#     ends) and endrmfail (the first removal of that cleanup failing; no
+#     signal, so it runs once, under INT). The signals are dropped and a
+#     failed removal is only warned about: both end with the run's own
+#     status (exit 0), endsig with nothing left, endrmfail with only the
+#     temp whose removal failed (named in the warning) left and the
+#     removals after it done. An EXIT trap that lets the signals through
+#     ends endsig by the signal (the INT / TERM trap runs inside it; the
+#     temp is still emptied), a failed removal left to errexit ends
+#     endrmfail's backup by exit 1 with the self-check dir left, and a
+#     cleanup that stops at the failure leaves that dir too (bash 3.2 and
+#     5 alike); of the three, the interrupted runs catch only the errexit
+#     one (rmfail's backup). Each run is a background job under `set -m`,
+#     so it has a process group of its own to signal, like a foreground
+#     job in a terminal (the wrapper ignores the two signals itself, being
+#     in that group). The signals are sent from inside the run's own
+#     tools, so there is no timing window (as
+#     test-doctor's herdr `interrupt` fixture does): a fake yq, at the `-e`
+#     manifest check on the temp (the first yq call once the plaintext is
+#     complete), snapshots the temp and signals the group, handing its
+#     process to `sleep` first so that what the signal kills is a child
+#     doing the tool's work, as with the real tool; a fake rm, at the first
+#     removal under the temp (the cleanup under way), leaves a marker
+#     naming that removal, signals the group again and waits for that to
+#     land before it removes anything: an rm the signal can kill dies
+#     there, as the real one would, and one that ignores it (the cleanup
+#     ignores INT / TERM) goes on to remove. A marker made beforehand turns
+#     that off (once), SIG_EVERY keeps it on for every removal (every,
+#     endsig), and SIG_RM_FAIL makes that first removal exit 1 instead
+#     (rmfail, endrmfail); SIG_NO_FIRST stops the fake yq at its snapshot
+#     (the end runs). Every other call goes to the real tool. A TMPDIR of
+#     its own per run, so a leftover shows and a KILL at the deadline
+#     (pb_kill_tree) cannot leak into the suite's temp; a fake mktemp makes
+#     every call without arguments there too (backup's three list files):
+#     BSD mktemp (macOS) puts such a file in the per-user temp dir whatever
+#     TMPDIR says, so a cleanup that forgot them went unseen and a KILL left
+#     them behind (Codex review R5). The backup runs check that the three
+#     were in the temp at the manifest check (the fake yq's snapshot). The
+#     python3 wrapper starts the run with the default SIGINT
+#     disposition, so the cases run even when the suite itself was started
+#     as a background list of a non-interactive shell (`… &`), where SIGINT
+#     is ignored at entry and bash cannot reset it. Without python3 the
+#     cases are skipped with a warning; on CI (CI=true, set by GitHub
+#     Actions) that is a failure instead, as without age (#330): a skip
+#     there means the cases did not run, not that they passed.
+if ! command -v python3 >/dev/null 2>&1; then
+  if [[ "${CI:-}" == "true" ]]; then
+    fail "python3 not found on CI; the interrupt cases must run there"
+    status=1
+  else
+    warn "python3 not found; the interrupt cases are skipped"
+  fi
+else
+  sig_home="$fixture_home/sig-home"
+  mkdir -p "$sig_home/.ssh" "$sig_home/target"
+  printf 'a\n' > "$sig_home/.zshrc.local"
+  printf 'b\n' > "$sig_home/.ssh/config.local"
+  sig_archive="$sig_home/sig.age"
+  if ! HOME="$sig_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$sig_archive" --recipient "$recipient" --yes >/dev/null 2>&1; then
+    miss "the backup the interrupt cases verify and restore could not be made"
+  fi
+  sig_fakebin="$fixture_home/sigfake"
+  mkdir -p "$sig_fakebin"
+  real_yq="$(command -v yq)"
+  real_rm="$(command -v rm)"
+  real_mktemp="$(command -v mktemp)"
+  cat > "$sig_fakebin/yq" <<'SH'
+#!/bin/sh
+if [ "$1" = -e ]; then
+  for arg; do
+    case "$arg" in
+      "$SIG_TMP"/*)
+        find "$SIG_TMP" -type f > "$SIG_SNAPSHOT"
+        if [ -z "$SIG_NO_FIRST" ]; then
+          (sleep 0.2; kill -"$SIG_NAME" 0) &
+          exec sleep 20
+        fi
+        break
+        ;;
+    esac
+  done
+fi
+exec "$REAL_YQ" "$@"
+SH
+  cat > "$sig_fakebin/rm" <<'SH'
+#!/bin/sh
+if [ ! -e "$SIG_MARKER" ] || [ -n "$SIG_EVERY" ]; then
+  for arg; do
+    case "$arg" in
+      "$SIG_TMP"/*)
+        printf '%s\n' "$arg" > "$SIG_MARKER"
+        [ -z "$SIG_RM_FAIL" ] || exit 1
+        (sleep 0.2; kill -"$SIG_NAME" 0) &
+        wait $!
+        break
+        ;;
+    esac
+  done
+fi
+exec "$REAL_RM" "$@"
+SH
+  # ended.py ENDED_FILE CMD ARG... — run CMD as a child with the default
+  # INT / TERM dispositions (ignoring both itself) and write how it ended
+  # to ENDED_FILE: "signal N" or "exit N"; exit as a shell reports it.
+  cat > "$sig_fakebin/ended.py" <<'PY'
+import os
+import signal
+import sys
+
+ended, cmd = sys.argv[1], sys.argv[2:]
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pid = os.fork()
+if pid == 0:
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.execvp(cmd[0], cmd)
+_, st = os.waitpid(pid, 0)
+with open(ended, "w") as f:
+    if os.WIFSIGNALED(st):
+        f.write("signal %d\n" % os.WTERMSIG(st))
+        sys.exit(128 + os.WTERMSIG(st))
+    f.write("exit %d\n" % os.WEXITSTATUS(st))
+    sys.exit(os.WEXITSTATUS(st))
+PY
+  cat > "$sig_fakebin/mktemp" <<'SH'
+#!/bin/sh
+[ "$#" -gt 0 ] || exec "$REAL_MKTEMP" "$SIG_TMP/mktemp.XXXXXXXXXX"
+exec "$REAL_MKTEMP" "$@"
+SH
+  chmod +x "$sig_fakebin/yq" "$sig_fakebin/rm" "$sig_fakebin/mktemp"
+  for sig_name in INT TERM; do
+    case "$sig_name" in
+      INT) sig_num=2 ;;
+      TERM) sig_num=15 ;;
+    esac
+    for sig_mode in once twice every rmfail endsig endrmfail; do
+      # endrmfail sends no signal, so it runs once (under INT).
+      [[ "$sig_mode" != endrmfail || "$sig_name" == INT ]] || continue
+      for sig_cmd in backup verify restore; do
+        case "$sig_cmd" in
+          backup)
+            sig_args=(backup --out "$sig_home/again.age" --recipient "$recipient" --yes)
+            sig_section="self-check manifest" ;;
+          verify)
+            sig_args=(verify --in "$sig_archive" --identity "$fixture_home/keys/id.txt")
+            sig_section="verify manifest" ;;
+          restore)
+            sig_args=(restore --in "$sig_archive" --identity "$fixture_home/keys/id.txt" --target-home "$sig_home/target")
+            sig_section="verify before restore" ;;
+        esac
+        sig_run="$sig_name-$sig_mode-$sig_cmd"
+        sig_tmp="$fixture_home/sig-tmp-$sig_run"
+        mkdir -p "$sig_tmp"
+        sig_log="$fixture_home/sig-$sig_run.log"
+        sig_snapshot="$fixture_home/sig-$sig_run.snapshot"
+        sig_marker="$fixture_home/sig-$sig_run.marker"
+        sig_ended="$fixture_home/sig-$sig_run.ended"
+        # The marker is what makes the fake rm pass its calls through: made
+        # beforehand, no second signal is sent. SIG_EVERY overrides it: one
+        # more signal at every removal under the temp. SIG_RM_FAIL turns the
+        # first removal under the temp into a plain failure (exit 1, nothing
+        # removed, no signal). SIG_NO_FIRST lets the run go past the manifest
+        # check without a signal, to its normal end and its EXIT cleanup.
+        sig_every="" sig_rm_fail="" sig_no_first=""
+        case "$sig_mode" in
+          once) : > "$sig_marker" ;;
+          every) sig_every=1 ;;
+          rmfail) sig_rm_fail=1 ;;
+          endsig) sig_no_first=1 sig_every=1 ;;
+          endrmfail) sig_no_first=1 sig_rm_fail=1 ;;
+        esac
+        set -m
+        HOME="$sig_home" TMPDIR="$sig_tmp" SIG_TMP="$sig_tmp" SIG_SNAPSHOT="$sig_snapshot" SIG_MARKER="$sig_marker" \
+          SIG_EVERY="$sig_every" SIG_RM_FAIL="$sig_rm_fail" SIG_NO_FIRST="$sig_no_first" SIG_NAME="$sig_name" \
+          REAL_YQ="$real_yq" REAL_RM="$real_rm" REAL_MKTEMP="$real_mktemp" \
+          PATH="$sig_fakebin:$fixture_home/fakebin:$PATH" \
+          python3 "$sig_fakebin/ended.py" "$sig_ended" "$PB" "${sig_args[@]}" > "$sig_log" 2>&1 < /dev/null &
+        sig_pid=$!
+        set +m
+        sig_deadline=$((SECONDS + 60))
+        while kill -0 "$sig_pid" 2>/dev/null && [[ "$SECONDS" -lt "$sig_deadline" ]]; do
+          sleep 0.2
+        done
+        sig_timed_out=0
+        if kill -0 "$sig_pid" 2>/dev/null; then
+          sig_timed_out=1
+          pb_kill_tree "$sig_pid"
+        fi
+        sig_rc=0
+        wait "$sig_pid" 2>/dev/null || sig_rc=$?
+        sig_out="$(cat "$sig_log")"
+        sig_had="$(cat "$sig_snapshot" 2>/dev/null || true)"
+        sig_end="$(cat "$sig_ended" 2>/dev/null || true)"
+        sig_left="$(find "$sig_tmp" -mindepth 1 2>/dev/null)"
+        # backup's three list files sat directly in the temp at the manifest
+        # check (the fake mktemp), so the leftover check covers them too.
+        sig_lists=0 sig_lists_ok=1
+        if [[ "$sig_cmd" == backup ]]; then
+          while IFS= read -r sig_path; do
+            [[ -z "$sig_path" || "${sig_path%/*}" != "$sig_tmp" ]] || sig_lists=$((sig_lists + 1))
+          done <<< "$sig_had"
+          [[ "$sig_lists" -eq 3 ]] || sig_lists_ok=0
+        fi
+        # Interrupted (128 + the signal) after the section that checks the
+        # plaintext began, with the plaintext in the temp at the first
+        # signal, nothing left afterwards, ended by that signal (not by an
+        # exit), and, past the once run, the fake rm reached during the
+        # cleanup; a failed removal is also named in a warning. The end runs
+        # pass the same section with the plaintext in the temp, then end with
+        # their own status (exit 0), the fake rm reached in the EXIT cleanup;
+        # endrmfail leaves only the temp whose removal failed (the marker
+        # names it), named in a warning, every other one removed.
+        sig_shape_ok=0
+        sig_want_rc=$((128 + sig_num)) sig_want_end="signal $sig_num"
+        sig_ends="leaves nothing in its temp and ends by that signal"
+        case "$sig_mode" in
+          once)
+            sig_shape="interrupted by SIG$sig_name after its plaintext existed"
+            sig_shape_ok=1 ;;
+          twice)
+            sig_shape="interrupted twice by SIG$sig_name after its plaintext existed"
+            [[ ! -e "$sig_marker" ]] || sig_shape_ok=1 ;;
+          every)
+            sig_shape="interrupted by SIG$sig_name after its plaintext existed and again at every removal"
+            [[ ! -e "$sig_marker" ]] || sig_shape_ok=1 ;;
+          rmfail)
+            sig_shape="interrupted by SIG$sig_name after its plaintext existed, its first removal failing,"
+            if [[ -e "$sig_marker" ]] && grep -Fq "could not remove the temp" <<< "$sig_out"; then
+              sig_shape_ok=1
+            fi ;;
+          endsig)
+            sig_shape="ending normally after its plaintext existed, with SIG$sig_name at every removal of its cleanup,"
+            sig_want_rc=0 sig_want_end="exit 0"
+            sig_ends="leaves nothing in its temp and ends with its own status"
+            [[ ! -e "$sig_marker" ]] || sig_shape_ok=1 ;;
+          endrmfail)
+            sig_shape="ending normally after its plaintext existed, the first removal of its cleanup failing,"
+            sig_want_rc=0 sig_want_end="exit 0"
+            sig_ends="warns, removes the rest of its temp and ends with its own status"
+            sig_failed="$(cat "$sig_marker" 2>/dev/null || true)"
+            if [[ -n "$sig_failed" ]] && grep -Fxq "$sig_failed" <<< "$sig_left" \
+              && grep -Fq "could not remove the temp $sig_failed" <<< "$sig_out"; then
+              sig_shape_ok=1
+              # What is left past the failed temp and its contents.
+              sig_rest=""
+              while IFS= read -r sig_path; do
+                [[ -z "$sig_path" || "$sig_path" == "$sig_failed" || "$sig_path" == "$sig_failed"/* ]] \
+                  || sig_rest+="$sig_path"$'\n'
+              done <<< "$sig_left"
+              sig_left="$sig_rest"
+            fi ;;
+        esac
+        if [[ "$sig_timed_out" -eq 0 && "$sig_rc" -eq "$sig_want_rc" && "$sig_end" == "$sig_want_end" ]] \
+          && [[ "$sig_shape_ok" -eq 1 && "$sig_lists_ok" -eq 1 && -z "$sig_left" ]] \
+          && grep -Fq "private-backup: $sig_section" <<< "$sig_out" \
+          && grep -Eq '/files/\.zshrc\.local$' <<< "$sig_had" && grep -Eq '/manifest\.json$' <<< "$sig_had"; then
+          pass "$sig_cmd $sig_shape $sig_ends"
+        else
+          printf 'mode=%s rc=%s timed_out=%s ended=%s marker=%s lists_in_temp=%s\nin the temp at the first signal:\n%s\nleft:\n%s\n%s\n' \
+            "$sig_mode" "$sig_rc" "$sig_timed_out" "${sig_end:-unknown}" "$([[ -e "$sig_marker" ]] && echo yes || echo no)" "$sig_lists" \
+            "$sig_had" "$sig_left" "$sig_out" >&2
+          miss "$sig_cmd $sig_shape: did not reach that point, left its temp behind, or did not end as expected (rc=$sig_rc, ended=${sig_end:-unknown})"
+        fi
+      done
+    done
+  done
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi

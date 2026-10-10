@@ -95,13 +95,29 @@ make_flipped_source() {
 # SRC/.chezmoidata/profiles.yaml (SRC is a make_flipped_source copy).
 # Boolean capabilities only: env(V) parses true/false into booleans; an
 # enum-valued capability would need strenv. Personal-only on purpose —
-# set_capability_all (above) is the all-profile, fail-closed variant with
-# a different contract (test-policy.sh pins that contract).
+# set_capability_all (above) is the all-profile variant with a different
+# contract. Fails when the personal profile does not declare CAP (#332): a
+# typo'd capability would otherwise add a new key and the following
+# assertion would pass against an effectively unflipped render — the same
+# fail-closed rule as set_capability_all (test-policy.sh pins both). The
+# `// {}` keeps has() from erroring when the profile or its capabilities
+# map is missing, so those cases fail here instead of in yq.
 flip_personal_capability() {
   local src="$1" cap="$2" value="$3"
+  local file="$src/.chezmoidata/profiles.yaml"
+  if [[ ! -f "$file" ]]; then
+    fail "flip_personal_capability: missing $file"
+    return 1
+  fi
+  local declared
+  declared="$(C="$cap" yq '.profiles.personal.capabilities // {} | has(strenv(C))' "$file")"
+  if [[ "$declared" != "true" ]]; then
+    fail "flip_personal_capability: capability '$cap' is not declared by the personal profile in $file"
+    return 1
+  fi
   C="$cap" V="$value" yq -i \
     '.profiles.personal.capabilities[strenv(C)] = env(V)' \
-    "$src/.chezmoidata/profiles.yaml"
+    "$file"
 }
 
 # copy_repo_fixture DEST
