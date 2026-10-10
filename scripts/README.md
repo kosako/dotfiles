@@ -593,14 +593,18 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `capture_incomplete` が true になること。正常 run では false。その archive の verify は通ること
   (整合と完全性は別)。
 - 平文ができた後の中断で temp に何も残らず、同じ signal で終わること(#358): backup / verify / restore を `set -m` の
-  background job(自分の process group)にし、SIGINT / SIGTERM それぞれを 1 回送る run と 2 回送る run を回す。signal は
-  run の中から送る(timing の窓を作らない): PATH 先頭の fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を
-  記録してから group へ)と fake `rm`(temp 配下の最初の削除 = 後始末の途中で、もう一度 group へ。1 回の run では送らない)。
-  終了後に専用 TMPDIR が空で、rc が 130 / 143 であること。1 回の run は python3 の wrapper を親にして waitpid の終了状態を
-  記録し、`exit 130` ではなく signal で死んだことも確かめる(2 回目の signal は trap の中の rm を殺し、errexit が EXIT trap
-  経由の exit で終えることがある(bash 3.2 の backup)ので、2 回の run は rc だけ)。EXIT trap だけ(INT / TERM の trap が
-  無い)の実装では 2 回の run の 6 case が temp を残して fail し(bash 3.2 / 5 とも。1 回なら bash が EXIT trap を走らせて
-  から死ぬので区別できない)、再送を exit に替えた実装では 1 回の run の 6 case が fail する。wrapper が SIGINT を既定に
+  background job(自分の process group)にし、SIGINT / SIGTERM それぞれで 4 種の run を回す: once(1 回)/ twice(後始末の
+  途中にもう 1 回)/ every(temp 配下の削除のたびにもう 1 回 = key の押しっぱなし)/ rmfail(1 回。temp 配下の最初の削除が
+  signal なしに失敗する)。signal は run の中から送る(timing の窓を作らない): PATH 先頭の fake `yq`(temp への manifest
+  検査 = 平文が揃った時点で中身を記録してから group へ)と fake `rm`(temp 配下の削除 = 後始末の途中で group へ送り、届くのを
+  待ってから本物の rm に渡す。signal で死ぬ rm はそこで死に、無視する rm は削除を続ける)。どの run も、終了後に専用 TMPDIR
+  が空で、rc が 130 / 143 で、python3 の wrapper を親にして記録した waitpid の終了状態が `exit 130` ではなく signal である
+  こと。rmfail は失敗した削除の warn も確かめる。変異での検出(bash 3.2 / 5 とも): EXIT trap だけ(INT / TERM の trap が
+  無い)の実装は twice / every / rmfail の 18 case が fail(once は bash が EXIT trap を走らせてから死ぬので区別できない)。
+  再送を exit に替えた実装は 24 case すべてが fail。後始末の間も INT / TERM を通す実装は every の 6 case が平文を残して
+  fail(bash 3.2 はそのまま終わり、bash 5 は signal のたびに trap をやり直して期限で kill される)。削除の失敗を errexit に
+  任せる実装は rmfail の backup の 2 case が exit 1 で終わって fail。この 2 つを併せた形(#358 review の前)では、加えて
+  bash 3.2 の twice の SIGINT の backup が exit で終わって fail する(bash 5 の twice は通る)。wrapper が SIGINT を既定に
   戻すので、非対話 shell の background list(`… &`)として suite を起動しても走る。python3 が無ければ手元は warn して
   skip、CI(`CI=true`)では fail(age が無いときと同じ形。#330)。
 

@@ -239,15 +239,19 @@ remove_workdir() {
 # alike). On INT / TERM the cleanup runs first; then the trap is dropped and
 # the same signal ends the script, so the caller still sees an interrupted
 # run, and the EXIT trap runs the cleanup once more, which is harmless:
-# every step skips what is unset or already gone. Returns 0 like
-# remove_workdir (a trap body runs under set -e).
+# every step skips what is unset or already gone. Each trap ignores INT
+# and TERM while it cleans up (see the bottom), so no further signal kills
+# an rm half-way; a removal that fails all the same is warned about, not
+# left to errexit, which would skip the removals after it and end the run
+# by an exit before an INT / TERM trap re-sends its signal (#358 review).
+# Returns 0 like remove_workdir (a trap body runs under set -e).
 cleanup_temps() {
   local t
   for t in "$staging" "$selfcheck"; do
-    [[ -n "$t" ]] && rm -rf "$t"
+    [[ -z "$t" ]] || rm -rf "$t" || warn "could not remove the temp $t; remove it by hand (it may hold plaintext)"
   done
   for t in "$declared" "$seen_paths" "$dir_listing"; do
-    [[ -n "$t" ]] && rm -f "$t"
+    [[ -z "$t" ]] || rm -f "$t" || warn "could not remove the temp $t; remove it by hand"
   done
   remove_workdir "$workdir"
   return 0
@@ -967,9 +971,18 @@ main() {
 }
 
 # Registered before any temp exists, so there is no moment in which a temp
-# has been made but no cleanup is set (see cleanup_temps; same form as
-# doctor.sh).
-trap cleanup_temps EXIT
-trap 'cleanup_temps; trap - INT; kill -INT $$' INT
-trap 'cleanup_temps; trap - TERM; kill -TERM $$' TERM
+# has been made but no cleanup is set (see cleanup_temps; the form of
+# doctor.sh, plus the first step). Each trap first ignores INT and TERM,
+# and the rm / find / chmod it runs inherit that, so no further Ctrl-C or
+# TERM (a second press, a held key) can cut the removal short; the INT /
+# TERM traps then restore their signal and end the script by it. A signal
+# arriving while the EXIT trap cleans up after a normal end is dropped, and
+# that run ends with its own status. Without the first step (#358 review)
+# a second signal killed the rm under way and errexit ended the run by an
+# exit instead of the signal (bash 3.2), and a signal at every removal kept
+# the plaintext: bash 3.2 ended with it left, and bash 5 re-ran the trap
+# without finishing for as long as the signals came.
+trap 'trap "" INT TERM; cleanup_temps' EXIT
+trap 'trap "" INT TERM; cleanup_temps; trap - INT; kill -INT $$' INT
+trap 'trap "" INT TERM; cleanup_temps; trap - TERM; kill -TERM $$' TERM
 main "$@"
