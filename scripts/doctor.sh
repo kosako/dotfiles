@@ -391,23 +391,60 @@ if ! command -v git >/dev/null 2>&1; then
 else
   scanned_repos=0
   flagged_remotes=0
+  remote_scan_failures=0
   for root in "$DOTFILES_ROOT" "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
-    [[ -d "$root" ]] || continue
+    # Only a CONFIRMED absence is "no root here": `-d` reads every failure to
+    # stat as absence, so a root that exists but cannot be entered (permission
+    # denied on it or on a parent such as ~/src, not a directory, a symlink
+    # loop) would be skipped silently and its repos never named as not
+    # checked. The errno is taken from the builtin cd in a subshell, as for
+    # the Codex rules dir: the C locale keeps the message stable, the
+    # strerror is matched at the END only (the message embeds the path), and
+    # the raw error is never echoed (#359).
+    if ! root_error="$( (LC_ALL=C; cd -P -- "$root") 2>&1 )"; then
+      case "$root_error" in
+        *": No such file or directory") continue ;;
+      esac
+      remote_scan_failures=$((remote_scan_failures + 1))
+      warn "remote URL scan INCOMPLETE: root $(display_safe "$root") could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked"
+      continue
+    fi
+    # A listing that fails partway (a dir under the root cannot be opened)
+    # is INCOMPLETE, not empty: the markers it did print are still scanned,
+    # the rest is named as not checked. -H follows the root itself when it
+    # is a symlink (the probe above opened its target; without -H find would
+    # print nothing and exit 0, a false clean) but still not a symlinked
+    # entry below it, as for the Codex rules dir (#359).
+    if ! repo_markers="$(find -H "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)"; then
+      remote_scan_failures=$((remote_scan_failures + 1))
+      warn "remote URL scan INCOMPLETE: repositories under $(display_safe "$root") could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked"
+    fi
     while IFS= read -r git_marker; do
+      [[ -z "$git_marker" ]] && continue
       repo="$(dirname "$git_marker")"
+      # A remote config that cannot be read is not a scan result: the repo is
+      # named as not checked and left out of the scanned count (#359).
+      if ! remote_hits="$(git_remotes_with_credentials "$repo")"; then
+        remote_scan_failures=$((remote_scan_failures + 1))
+        warn "remote URL scan INCOMPLETE: the remote config of repo=$(display_safe "$repo") could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked"
+        continue
+      fi
       scanned_repos=$((scanned_repos + 1))
       while IFS= read -r remote_name; do
         [[ -z "$remote_name" ]] && continue
         flagged_remotes=$((flagged_remotes + 1))
         warn "credential-like userinfo in remote URL: repo=$(display_safe "$repo") remote=$(display_safe "$remote_name") (URL not shown)"
-      done < <(git_remotes_with_credentials "$repo")
-    done < <(find "$root" -maxdepth 4 -name .git -prune -print 2>/dev/null)
+      done <<< "$remote_hits"
+    done <<< "$repo_markers"
   done
   ok "scanned repositories: $scanned_repos"
-  if [[ "$flagged_remotes" -eq 0 ]]; then
-    ok "no credential-like userinfo in remote URLs"
-  else
+  if [[ "$flagged_remotes" -gt 0 ]]; then
     warn "remotes with credential-like userinfo: $flagged_remotes"
+  fi
+  if [[ "$remote_scan_failures" -gt 0 ]]; then
+    warn "remote URL scan INCOMPLETE: $remote_scan_failures root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean"
+  elif [[ "$flagged_remotes" -eq 0 ]]; then
+    ok "no credential-like userinfo in remote URLs"
   fi
 fi
 

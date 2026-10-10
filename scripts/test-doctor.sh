@@ -70,7 +70,21 @@ fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # specific answer put their own fake in front of these, as before (#306).
 # Kept outside the fixture HOME so no section's cleanup removes it.
 host_stub_dir=""
-trap 'rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}' EXIT
+# Sections that plant a mode-000 dir or file under the fixture HOME (GS-2,
+# OP, AIP, CL-8) restore the mode on their normal path only: a run that
+# stops inside that window would leave a tree `rm -rf` cannot enter. The
+# modes are re-opened first (chmod -R visits a dir before reading it, so a
+# 000 dir is passed; best effort, the removal must still run), and the
+# cleanup is also wired to INT / TERM, so a second signal that lands
+# while it runs starts it over (modes first) instead of killing it
+# halfway (#359 review).
+cleanup_fixtures() {
+  chmod -R u+rwX "$fixture_home" 2>/dev/null || true
+  rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}
+}
+trap cleanup_fixtures EXIT
+trap 'cleanup_fixtures; trap - INT; kill -INT $$' INT
+trap 'cleanup_fixtures; trap - TERM; kill -TERM $$' TERM
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
 for host_tool in op herdr codex opencode; do
@@ -2376,6 +2390,126 @@ else
   status=1
 fi
 rm -rf "$gs_home"
+
+# GS-2) remote URL scan INCOMPLETE (#359): a remote config that cannot be
+#       read and a root that cannot be listed completely are failures, not
+#       clean repos — each is named (the URL, a canary, never shown), the
+#       repos that could be read are still flagged and counted, the clean ok
+#       is withheld, and doctor stays exit 0; a root that is a symlink is
+#       followed, not read as empty. Run from a copy of the checkout so the
+#       scanned count is the fixture's alone. Skipped as root (root reads
+#       mode 000).
+if [[ "$(id -u)" != "0" ]]; then
+  gs2_home="$fixture_home/gs2-home"
+  gs2_copy="$fixture_home/gs2-dotfiles"
+  gs2_canary="canary-remote-userinfo-359"
+  rm -rf "$gs2_home" "$gs2_copy"
+  copy_repo_fixture "$gs2_copy"
+  mkdir -p "$gs2_home"
+  : > "$gs2_home/.gitconfig"
+  gs2_git() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+  gs2_run() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 "$gs2_copy/scripts/doctor.sh" personal 2>&1; }
+  #     GS-2a) a repo whose .git/config cannot be read, next to a repo with no
+  #            remote: the former is INCOMPLETE, the latter scanned (count 1).
+  gs2_git init -q --template= "$gs2_home/src/personal/locked"
+  gs2_git -C "$gs2_home/src/personal/locked" remote add origin "https://user:$gs2_canary@example.invalid/x.git"
+  gs2_git init -q --template= "$gs2_home/src/personal/clean"
+  chmod 000 "$gs2_home/src/personal/locked/.git/config"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: the remote config of repo=$gs2_home/src/personal/locked could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 1 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 1" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a remote config that cannot be read reports the scan INCOMPLETE (named, not counted, no false clean)"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: an unreadable remote config was read as clean"
+    status=1
+  fi
+  chmod 644 "$gs2_home/src/personal/locked/.git/config"
+  #     GS-2b) a root with a dir that cannot be opened (the listing fails
+  #            partway) and a root that cannot be opened at all (the open
+  #            probe fails): both are INCOMPLETE, while the repos the listing
+  #            did print (and the now readable one) are flagged.
+  gs2_git init -q --template= "$gs2_home/src/work/flagged"
+  gs2_git -C "$gs2_home/src/work/flagged" remote add origin "https://user:$gs2_canary@example.invalid/y.git"
+  mkdir -p "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  chmod 000 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/personal/locked remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/work/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: repositories under $gs2_home/src/work could not be listed completely (permission denied or a symlink loop?); the repos it did not list are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: root $gs2_home/src/client could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remotes with credential-like userinfo: 2" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 2 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 3" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a root that cannot be listed completely reports the scan INCOMPLETE while the repos it did list are still flagged"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: a root that cannot be listed completely was read as clean or its listed repos were dropped"
+    status=1
+  fi
+  chmod 755 "$gs2_home/src/work/locked-dir" "$gs2_home/src/client"
+  #     GS-2c) the parent of every standard root cannot be passed (~/src mode
+  #            000): a `-d` test reads all five roots as absent and would skip
+  #            them silently with the flagged repos under them, so each root
+  #            is named as not openable, nothing under them is counted, and
+  #            the clean ok is withheld.
+  chmod 000 "$gs2_home/src"
+  gs2_rc=0
+  gs2_out="$(gs2_run)" || gs2_rc=$?
+  gs2_roots_named=0
+  for gs2_root in personal work client sandbox agent; do
+    grep -Fxq "[warn] remote URL scan INCOMPLETE: root $gs2_home/src/$gs2_root could not be opened (permission denied on it or on a parent, not a directory or a symlink loop?); the repos under it are not checked" <<< "$gs2_out" \
+      && gs2_roots_named=$((gs2_roots_named + 1))
+  done
+  if [[ "$gs2_rc" -eq 0 && "$gs2_roots_named" -eq 5 ]] \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 5 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 0" <<< "$gs2_out" \
+    && ! grep -Fq "credential-like userinfo" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a parent that cannot be passed reports every root under it INCOMPLETE instead of skipping them as absent"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: roots behind a parent that cannot be passed were skipped as absent (rc=$gs2_rc, roots named=$gs2_roots_named)"
+    status=1
+  fi
+  chmod 755 "$gs2_home/src"
+  #     GS-2d) a root that is a symlink to a dir outside every root (Codex
+  #            review R2): the open probe passes (cd -P opens the target),
+  #            but a find without -H does not follow the root, prints
+  #            nothing and exits 0 — with no other repo in this HOME, the
+  #            flagged and the unreadable repo behind the link would both
+  #            vanish into the clean ok. Followed, the flagged one is named
+  #            under the root path, the unreadable one INCOMPLETE.
+  rm -rf "$gs2_home/src"
+  mkdir -p "$gs2_home/src"
+  gs2_git init -q --template= "$gs2_home/elsewhere/sandbox/flagged"
+  gs2_git -C "$gs2_home/elsewhere/sandbox/flagged" remote add origin "https://user:$gs2_canary@example.invalid/z.git"
+  gs2_git init -q --template= "$gs2_home/elsewhere/sandbox/locked"
+  gs2_git -C "$gs2_home/elsewhere/sandbox/locked" remote add origin "https://user:$gs2_canary@example.invalid/w.git"
+  ln -s "$gs2_home/elsewhere/sandbox" "$gs2_home/src/sandbox"
+  chmod 000 "$gs2_home/elsewhere/sandbox/locked/.git/config"
+  if gs2_out="$(gs2_run)" \
+    && grep -Fxq "[warn] credential-like userinfo in remote URL: repo=$gs2_home/src/sandbox/flagged remote=origin (URL not shown)" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: the remote config of repo=$gs2_home/src/sandbox/locked could not be read (permission denied, not a repository, a dangling gitdir pointer or an unparsable config?); its remotes not checked" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remotes with credential-like userinfo: 1" <<< "$gs2_out" \
+    && grep -Fxq "[warn] remote URL scan INCOMPLETE: 1 root(s) / repo(s) could not be listed or read (see above); do NOT read this as clean" <<< "$gs2_out" \
+    && grep -Fxq "[ok] scanned repositories: 1" <<< "$gs2_out" \
+    && ! grep -Fq "no credential-like userinfo in remote URLs" <<< "$gs2_out" \
+    && ! grep -Fq "$gs2_canary" <<< "$gs2_out"; then
+    ok "test passed: a root that is a symlink is followed (the repos behind it are flagged or named INCOMPLETE, no false clean)"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: the repos behind a root that is a symlink were read as clean"
+    status=1
+  fi
+  chmod 644 "$gs2_home/elsewhere/sandbox/locked/.git/config"
+  rm -rf "$gs2_home" "$gs2_copy"
+fi
 
 # HG) git hook gates readiness on a module-active profile (#307): the
 #     observer side of the two-key gate. Each case plants the agent-tools
