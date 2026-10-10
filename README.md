@@ -63,7 +63,7 @@ profile + environmentKind + modules + capabilities + policy
 
 ### environmentKind は制約を強制する
 
-environmentKind は飾りラベルではない。`validate-policy.sh` が、環境種別が禁止する capability を **hard fail** で検査する(違反した PR は CI で止まる)。
+environmentKind は飾りラベルではない。`validate-policy.sh` が、環境種別が禁止する capability を **hard fail** で検査する(違反した PR は CI で止まる)。`install-packages.sh` と `private-backup.sh` も、実行時に同じ表で違反した profile を拒否する(#357)。
 
 | environmentKind | false 必須の capability |
 | --- | --- |

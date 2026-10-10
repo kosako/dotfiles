@@ -159,7 +159,8 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
 ```
 
 restore は `allowSecretsAccess=true` の profile でのみ実行できる(environmentKind が work / client / sandbox /
-agent の profile では拒否。backup / verify も同じ gate)。
+agent の profile では拒否。backup / verify も同じ gate)。data の誤りでそれらの profile の `allowSecretsAccess` が
+true になっていても、environmentKind の違反として拒否する(#357)。
 復元後に**新しい backup を作る**には公開鍵(recipient)が要る ——
 `~/.config/dotfiles/private-backup.recipient` を置くか `--recipient` で渡す(公開鍵なので
 secret ではないが repo にはコミットしない)。

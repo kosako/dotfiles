@@ -29,7 +29,7 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 
 `.chezmoidata/*.yaml`(profiles / modules / capabilities.schema / packages / backup-paths)の読み取りは shell script 側では mikefarah/yq v4 で行う(chezmoi template 側は Go template が読む)。yq が無い・別 variant の場合は `require_yq` が fail closed する。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない(injection 防止)。
 
-boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型を、引用符なしの小文字 `true` / `false` で指定する。`validate-policy.sh` は型と綴りを検査し、文字列 `"true"` / `"false"`、数値、null に加え、`True` / `FALSE` などの大文字を含む綴りも拒否する。直接の `chezmoi apply` / template 展開は共通 `require-profile` guard でデコード後の型を検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の小文字 boolean `true` だけを許可する。enum の値は従来どおり文字列で指定する。enum も `require-profile` が schema の値に含まれるかを検査し、未知の値・型違い・欠落なら直接の apply でも fail する(値をそのまま書く template があるため。#264)。
+boolean capability、module の boolean `requires:`、schema の `implemented:` は YAML の boolean 型を、引用符なしの小文字 `true` / `false` で指定する。`validate-policy.sh` は型と綴りを検査し、文字列 `"true"` / `"false"`、数値、null に加え、`True` / `FALSE` などの大文字を含む綴りも拒否する。直接の `chezmoi apply` / template 展開は共通 `require-profile` guard でデコード後の型を検査するため、文字列 `"false"` を truthy とみなして hook を有効化しない。install / secret access の runtime gate も YAML の小文字 boolean `true` だけを許可する。この gate は environmentKind の禁止の表も当て、表が禁じる capability は値の書き方(YAML の alias / merge key 経由を含む)によらず許可しない(#357。下記「environmentKind の制約」)。enum の値は従来どおり文字列で指定する。enum も `require-profile` が schema の値に含まれるかを検査し、未知の値・型違い・欠落なら直接の apply でも fail する(値をそのまま書く template があるため。#264)。
 
 `packages`(`.chezmoidata/packages.yaml`)は software catalog。各 entry の `source`(brew_formula / brew_cask / npm_global / go_install / mas / manual)と canonical id を宣言する。`validate-policy.sh` が source の妥当性・go_install/mas の pkg 必須・name 重複を fail closed で検査する。
 
@@ -41,7 +41,7 @@ boolean capability、module の boolean `requires:`、schema の `implemented:` 
 
 照合は source ごとの canonical id(`pkg`、無ければ `name`)で行う。 inventory の取得・解析に失敗した source は未 install / 台帳外と判定せず、`INCOMPLETE` を警告して検査を skip する。他の source は引き続き検査し、doctor は exit 0 を維持する。依存 tree の不整合による `npm ls` の nonzero も inventory 不明として扱い、任意の stderr は転載せず exit code と固定ヒントを表示するので、`npm ls -g --depth=0` を手動実行して診断する。
 
-install は `install-packages.sh`(手動起動・`chezmoi apply` 非結合)が担う。catalog の未 install entry を、`installPackages`(brew_formula / npm_global / go_install)と `installGuiApps`(brew_cask / mas)で gate して install する。**dry-run 既定**(`--apply` で実行)、既 install は skip して**更新しない**(install と update の分離、[update-policy](update-policy.md))、track-only / manual は対象外、npm/go の manager 不在時は skip+warn。environmentKind 制約で work / client / agent は gate(installPackages/installGuiApps)が false 必須なので install されない(`environment_kind_forbidden_capabilities`)。sandbox は install 制約の対象外(secret のみ禁止)で、profile が install gate を true にすれば install されうる。
+install は `install-packages.sh`(手動起動・`chezmoi apply` 非結合)が担う。catalog の未 install entry を、`installPackages`(brew_formula / npm_global / go_install)と `installGuiApps`(brew_cask / mas)で gate して install する。**dry-run 既定**(`--apply` で実行)、既 install は skip して**更新しない**(install と update の分離、[update-policy](update-policy.md))、track-only / manual は対象外、npm/go の manager 不在時は skip+warn。environmentKind 制約で work / client / agent は gate(installPackages/installGuiApps)が false 必須なので install されない(`environment_kind_forbidden_capabilities`)。data の誤りで禁じられた capability が true になった profile は、validate-policy を経ていなくても `install-packages.sh` が冒頭で拒否する(exit 1、manager を probe しない。#357)。sandbox は install 制約の対象外(secret のみ禁止)で、profile が install gate を true にすれば install されうる。
 
 Go の install 済み判定は GOBIN(空の場合は GOPATH の先頭 entry 配下の `bin`)を調べる。そこに executable があれば PATH 外でも再 install しない。逆に、PATH 上の別の場所(GOBIN だった toolchain の dir など)にある copy は導入済みとみなさない(#305。bin の dir が変わった後も、catalog が正しい場所に入れるため)。`go env` の probe は `GOTOOLCHAIN=local` / `GO111MODULE=off` / `GOWORK=off` で実行し、呼出元の `go.mod` / `go.work` による toolchain 自動取得を抑止する。query 失敗、空や不正な GOPATH は「不明」であり、`/bin` へ fallback しない。
 
@@ -51,7 +51,7 @@ installer は inventory の不明と正常な空リストを区別する。取�
 
 - profile 名だけで副作用を許可しない。
 - unknown profile / module / capability は fail closed。
-- destructive な操作は work / client / agent でデフォルト無効(environmentKind の制約として `validate-policy.sh` が hard fail で強制。下記参照)。
+- destructive な操作は work / client / agent でデフォルト無効(environmentKind の制約として `validate-policy.sh` が hard fail で強制し、副作用のある入口(install-packages / private-backup)も同じ判定で実行時に拒否する。下記参照)。
 - secret access、network tunnel、AI tools は personal でも明示的に扱う。
 - boolean で足りない capability は enum にする。
 - `report` は検査のみ、`enforce` は実際の適用(例: `~/.npmrc` を chezmoi で管理)を意味する。`corepackMode=enable` は手動の `corepack enable` を前提にした検査で、dotfiles は適用しない([supply-chain-corepack](supply-chain-corepack.md))。
@@ -59,6 +59,8 @@ installer は inventory の不明と正常な空リストを区別する。取�
 ## environmentKind の制約
 
 environmentKind は飾りラベルではなく、capability の不変条件を駆動する。`validate-policy.sh` が各 profile を検証するとき、environmentKind が禁止する boolean capability が `true` だと **hard fail**(report-only の warning ではない)する。「work 環境なのに `installPackages=true`」のような矛盾を CI で止めるための invariant(2026-06-14 決定)。
+
+boolean の制約は静的な検証(`validate-policy.sh`)と、副作用のある入口(`install-packages.sh`、`private-backup.sh` の backup / verify / restore)での実行時の拒否の 2 層で当て、違反の判定は `lib-policy.sh` の `profile_environment_kind_violations` の 1 か所にまとめてある(#357)。入口は validate-policy を経ずに起動されうるため、その profile にどれか 1 つでも違反があれば、その入口が使う capability に限らず `[fail] machine profile '<profile>' sets <capability>=true, ..., which environmentKind <kind> forbids; refusing ...` で拒否して exit 1 する。environmentKind が欠落・未知の profile も、制約なしとは読まずに拒否する。doctor / preflight は先に validate-policy を走らせて違反なら exit 1 で止まるので、表示は変わらない。
 
 | environmentKind | false 必須の capability |
 | --- | --- |
@@ -75,7 +77,10 @@ enum capability には**禁止値**の制約を同じ仕組みで当てる(#45�
 | personal / sandbox | (制約なし) |
 
 - 表は `scripts/lib-policy.sh` の `environment_kind_forbidden_capabilities`(boolean)と
-  `environment_kind_forbidden_enum_values`(enum 禁止値)が持つ。
+  `environment_kind_forbidden_enum_values`(enum 禁止値)が持つ。boolean の表を読む判定も同じ file にある:
+  違反の一覧(`profile_environment_kind_violations`。validate-policy と実行時の拒否が使う)、
+  capability ごとの許可(`profile_grants_capability`。表が禁じる capability は値によらず許可しない)、
+  入口での拒否(`require_environment_kind_limits`)。
 - `personal` は明示許可前提なので無制約。`agent` は profile がまだ無いが、最小権限を明示するため先行定義してある(agent profile 追加時に即発効)。
 - **required 値の制約(「work は enforce 必須」)は作らない**(#45 裁定): 会社 Mac の work は
   会社 npm 設定との兼ね合いで report 稼働([supply-chain-npm](supply-chain-npm.md))であり、
@@ -419,6 +424,8 @@ capability を 1 つ追加するときに触る場所(fail-closed の意図的�
 3. 危険な権限なら `lib-policy.sh` の `environment_kind_forbidden_capabilities` と
    本 doc / README の表(3 箇所)+ `test-policy.sh` の cross-check に追加。
    安全強化型(true ほど締まる)は**入れない**(極性は sandbox 節参照)。
+   その capability で副作用を許す実行時の gate は `profile_grants_capability` を使い、
+   `profile_capability_is_true` を直接使わない(表に足すだけで実行時の gate にも効く。#357)。
 4. 実装の配線 — 原則 requires 方式。off にしたとき既存 file を確実に消す必要があれば
    テンプレート自己 gate(下の「capability → 実装の gating 方式(規範)」)。
    `implemented: false` で land する場合は doctor に未実装/未配線の warn を出す section を追加

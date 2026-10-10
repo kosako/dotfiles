@@ -43,7 +43,8 @@ unknown profile / module / capability や capability enum の不正値は policy
 - enum capability が schema の `values` に含まれること。
 - environmentKind cross-check: kind が禁止する boolean capability が `true`(#43)、または
   enum capability が禁止値(work / client / agent の `npmHardeningMode=off`、#45)だと
-  hard fail すること。
+  hard fail すること。boolean の行は、実行時の拒否(install-packages / private-backup)と共有する
+  `lib-policy.sh` の `profile_environment_kind_violations` で判定する(#357)。
 - module の `paths:` が home 相対のリテラル path であること(glob / pattern 文字・空白・
   先頭 `~` / `./`・末尾 `/` は fail。`.chezmoiignore` allowlist の `!<path>` 行になるため、#207)。
   同一 path を複数 module が宣言していないこと。
@@ -478,7 +479,8 @@ software catalog(`.chezmoidata/packages.yaml`)の **未 install entry を instal
 手動起動のみ・`chezmoi apply` 非結合。**dry-run 既定**で、`--apply` を付けたときだけ実 install する。
 実 profile を chezmoi config から fail-closed に解決し、source を `installPackages`(brew_formula /
 npm_global / go_install)/ `installGuiApps`(brew_cask / mas)で gate する(work / client / agent は
-これらが false なので何も install しない)。既 install は skip して**更新しない**(install と update の
+これらが false なので何も install しない。environmentKind が禁じる capability を true にした profile は、
+validate-policy を経ずに起動されても冒頭で拒否し、manager を probe せずに exit 1。#357)。既 install は skip して**更新しない**(install と update の
 分離、[docs/update-policy.md](../docs/update-policy.md))。track-only / manual は対象外。npm / go の
 manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 
@@ -501,6 +503,7 @@ private な設定(`.local` 上書き + curated アプリ設定)を **age identit
 退避し(`backup`)、アーカイブを検証し(`verify`)、検証済みのものだけを復元する(`restore`。
 既定 dry-run、`--apply` で実行)。手動起動のみ・`chezmoi apply` 非結合。冒頭で runtime secrets gate
 (`require_secrets_access`)を通り、`allowSecretsAccess != true` の profile では実行拒否。
+environmentKind が禁じる capability を true にした profile も、その違反として拒否する(#357)。
 
 ```sh
 ./scripts/private-backup.sh backup --out PATH [--recipient AGE1... | --recipients-file PATH] \
@@ -564,6 +567,9 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   確かめる。mode 000 の dir(中に file)を残す archive を verify が拒否し、その後に temp が中身ごと消え、archive 由来の名前が
   出ないことも確かめる(root では飛ばす。#335)。
 - 拒否 profile(work)では backup が実行拒否し、アーカイブを書かないこと。
+- environmentKind の実行時の拒否(#357): work に `allowSecretsAccess=true` を入れた repo の copy(copy の
+  validate-policy が同じ data を拒否することも確かめる)では、backup / verify / restore `--apply` が
+  environmentKind の拒否行で exit 1 になり、age を呼ばず、archive を書かず、marker も restore 先も変えないこと。
 - 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
 - local 補足リストの構造不正(#246): path の無い entry・category の `|`・path 内の改行・list の代わりの scalar
   (`backup_paths: false`)があれば、`backup-paths entry invalid` で backup ごと fail し、archive も marker も
@@ -609,6 +615,12 @@ profile を解決できない・未知の profile・`true` 以外の値はすべ
   `false` の profile(work)と未知 profile を拒否すること(vacuously true にしない)。
 - chezmoi が見つからないとき `resolve_runtime_profile` / `require_secrets_access` が fail-closed で
   拒否すること(default profile に倒さない)。
+- environmentKind の実行時の拒否(#357): repo の copy の gate が、work に `allowSecretsAccess=true` を入れた
+  data・YAML の alias で personal の map を流用した work・sandbox に付け替えた personal・未知の kind を、
+  validate-policy を経ずに environmentKind の拒否行で拒否し、`profile_allows_secrets_access` も許可しないこと。
+  未改変の copy の gate が personal を許可すること(control)、copy の validate-policy が同じ data を拒否する
+  こと、`set_environment_kind`(test-lib.sh)が未定義の profile と environmentKind の無い profile で fail して
+  file を変えないことも確かめる。
 - chezmoi が profile を解決できる環境では、gate の判定が profiles.yaml の
   `allowSecretsAccess` 宣言値(yq 直読みの独立期待値)と一致すること
   (より緩くならない。chezmoi 不在の CI では skip)。
@@ -802,6 +814,6 @@ git が必要。chezmoi / starship binary は不要(CI では render job で実�
 ## lib-policy.sh
 
 他 script から source される共通 helper。
-data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)、global excludes の解決(`git_excludes_file_setting`: global > system・`GIT_CONFIG_NOSYSTEM` 尊重・unset / empty / path / error の 4 状態、`git_default_excludes_file`: XDG 既定。doctor と preflight が共有、#248)を提供する。ほかに、BSD/GNU をまたぐ octal mode 取得(`file_mode`)、doctor / preflight が共有する policy ゲート(`run_policy_validation`)と標準 project roots 報告(`report_standard_project_roots`)、catalog source → package manager の対応表(`manager_present`。installer と catalog drift 報告の単一 source)を持つ。
+data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)、global excludes の解決(`git_excludes_file_setting`: global > system・`GIT_CONFIG_NOSYSTEM` 尊重・unset / empty / path / error の 4 状態、`git_default_excludes_file`: XDG 既定。doctor と preflight が共有、#248)を提供する。ほかに、BSD/GNU をまたぐ octal mode 取得(`file_mode`)、doctor / preflight が共有する policy ゲート(`run_policy_validation`)と標準 project roots 報告(`report_standard_project_roots`)、catalog source → package manager の対応表(`manager_present`。installer と catalog drift 報告の単一 source)を持つ。environmentKind の禁止の表を読む判定(違反の一覧 `profile_environment_kind_violations`、capability ごとの許可 `profile_grants_capability`、副作用のある入口での拒否 `require_environment_kind_limits`)もここにあり、validate-policy・install-packages・private-backup が共有する(#357)。
 
 policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-preflight.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
