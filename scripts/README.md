@@ -600,7 +600,10 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   なしに失敗する。signal を使わないので INT の回だけ)。signal は run の中から送る(timing の窓を作らない): PATH 先頭の
   fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を記録してから group へ。正常終了の run は記録だけ)と fake
   `rm`(temp 配下の削除 = 後始末の途中で group へ送り、届くのを待ってから本物の rm に渡す。signal で死ぬ rm はそこで死に、
-  無視する rm は削除を続ける)。中断の run は、終了後に専用 TMPDIR が空で、rc が 130 / 143 で、python3 の wrapper を親に
+  無視する rm は削除を続ける)。引数なしの `mktemp`(backup の一覧 file 3 つ)も fake `mktemp` が専用 TMPDIR に作らせる
+  (BSD の mktemp = macOS は引数なしだと TMPDIR を見ずに user ごとの temp dir に作るので、消し忘れが残留の検査に映らず、期限の
+  KILL では残っていた。Codex review R5)。backup の run は、その 3 つが manifest 検査の時点で専用 TMPDIR にあったことも確かめる。
+  中断の run は、終了後に専用 TMPDIR が空で、rc が 130 / 143 で、python3 の wrapper を親に
   して記録した waitpid の終了状態が `exit 130` ではなく signal であること。rmfail は失敗した削除の warn も確かめる。正常
   終了の run は、rc 0 で終了状態が `exit 0` であること(signal は捨て、削除の失敗は warn だけで終了状態を変えない)。endsig
   は TMPDIR が空、endrmfail は失敗した temp だけが残り(warn がその path を名指しする)、後続の削除は済んでいること。
@@ -612,7 +615,9 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   通す実装は endsig の 6 case が signal で終わって fail(temp は INT / TERM の trap が空にする)。削除の失敗を errexit に
   任せる実装は rmfail と endrmfail の backup の 3 case が exit 1 で終わって fail。失敗した削除で後始末をやめる実装は
   endrmfail の backup だけが self-check の dir を残して fail(中断の run は EXIT の trap が後始末をもう一度回すので通る)。
-  `remove_workdir` が残りを warn しない実装は rmfail と endrmfail の verify / restore の 6 case が fail。通す実装と
+  `remove_workdir` が残りを warn しない実装は rmfail と endrmfail の verify / restore の 6 case が fail。一覧 file の削除を
+  外す実装は backup の 11 case(endrmfail を含む)が一覧 file を残して fail(fake `mktemp` の前は macOS で通っていた)。一覧 file
+  を専用 TMPDIR の外に作る実装は同じ 11 case が「3 つが TMPDIR に無い」で fail。通す実装と
   errexit を併せた形(#358 review の前)では every / endsig の 12 case と rmfail / endrmfail の backup の 3 case が fail し、
   bash 3.2 では加えて twice の SIGINT の backup が exit で終わって fail する(bash 5 の twice は通る)。wrapper が SIGINT を既定に
   戻すので、非対話 shell の background list(`… &`)として suite を起動しても走る。python3 が無ければ手元は warn して

@@ -1774,8 +1774,13 @@ fi
 #     (rmfail, endrmfail); SIG_NO_FIRST stops the fake yq at its snapshot
 #     (the end runs). Every other call goes to the real tool. A TMPDIR of
 #     its own per run, so a leftover shows and a KILL at the deadline
-#     (pb_kill_tree) cannot leak into the
-#     suite's temp. The wrapper starts the run with the default SIGINT
+#     (pb_kill_tree) cannot leak into the suite's temp; a fake mktemp makes
+#     every call without arguments there too (backup's three list files):
+#     BSD mktemp (macOS) puts such a file in the per-user temp dir whatever
+#     TMPDIR says, so a cleanup that forgot them went unseen and a KILL left
+#     them behind (Codex review R5). The backup runs check that the three
+#     were in the temp at the manifest check (the fake yq's snapshot). The
+#     python3 wrapper starts the run with the default SIGINT
 #     disposition, so the cases run even when the suite itself was started
 #     as a background list of a non-interactive shell (`… &`), where SIGINT
 #     is ignored at entry and bash cannot reset it. Without python3 the
@@ -1803,6 +1808,7 @@ else
   mkdir -p "$sig_fakebin"
   real_yq="$(command -v yq)"
   real_rm="$(command -v rm)"
+  real_mktemp="$(command -v mktemp)"
   cat > "$sig_fakebin/yq" <<'SH'
 #!/bin/sh
 if [ "$1" = -e ]; then
@@ -1862,7 +1868,12 @@ with open(ended, "w") as f:
     f.write("exit %d\n" % os.WEXITSTATUS(st))
     sys.exit(os.WEXITSTATUS(st))
 PY
-  chmod +x "$sig_fakebin/yq" "$sig_fakebin/rm"
+  cat > "$sig_fakebin/mktemp" <<'SH'
+#!/bin/sh
+[ "$#" -gt 0 ] || exec "$REAL_MKTEMP" "$SIG_TMP/mktemp.XXXXXXXXXX"
+exec "$REAL_MKTEMP" "$@"
+SH
+  chmod +x "$sig_fakebin/yq" "$sig_fakebin/rm" "$sig_fakebin/mktemp"
   for sig_name in INT TERM; do
     case "$sig_name" in
       INT) sig_num=2 ;;
@@ -1907,7 +1918,7 @@ PY
         set -m
         HOME="$sig_home" TMPDIR="$sig_tmp" SIG_TMP="$sig_tmp" SIG_SNAPSHOT="$sig_snapshot" SIG_MARKER="$sig_marker" \
           SIG_EVERY="$sig_every" SIG_RM_FAIL="$sig_rm_fail" SIG_NO_FIRST="$sig_no_first" SIG_NAME="$sig_name" \
-          REAL_YQ="$real_yq" REAL_RM="$real_rm" \
+          REAL_YQ="$real_yq" REAL_RM="$real_rm" REAL_MKTEMP="$real_mktemp" \
           PATH="$sig_fakebin:$fixture_home/fakebin:$PATH" \
           python3 "$sig_fakebin/ended.py" "$sig_ended" "$PB" "${sig_args[@]}" > "$sig_log" 2>&1 < /dev/null &
         sig_pid=$!
@@ -1927,6 +1938,15 @@ PY
         sig_had="$(cat "$sig_snapshot" 2>/dev/null || true)"
         sig_end="$(cat "$sig_ended" 2>/dev/null || true)"
         sig_left="$(find "$sig_tmp" -mindepth 1 2>/dev/null)"
+        # backup's three list files sat directly in the temp at the manifest
+        # check (the fake mktemp), so the leftover check covers them too.
+        sig_lists=0 sig_lists_ok=1
+        if [[ "$sig_cmd" == backup ]]; then
+          while IFS= read -r sig_path; do
+            [[ -z "$sig_path" || "${sig_path%/*}" != "$sig_tmp" ]] || sig_lists=$((sig_lists + 1))
+          done <<< "$sig_had"
+          [[ "$sig_lists" -eq 3 ]] || sig_lists_ok=0
+        fi
         # Interrupted (128 + the signal) after the section that checks the
         # plaintext began, with the plaintext in the temp at the first
         # signal, nothing left afterwards, ended by that signal (not by an
@@ -1977,13 +1997,13 @@ PY
             fi ;;
         esac
         if [[ "$sig_timed_out" -eq 0 && "$sig_rc" -eq "$sig_want_rc" && "$sig_end" == "$sig_want_end" ]] \
-          && [[ "$sig_shape_ok" -eq 1 && -z "$sig_left" ]] \
+          && [[ "$sig_shape_ok" -eq 1 && "$sig_lists_ok" -eq 1 && -z "$sig_left" ]] \
           && grep -Fq "private-backup: $sig_section" <<< "$sig_out" \
           && grep -Eq '/files/\.zshrc\.local$' <<< "$sig_had" && grep -Eq '/manifest\.json$' <<< "$sig_had"; then
           pass "$sig_cmd $sig_shape $sig_ends"
         else
-          printf 'mode=%s rc=%s timed_out=%s ended=%s marker=%s\nin the temp at the first signal:\n%s\nleft:\n%s\n%s\n' \
-            "$sig_mode" "$sig_rc" "$sig_timed_out" "${sig_end:-unknown}" "$([[ -e "$sig_marker" ]] && echo yes || echo no)" \
+          printf 'mode=%s rc=%s timed_out=%s ended=%s marker=%s lists_in_temp=%s\nin the temp at the first signal:\n%s\nleft:\n%s\n%s\n' \
+            "$sig_mode" "$sig_rc" "$sig_timed_out" "${sig_end:-unknown}" "$([[ -e "$sig_marker" ]] && echo yes || echo no)" "$sig_lists" \
             "$sig_had" "$sig_left" "$sig_out" >&2
           miss "$sig_cmd $sig_shape: did not reach that point, left its temp behind, or did not end as expected (rc=$sig_rc, ended=${sig_end:-unknown})"
         fi
