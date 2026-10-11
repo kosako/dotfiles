@@ -134,6 +134,9 @@ git diff --check
 `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
 (CI では version pin して導入する。render job 所属)。`test-starship.sh` は source の静的検査と Git fixture での条件実行なので chezmoi は
 不要だが、CI では render job で走る。
+`test-codex-settings.sh` は、render した Codex の rules を `codex execpolicy check` で評価する節も持つ。CI の render job は
+version と sha256 を固定した codex(release の Linux 用 binary)を入れて回し、codex が無ければ CI では fail、手元では表示して飛ばす。
+rules を変える PR は、codex の入った手元でもこの test を回す(CI の codex は手元の版と同じとは限らない。#332 F36)。
 `test-npmrc.sh` は両 job で走る(静的検査は validate job、chezmoi が要る rendered-content
 検査は render job で実行される。#150)。
 `test-inventory.sh` は `test-install-packages.sh` から呼ばれるため個別には載せない(単独実行も可)。

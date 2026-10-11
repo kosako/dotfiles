@@ -342,11 +342,13 @@ fi
 #     -> forbidden (outranking the git commit allow: the strictest match
 #     wins), the everyday forms -> allow or no match, and the documented
 #     prefix gaps (an option after other arguments, global options) -> not
-#     caught. Where codex is not installed (CI) this is reported and
-#     skipped; the exact pin above still holds the content. An installed
-#     codex whose `execpolicy check` cannot be used, a non-zero exit, or an
-#     answer that is neither a decision nor an empty matchedRules array fails
-#     the test rather than passing as "no match" (Codex review R1, PR #328).
+#     caught. The render job installs a pinned codex for this (#332 F36);
+#     where codex is not installed this is reported and skipped locally (the
+#     exact pin above still holds the content) and fails on CI (codex_gate).
+#     An installed codex whose `execpolicy check` cannot be used, a non-zero
+#     exit, or an answer that is neither a decision nor an empty matchedRules
+#     array fails the test rather than passing as "no match" (Codex review
+#     R1, PR #328).
 # codex_policy_decision JSON — allow / prompt / forbidden as Codex answered,
 # "none" only for no decision key and an empty matchedRules array, and
 # "malformed" for anything else — an unknown decision string included, so a
@@ -391,7 +393,33 @@ else
   printf '%s' "$decision_reader_misses" >&2
   status=1
 fi
-if ! command -v codex >/dev/null 2>&1; then
+# codex_gate — whether the decisions are checked here: "run" with codex on
+# PATH; without it "skip" locally and "fail" on CI (CI=true, set by GitHub
+# Actions), as for age in test-private-backup.sh (#330): a dropped install
+# step or a broken PATH must not turn 4b into a reported skip on CI.
+codex_gate() {
+  if command -v codex >/dev/null 2>&1; then
+    printf 'run\n'
+  elif [[ "${CI:-}" == "true" ]]; then
+    printf 'fail\n'
+  else
+    printf 'skip\n'
+  fi
+}
+# The gate itself, on a PATH without codex (runs everywhere, so in CI too).
+gate_ci="$(PATH="$home_root/no-such-bin" CI=true codex_gate)"
+gate_local="$(PATH="$home_root/no-such-bin" CI='' codex_gate)"
+if [[ "$gate_ci" == fail && "$gate_local" == skip ]]; then
+  ok "test passed: without codex the execpolicy check fails on CI and is a reported skip locally"
+else
+  fail "test failed: without codex the gate answered '$gate_ci' on CI (expected fail) and '$gate_local' locally (expected skip)"
+  status=1
+fi
+gate="$(codex_gate)"
+if [[ "$gate" == fail ]]; then
+  fail "test failed: codex not found on CI; the execpolicy decisions must be checked there (the render job installs a pinned codex)"
+  status=1
+elif [[ "$gate" == skip ]]; then
   item "codex not installed here; execpolicy decisions not checked (the exact pin above still holds the content)"
 elif ! codex execpolicy check --help >/dev/null 2>&1 </dev/null; then
   fail "test failed: codex is installed but \`codex execpolicy check\` is unusable here, so the rule decisions could not be checked"
