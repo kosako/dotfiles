@@ -148,6 +148,7 @@ CI は fresh checkout で差分が無いため、代わりに commit 済み tree
 
 `bash32` job は、validate job の test(shellcheck・zsh の構文検査・whitespace check を除く)を macOS の runner で、
 `/bin/bash`(3.2)を PATH の先頭に置いて回す(#333 F06。契約は `scripts/README.md` の「実行環境の契約(bash 3.2)」)。
+macOS の runner では `test-doctor.sh` だけで約 40 分かかるので、doctor / private-backup / その他の 3 つの group に分けて並列に回す。
 手元で 3.2 で回すときも同じく、`/bin/bash` への symlink を置いた directory を PATH の先頭に置く
 (`#!/usr/bin/env bash` が 3.2 に解決される):
 

@@ -122,8 +122,25 @@ jobs:
   # first on PATH, so the scripts also meet the BSD userland (mktemp, sed,
   # stat) they run on (#333 F06).
   bash32:
+    name: bash32 (${{ matrix.group }})
     runs-on: macos-latest
-    timeout-minutes: 30
+    # test-doctor alone takes about 40 minutes here (each case is a full
+    # doctor run, and process start-up is slow on the macOS runner), so the
+    # tests run as three parallel groups and the wait is the slowest group's.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: doctor
+            suites: test-doctor.sh
+          - group: private-backup
+            suites: test-secrets-gate.sh test-private-backup.sh
+          - group: others
+            suites: >-
+              test-shell-syntax.sh test-ai-clip.sh test-zshrc-compinit.sh
+              test-zshrc-order.sh test-gclone.sh test-policy.sh test-gitconfig.sh
+              test-npmrc.sh test-install-packages.sh test-preflight.sh
     steps:
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -169,52 +186,32 @@ jobs:
       # in a branch no test reaches. Runtime-only features (`declare -A`,
       # `${v,,}`) fail only where the tests below run them.
       - name: bash syntax check (bash 3.2)
+        if: matrix.group == 'others'
         run: |
           for file in scripts/*.sh; do
             bash -n "$file"
           done
 
-      - name: shell syntax gate regression tests
-        run: ./scripts/test-shell-syntax.sh
-
-      - name: ai-clip (Ctrl-O) helper tests
-        run: ./scripts/test-ai-clip.sh
-
-      - name: zshrc compinit daily cache tests
-        run: ./scripts/test-zshrc-compinit.sh
-
-      - name: zshrc PATH and source order tests
-        run: ./scripts/test-zshrc-order.sh
-
-      - name: gclone helper tests
-        run: ./scripts/test-gclone.sh
-
       - name: validate policy
+        if: matrix.group == 'others'
         run: ./scripts/validate-policy.sh --all
 
-      - name: policy fail-closed tests
-        run: ./scripts/test-policy.sh
-
-      - name: gitconfig safety tests
-        run: ./scripts/test-gitconfig.sh
-
-      - name: npmrc hardening tests
-        run: ./scripts/test-npmrc.sh
-
-      - name: doctor tests
-        run: ./scripts/test-doctor.sh
-
-      - name: private-backup secrets-gate tests
-        run: ./scripts/test-secrets-gate.sh
-
-      - name: private-backup backup/verify tests
-        run: ./scripts/test-private-backup.sh
-
-      - name: catalog install gate tests
-        run: ./scripts/test-install-packages.sh
-
-      - name: preflight report-only tests
-        run: ./scripts/test-preflight.sh
+      # Every suite runs even after one fails; the failed ones are named at
+      # the end.
+      - name: tests (${{ matrix.group }})
+        env:
+          SUITES: ${{ matrix.suites }}
+        run: |
+          failed=""
+          for suite in $SUITES; do
+            echo "::group::$suite"
+            ./scripts/"$suite" || failed="$failed $suite"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "failed:$failed" >&2
+            exit 1
+          fi
 
   render:
     runs-on: ubuntu-latest
