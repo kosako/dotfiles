@@ -755,7 +755,8 @@ apply 済み file が **削除される**こと(template 自己 gate)、rules ba
 直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、prefix で拾えない形
 (後ろの option・global option)は拾われないことを確かめる(#304)。CI の render job は version と sha256 を固定した
 codex(release の Linux 用 binary。npm は通さない)を入れてこの評価を回す(#332 F36)。CI の codex は手元の版と同じとは限らないので、
-手元の codex の版が変わったときの解釈の変化は、手元でのこの test と doctor の rules の意味の検査が受け持つ。`codex` が無いと、
+手元の codex の版が変わったときの解釈の変化は、手元でのこの test と doctor の rules の意味の検査が受け持つ。rules を変える PR は、
+codex の入った手元でもこの test を回す。`codex` が無いと、
 手元ではその旨を表示して飛ばし(exact pin だけが効く)、CI(`CI=true`)では fail にする(#330 の age と同じ。この分かれ目も
 codex の無い PATH で確かめる)。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
 `matchedRules` も無い答えを返す、のどれも「一致なし」とはせず fail にする。答えの読み取り(decision は allow / prompt /
