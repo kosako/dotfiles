@@ -117,6 +117,8 @@ jobs:
     env:
       CHEZMOI_VERSION: 2.73.0
       CHEZMOI_SHA256: b597729b687af4488a848240134cb633de8ca0f04e0d26d48f400ee2ac338ffa
+      CODEX_VERSION: 0.162.1
+      CODEX_SHA256: 86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057
     steps:
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -139,6 +141,21 @@ jobs:
           echo "${YQ_SHA256}  yq" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           install -m 0755 yq "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # test-codex-settings evaluates the rendered Codex rules with Codex's own
+      # `codex execpolicy check` (it only evaluates the rules file it is
+      # given: no login, no network, no command run), and fails on CI without
+      # codex (#332 F36). The release's static Linux binary, not the npm
+      # package: pinned and checksum-verified like the tools above.
+      - name: install codex (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz"
+          echo "${CODEX_SHA256}  codex.tar.gz" | sha256sum -c -
+          tar -xzf codex.tar.gz codex-x86_64-unknown-linux-musl
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 codex-x86_64-unknown-linux-musl "$HOME/.local/bin/codex"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: chezmoi render and managed-set tests

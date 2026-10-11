@@ -753,10 +753,14 @@ apply 済み file が **削除される**こと(template 自己 gate)、rules ba
 `--no-verify` の prompt 1、#334 の secret の床の forbidden 6・prompt 3)と gate の独立性(#139)を確認する。`codex` が install されていれば、render した rules を
 `codex execpolicy check`(rules を評価するだけで何も実行しない)に当て、subcommand の直後の作業を捨てる形は prompt、
 直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、prefix で拾えない形
-(後ろの option・global option)は拾われないことを確かめる(#304)。`codex` が無い環境(CI)ではその旨を表示して飛ばし、
-exact pin だけが効く。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
+(後ろの option・global option)は拾われないことを確かめる(#304)。CI の render job は version と sha256 を固定した
+codex(release の Linux 用 binary。npm は通さない)を入れてこの評価を回す(#332 F36)。CI の codex は手元の版と同じとは限らないので、
+手元の codex の版が変わったときの解釈の変化は、手元でのこの test と doctor の rules の意味の検査が受け持つ。rules を変える PR は、
+codex の入った手元でもこの test を回す。`codex` が無いと、
+手元ではその旨を表示して飛ばし(exact pin だけが効く)、CI(`CI=true`)では fail にする(#330 の age と同じ。この分かれ目も
+codex の無い PATH で確かめる)。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
 `matchedRules` も無い答えを返す、のどれも「一致なし」とはせず fail にする。答えの読み取り(decision は allow / prompt /
-forbidden だけ、一致なしは decision が無く `matchedRules` が空の配列のときだけ)は、codex の無い CI でも固定の答えで確かめる。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
+forbidden だけ、一致なしは decision が無く `matchedRules` が空の配列のときだけ)は、codex が無くても固定の答えで確かめる。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
 どおりであること(どちらも `model_reasoning_effort` だけ。review 用 file に `service_tier` を書かない)・全行が agent-tools の読み手(worker preflight と同じ)の top-level の形に収まること、
 値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ることを確認する。
 chezmoi が必要(render job)。
