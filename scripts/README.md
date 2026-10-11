@@ -22,6 +22,22 @@ CLI usage error: exit 2
 unknown profile / module / capability や capability enum の不正値は policy violation として fail closed する。
 `doctor.sh` / `preflight.sh` は冒頭の policy validation が失敗した場合のみ exit 1 で、それ以外は warning があっても常に exit 0(report-only)。`doctor.sh` の未知 option(`--actions-only` 以外の `-` 始まり)と、`preflight.sh` の `-` 始まりの引数・2 つ目の引数だけは usage error として exit 2 で report を走らせない(#227 / #309。validate-policy の `-h` / `--all` などに素通しすると、その文字列を profile 名にした report が誤った clean で終わるため)。
 
+## 実行環境の契約(bash 3.2)
+
+`scripts/*.sh` は macOS 標準の `/bin/bash`(3.2)でも動くことを契約にする(#333 F06)。新しい machine では Homebrew の
+bash が入る前に preflight が走り、最小の PATH で起動された agent も `#!/usr/bin/env bash` を `/bin/bash` に解決するため。
+
+- bash 4 以降の機能(連想配列、`mapfile` / `readarray`、`${v,,}` / `${v^^}`、`declare -n`、`|&`、`&>>`、`;;&`、負の配列添字、
+  `wait -n`、`$EPOCHSECONDS` など)を使わない。
+- 3.2 の挙動に合わせる: `set -u` の下で空の配列を `"${a[@]}"` と展開すると unbound variable で落ちる、`read -t` は timeout
+  でも 1 を返す、`${v//pat/rep}` の置換の文字列は backslash と引用符を残す、`$!` が未設定だと `set -u` の下ではどう書いても
+  error になる。
+- macOS の userland(BSD の `mktemp` / `sed` / `stat` / `date`)で動かす。GNU だけの option を使わない。BSD の `mktemp` は
+  template が無いと `TMPDIR` を見ないので、template を付ける(#372)。
+
+CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置いて validate job の test を回す。手元で同じことを
+するには `docs/github-workflow.md` の「最低限の validation」に従う。
+
 ## validate-policy.sh
 
 `.chezmoidata/profiles.yaml`、`.chezmoidata/modules.yaml`、`.chezmoidata/capabilities.schema.yaml` の整合性を検証する。
