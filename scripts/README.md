@@ -810,7 +810,8 @@ git config には触れない。
 herdr-config module(#261)を検証する。personal で `~/.config/herdr/config.toml` が apply され work では
 されないこと(work が持つ自前の config は byte 単位で不変)、1 行目の managed-by header、TOML として parse でき
 設定値が pin どおりであること(`[ui.toast] delivery = "system"` を含む。key を sort して比べる)、mode が file 0644 /
-directory 0755 であること(既存 host の初回 apply で権限を変えない)、隣に置いた `session.json` と log が apply で
+directory 0755 であること(既存 host の初回 apply で権限を変えない。apply した file の mode は apply する process の umask に従うので、
+test は umask 022 に固定して確かめる。#332 F38)、隣に置いた `session.json` と log が apply で
 変わらないこと(herdr の実行時状態には触れない)。chezmoi と yq が必要(render job)。実 home には触れない。
 
 ## test-agent-tools-usage-reader.sh
@@ -819,8 +820,8 @@ agent-tools-usage-reader module(#301)を検証する。personal で `~/.config/a
 work ではされないこと(work が持つ自前の file は byte 単位で不変)、strict な JSON で key が agent-tools の契約どおり
 `argv` / `timeout_sec` だけであること(知らない key は wrapper が拒否する)・`argv` が `[<home>/go/bin/tacho, "status",
 "--json"]`・`timeout_sec` が整数 20、`"` `\` `&` `<` を含む home の path が JSON の escape を経ても壊れないこと、
-mode が file 0644 / directory 0755 であること、`~/.config/agent-tools/` の隣の file が apply で変わらないこと。
-chezmoi と yq が必要(render job)。実 home には触れない。
+mode が file 0644 / directory 0755 であること(umask 022 に固定して確かめる。#332 F38)、`~/.config/agent-tools/` の隣の
+file が apply で変わらないこと。chezmoi と yq が必要(render job)。実 home には触れない。
 
 ## test-git-hook-gates.sh
 
