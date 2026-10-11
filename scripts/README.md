@@ -712,7 +712,8 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 - 宣言忘れの検知(#207): 実 source の全 entry(`.` 始まりと repo 管理 file を除く)を
   `chezmoi target-path` で target に変換し、全 module の宣言 path ∪ 祖先 directory に含まれること。
   未宣言 entry を置いた複製ではこの検査が fail すること(空振り防止)。未使用の chezmoi source
-  種別(`run_` 等の属性 prefix、`.chezmoiscripts` 等の special file)は fail すること。
+  種別(`run_` 等の属性 prefix、`.chezmoiscripts` 等の special file)は fail すること。例外は path で名指しした
+  `dot_claude/modify_settings.json.tmpl`(#360)だけで、ほかの `modify_` の file は fail すること。
 - typo profile が known profile 一覧つきのエラーで fail すること。
 - profile 未設定が init 誘導メッセージで fail すること。
 - 非対話 init(`--promptString profile=<name>`)が動くこと。
@@ -756,7 +757,12 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
 取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
-chezmoi が必要(render job)。
+managed file は modify script(#360)なので、live の file がある home への apply も確かめる: `autoMode` / `modelSettings` /
+未知の key と `/model` の選択(`model`)が値も位置もそのまま残る、managed の key の古い値は render に戻り要らない
+`sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
+byte のまま残る、`model` が無ければ template の値が入る、hook の capability が全部 false なら live の `hooks` が消える、
+capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、JSON の object で
+ない live の file は apply を止めて書き換えない。chezmoi と jq が必要(render job)。
 
 ## test-codex-settings.sh
 

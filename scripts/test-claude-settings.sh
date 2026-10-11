@@ -36,6 +36,13 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
+# jq runs inside the managed settings.json modify script whenever a live
+# file exists (#360), and section 9 builds its live files with it.
+if ! command -v jq >/dev/null 2>&1; then
+  fail "jq not found; the settings.json modify script and section 9 need it"
+  exit 1
+fi
+
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; render tests require it"
   exit 1
@@ -118,10 +125,12 @@ section "claude settings managed global prefs"
 #    section 1; lock the two currently-absorbed keys there.
 skip_warn="$(yq -p json '.skipWorkflowUsageWarning // "absent"' "$off_file")"
 tui_mode="$(yq -p json '.tui // "absent"' "$off_file")"
-if [[ "$skip_warn" == "true" && "$tui_mode" == "fullscreen" ]]; then
-  ok "test passed: managed template carries skipWorkflowUsageWarning=true and tui=fullscreen"
+# `//` would read false as absent, so presence is asked separately.
+switch_models="$(yq -p json 'select(has("switchModelsOnFlag")) | .switchModelsOnFlag' "$off_file")"
+if [[ "$skip_warn" == "true" && "$tui_mode" == "fullscreen" && "$switch_models" == "false" ]]; then
+  ok "test passed: managed template carries skipWorkflowUsageWarning=true, tui=fullscreen and switchModelsOnFlag=false"
 else
-  fail "test failed: managed global prefs missing (skipWorkflowUsageWarning=$skip_warn tui=$tui_mode)"
+  fail "test failed: managed global prefs missing (skipWorkflowUsageWarning=$skip_warn tui=$tui_mode switchModelsOnFlag=$switch_models)"
   status=1
 fi
 
@@ -913,6 +922,150 @@ else
   fail "test failed: enableToolCallRecordHook=false render still carries a second entry in PreToolUse / PostToolUse / SessionStart"
   status=1
 fi
+
+section "claude settings keep the keys the template does not manage (#360)"
+
+# 9) ~/.claude/settings.json is a chezmoi modify script: with no live file it
+#    prints the managed JSON (sections 1-8), with one it changes only what the
+#    template manages. Each case applies onto a home whose settings.json is
+#    already there. The live files are printed by jq, the formatter the script
+#    re-prints with, so "unchanged" can be checked byte for byte.
+# apply_over LABEL SOURCE SEED — apply SOURCE (personal) onto a fresh home
+# whose ~/.claude/settings.json is SEED; sets over_root, over_file and over_rc
+# (the apply's exit status). Called as a plain statement for the same
+# tmp_roots reason as render_hook_flip.
+apply_over() {
+  local label="$1" source_dir="$2" seed="$3"
+  over_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-$label.XXXXXX")"
+  tmp_roots+=("$over_root")
+  mkdir -p "$over_root/home/.claude"
+  over_file="$over_root/home/.claude/settings.json"
+  printf '%s\n' "$seed" > "$over_file"
+  over_rc=0
+  render_personal_into "$source_dir" "$over_root" || over_rc=$?
+}
+# norm FILE [FILTER] — FILE as key-sorted one-line JSON after FILTER.
+norm() {
+  yq -p json -o json -I0 "${2:-.} | sort_keys(..)" "$1" 2>/dev/null
+}
+
+# 9a) A live file with the hand-kept keys, a /model choice, stale managed
+#     values and a stale sandbox block (enforceAiSandbox is false here): the
+#     hand-kept keys and the model stay as they were and where they were
+#     (autoMode first), the managed keys come back to the render, the sandbox
+#     block goes.
+local_seed="$(jq '{autoMode: {environment: ["Trusted repo: example/example"]}} + .
+  | .model = "sonnet"
+  | .modelSettings = {"claude-sonnet-x": {effortLevel: "high"}}
+  | .futureKey = {nested: [1, 2]}
+  | .switchModelsOnFlag = true
+  | .tui = "default"
+  | .permissions.deny |= .[1:]
+  | .sandbox = {enabled: false}' "$off_file")"
+apply_over local "$DOTFILES_ROOT" "$local_seed"
+local_file="$over_file"
+local_root="$over_root"
+kept="$(yq -p json -o json -I0 '[.autoMode, .modelSettings, .futureKey, .model]' "$local_file" 2>/dev/null)"
+want_kept="$(printf '%s\n' "$local_seed" | yq -p json -o json -I0 '[.autoMode, .modelSettings, .futureKey, .model]')"
+if [[ "$over_rc" -eq 0 && -n "$kept" && "$kept" == "$want_kept" \
+  && "$(yq -p json 'keys | .[0]' "$local_file")" == "autoMode" ]]; then
+  ok "test passed: apply keeps autoMode, modelSettings, an unknown key and the /model choice, in place"
+else
+  fail "test failed: apply over a live file lost or moved a key the template does not manage (rc=$over_rc kept=$kept)"
+  status=1
+fi
+if [[ -n "$(norm "$off_file")" \
+  && "$(norm "$local_file" 'del(.autoMode, .modelSettings, .futureKey, .model)')" == "$(norm "$off_file" 'del(.model)')" ]]; then
+  ok "test passed: every managed key comes back to the render (stale deny, switchModelsOnFlag and tui restored; the stale sandbox block removed)"
+else
+  fail "test failed: apply over a live file left a managed key different from the render"
+  status=1
+fi
+
+# 9b) Applying again changes nothing, and chezmoi diff is empty.
+cp "$local_file" "$local_root/before-second-apply.json"
+second_rc=0
+render_personal_into "$DOTFILES_ROOT" "$local_root" || second_rc=$?
+local_diff="$(chezmoi --config "$local_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+  --destination "$local_root/home" diff 2>/dev/null)" || local_diff="<chezmoi diff failed>"
+if [[ "$second_rc" -eq 0 ]] && cmp -s "$local_root/before-second-apply.json" "$local_file" \
+  && [[ -z "$local_diff" ]]; then
+  ok "test passed: a second apply leaves the file byte-identical and chezmoi diff is empty"
+else
+  fail "test failed: the second apply changed the file or chezmoi diff is not empty (rc=$second_rc)"
+  status=1
+fi
+
+# 9c) A managed value equal to the render up to object key order (as a hand
+#     edit or Claude Code may leave it) keeps its live bytes: no diff for a
+#     reordering alone.
+reordered_seed="$(jq '.permissions = ({allow: .permissions.allow} + .permissions)
+  | .hooks.PreToolUse[0].hooks[0] |= ({command: .command} + .)' "$off_file")"
+apply_over reordered "$DOTFILES_ROOT" "$reordered_seed"
+if [[ "$over_rc" -eq 0 ]] && [[ "$(cat "$over_file")" == "$reordered_seed" ]] \
+  && [[ "$(yq -p json '.permissions | keys | .[0]' "$over_file")" == "allow" ]] \
+  && [[ "$(yq -p json '.hooks.PreToolUse[0].hooks[0] | keys | .[0]' "$over_file")" == "command" ]]; then
+  ok "test passed: a managed value equal up to key order keeps its live bytes"
+else
+  fail "test failed: a reordering alone rewrote the live file (rc=$over_rc)"
+  status=1
+fi
+
+# 9d) No model in the live file: the template's model is the default.
+no_model_seed="$(jq 'del(.model) | .autoMode = {environment: ["x"]}' "$off_file")"
+apply_over no-model "$DOTFILES_ROOT" "$no_model_seed"
+if [[ "$over_rc" -eq 0 && "$(yq -p json '.model' "$over_file")" == "$(yq -p json '.model' "$off_file")" \
+  && "$(yq -p json -o json -I0 '.autoMode' "$over_file")" == '{"environment":["x"]}' ]]; then
+  ok "test passed: a live file without model gets the template's model as the default"
+else
+  fail "test failed: model was not defaulted for a live file without one (rc=$over_rc)"
+  status=1
+fi
+
+# 9e) All four hook capabilities false: the live hooks key goes (it would
+#     otherwise keep a hook the capabilities turned off), the rest equals the
+#     all-off render plus the hand-kept key.
+hooks_off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-hooks-off-src.XXXXXX")"
+tmp_roots+=("$hooks_off_src")
+make_flipped_source "$hooks_off_src"
+for cap in enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration enableToolCallRecordHook; do
+  flip_personal_capability "$hooks_off_src/src" "$cap" false
+done
+apply_over hooks-off "$hooks_off_src/src" "$(jq '.autoMode = {environment: ["x"]}' "$off_file")"
+if [[ "$over_rc" -eq 0 && "$(yq -p json '.hooks // "absent"' "$over_file")" == "absent" \
+  && -n "$(norm "$both_off_file")" \
+  && "$(norm "$over_file" 'del(.autoMode)')" == "$(norm "$both_off_file")" ]]; then
+  ok "test passed: with the hook capabilities off, apply removes the live hooks key and keeps the hand-kept key"
+else
+  fail "test failed: apply kept a hooks key the capabilities turned off, or changed another key (rc=$over_rc)"
+  status=1
+fi
+
+# 9f) The keys the script removes when the template does not emit them are
+#     exactly the keys a capability adds: the all-on render (sandbox + hooks)
+#     minus the all-off render. A new capability-gated top-level key must be
+#     added to the script's list as well.
+gated_keys="$(yq -p json -o json -I0 '[keys[]]' "$on_file" 2>/dev/null)"
+off_keys="$(yq -p json -o json -I0 '[keys[]]' "$both_off_file" 2>/dev/null)"
+gated_diff="$(GATED="$gated_keys" OFF="$off_keys" yq -n -o json -I0 '(env(GATED) - env(OFF)) | sort')"
+if [[ -n "$gated_keys" && -n "$off_keys" && "$gated_diff" == '["hooks","sandbox"]' ]]; then
+  ok "test passed: the capability-gated top-level keys are exactly hooks and sandbox (the modify script's removal list)"
+else
+  fail "test failed: capability-gated top-level keys are $gated_diff, not [hooks, sandbox]; update the modify script's removal list"
+  status=1
+fi
+
+# 9g) A live file that is not a JSON object stops the apply and is left as it
+#     was, rather than being replaced by the render.
+for bad_seed in '[]' '{"model": '; do
+  apply_over bad "$DOTFILES_ROOT" "$bad_seed"
+  if [[ "$over_rc" -ne 0 && "$(cat "$over_file")" == "$bad_seed" ]]; then
+    ok "test passed: a live file of '$bad_seed' stops the apply and stays as it was"
+  else
+    fail "test failed: a live file of '$bad_seed' was replaced or the apply did not fail (rc=$over_rc)"
+    status=1
+  fi
+done
 
 if [[ "$status" -eq 0 ]]; then
   ok "claude settings tests passed"

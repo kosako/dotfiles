@@ -22,7 +22,7 @@ modules は装飾ラベルではなく、管理対象 path を宣言する単位
 - 宣言 path の祖先 directory(`.config` など)は template が自動で `!` に展開する。これは **通過用**であって所有ではない: 祖先行は directory entry 自身だけを通し、その下の他の file は個別の宣言がなければ落ちる(directory を宣言しても subtree は入らない。exact のみ)。
 - `paths:` を持たない module は現時点では情報ラベル(実装が入る時点で `paths:` を宣言する)。
 - `requires:` の capability 名・値は `validate-policy.sh` が schema と突き合わせて検証する。複数 module による同一 path の宣言は fail。
-- 宣言し忘れは `scripts/test-render.sh` が CI で止める: source の全 entry を `chezmoi target-path` で target に変換し、全 module の宣言 path ∪ その祖先に含まれなければ fail。chezmoi の未使用の source 種別(`run_` script、`symlink_` / `modify_` / `exact_` などの属性、`.chezmoiscripts` / `.chezmoiexternal*`)も `**` に黙って落ちないよう fail にする(使うときは契約を広げてから)。
+- 宣言し忘れは `scripts/test-render.sh` が CI で止める: source の全 entry を `chezmoi target-path` で target に変換し、全 module の宣言 path ∪ その祖先に含まれなければ fail。chezmoi の未使用の source 種別(`run_` script、`symlink_` / `modify_` / `exact_` などの属性、`.chezmoiscripts` / `.chezmoiexternal*`)も `**` に黙って落ちないよう fail にする(使うときは契約を広げてから)。例外は path で名指しした source だけで、今は `dot_claude/modify_settings.json.tmpl`(`~/.claude/settings.json` の modify script。手元の key を apply で残す。#360)の 1 つ。ほかの `modify_` は従来どおり fail。
 - #138(禁止 file の pattern を `.chezmoiignore` に先置きしない)とは別の層: allowlist は特定の禁止 file を列挙するのではなく「宣言した file だけを通す」一般契約で、個別の ignore 行を持たない([config-ownership](config-ownership.md))。
 
 ## データ読み取り

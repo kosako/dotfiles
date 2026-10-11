@@ -163,6 +163,27 @@
 {{- end -}}
 {{- $ask = append $ask "Bash(git *--no-verify*)" -}}
 {{- if index $caps "enforceAiSandbox" -}}{{- $deny = concat $deny (list "Bash(cat *.env*)" "Read(//**/.env*)" "Bash(git push * main)" "Bash(git push * master)") -}}{{- $ask = concat $ask (list "Bash(gh release create *)" "Bash(gh release delete *)" "Bash(gh release edit *)" "Bash(gh api *protection*)" "Bash(gh api *rulesets*)") -}}{{- end -}}
+#!/bin/sh
+# ~/.claude/settings.json: a chezmoi modify script (dotfiles #360). chezmoi
+# runs it with the live file on stdin (empty when there is none) and writes
+# what it prints back. Without a live file it prints the managed JSON below
+# unchanged. With one, it keeps the live file and changes only what the
+# template manages:
+#   - every top-level key of the managed JSON is set to the template's value
+#     where it differs (jq's == ignores object key order, so an equal value
+#     keeps its live bytes), except "model": Claude Code writes the /model
+#     choice there, so the template's value is only the default for a file
+#     that has none;
+#   - "sandbox" and "hooks", which the template emits only while their
+#     capabilities are on, are removed while it does not emit them;
+#   - every other key (modelSettings, autoMode, keys Claude Code adds later)
+#     stays as it is, in place.
+# A live file that is not a JSON object stops the apply (jq fails) instead of
+# being replaced. jq re-prints the file with two-space indentation, which is
+# also how Claude Code writes it, so an unchanged file comes back
+# byte-identical and `chezmoi diff` stays empty.
+set -eu
+managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 {
 {{- if index $caps "enforceAiSandbox" }}
   "sandbox": {
@@ -213,5 +234,24 @@
   "agentPushNotifEnabled": true,
   "remoteControlAtStartup": true,
   "skipWorkflowUsageWarning": true,
+  "switchModelsOnFlag": false,
   "tui": "fullscreen"
 }
+CLAUDE_SETTINGS_JSON
+)
+current=$(cat)
+if [ -z "$current" ]; then
+  printf '%s\n' "$managed"
+  exit 0
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  echo "dotfiles: jq is required to update the existing ~/.claude/settings.json (it keeps the keys the template does not manage)" >&2
+  exit 1
+fi
+printf '%s\n' "$current" | jq --argjson managed "$managed" '
+  if type != "object" then error("~/.claude/settings.json is not a JSON object") else . end
+  | reduce ($managed | keys_unsorted[]) as $key (.;
+      if ($key == "model" and has("model")) or .[$key] == $managed[$key] then .
+      else .[$key] = $managed[$key] end)
+  | reduce ("sandbox", "hooks") as $key (.;
+      if $managed | has($key) then . else del(.[$key]) end)'
