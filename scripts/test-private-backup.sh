@@ -1825,12 +1825,11 @@ fi
 #     (rmfail, endrmfail); SIG_NO_FIRST stops the fake yq at its snapshot
 #     (the end runs). Every other call goes to the real tool. A TMPDIR of
 #     its own per run, so a leftover shows and a KILL at the deadline
-#     (pb_kill_tree) cannot leak into the suite's temp; a fake mktemp makes
-#     every call without arguments there too (backup's three list files):
-#     BSD mktemp (macOS) puts such a file in the per-user temp dir whatever
-#     TMPDIR says, so a cleanup that forgot them went unseen and a KILL left
-#     them behind (Codex review R5). The backup runs check that the three
-#     were in the temp at the manifest check (the fake yq's snapshot). The
+#     (pb_kill_tree) cannot leak into the suite's temp. backup's three list
+#     files are made under that TMPDIR too (#372; case 34 pins how), so a
+#     cleanup that forgot them shows as a leftover (Codex review R5): the
+#     backup runs check that the three were in the temp at the manifest
+#     check (the fake yq's snapshot). The
 #     python3 wrapper starts the run with the default SIGINT
 #     disposition, so the cases run even when the suite itself was started
 #     as a background list of a non-interactive shell (`… &`), where SIGINT
@@ -1859,7 +1858,6 @@ else
   mkdir -p "$sig_fakebin"
   real_yq="$(command -v yq)"
   real_rm="$(command -v rm)"
-  real_mktemp="$(command -v mktemp)"
   cat > "$sig_fakebin/yq" <<'SH'
 #!/bin/sh
 if [ "$1" = -e ]; then
@@ -1919,12 +1917,7 @@ with open(ended, "w") as f:
     f.write("exit %d\n" % os.WEXITSTATUS(st))
     sys.exit(os.WEXITSTATUS(st))
 PY
-  cat > "$sig_fakebin/mktemp" <<'SH'
-#!/bin/sh
-[ "$#" -gt 0 ] || exec "$REAL_MKTEMP" "$SIG_TMP/mktemp.XXXXXXXXXX"
-exec "$REAL_MKTEMP" "$@"
-SH
-  chmod +x "$sig_fakebin/yq" "$sig_fakebin/rm" "$sig_fakebin/mktemp"
+  chmod +x "$sig_fakebin/yq" "$sig_fakebin/rm"
   for sig_name in INT TERM; do
     case "$sig_name" in
       INT) sig_num=2 ;;
@@ -1969,7 +1962,7 @@ SH
         set -m
         HOME="$sig_home" TMPDIR="$sig_tmp" SIG_TMP="$sig_tmp" SIG_SNAPSHOT="$sig_snapshot" SIG_MARKER="$sig_marker" \
           SIG_EVERY="$sig_every" SIG_RM_FAIL="$sig_rm_fail" SIG_NO_FIRST="$sig_no_first" SIG_NAME="$sig_name" \
-          REAL_YQ="$real_yq" REAL_RM="$real_rm" REAL_MKTEMP="$real_mktemp" \
+          REAL_YQ="$real_yq" REAL_RM="$real_rm" \
           PATH="$sig_fakebin:$fixture_home/fakebin:$PATH" \
           python3 "$sig_fakebin/ended.py" "$sig_ended" "$PB" "${sig_args[@]}" > "$sig_log" 2>&1 < /dev/null &
         sig_pid=$!
@@ -1990,7 +1983,7 @@ SH
         sig_end="$(cat "$sig_ended" 2>/dev/null || true)"
         sig_left="$(find "$sig_tmp" -mindepth 1 2>/dev/null)"
         # backup's three list files sat directly in the temp at the manifest
-        # check (the fake mktemp), so the leftover check covers them too.
+        # check (made under TMPDIR, #372), so the leftover check covers them too.
         sig_lists=0 sig_lists_ok=1
         if [[ "$sig_cmd" == backup ]]; then
           while IFS= read -r sig_path; do
@@ -2061,6 +2054,52 @@ SH
       done
     done
   done
+fi
+
+# 34. backup makes every temp from a template under TMPDIR (#372). BSD
+#     mktemp (macOS) without a template ignores TMPDIR and puts the file in
+#     the per-user temp dir, so the three list files left the TMPDIR a
+#     caller (or a case above) chose, and a KILL left them there. GNU mktemp
+#     (CI) honors TMPDIR either way, so where a file landed cannot tell the
+#     two apart on every platform; a mktemp first on PATH records each
+#     call's last argument instead, and every call must name a template
+#     under the run's TMPDIR. The run must also leave that TMPDIR empty.
+#     Five calls at least: the three list files, the staging and the
+#     self-check dir.
+tmpl_fakebin="$fixture_home/tmpl-fakebin"
+tmpl_home="$fixture_home/tmpl-home"
+tmpl_tmp="$fixture_home/tmpl-tmp"
+mkdir -p "$tmpl_fakebin" "$tmpl_home" "$tmpl_tmp"
+printf 'fixture\n' > "$tmpl_home/.zshrc.local"
+cat > "$tmpl_fakebin/mktemp" <<'SH'
+#!/bin/sh
+last=""
+for arg; do last="$arg"; done
+printf '%s\n' "$last" >> "$MKTEMP_CALLS"
+exec "$REAL_MKTEMP" "$@"
+SH
+chmod +x "$tmpl_fakebin/mktemp"
+tmpl_rc=0
+tmpl_out="$(HOME="$tmpl_home" TMPDIR="$tmpl_tmp" REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$tmpl_home/mktemp-calls" \
+  PATH="$tmpl_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$tmpl_home/t.age" --recipient "$recipient" --yes 2>&1)" || tmpl_rc=$?
+tmpl_calls="$(cat "$tmpl_home/mktemp-calls" 2>/dev/null || true)"
+tmpl_count=0 tmpl_bad=""
+while IFS= read -r tmpl_call; do
+  tmpl_count=$((tmpl_count + 1))
+  case "$tmpl_call" in
+    "$tmpl_tmp"/*) ;;
+    *) tmpl_bad+="${tmpl_call:-(no template)}"$'\n' ;;
+  esac
+done <<< "$tmpl_calls"
+[[ -n "$tmpl_calls" ]] || tmpl_count=0
+tmpl_left="$(find "$tmpl_tmp" -mindepth 1 2>/dev/null)"
+if [[ "$tmpl_rc" -eq 0 && -f "$tmpl_home/t.age" && "$tmpl_count" -ge 5 && -z "$tmpl_bad" && -z "$tmpl_left" ]]; then
+  pass "backup makes every temp from a template under TMPDIR and leaves it empty"
+else
+  printf 'calls (last argument):\n%s\nnot under TMPDIR:\n%s\nleft in TMPDIR:\n%s\n%s\n' \
+    "$tmpl_calls" "$tmpl_bad" "$tmpl_left" "$tmpl_out" >&2
+  miss "backup made a temp outside its TMPDIR or left one behind (rc=$tmpl_rc, calls=$tmpl_count)"
 fi
 
 if [[ "$status" -eq 0 ]]; then

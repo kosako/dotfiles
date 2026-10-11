@@ -361,12 +361,14 @@ cmd_backup() {
   section "private-backup: resolve targets"
 
   # Script-global; cleanup_temps removes them (the 0700 staging holds
-  # plaintext config).
-  declared="$(mktemp)"
-  seen_paths="$(mktemp)"
+  # plaintext config). Every temp is made from a template under TMPDIR, as
+  # the staging is: BSD mktemp (macOS) without a template ignores TMPDIR
+  # and uses the per-user temp dir (#372).
+  declared="$(mktemp "${TMPDIR:-/tmp}/private-backup-declared.XXXXXX")"
+  seen_paths="$(mktemp "${TMPDIR:-/tmp}/private-backup-seen.XXXXXX")"
   # Per-directory find listing (NUL-delimited), outside the staging so it
   # never lands in the archive; reused for every declared directory.
-  dir_listing="$(mktemp)"
+  dir_listing="$(mktemp "${TMPDIR:-/tmp}/private-backup-listing.XXXXXX")"
   staging="$(mktemp -d "${TMPDIR:-/tmp}/private-backup.XXXXXX")"
   chmod 700 "$staging"
 
