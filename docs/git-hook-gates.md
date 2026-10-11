@@ -23,7 +23,8 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
                        pre-commit : personal-public-safety-gate → personal-git-identity-gate
                                     (配列順・最初に fail した gate で止まる。identity gate は
                                     agent-tools#281 / #239: 空 email 等の partial identity を止める)
-                       commit-msg : personal-ai-trailer-gate
+                       commit-msg : personal-public-safety-gate --commit-msg → personal-ai-trailer-gate
+                                    (commit message の本文も public-safety で見る。agent-tools#413)
                        ほかの stage: gate なしで repo hook へ chain するだけ(素通し。agent-tools#460)
 ```
 
