@@ -78,11 +78,32 @@ modules:
     paths:
       - .config/opencode/opencode.json
   git-hook-gates:
-    description: commit 境界の git hook gates 配線(#196)。~/.config/git-hook-gates/hooks に薄い shim(pre-commit / commit-msg)を置き、agent-tools 配備の personal-git-hook-dispatcher へ exec で委譲する(実体=agent-tools・配線=dotfiles。契約の正本は agent-tools の docs/git-hook-gates.md)。global core.hooksPath は dot_gitconfig の無条件 include が読む hooks.gitconfig(この module の managed file)で設定する(missing なら git が無視=signing.gitconfig と同型)。render は 2 段 gate — enableGitHookGates(intent)AND destination に agent-tools 配備 4 本(dispatcher + public-safety / git-identity / ai-trailer gate。identity gate は agent-tools#281・#239 で追随)が完全に存在(readiness、.chezmoitemplates/git-hook-gates-armed)— の両立時のみ。dispatcher は gate 欠損時 fail-closed なので、未配備・部分配備のマシンでは武装せず素通りする(新規マシンの apply で commit を brick しない。PR #197 Codex must)。cap gate は module の requires ではなく template 自己 gate(鍵が欠けると空 render → chezmoi が既存 target も削除。requires だと chezmoiignore が既存 file を prune せず、fail-closed な shim が残置される)。置き場を ~/.config/git 配下にしなかったのは #207 以前の経緯 — 当時の denylist では git-signing module が ~/.config/git を dir ごと宣言し、enableGitSigning=false の profile で subtree ごと落ちて gate が黙って消えたため(当時の実測)。現行の allowlist では祖先 dir は活性 module の宣言 path から union されるのでこの制約は無いが、配置は経緯どおり維持する(dotfiles 側の docs/git-hook-gates.md「置き場所が ~/.config/git/ 配下でない理由」)。
+    description: commit 境界の git hook gates 配線(#196)。~/.config/git-hook-gates/hooks に薄い shim(gate のある pre-commit / commit-msg と、repo 自身の hook へ素通しする 21 stage。#361。置かない stage は docs/git-hook-gates.md)を置き、agent-tools 配備の personal-git-hook-dispatcher へ exec で委譲する(実体=agent-tools・配線=dotfiles。契約の正本は agent-tools の docs/git-hook-gates.md)。global core.hooksPath は dot_gitconfig の無条件 include が読む hooks.gitconfig(この module の managed file)で設定する(missing なら git が無視=signing.gitconfig と同型)。render は 2 段 gate — enableGitHookGates(intent)AND destination に agent-tools 配備 4 本(dispatcher + public-safety / git-identity / ai-trailer gate。identity gate は agent-tools#281・#239 で追随)が完全に存在(readiness、.chezmoitemplates/git-hook-gates-armed)— の両立時のみ。dispatcher は gate 欠損時 fail-closed なので、未配備・部分配備のマシンでは武装せず素通りする(新規マシンの apply で commit を brick しない。PR #197 Codex must)。cap gate は module の requires ではなく template 自己 gate(鍵が欠けると空 render → chezmoi が既存 target も削除。requires だと chezmoiignore が既存 file を prune せず、fail-closed な shim が残置される)。置き場を ~/.config/git 配下にしなかったのは #207 以前の経緯 — 当時の denylist では git-signing module が ~/.config/git を dir ごと宣言し、enableGitSigning=false の profile で subtree ごと落ちて gate が黙って消えたため(当時の実測)。現行の allowlist では祖先 dir は活性 module の宣言 path から union されるのでこの制約は無いが、配置は経緯どおり維持する(dotfiles 側の docs/git-hook-gates.md「置き場所が ~/.config/git/ 配下でない理由」)。
     paths:
       - .config/git-hook-gates/hooks.gitconfig
       - .config/git-hook-gates/hooks/pre-commit
       - .config/git-hook-gates/hooks/commit-msg
+      - .config/git-hook-gates/hooks/applypatch-msg
+      - .config/git-hook-gates/hooks/pre-applypatch
+      - .config/git-hook-gates/hooks/post-applypatch
+      - .config/git-hook-gates/hooks/pre-merge-commit
+      - .config/git-hook-gates/hooks/prepare-commit-msg
+      - .config/git-hook-gates/hooks/post-commit
+      - .config/git-hook-gates/hooks/pre-rebase
+      - .config/git-hook-gates/hooks/post-checkout
+      - .config/git-hook-gates/hooks/post-merge
+      - .config/git-hook-gates/hooks/pre-push
+      - .config/git-hook-gates/hooks/pre-receive
+      - .config/git-hook-gates/hooks/update
+      - .config/git-hook-gates/hooks/post-receive
+      - .config/git-hook-gates/hooks/post-update
+      - .config/git-hook-gates/hooks/pre-auto-gc
+      - .config/git-hook-gates/hooks/post-rewrite
+      - .config/git-hook-gates/hooks/sendemail-validate
+      - .config/git-hook-gates/hooks/p4-changelist
+      - .config/git-hook-gates/hooks/p4-prepare-changelist
+      - .config/git-hook-gates/hooks/p4-post-changelist
+      - .config/git-hook-gates/hooks/p4-pre-submit
   codex-settings:
     description: Codex CLI harness 設定。user 層 ~/.codex/hooks.json に safe-gh 誘導の PreToolUse hook(#181・#137 の Codex parity・gate=enableGitHubIsolatedReader)、品質ループの PostToolUse fast-edit-check + Stop changed-scope-qa(#199・gate=enableQualityLoopHooks)、herdr integration の SessionStart hook(#225・gate=enableHerdrIntegration・body は herdr の installer)を登録し(hooks object は .chezmoitemplates/agent-hooks-json で Claude と共有)、~/.codex/rules/default.rules に承認 rules の read-only baseline を配る(#139・gate=enableAiPolicy。堆積 grant を drift 可視化し apply で棚卸し)。agent-tools の Codex review / worker 用 profile file(~/.codex/agent-tools-review.config.toml・~/.codex/agent-tools-worker.config.toml。file 名は agent-tools の公開契約)に reasoning effort を配る(#264・gate=codexReviewEffort / codexWorkerEffort の enum。off で空 render。agent-tools は両 file の top-level の model / effort だけを読むので、他の key は書かない = agent-tools#358 / #299)。registration=dotfiles / body=agent-tools(safe-gh・品質ループ)または herdr(herdr integration)。config.toml は codex 所有の live ファイルなので管理しない(projects trust は doctor が report-only 監視)。cap gate はすべて module の requires ではなく template 自己 gate で行う(hooks.json は 3 つの hook cap が全部 false で空 render → chezmoi が既存 target も削除)。requires を使うと chezmoiignore が既存 file を prune せず残置するため(Codex review #184)。
     paths:

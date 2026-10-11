@@ -2308,6 +2308,25 @@ else
   fail "test failed: doctor must stay exit 0 (hook gates shims + stray hooksPath, work)"
   status=1
 fi
+#     HL-f) work with only a pass-through shim left (#361: pre-push is one of
+#           the declared stages beyond pre-commit / commit-msg) and no
+#           hooksPath anywhere: still lingering, and rm names that shim.
+rm -f "$hl_dir/hooks/pre-commit" "$hl_dir/hooks/commit-msg"
+printf '#!/bin/sh\n' > "$hl_dir/hooks/pre-push"
+: > "$hl_home/.gitconfig"
+hl_rm_push="\$ rm -i $(printf '%q' "$hl_dir/hooks/pre-push")"
+if hl_out="$(hl_run work)"; then
+  if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" && grep -Fq -- "$hl_rm_push" <<< "$hl_out"; then
+    ok "test passed: a lingering pass-through shim alone (pre-push) is reported and named for removal"
+  else
+    printf '%s\n' "$hl_out" >&2
+    fail "test failed: a lingering pre-push shim alone was not reported as hand removal"
+    status=1
+  fi
+else
+  fail "test failed: doctor must stay exit 0 (hook gates pass-through shim lingering, work)"
+  status=1
+fi
 #     HL-c) work with only core.hooksPath set directly in ~/.gitconfig (no
 #           managed file left) -> point at the setting, not at rm or apply.
 rm -rf "$hl_dir"
@@ -2522,8 +2541,13 @@ hg_home="$fixture_home/hg-home"
 hg_deploy="$hg_home/.claude/agent-tools/scripts"
 hg_shims="$hg_home/.config/git-hook-gates/hooks"
 hg_all=(personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate)
-# hg_setup WIRED SCRIPT... — a fresh HOME; WIRED=1 plants both shims and
-# core.hooksPath; each SCRIPT is planted executable.
+hg_stages=()
+while IFS= read -r hg_decl; do
+  case "$hg_decl" in .config/git-hook-gates/hooks/*) hg_stages+=("${hg_decl##*/}") ;; esac
+done < <(module_paths git-hook-gates)
+# hg_setup WIRED SCRIPT... — a fresh HOME; WIRED=1 plants a shim for every
+# stage modules.yaml declares (#361) and core.hooksPath; each SCRIPT is
+# planted executable.
 hg_setup() {
   local wired="$1" hg_script
   shift
@@ -2535,7 +2559,7 @@ hg_setup() {
   done
   if [[ "$wired" -eq 1 ]]; then
     mkdir -p "$hg_shims"
-    for hg_script in pre-commit commit-msg; do
+    for hg_script in "${hg_stages[@]}"; do
       printf '#!/bin/sh\nexit 0\n' > "$hg_shims/$hg_script"
       chmod +x "$hg_shims/$hg_script"
     done
@@ -2577,13 +2601,20 @@ hg_expect() {
 hg_complete="[ok] agent-tools deploy complete: dispatcher + all three gates executable in $hg_deploy (bodies owned by agent-tools sync)"
 hg_wired_incomplete="[warn] agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and all three gates in $hg_deploy — or set enableGitHookGates=false and apply"
 hg_both_incomplete="[warn] agent-tools deploy incomplete (dispatcher and/or a gate missing in $hg_deploy; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
-# HG-1) wired + all four deployed -> both shims ok, hooksPath ok, deploy complete.
+# HG-1) wired + all four deployed -> one ok for all 23 declared shims (#361),
+#       hooksPath ok, deploy complete.
 hg_setup 1 "${hg_all[@]}"
 hg_expect "wired + complete deploy -> all ok" -- \
-  "[ok] shim present and executable: $hg_shims/pre-commit" \
-  "[ok] shim present and executable: $hg_shims/commit-msg" \
+  "[ok] shims present and executable: all 23 declared stages in $hg_shims" \
   "[ok] global core.hooksPath -> managed shim directory" \
-  "$hg_complete" ! "deploy INCOMPLETE" "deploy incomplete ("
+  "$hg_complete" ! "deploy INCOMPLETE" "deploy incomplete (" "shim missing"
+# HG-1b) the same with one pass-through shim (pre-push) gone -> that shim is
+#        named, and the all-present line is not claimed.
+hg_setup 1 "${hg_all[@]}"
+rm -f "$hg_shims/pre-push"
+hg_expect "wired + one pass-through shim missing -> named" -- \
+  "[warn] shim missing or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  ! "shims present and executable: all" "shim missing or not executable: $hg_shims/pre-commit"
 # HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
 hg_expect "wired + pre-#281 deploy (identity gate missing) -> BLOCKED warning" -- \

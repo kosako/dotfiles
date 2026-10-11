@@ -17,12 +17,14 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
        └─ ~/.config/git-hook-gates/hooks/
             pre-commit    … 薄い shim: dispatcher へ exec(managed)
             commit-msg    … 薄い shim: dispatcher へ exec(managed)
+            pre-push ほか 21 stage … 同じ形の shim(managed。#361。下記「shim を置く stage」)
                  └─ $HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher
                     … gate 実行 + repo 自身の .git/hooks への chain(agent-tools 配備)
                        pre-commit : personal-public-safety-gate → personal-git-identity-gate
                                     (配列順・最初に fail した gate で止まる。identity gate は
                                     agent-tools#281 / #239: 空 email 等の partial identity を止める)
                        commit-msg : personal-ai-trailer-gate
+                       ほかの stage: gate なしで repo hook へ chain するだけ(素通し。agent-tools#460)
 ```
 
 - shim はロジックを持たない(gate 本体の更新は agent-tools の sync が担い、
@@ -32,10 +34,34 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
   正とする**(Claude 側 hooks 登録が既に同じ home を参照している並びに合わせた。
   `$HOME` は shim 実行時に sh が展開するため、render に実 home path は焼かれない)。
 - `core.hooksPath` は per-repo `.git/hooks` を完全置換する。dispatcher が gate 通過後に repo 自身の
-  `.git/hooks/<stage>`(linked worktree でも common dir 側)へ chain するので、**pre-commit / commit-msg の**
-  既存 repo hook は動き続ける(契約の詳細は agent-tools 側 doc)。shim を置いていない stage
-  (`prepare-commit-msg` / `post-commit` / `pre-push` / `post-checkout` / `post-merge` など)の repo hook は、
-  配線中は**実行されない**(git は `core.hooksPath` の directory しか見ない)。
+  `.git/hooks/<stage>`(linked worktree でも common dir 側)へ chain するので、shim を置いた stage の既存
+  repo hook は動き続ける(契約の詳細は agent-tools 側 doc)。shim を置いていない stage の repo hook は、配線中は
+  **実行されない**(git は `core.hooksPath` の directory しか見ない)。
+- shim は共通の template `.chezmoitemplates/git-hook-shim` から stage ごとに描く(source の file は stage 名を
+  渡すだけの 1 行)。shim を置く stage の一覧の正本は `.chezmoidata/modules.yaml` の `git-hook-gates` の
+  `paths:` で、doctor もここから読む。
+
+### shim を置く stage(#361)
+
+dispatcher が素通しを受け付ける stage(agent-tools#460 の `GIT_HOOK_STAGES`)のうち、次の 5 つを除く
+23 stage に shim を置く(pre-commit / commit-msg と、`applypatch-msg` / `pre-applypatch` / `post-applypatch` /
+`pre-merge-commit` / `prepare-commit-msg` / `post-commit` / `pre-rebase` / `post-checkout` / `post-merge` /
+`pre-push` / `pre-receive` / `update` / `post-receive` / `post-update` / `pre-auto-gc` / `post-rewrite` /
+`sendemail-validate` / `p4-changelist` / `p4-prepare-changelist` / `p4-post-changelist` / `p4-pre-submit`)。
+これで Git LFS の pre-push / post-checkout / post-commit / post-merge のような repo hook も配線中に動く。
+
+置かない stage:
+
+- `push-to-checkout` / `proc-receive` / `fsmonitor-watchman`: hook が在ると git の既定の挙動が変わる、または
+  hook が決まった形式で答える契約なので、素通しにできない(dispatcher も exit 2 で拒む)。
+- `reference-transaction` / `post-index-change`: git が ref の更新・index の書き込みのたびに呼ぶ。shim があると
+  そのたびに dispatcher(ruby)が起動し、#361 の実測(commit 20 回と checkout 40 回)では hook なしの 0.89 秒が
+  `reference-transaction` だけで 23.96 秒、`post-index-change` だけで 3.46 秒になった。これらを使う repo hook は
+  まれなので、配線中は走らないままにする。ほかの stage の shim は 1 回の起動が約 0.04 秒で、commit / checkout /
+  push などの 1 回ごとに足される(同じ実測で `post-checkout` は 2.72 秒、`post-commit` は 1.80 秒)。
+
+素通しの stage の shim は、それを知っている dispatcher(agent-tools#460 以降)が前提。古い dispatcher は未知の
+stage を exit 2 で拒むので、push や rebase がはっきり止まる。agent-tools を先に配備(sync)してから apply する。
 
 ## gating(2 段 gate = intent × readiness)
 
@@ -98,7 +124,8 @@ on / off に関わらず `.config/git` は通る。つまり「signing off で s
 これは**通常経路(`git commit`)に対する best-effort guardrail** であって、
 enforcement boundary ではない:
 
-- `git commit --no-verify` は pre-commit / commit-msg をどちらも skip する。
+- `git commit --no-verify` は pre-commit / commit-msg をどちらも skip する(`prepare-commit-msg` / `post-commit`
+  は skip されず、素通しの shim から repo hook へ chain する)。
 - repo local の `core.hooksPath`(husky 等)は global 設定を上書きし、gate は
   黙って外れる。
 - 別 client / 他マシンからの commit・GitHub 上の操作(squash merge 等)は対象外。

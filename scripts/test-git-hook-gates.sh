@@ -39,6 +39,14 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
+# The shim stages: the git-hook-gates module's declared hooks/* paths
+# (modules.yaml is the one list; #361 grew it from pre-commit / commit-msg to
+# every stage the dispatcher passes through, minus the five it must not).
+gate_stages=()
+while IFS= read -r gate_decl; do
+  case "$gate_decl" in .config/git-hook-gates/hooks/*) gate_stages+=("${gate_decl##*/}") ;; esac
+done < <(module_paths git-hook-gates)
+
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; render tests require it"
   exit 1
@@ -78,10 +86,11 @@ plant_gate_deploy() {
 }
 
 gate_files_absent() {
-  local home_dir="$1"
-  [[ ! -e "$home_dir/.config/git-hook-gates/hooks/pre-commit" ]] \
-    && [[ ! -e "$home_dir/.config/git-hook-gates/hooks/commit-msg" ]] \
-    && [[ ! -e "$home_dir/.config/git-hook-gates/hooks.gitconfig" ]]
+  local home_dir="$1" stage
+  for stage in "${gate_stages[@]}"; do
+    [[ ! -e "$home_dir/.config/git-hook-gates/hooks/$stage" ]] || return 1
+  done
+  [[ ! -e "$home_dir/.config/git-hook-gates/hooks.gitconfig" ]]
 }
 
 section "git hook gates arming (two-key gate, #196)"
@@ -185,7 +194,23 @@ shim_body() {
     "exec \"\$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher\" $stage \"\$@\""
 }
 
-for stage in pre-commit commit-msg; do
+# Exactly the declared stages render: 23 (#361), and none of the five that
+# must not have a shim (docs/git-hook-gates.md).
+rendered_stages="$(cd "$gates_dir/hooks" 2>/dev/null && ls | sort)"
+declared_stages="$(printf '%s\n' "${gate_stages[@]}" | sort)"
+if [[ "${#gate_stages[@]}" -eq 23 && "$rendered_stages" == "$declared_stages" ]]; then
+  ok "test passed: full deploy arms exactly the 23 declared shims"
+else
+  fail "test failed: rendered shims differ from the 23 declared stages (declared ${#gate_stages[@]}); rendered: $(tr '\n' ' ' <<< "$rendered_stages")"
+  status=1
+fi
+for stage in reference-transaction post-index-change push-to-checkout proc-receive fsmonitor-watchman; do
+  if [[ -e "$gates_dir/hooks/$stage" ]] || printf '%s\n' "${gate_stages[@]}" | grep -Fxq -- "$stage"; then
+    fail "test failed: $stage must have no shim (docs/git-hook-gates.md)"
+    status=1
+  fi
+done
+for stage in "${gate_stages[@]}"; do
   shim="$gates_dir/hooks/$stage"
   if [[ ! -f "$shim" ]]; then
     fail "test failed: full deploy did not arm the $stage shim (enableGitHookGates is ON)"
@@ -213,9 +238,11 @@ hooks_gitconfig="$gates_dir/hooks.gitconfig"
 expected_gitconfig="$(printf '%s\n' \
   '# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).' \
   "# Read via the unconditional [include] in ~/.gitconfig. Points every repo's" \
-  '# hooks at the managed shim directory (pre-commit / commit-msg only); those' \
-  '# shims chain to the repo'"'"'s own .git/hooks/<stage>. Other repo hooks (pre-push,' \
-  '# post-checkout, ...) do not run while this is set (docs/git-hook-gates.md).' \
+  '# hooks at the managed shim directory; the shims run the personal gates' \
+  '# (pre-commit / commit-msg) and chain to the repo'"'"'s own .git/hooks/<stage>.' \
+  '# Repo hooks of the stages without a shim (reference-transaction,' \
+  '# post-index-change, push-to-checkout, proc-receive, fsmonitor-watchman) do' \
+  '# not run while this is set (docs/git-hook-gates.md).' \
   '[core]' \
   $'\thooksPath = ~/.config/git-hook-gates/hooks')"
 if [[ ! -f "$hooks_gitconfig" ]]; then
@@ -230,13 +257,13 @@ else
 fi
 
 # gate_wiring_armed HOME_DIR
-# The fully armed state exactly as pinned above (both shims present,
+# The fully armed state exactly as pinned above (every declared shim present,
 # executable and byte-exact; hooks.gitconfig byte-exact), as a predicate for
 # later cases whose precondition is "armed". `! gate_files_absent` is NOT that
 # predicate: it accepts a single lingering file as armed.
 gate_wiring_armed() {
   local home_dir="$1" stage shim
-  for stage in pre-commit commit-msg; do
+  for stage in "${gate_stages[@]}"; do
     shim="$home_dir/.config/git-hook-gates/hooks/$stage"
     [[ -f "$shim" && -x "$shim" ]] || return 1
     diff <(shim_body "$stage") "$shim" >/dev/null || return 1
@@ -261,10 +288,16 @@ else
   home="$(cd "$home" && pwd -P)"
   fake_dispatcher="$home/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
   dispatcher_log="$home/dispatcher-invocations.log"
+  # FAKE_DISPATCHER_EXIT stands for a gate's verdict, so it applies to the
+  # gated stages only; every other stage is a pass-through with no repo hook
+  # here, which the real dispatcher ends with 0.
   cat > "$fake_dispatcher" <<EOF
 #!/bin/sh
 printf '%s\n' "\$1" >> "$dispatcher_log"
-exit "\${FAKE_DISPATCHER_EXIT:-0}"
+case "\$1" in
+  pre-commit | commit-msg) exit "\${FAKE_DISPATCHER_EXIT:-0}" ;;
+esac
+exit 0
 EOF
   chmod +x "$fake_dispatcher"
 
@@ -293,8 +326,8 @@ EOF
   run_git "$repo" init --quiet --initial-branch=main
 
   if output="$(FAKE_DISPATCHER_EXIT=0 run_git "$repo" commit --allow-empty -m test 2>&1)"; then
-    if [[ "$(cat "$dispatcher_log" 2>/dev/null)" == $'pre-commit\ncommit-msg' ]]; then
-      ok "test passed: a commit routes through the shims and the dispatcher sees pre-commit then commit-msg"
+    if [[ "$(cat "$dispatcher_log" 2>/dev/null)" == $'pre-commit\nprepare-commit-msg\ncommit-msg\npost-commit' ]]; then
+      ok "test passed: a commit routes through the shims: pre-commit, prepare-commit-msg, commit-msg, post-commit (no reference-transaction)"
     else
       fail "test failed: dispatcher invocations unexpected; log was:"
       cat "$dispatcher_log" >&2 || true
@@ -316,16 +349,28 @@ EOF
 
   : > "$dispatcher_log"
   if output="$(FAKE_DISPATCHER_EXIT=2 run_git "$repo" commit --no-verify --allow-empty -m test 2>&1)"; then
-    if [[ ! -s "$dispatcher_log" ]]; then
-      ok "test passed: --no-verify bypasses both shims (documented best-effort limit)"
+    if [[ "$(cat "$dispatcher_log" 2>/dev/null)" == $'prepare-commit-msg\npost-commit' ]]; then
+      ok "test passed: --no-verify bypasses the gated shims (pre-commit / commit-msg); the pass-through ones still run (documented best-effort limit)"
     else
-      fail "test failed: --no-verify still invoked the dispatcher; log was:"
+      fail "test failed: --no-verify did not skip exactly the gated stages; log was:"
       cat "$dispatcher_log" >&2
       status=1
     fi
   else
     printf '%s\n' "$output" >&2
     fail "test failed: --no-verify commit did not succeed"
+    status=1
+  fi
+
+  # A pass-through stage is on the path as well (#361): a checkout runs
+  # post-checkout through its shim, and nothing else.
+  : > "$dispatcher_log"
+  if output="$(run_git "$repo" checkout -q -b topic 2>&1)" \
+    && [[ "$(cat "$dispatcher_log" 2>/dev/null)" == "post-checkout" ]]; then
+    ok "test passed: a checkout routes post-checkout through its pass-through shim"
+  else
+    printf '%s\n' "$output" >&2
+    fail "test failed: a checkout did not run exactly post-checkout through the shims; log was: $(tr '\n' ' ' < "$dispatcher_log" 2>/dev/null)"
     status=1
   fi
 fi

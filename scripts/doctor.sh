@@ -159,7 +159,7 @@ fi
 # shims in ~/.config/git-hook-gates/hooks exec agent-tools'
 # personal-git-hook-dispatcher (pre-commit -> public-safety gate then
 # git-identity gate, commit-msg -> AI trailer gate, then chain to the repo's
-# own .git/hooks), and global
+# own .git/hooks; every other declared stage only chains, #361), and global
 # core.hooksPath points at the shim directory via the unconditional include in
 # the managed ~/.gitconfig. The wiring is a TWO-KEY gate: the capability
 # (intent) AND a complete agent-tools deploy in the destination (readiness;
@@ -182,17 +182,33 @@ hook_gates_deploy_complete=1
 for hook_gates_script in "${hook_gates_scripts[@]}"; do
   [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
 done
+# The shim stages are the module's declared .config/git-hook-gates/hooks/*
+# paths (modules.yaml is the one list; #361 grew it from pre-commit /
+# commit-msg to every stage the dispatcher passes through).
+hook_gates_stages=()
+while IFS= read -r hook_gates_decl; do
+  case "$hook_gates_decl" in
+    .config/git-hook-gates/hooks/*) hook_gates_stages+=("${hook_gates_decl##*/}") ;;
+  esac
+done < <(module_paths git-hook-gates)
 if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   if module_active_for_profile "$profile" git-hook-gates; then
     hook_gates_wired=1
-    for hook_stage in pre-commit commit-msg; do
+    hook_gates_present=0
+    for hook_stage in ${hook_gates_stages[@]+"${hook_gates_stages[@]}"}; do
       if [[ -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
-        ok "shim present and executable: $hook_gates_dir/hooks/$hook_stage"
+        hook_gates_present=$((hook_gates_present + 1))
       else
         warn "shim missing or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
         hook_gates_wired=0
       fi
     done
+    if [[ "${#hook_gates_stages[@]}" -eq 0 ]]; then
+      warn "no shim declared for the git-hook-gates module in modules.yaml; the hooks are not wired"
+      hook_gates_wired=0
+    elif [[ "$hook_gates_present" -eq "${#hook_gates_stages[@]}" ]]; then
+      ok "shims present and executable: all $hook_gates_present declared stages in $hook_gates_dir/hooks"
+    fi
     if command -v git >/dev/null 2>&1; then
       # --includes is load-bearing: the value lives in the INCLUDED
       # hooks.gitconfig, and `git config --global --get` skips includes by
@@ -237,7 +253,7 @@ else
   # switch the module is unlisted, .chezmoiignore skips the targets and apply
   # never touches them, so the remedy is removing them by hand (#201, #258).
   hook_gates_lingering=0
-  for hook_stage in pre-commit commit-msg; do
+  for hook_stage in ${hook_gates_stages[@]+"${hook_gates_stages[@]}"}; do
     [[ -e "$hook_gates_dir/hooks/$hook_stage" ]] && hook_gates_lingering=1
   done
   if command -v git >/dev/null 2>&1; then
@@ -253,8 +269,9 @@ else
       "\$ chezmoi apply"
   elif [[ "$hook_gates_lingering" -eq 1 ]]; then
     hook_gates_leftovers=""
-    for hook_gates_file in "$hook_gates_dir/hooks.gitconfig" "$hook_gates_dir/hooks/pre-commit" "$hook_gates_dir/hooks/commit-msg"; do
-      [[ -e "$hook_gates_file" ]] && hook_gates_leftovers+=" $(shell_quote_safe "$hook_gates_file")"
+    [[ -e "$hook_gates_dir/hooks.gitconfig" ]] && hook_gates_leftovers+=" $(shell_quote_safe "$hook_gates_dir/hooks.gitconfig")"
+    for hook_stage in ${hook_gates_stages[@]+"${hook_gates_stages[@]}"}; do
+      [[ -e "$hook_gates_dir/hooks/$hook_stage" ]] && hook_gates_leftovers+=" $(shell_quote_safe "$hook_gates_dir/hooks/$hook_stage")"
     done
     if [[ -n "$hook_gates_leftovers" ]]; then
       action "enableGitHookGates=false but gate wiring lingers (shim and/or core.hooksPath still present), left by another profile — this profile does not manage ~/.config/git-hook-gates, so chezmoi apply will NOT remove it (#201); remove it by hand" \
