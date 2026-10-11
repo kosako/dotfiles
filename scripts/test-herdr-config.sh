@@ -26,6 +26,13 @@ if ! command -v chezmoi >/dev/null 2>&1; then
   exit 1
 fi
 
+# chezmoi creates targets under the umask of the process that applies (the
+# chezmoi config sets none, so a user who tightened theirs keeps tighter
+# modes), and the seeded directory below is made the same way. Section 4's
+# 0644 / 0755 is what a stock umask gives; pin it so the result does not
+# depend on the shell that runs this test (#332 F38).
+umask 022
+
 status=0
 tmp_roots=()
 
@@ -121,7 +128,8 @@ else
   status=1
 fi
 
-# 4) Modes match a stock herdr install (file 0644 under a 0755 directory).
+# 4) Modes match a stock herdr install (file 0644 under a 0755 directory)
+#    under the stock umask pinned above.
 file_mode_got="$(file_mode "$managed")"
 dir_mode_got="$(file_mode "$personal_root/home/.config/herdr")"
 if [[ "$file_mode_got" == "644" && "$dir_mode_got" == "755" ]]; then

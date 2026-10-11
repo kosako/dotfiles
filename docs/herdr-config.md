@@ -71,5 +71,5 @@ managed file `~/.config/herdr/config.toml`(source: `private_dot_config/herdr/con
 `scripts/test-herdr-config.sh`: personal で apply され work ではされない(work が持つ自前の config は
 byte 単位で不変)、1 行目の managed-by 見出し、TOML として parse でき設定値が pin どおり
 (`[ui.toast] delivery = "system"` を含む)、mode が file 0644 / directory 0755(既存 host の初回 apply で
-権限を変えない)、隣の `session.json` と log が apply で変わらないこと。doctor の分岐は `test-doctor.sh`
+権限を変えない。mode は apply する process の umask に従うので、test は umask 022 に固定する。#332 F38)、隣の `session.json` と log が apply で変わらないこと。doctor の分岐は `test-doctor.sh`
 (`herdr config check` は PATH の先頭に置いた fake)、preflight の warn は `test-preflight.sh`。

@@ -90,7 +90,8 @@ managed file `~/.config/agent-tools/usage-reader.json`(source:
 `scripts/test-agent-tools-usage-reader.sh`: personal で apply され work ではされない(work が持つ自前の
 file は byte 単位で不変)、strict な JSON で key が `argv` / `timeout_sec` だけ・`argv` が
 `[<home>/go/bin/tacho, "status", "--json"]`・`timeout_sec` が整数 20、`"` `\` `&` `<` を含む home の path が
-escape を経ても壊れない、mode が file 0644 / directory 0755、`~/.config/agent-tools/` の隣の file が apply で
+escape を経ても壊れない、mode が file 0644 / directory 0755(mode は apply する process の umask に従うので、test は
+umask 022 に固定する。#332 F38)、`~/.config/agent-tools/` の隣の file が apply で
 変わらないこと。doctor の分岐は `test-doctor.sh`、preflight の warn は `test-preflight.sh`。導入時に、render した
 file を scratch の `XDG_CONFIG_HOME` に置いて実際の wrapper で読めること(exit 0 で tacho の JSON)と、知らない
 key を足すと exit 2 になることを手で確認した(#301)。`--check` への置き換え(#303)では、実機の managed file で ok に
