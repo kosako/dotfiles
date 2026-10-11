@@ -13,9 +13,10 @@ tool-specific config template(agent-tools 側の責務)とは別物
 
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
-| personal・public-safe な `settings.json`(model / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 等の global preference) | public repo(`dot_claude/settings.json.tmpl`) | ✅ chezmoi(**personal profile のみ**) |
+| personal・public-safe な `settings.json`(model の既定 / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 / `switchModelsOnFlag` 等の global preference) | public repo(`dot_claude/modify_settings.json.tmpl`。chezmoi の modify script。下記「apply の仕組み」) | ✅ chezmoi(**personal profile のみ**) |
 | permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 21 件(#341。どちらも personal 既定 true で deny は計 56 件)、`allow: mcp__pencil`、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `^(startup\|resume\|clear\|compact\|fork)$`(herdr 0.9.3 の integration v10 と同じ。#274)に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。`enableToolCallRecordHook` 連動(#353、agent-tools#454)で SessionStart(matcher なし)と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied(matcher `*`)に agent-tools 配布の `personal-tool-call-record-hook` を `async: true`・timeout 10 で登録(tool 呼び出しの記録。引数は key だけ・fail-open。既存の entry の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
+| 手元だけの key: `/model` で選んだ `model`(template の値は file に無いときの既定だけ)、`modelSettings`(model ごとの effort)、`autoMode`(auto mode の environment。repository 名などを含み public に出さない)、Claude Code が後から足す key | live の `~/.claude/settings.json` | ⚪ 管理外だが apply で消さない(modify script がそのまま残す。#360) |
 | personal・機密(secret を含む設定など) | project の `.claude/settings.local.json`(project 単位)/ `CLAUDE_CONFIG_DIR` の別 config dir(machine 全体)/ `--settings` や環境変数(session 限定)。user 級 `~/.claude/settings.local.json` は Claude Code が**読まない**ので置き場にしない(#245、[local-overrides](local-overrides.md)) | ❌ 非コミット・管理外 |
 | work / client の settings | 各マシン手設定(#60 の暗号化バックアップは `allowSecretsAccess=false` の work / client では実行を拒否するため使えない) | ❌ public repo に生値を置かない |
 | skill / instruction(`skills/`、`agent-tools/CLAUDE.md`) | agent-tools が配布 | ❌ 別 repo の責務 |
@@ -47,20 +48,21 @@ Claude Code は書き先を 2 つに分ける: **動的に承認した permissio
 project の `.claude/settings.local.json`(machine / context 固有・絶対 path を含むので非 public-safe)へ、
 **global な preference**(`effortLevel` / `tui` / `skipWorkflowUsageWarning` / 通知 /
 `remoteControlAtStartup` / plugin 有効化など)は **`~/.claude/settings.json` 本体**へ書く。
-前者は管理外なので衝突しないが、後者は managed な `settings.json` を Claude が
-書き換えるため、template に無いキーは `chezmoi apply` で消える(drift)。
+前者は管理外なので衝突しない。後者は managed な `settings.json` を Claude が書き換える。#360 までは
+template に無いキーが `chezmoi apply` で消えたが、今は modify script が template の管理しない key を
+そのまま残す(下記「apply の仕組み」)。
 
 **方針(issue #93, 案 a「取り込む」)**: Claude が `settings.json` に書く **安定・public-safe な
-global preference は managed template に取り込む**。こうすると `chezmoi apply` がその
-キーに対して no-op になり、live が drift しない & 新マシン bootstrap の baseline も忠実に
-なる。permission 承認は引き続き `settings.local.json`(管理外)に任せる。`settings.json` と
+global preference は managed template に取り込む**。新マシン bootstrap の baseline が忠実になり、
+値は PR で変わる。permission 承認は引き続き `settings.local.json`(管理外)に任せる。`settings.json` と
 `settings.local.json` の責務境界はこれで固定する。
 
-この境界は **完全な drift ゼロを保証しない**(構造上の限界)。Claude が将来 *新しい* global
-preference キーを `settings.json` に書くと、template に取り込むまでの間は一時的に
-`chezmoi status` が `M` を出す。これは想定内で、対処は「その安定 public-safe キーを
-template に追記して再 apply する(= 取り込みの継続運用)」。`settings.local.json` 行きの
-permission 承認は対象外。
+取り込むのは **安定した** preference だけ。`/model` のように使う人がその場で切り替える値(`model` /
+`modelSettings`)や、public に出せない値(`autoMode`)は取り込まず、手元の key として残す(#360)。
+Claude が *新しい* key を書いても apply では消えず、`chezmoi status` も `M` を出さない。安定した
+public-safe な key なら template に取り込む(取り込みの継続運用)。drift(`M`)が出るのは、managed の
+key に Claude が template と違う値を書いたときで、対処は「apply で template の値に戻す」か「その値を
+template に取り込む」。`settings.local.json` 行きの permission 承認は対象外。
 
 **project 側の allow の堆積(#334)**: `settings.local.json` は管理外なので、`chezmoi apply` では戻らない。
 承認の「次から聞かない」で外向きの操作(push・PR の作成や merge・外部送信など)の allow が溜まると、その
@@ -69,6 +71,31 @@ project ではそれらが承認なしに走る(managed の deny / ask は allow
 project 自身の deny / ask が止めないものを warn する(rule の
 中身は出さない。一致の規則は [scripts/README](../scripts/README.md) の doctor の AI policy)。対処はその file から
 該当の allow を外し、都度承認に戻すこと。
+
+## apply の仕組み(modify script、#360)
+
+`dot_claude/modify_settings.json.tmpl` は chezmoi の modify script で、chezmoi は live の file を stdin に
+渡して、script が出力したものを書き戻す。template が描く JSON(managed の JSON)は script の中にある。
+
+- live の file が無い(新しい machine・test の throwaway home)か 0 byte のときは、managed の JSON をそのまま出す
+  (render は modify script にする前と byte 単位で同じ)。
+- live の file があるときは jq で合成する:
+  - managed の JSON の top-level の key は、値が違えば template の値にする(jq の `==` は object の key の
+    順を見ないので、意味が同じなら live の byte のまま残る)。
+  - ただし `model` は、live に在ればそのまま残す(`/model` の選択)。template の値は file に無いときの既定。
+  - capability で出し入れする `sandbox`(`enforceAiSandbox`)と `hooks`(hook の 4 capability)は、template が
+    出さないときは live からも消す。capability で出し入れする top-level の key を足すときは、script の
+    この一覧にも足す(`test-claude-settings.sh` が、全 on と全 off の render の key の差がこの一覧と同じことを
+    固定する)。template から top-level の key を消すときも、live に残したくなければこの一覧に足す。
+  - それ以外の key(`modelSettings` / `autoMode` / Claude Code が後から足す key)は、位置も値もそのまま残す。
+- 合成しても live の file と意味が同じなら、live の byte をそのまま返す(初回の apply が書いた 1 行の配列なども
+  整形し直さないので、`chezmoi diff` は空のまま)。変わるときは jq が 2 space の indent で出す(Claude Code が
+  書く形と同じ)。
+- live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON)ときは、apply は
+  その file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+
+`chezmoi diff` / `status` も同じ script を走らせて比べる。手元の key を保ったまま apply できるので、#341 / #353
+のときのように live の file を手で書き換える必要はない。
 
 ## gate の仕組み
 

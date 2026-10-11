@@ -244,6 +244,10 @@ chezmoi_special_sources=(.chezmoi.toml.tmpl .chezmoidata .chezmoiignore .chezmoi
 # directory, ...) and is not covered by the contract either.
 allowed_attribute_re='^(private_|executable_|dot_)'
 chezmoi_attribute_re='^(after_|before_|create_|empty_|encrypted_|exact_|external_|literal_|modify_|once_|onchange_|readonly_|remove_|run_|symlink_)'
+# Sources allowed one attribute beyond the above, by exact path: the managed
+# ~/.claude/settings.json is a modify script so the keys the template does
+# not manage survive apply (#360). Any other modify_ source still fails.
+allowed_modify_sources=(dot_claude/modify_settings.json.tmpl)
 
 # scan_undeclared_sources SRC
 # Print every target under SRC that no module declares, and every source
@@ -271,6 +275,10 @@ scan_undeclared_sources() {
   done
   while IFS= read -r entry; do
     rel="${entry#"$src"/}"
+    if printf '%s\n' "${allowed_modify_sources[@]}" | grep -Fxq -- "$rel"; then
+      entries+=("$entry")
+      continue
+    fi
     IFS=/ read -ra comps <<< "$rel"
     for comp in "${comps[@]}"; do
       stripped="${comp%.tmpl}"
@@ -339,6 +347,8 @@ fi
 make_root
 make_flipped_source "$root"
 printf '#!/bin/sh\n' > "$root/src/run_once_audit.sh"
+# The modify_ exception is the one exact path, not the attribute (#360).
+printf '#!/bin/sh\n' > "$root/src/dot_claude/modify_extra.json"
 mkdir -p "$root/src/.chezmoiscripts"
 write_config personal
 if output="$(scan_undeclared_sources "$root/src")"; then
@@ -346,6 +356,7 @@ if output="$(scan_undeclared_sources "$root/src")"; then
   status=1
 else
   for expected_line in "unsupported source attribute: run_once_audit.sh" \
+    "unsupported source attribute: dot_claude/modify_extra.json" \
     "unsupported chezmoi special source: .chezmoiscripts"; do
     if grep -Fxq -- "$expected_line" <<< "$output"; then
       ok "test passed: scan reports $expected_line"
@@ -493,7 +504,7 @@ for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
 
     # Each agent's template must guard itself as well as .chezmoiignore:
     # execute-template bypasses the managed-set/apply path entirely.
-    for agent_template in dot_claude/settings.json.tmpl dot_codex/hooks.json.tmpl; do
+    for agent_template in dot_claude/modify_settings.json.tmpl dot_codex/hooks.json.tmpl; do
       if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
         --destination "$root/home" execute-template < "$root/src/$agent_template" 2>&1)"; then
         fail "test failed: $agent_template accepted $bool_input YAML value $invalid_bool"

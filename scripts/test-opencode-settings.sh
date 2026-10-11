@@ -184,7 +184,7 @@ fi
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
 #    bare command fall through to the allow-all base (Codex review, PR #235).
 #    #304 adds the same git rules as the Claude floor (dot_claude/
-#    settings.json.tmpl): the work-discarding forms and the hook skips in
+#    modify_settings.json.tmpl): the work-discarding forms and the hook skips in
 #    any placement ask, each option a word of its own; the hook skips right
 #    after `git commit` / `git push` deny, last. OpenCode has no rule that
 #    makes a trailing " *" match the bare command, so those denies list the
