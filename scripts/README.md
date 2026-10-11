@@ -110,7 +110,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 - Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 2 つを見る。
   - Git signing: `enableGitSigning` の SSH 署名 mechanism が managed か、capability true で module inactive の dangling か。
   - global gitignore: `git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定(末尾の `/` はすべて落とし、`-ef` でも同じ file と判定する、#309)— と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない(#248)。
-- git hook gates(report-only): `enableGitHookGates` が true で module が active なら、shim 2 本(`~/.config/git-hook-gates/hooks/pre-commit` / `commit-msg`)が実行可能に置かれているか、global `core.hooksPath`(`--includes` 付きで読む)が managed shim directory を指すか(別の値なら値は出さずに warn)、agent-tools deploy 4 本(dispatcher + gate 3 本)が揃っているかを report する。配線済みなのに deploy が欠けていれば commit が fail-closed で止まる旨を warn し、`core.hooksPath` が未設定なら action。capability true で module inactive なら dangling として warn。capability=false で shim / hooksPath が残っていれば action(lingering)。git-hook-gates module が active な profile では apply で除去する手順、module が非 active な profile(profile 切替後の残置。#201)では apply が触れないので、残っている file を `rm -i` で消す手順と、`core.hooksPath` が managed shim directory を指さなくなったかの確認(まだ指すなら表示された設定元の行を消す)を出す(managed file が無く `core.hooksPath` だけが残るときは設定元を探す手順。#258)。`--no-verify` と repo-local `core.hooksPath` で迂回できる best-effort である旨も表示する(#196 / #239。詳細は `docs/git-hook-gates.md`)。
+- git hook gates(report-only): `enableGitHookGates` が true で module が active なら、modules.yaml が宣言する shim(`~/.config/git-hook-gates/hooks/` の 23 本。#361)がすべて実行可能に置かれているか(欠けたものを 1 本ずつ warn し、そろっていれば 1 行の ok)、global `core.hooksPath`(`--includes` 付きで読む)が managed shim directory を指すか(別の値なら値は出さずに warn)、agent-tools deploy 4 本(dispatcher + gate 3 本)が揃っているかを report する。配線済みなのに deploy が欠けていれば commit が fail-closed で止まる旨を warn し、`core.hooksPath` が未設定なら action。capability true で module inactive なら dangling として warn。capability=false で宣言されたどれかの shim / hooksPath が残っていれば action(lingering)。git-hook-gates module が active な profile では apply で除去する手順、module が非 active な profile(profile 切替後の残置。#201)では apply が触れないので、残っている file を `rm -i` で消す手順と、`core.hooksPath` が managed shim directory を指さなくなったかの確認(まだ指すなら表示された設定元の行を消す)を出す(managed file が無く `core.hooksPath` だけが残るときは設定元を探す手順。#258)。`--no-verify` と repo-local `core.hooksPath` で迂回できる best-effort である旨も表示する(#196 / #239。詳細は `docs/git-hook-gates.md`)。
 - Git identity contexts: `git-profile` module が active な profile では、managed な identity reset `~/.config/git-profile/identity-reset.gitconfig` の presence を見る — 中身は見ない。無ければ、context file の無い非 personal repo で personal pattern に一致する remote が personal identity を継承して commit 拒否にならないので、`mkdir -p ~/.config` → `chezmoi apply`(dir と file)を action にする(#241)。各 context の identity file が存在するか、意図的に未設定かも見る。存在する file は `user.name` / `user.email` の有無だけを見て partial を action 化し、値の無い key(`=` なし。git が identity 全体を拒否する)は別の action、git が parse できない file は warn — 値は出さない。partial は managed な identity reset が塞げない唯一の状態なので doctor が主な検出手段になる(#202)。
 - Git remote URLs: credential らしき userinfo の有無。url と pushurl を見る。URL の値は表示しない。root を開けない(root 自身や親 dir の permission denied、symlink loop など。存在しないと確かめられた root だけ skip する)、repo の探索(find。root 自身が symlink なら link 先を辿る)や remote 設定の読み取り(`git config`)に失敗した root / repo は名指しで INCOMPLETE として warn し、clean の ok は出さない。`scanned repositories` は読めた repo だけを数える(#359)。
 - npm hardening / Corepack: 検査内容は下記の docs に従う。
@@ -852,10 +852,13 @@ git-hook-gates module(#196)の配線内容と武装条件を検証する。武�
 agent-tools の deploy 4 本(dispatcher + public-safety / git-identity / ai-trailer gate、#239)が実行可能な状態で
 揃っていること(readiness)の 2 段 gate。bare destination、dispatcher だけの部分 deploy、identity gate が欠けた旧
 deploy(agent-tools#281 以前の 3 本)、実行 bit の無い dispatcher のどれでも、shim と `hooks.gitconfig` が render
-されない(武装しない)ことを確認する。完全 deploy では shim 2 本(`pre-commit` / `commit-msg`、実行可能)と
-`hooks.gitconfig`(`core.hooksPath`)が exact な内容で render されること、render した `~/.gitconfig` 経由の実 commit で
-dispatcher が pre-commit → commit-msg の順に呼ばれること、失敗する dispatcher が commit を止めること、`--no-verify` で
-両方を迂回できること(best-effort の既知の限界)を確認する。`enableGitHookGates=false` の apply で適用済みの配線が
+されない(武装しない)ことを確認する。完全 deploy では modules.yaml が宣言する 23 本の shim(実行可能。#361)がちょうど
+render され、置かない 5 stage(`reference-transaction` / `post-index-change` / `push-to-checkout` / `proc-receive` /
+`fsmonitor-watchman`)には無く、どれも stage 名だけが違う exact な内容であること、`hooks.gitconfig`(`core.hooksPath`)が
+exact な内容で render されること、render した `~/.gitconfig` 経由の実 commit で dispatcher が pre-commit →
+prepare-commit-msg → commit-msg → post-commit の順に呼ばれること、失敗する gate(dispatcher)が commit を止めること、
+`--no-verify` が gate のある 2 stage だけを迂回すること(best-effort の既知の限界)、checkout で素通しの post-checkout が
+shim を通ることを確認する。`enableGitHookGates=false` の apply で適用済みの配線が
 **削除される**こと、配備(deploy 4 本)が消えた後の同じ source での再 apply でも配線が削除されること、
 `enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
 `--includes` 付きで読むこと(静的 pin)と、deploy 4 本の一覧が武装の template・doctor・preflight・この test で同じであること
