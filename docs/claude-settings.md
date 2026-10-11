@@ -77,7 +77,7 @@ project 自身の deny / ask が止めないものを warn する(rule の
 `dot_claude/modify_settings.json.tmpl` は chezmoi の modify script で、chezmoi は live の file を stdin に
 渡して、script が出力したものを書き戻す。template が描く JSON(managed の JSON)は script の中にある。
 
-- live の file が無い(新しい machine・test の throwaway home)ときは、managed の JSON をそのまま出す
+- live の file が無い(新しい machine・test の throwaway home)か 0 byte のときは、managed の JSON をそのまま出す
   (render は modify script にする前と byte 単位で同じ)。
 - live の file があるときは jq で合成する:
   - managed の JSON の top-level の key は、値が違えば template の値にする(jq の `==` は object の key の
@@ -88,10 +88,11 @@ project 自身の deny / ask が止めないものを warn する(rule の
     この一覧にも足す(`test-claude-settings.sh` が、全 on と全 off の render の key の差がこの一覧と同じことを
     固定する)。template から top-level の key を消すときも、live に残したくなければこの一覧に足す。
   - それ以外の key(`modelSettings` / `autoMode` / Claude Code が後から足す key)は、位置も値もそのまま残す。
-- jq は file を 2 space の indent で出し直す。Claude Code が書く形と同じなので、何も変わらない file は byte
-  単位で同じに戻り、`chezmoi diff` は空になる。
-- live の file が JSON の object でない(壊れている・配列など)ときは jq が失敗し、apply はその file を書き換えず
-  に止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+- 合成しても live の file と意味が同じなら、live の byte をそのまま返す(初回の apply が書いた 1 行の配列なども
+  整形し直さないので、`chezmoi diff` は空のまま)。変わるときは jq が 2 space の indent で出す(Claude Code が
+  書く形と同じ)。
+- live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON)ときは、apply は
+  その file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
 
 `chezmoi diff` / `status` も同じ script を走らせて比べる。手元の key を保ったまま apply できるので、#341 / #353
 のときのように live の file を手で書き換える必要はない。

@@ -761,8 +761,9 @@ managed file は modify script(#360)なので、live の file がある home へ
 未知の key と `/model` の選択(`model`)が値も位置もそのまま残る、managed の key の古い値は render に戻り要らない
 `sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
 byte のまま残る、`model` が無ければ template の値が入る、hook の capability が全部 false なら live の `hooks` が消える、
-capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、JSON の object で
-ない live の file は apply を止めて書き換えない。chezmoi と jq が必要(render job)。
+capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、ちょうど 1 つの JSON の
+object でない live の file(配列・壊れた JSON・空白だけ・object 2 つ・改行だけ)は apply を止めて byte 単位で変えない、
+file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない。chezmoi と jq が必要(render job)。
 
 ## test-codex-settings.sh
 

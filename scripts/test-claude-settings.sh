@@ -941,6 +941,7 @@ apply_over() {
   mkdir -p "$over_root/home/.claude"
   over_file="$over_root/home/.claude/settings.json"
   printf '%s\n' "$seed" > "$over_file"
+  cp "$over_file" "$over_root/seed.json"
   over_rc=0
   render_personal_into "$source_dir" "$over_root" || over_rc=$?
 }
@@ -1055,17 +1056,41 @@ else
   status=1
 fi
 
-# 9g) A live file that is not a JSON object stops the apply and is left as it
-#     was, rather than being replaced by the render.
-for bad_seed in '[]' '{"model": '; do
+# 9g) A live file that is not exactly one JSON object stops the apply and is
+#     left byte for byte as it was, rather than being replaced: an array,
+#     broken JSON, whitespace only (jq would run no filter and print
+#     nothing), two objects, and a lone newline (not 0 bytes, so not the
+#     no-file case) (Codex review R1, PR #377).
+for bad_seed in '[]' '{"model": ' '   ' '{} {}' ''; do
   apply_over bad "$DOTFILES_ROOT" "$bad_seed"
-  if [[ "$over_rc" -ne 0 && "$(cat "$over_file")" == "$bad_seed" ]]; then
-    ok "test passed: a live file of '$bad_seed' stops the apply and stays as it was"
+  if [[ "$over_rc" -ne 0 ]] && cmp -s "$over_root/seed.json" "$over_file"; then
+    ok "test passed: a live file of '$bad_seed' (plus a newline) stops the apply and stays byte-identical"
   else
-    fail "test failed: a live file of '$bad_seed' was replaced or the apply did not fail (rc=$over_rc)"
+    fail "test failed: a live file of '$bad_seed' (plus a newline) was changed or the apply did not fail (rc=$over_rc)"
     status=1
   fi
 done
+
+# 9h) The first apply on a home without the file writes the managed JSON as
+#     the template prints it (one-line deny / ask arrays); right after it,
+#     chezmoi diff is empty and a second apply changes no byte: an unchanged
+#     file comes back as it was, not re-printed (Codex review R1, PR #377).
+first_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-first.XXXXXX")"
+tmp_roots+=("$first_root")
+first_rc=0
+render_personal_into "$DOTFILES_ROOT" "$first_root" || first_rc=$?
+first_file="$first_root/home/.claude/settings.json"
+cp "$first_file" "$first_root/after-first-apply.json" 2>/dev/null || true
+first_diff="$(chezmoi --config "$first_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+  --destination "$first_root/home" diff 2>/dev/null)" || first_diff="<chezmoi diff failed>"
+render_personal_into "$DOTFILES_ROOT" "$first_root" || first_rc=$?
+if [[ "$first_rc" -eq 0 && -z "$first_diff" ]] && cmp -s "$off_file" "$first_root/after-first-apply.json" \
+  && cmp -s "$first_root/after-first-apply.json" "$first_file"; then
+  ok "test passed: after a first apply chezmoi diff is empty and a second apply changes no byte"
+else
+  fail "test failed: right after a first apply chezmoi diff is not empty or a second apply re-printed the file (rc=$first_rc)"
+  status=1
+fi
 
 if [[ "$status" -eq 0 ]]; then
   ok "claude settings tests passed"

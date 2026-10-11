@@ -178,10 +178,14 @@
 #     capabilities are on, are removed while it does not emit them;
 #   - every other key (modelSettings, autoMode, keys Claude Code adds later)
 #     stays as it is, in place.
-# A live file that is not a JSON object stops the apply (jq fails) instead of
-# being replaced. jq re-prints the file with two-space indentation, which is
-# also how Claude Code writes it, so an unchanged file comes back
-# byte-identical and `chezmoi diff` stays empty.
+# When that leaves the live file the same JSON, the live bytes come back
+# as they were (so the one-line arrays of a first apply, or any other
+# formatting, never show as a diff); otherwise jq prints the result with
+# two-space indentation, which is also how Claude Code writes the file.
+# A live file that is not exactly one JSON object (whitespace only, several
+# values, an array, broken JSON) stops the apply instead of being replaced;
+# only an empty one (0 bytes, also what chezmoi passes when there is none)
+# gets the managed JSON.
 set -eu
 managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 {
@@ -239,8 +243,13 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 }
 CLAUDE_SETTINGS_JSON
 )
-current=$(cat)
-if [ -z "$current" ]; then
+# The live file goes to a temp file, so its bytes come back exactly (a
+# command substitution would drop trailing newlines).
+live=$(mktemp "${TMPDIR:-/tmp}/dotfiles-claude-settings-live.XXXXXX")
+trap 'rm -f "$live"' EXIT
+trap 'rm -f "$live"; exit 1' HUP INT TERM
+cat > "$live"
+if [ ! -s "$live" ]; then
   printf '%s\n' "$managed"
   exit 0
 fi
@@ -248,10 +257,16 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "dotfiles: jq is required to update the existing ~/.claude/settings.json (it keeps the keys the template does not manage)" >&2
   exit 1
 fi
-printf '%s\n' "$current" | jq --argjson managed "$managed" '
-  if type != "object" then error("~/.claude/settings.json is not a JSON object") else . end
+merged=$(jq -s --argjson managed "$managed" '
+  if length != 1 or (.[0] | type) != "object"
+  then error("~/.claude/settings.json is not exactly one JSON object") else .[0] end
   | reduce ($managed | keys_unsorted[]) as $key (.;
       if ($key == "model" and has("model")) or .[$key] == $managed[$key] then .
       else .[$key] = $managed[$key] end)
   | reduce ("sandbox", "hooks") as $key (.;
-      if $managed | has($key) then . else del(.[$key]) end)'
+      if $managed | has($key) then . else del(.[$key]) end)' "$live")
+if jq -s -e --argjson merged "$merged" '.[0] == $merged' "$live" >/dev/null; then
+  cat "$live"
+else
+  printf '%s\n' "$merged"
+fi
