@@ -14,6 +14,9 @@ env:
   YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
   AGE_VERSION: 1.3.2
   AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+  # The same versions for the macOS (arm64) runner of the bash32 job.
+  YQ_SHA256_DARWIN_ARM64: fee511a181bd8b3e6b7da98842b41973bfac8cd3bcd341ed29a584620b5b2844
+  AGE_SHA256_DARWIN_ARM64: e2020b073c44f692685a24d6abc378817eb81ffaaf49fd0531ef8565f767f2f5
 
 jobs:
   validate:
@@ -111,6 +114,107 @@ jobs:
 
       - name: whitespace check (committed tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+  # scripts/*.sh must also run on macOS's /bin/bash 3.2 (the contract in
+  # scripts/README.md): a new machine runs preflight before any Homebrew bash,
+  # and an agent started with a minimal PATH resolves `#!/usr/bin/env bash` to
+  # /bin/bash. The validate job's tests again, on a macOS runner with /bin/bash
+  # first on PATH, so the scripts also meet the BSD userland (mktemp, sed,
+  # stat) they run on (#333 F06).
+  bash32:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: install yq (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_darwin_arm64"
+          echo "${YQ_SHA256_DARWIN_ARM64}  yq" | shasum -a 256 -c -
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 yq "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: install age (pinned, checksum verified)
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o age.tar.gz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-darwin-arm64.tar.gz"
+          echo "${AGE_SHA256_DARWIN_ARM64}  age.tar.gz" | shasum -a 256 -c -
+          tar -xzf age.tar.gz age/age age/age-keygen
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 age/age "$HOME/.local/bin/age"
+          install -m 0755 age/age-keygen "$HOME/.local/bin/age-keygen"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Added to GITHUB_PATH last, so it comes before every other entry,
+      # ~/.local/bin included.
+      - name: put /bin/bash (3.2) first on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/bash32"
+          ln -s /bin/bash "$RUNNER_TEMP/bash32/bash"
+          echo "$RUNNER_TEMP/bash32" >> "$GITHUB_PATH"
+
+      # Fail here rather than pass on another bash: a runner image change
+      # that shadowed the symlink would otherwise go unnoticed.
+      - name: env bash is 3.2 on an arm64 runner
+        run: |
+          version="$(/usr/bin/env bash -c 'printf %s "$BASH_VERSION"')"
+          echo "env bash: $version, arch: $(uname -m)"
+          case "$version" in 3.2.*) ;; *) echo "expected /bin/bash 3.2 first on PATH" >&2; exit 1 ;; esac
+          [ "$(uname -m)" = arm64 ] || { echo "expected an arm64 runner (the pinned tools are arm64)" >&2; exit 1; }
+
+      # bash 3.2's parser: bash 4+ syntax (`|&`, `;;&`, `&>>`) fails here even
+      # in a branch no test reaches. Runtime-only features (`declare -A`,
+      # `${v,,}`) fail only where the tests below run them.
+      - name: bash syntax check (bash 3.2)
+        run: |
+          for file in scripts/*.sh; do
+            bash -n "$file"
+          done
+
+      - name: shell syntax gate regression tests
+        run: ./scripts/test-shell-syntax.sh
+
+      - name: ai-clip (Ctrl-O) helper tests
+        run: ./scripts/test-ai-clip.sh
+
+      - name: zshrc compinit daily cache tests
+        run: ./scripts/test-zshrc-compinit.sh
+
+      - name: zshrc PATH and source order tests
+        run: ./scripts/test-zshrc-order.sh
+
+      - name: gclone helper tests
+        run: ./scripts/test-gclone.sh
+
+      - name: validate policy
+        run: ./scripts/validate-policy.sh --all
+
+      - name: policy fail-closed tests
+        run: ./scripts/test-policy.sh
+
+      - name: gitconfig safety tests
+        run: ./scripts/test-gitconfig.sh
+
+      - name: npmrc hardening tests
+        run: ./scripts/test-npmrc.sh
+
+      - name: doctor tests
+        run: ./scripts/test-doctor.sh
+
+      - name: private-backup secrets-gate tests
+        run: ./scripts/test-secrets-gate.sh
+
+      - name: private-backup backup/verify tests
+        run: ./scripts/test-private-backup.sh
+
+      - name: catalog install gate tests
+        run: ./scripts/test-install-packages.sh
+
+      - name: preflight report-only tests
+        run: ./scripts/test-preflight.sh
 
   render:
     runs-on: ubuntu-latest

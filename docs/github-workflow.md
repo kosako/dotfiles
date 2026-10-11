@@ -143,6 +143,16 @@ git diff --check
 CI は fresh checkout で差分が無いため、代わりに commit 済み tree 全体を空 tree と比べる
 `git diff --check "$(git hash-object -t tree /dev/null)" HEAD` を実行する。
 
+`bash32` job は、validate job の test(shellcheck・zsh の構文検査・whitespace check を除く)を macOS の runner で、
+`/bin/bash`(3.2)を PATH の先頭に置いて回す(#333 F06。契約は `scripts/README.md` の「実行環境の契約(bash 3.2)」)。
+手元で 3.2 で回すときも同じく、`/bin/bash` への symlink を置いた directory を PATH の先頭に置く
+(`#!/usr/bin/env bash` が 3.2 に解決される):
+
+```sh
+bash32="$(mktemp -d)" && ln -s /bin/bash "$bash32/bash"
+PATH="$bash32:$PATH" ./scripts/test-doctor.sh   # 他の test も同じ形で回す
+```
+
 `preflight` / `doctor` を変更した場合:
 
 ```sh
