@@ -59,6 +59,17 @@ steps_consecutive() {
   grep -F -x -A1 -- "$first" <<< "$out" | grep -Fxq -- "$second"
 }
 
+# doctor_exit_fail LABEL RC OUTPUT — the doctor run of LABEL did not exit 0:
+# show its output and its exit status, then fail. A failure seen once is then
+# readable from the CI log (#378: CX-c failed once on the macOS runner with
+# nothing to go on); the status tells a signal (128+N) from a failure doctor
+# reported itself.
+doctor_exit_fail() {
+  printf '%s\n' "$3" >&2
+  fail "test failed: doctor must stay exit 0 ($1): exited $2"
+  status=1
+}
+
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # Host tools doctor would otherwise launch for real on a developer machine
@@ -2172,8 +2183,7 @@ if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
     "[warn] codexReviewEffort=xhigh but $cx_review is missing — personal-codex-review falls back to the config.toml defaults" \
     "[warn] codexWorkerEffort=high but $cx_worker is missing — personal-codex-worker falls back to the config.toml defaults"
 else
-  fail "test failed: doctor must stay exit 0 (Codex profiles, missing)"
-  status=1
+  doctor_exit_fail "Codex profiles, missing" "$?" "$cx_out"
 fi
 #     CX-b) files present -> ok, contents never printed.
 mkdir -p "$fixture_home/.codex"
@@ -2184,8 +2194,7 @@ if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
     "[ok] codexReviewEffort=xhigh; $cx_review present (read by personal-codex-review)" \
     "[ok] codexWorkerEffort=high; $cx_worker present (read by personal-codex-worker)"
 else
-  fail "test failed: doctor must stay exit 0 (Codex profiles, present)"
-  status=1
+  doctor_exit_fail "Codex profiles, present" "$?" "$cx_out"
 fi
 #     CX-c) codex-settings active but the capability off while a file
 #           lingers -> action (agent-tools still reads it until apply).
@@ -2197,8 +2206,7 @@ if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
     "[warn] codexReviewEffort=off but $cx_review exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
     "[ok] codexWorkerEffort=off; no worker profile file (personal-codex-worker uses the config.toml defaults)"
 else
-  fail "test failed: doctor must stay exit 0 (Codex profiles, off)"
-  status=1
+  doctor_exit_fail "Codex profiles, off" "$?" "$cx_out"
 fi
 #     CX-d) work (module inactive): a hand-placed file is neutral, a missing
 #           one is ok, and a non-off capability is a dangling warning.
@@ -2209,14 +2217,16 @@ if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" work)"; then
     "[warn] codexWorkerEffort=high but the codex-settings module is inactive for this profile; nothing renders $cx_worker (dangling capability)" \
     "[ok] no worker profile file (not managed for this profile; personal-codex-worker uses the config.toml defaults)"
 else
-  fail "test failed: doctor must stay exit 0 (Codex profiles, work)"
-  status=1
+  doctor_exit_fail "Codex profiles, work" "$?" "$cx_out"
 fi
 #     CX-e) a CODEX_HOME that is not ~/.codex is flagged: agent-tools would
 #           look there, chezmoi renders into ~/.codex. The default spelled
 #           with a trailing slash is not flagged.
-if cx_out="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/elsewhere" "$cx_root/scripts/doctor.sh" personal 2>&1)" \
-  && cx_default="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/.codex/" "$cx_root/scripts/doctor.sh" personal 2>&1)"; then
+cx_rc=0
+cx_out="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/elsewhere" "$cx_root/scripts/doctor.sh" personal 2>&1)" || cx_rc=$?
+if [[ "$cx_rc" -ne 0 ]]; then
+  doctor_exit_fail "Codex profiles, CODEX_HOME" "$cx_rc" "$cx_out"
+elif cx_default="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/.codex/" "$cx_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fxq "[warn] CODEX_HOME is set to $fixture_home/elsewhere: agent-tools reads the review / worker profile files from there, but chezmoi renders them into ~/.codex" <<< "$cx_out" \
     && ! grep -Fq "CODEX_HOME is set to" <<< "$cx_default"; then
     ok "test passed: a diverging CODEX_HOME is flagged; the default (trailing slash) is not"
@@ -2226,8 +2236,7 @@ if cx_out="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/elsewhere" "$cx_root
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (Codex profiles, CODEX_HOME)"
-  status=1
+  doctor_exit_fail "Codex profiles, CODEX_HOME default" "$?" "$cx_default"
 fi
 rm -f "$cx_review" "$cx_worker"
 
@@ -2262,8 +2271,7 @@ if hl_out="$(hl_run personal)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (hook gates lingering, personal)"
-  status=1
+  doctor_exit_fail "hook gates lingering, personal" "$?" "$hl_out"
 fi
 #     HL-b) work (module inactive) with the full managed wiring left by
 #           personal: shims + hooks.gitconfig included from ~/.gitconfig, so
@@ -2284,8 +2292,7 @@ if hl_out="$(hl_run work)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (hook gates lingering, work)"
-  status=1
+  doctor_exit_fail "hook gates lingering, work" "$?" "$hl_out"
 fi
 #     HL-e) work with the shims left but no hooks.gitconfig, while another
 #           origin (here ~/.gitconfig directly) still points core.hooksPath at
@@ -2305,8 +2312,7 @@ if hl_out="$(hl_run work)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (hook gates shims + stray hooksPath, work)"
-  status=1
+  doctor_exit_fail "hook gates shims + stray hooksPath, work" "$?" "$hl_out"
 fi
 #     HL-f) work with only a pass-through shim left (#361: pre-push is one of
 #           the declared stages beyond pre-commit / commit-msg) and no
@@ -2324,8 +2330,7 @@ if hl_out="$(hl_run work)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (hook gates pass-through shim lingering, work)"
-  status=1
+  doctor_exit_fail "hook gates pass-through shim lingering, work" "$?" "$hl_out"
 fi
 #     HL-c) work with only core.hooksPath set directly in ~/.gitconfig (no
 #           managed file left) -> point at the setting, not at rm or apply.
@@ -2341,8 +2346,7 @@ if hl_out="$(hl_run work)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (hook gates stray hooksPath, work)"
-  status=1
+  doctor_exit_fail "hook gates stray hooksPath, work" "$?" "$hl_out"
 fi
 #     HL-d) work with nothing left -> not wired, no action.
 rm -f "$hl_home/.gitconfig"
@@ -2356,8 +2360,7 @@ if hl_out="$(hl_run work)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (hook gates clean, work)"
-  status=1
+  doctor_exit_fail "hook gates clean, work" "$?" "$hl_out"
 fi
 rm -rf "$hl_home"
 
@@ -2395,8 +2398,7 @@ if gs_out="$(env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (Git section)"
-  status=1
+  doctor_exit_fail "Git section" "$?" "$gs_out"
 fi
 printf '[user]\n\tuseConfigOnly = true\n[transfer]\n\tcredentialsInUrl = die\n' > "$gs_home/.gitconfig"
 if gs_out="$(env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
@@ -2692,8 +2694,7 @@ op_ok_line="[ok] agent-tools plugin personal-agent-tools.js in the global plugin
 if op_out="$(op_run)"; then
   op_expect "the agent-tools plugin in the global plugins dir is ok (static, OpenCode not run)" "$op_out" "$op_ok_line"
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode plugin present)"
-  status=1
+  doctor_exit_fail "OpenCode plugin present" "$?" "$op_out"
 fi
 #     OP-b) the same plugin also listed in a config's plugin key -> double
 #           load warning; the config's other values never show.
@@ -2702,8 +2703,7 @@ if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
   op_expect "a plugin also listed in the active config's plugin key is a double-load warning" "$op_out" \
     "[warn] agent-tools plugin personal-agent-tools is also listed in an OpenCode config's plugin key — OpenCode loads it twice"
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode plugin listed in config)"
-  status=1
+  doctor_exit_fail "OpenCode plugin listed in config" "$?" "$op_out"
 fi
 #     OP-b2) the same listing in opencode.local.json while OPENCODE_CONFIG does
 #            not point at it: OpenCode does not read that file here, so it is
@@ -2717,8 +2717,7 @@ if op_out="$(op_run)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode inactive local listing)"
-  status=1
+  doctor_exit_fail "OpenCode inactive local listing" "$?" "$op_out"
 fi
 #     OP-c) names are compared literally, not as regexes: personal-a.b.js
 #           on disk does not match personal-a-b.js in the config.
@@ -2732,8 +2731,7 @@ if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode literal names)"
-  status=1
+  doctor_exit_fail "OpenCode literal names" "$?" "$op_out"
 fi
 rm -f "$op_cfg/plugins/personal-a.b.js"
 #     OP-d) a config that is not JSON -> that check is reported as not done,
@@ -2744,8 +2742,7 @@ if op_out="$(op_run)"; then
     "[info] - the plugin key of $op_cfg/opencode.local.json could not be read (not JSON?); double loading via config not checked (contents never shown)" \
     "$op_ok_line"
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode unreadable config)"
-  status=1
+  doctor_exit_fail "OpenCode unreadable config" "$?" "$op_out"
 fi
 #     OP-d2) the same broken file as the ACTIVE config (OPENCODE_CONFIG points
 #            at it) -> the active branch also reports "not checked".
@@ -2754,8 +2751,7 @@ if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
     "[info] - the plugin key of $op_cfg/opencode.local.json could not be read (not JSON?); double loading via config not checked (contents never shown)" \
     "$op_ok_line"
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode unreadable active config)"
-  status=1
+  doctor_exit_fail "OpenCode unreadable active config" "$?" "$op_out"
 fi
 rm -f "$op_cfg/opencode.local.json"
 #     OP-e) no agent-tools plugin -> neutral item.
@@ -2764,8 +2760,7 @@ if op_out="$(op_run)"; then
   op_expect "no agent-tools plugin is neutral" "$op_out" \
     "[info] - no agent-tools plugin in ~/.config/opencode/plugins (agent-tools sync deploys personal-*.js there)"
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode no plugin)"
-  status=1
+  doctor_exit_fail "OpenCode no plugin" "$?" "$op_out"
 fi
 mv "$op_cfg/personal-agent-tools.js.off" "$op_cfg/plugins/personal-agent-tools.js"
 #     OP-f) extra copies that OpenCode may load twice (.ts next to .js,
@@ -2778,8 +2773,7 @@ if op_out="$(op_run)"; then
     "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugins/personal-agent-tools.ts" \
     "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugin/personal-agent-tools.js"
 else
-  fail "test failed: doctor must stay exit 0 (OpenCode extra copies)"
-  status=1
+  doctor_exit_fail "OpenCode extra copies" "$?" "$op_out"
 fi
 rm -rf "$op_cfg/plugin" "$op_cfg/plugins/personal-agent-tools.ts"
 #     OP-g) OPENCODE_CONFIG against a present opencode.local.json.
@@ -2788,38 +2782,33 @@ if op_out="$(op_run)"; then
   op_expect "local config present but OPENCODE_CONFIG unset (no export anywhere) is an action" "$op_out" \
     "[warn] opencode.local.json exists but OPENCODE_CONFIG is not set — OpenCode ignores the local provider / model / mcp config"
 else
-  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG unset)"
-  status=1
+  doctor_exit_fail "OPENCODE_CONFIG unset" "$?" "$op_out"
 fi
 printf 'export OPENCODE_CONFIG="$HOME/.config/opencode/opencode.local.json"\n' > "$op_home/.zshrc.local"
 if op_out="$(op_run)"; then
   op_expect "an export in ~/.zshrc.local that this shell did not load is neutral" "$op_out" \
     "[info] - OPENCODE_CONFIG is exported in ~/.zshrc.local but not set in this shell"
 else
-  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG exported elsewhere)"
-  status=1
+  doctor_exit_fail "OPENCODE_CONFIG exported elsewhere" "$?" "$op_out"
 fi
 if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
   op_expect "OPENCODE_CONFIG pointing at opencode.local.json is ok" "$op_out" \
     "[ok] OPENCODE_CONFIG -> opencode.local.json (local provider / model / mcp config is read)"
 else
-  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG ok)"
-  status=1
+  doctor_exit_fail "OPENCODE_CONFIG ok" "$?" "$op_out"
 fi
 printf '{}\n' > "$op_home/other.json"
 if op_out="$(op_run OPENCODE_CONFIG="$op_home/other.json")"; then
   op_expect "OPENCODE_CONFIG pointing elsewhere is warned" "$op_out" \
     "[warn] OPENCODE_CONFIG points to a different file than opencode.local.json — that local config is not read"
 else
-  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG elsewhere)"
-  status=1
+  doctor_exit_fail "OPENCODE_CONFIG elsewhere" "$?" "$op_out"
 fi
 if op_out="$(op_run OPENCODE_CONFIG="$op_home/missing.json")"; then
   op_expect "OPENCODE_CONFIG pointing at a missing file is warned" "$op_out" \
     "[warn] OPENCODE_CONFIG points to a file that does not exist — OpenCode reads no local config"
 else
-  fail "test failed: doctor must stay exit 0 (OPENCODE_CONFIG missing file)"
-  status=1
+  doctor_exit_fail "OPENCODE_CONFIG missing file" "$?" "$op_out"
 fi
 #     OP-h) herdr's view of its OpenCode integration is shown neutrally
 #           (installing it is the user's call; never an action).
@@ -2831,8 +2820,7 @@ if op_out="$(op_run)"; then
     status=1
   fi
 else
-  fail "test failed: doctor must stay exit 0 (herdr OpenCode view)"
-  status=1
+  doctor_exit_fail "herdr OpenCode view" "$?" "$op_out"
 fi
 #     OP-i) the init marker of personal-agent-tools (#311, agent-tools#343):
 #           doctor reads OpenCode's existing log (never runs OpenCode) and
@@ -2869,11 +2857,11 @@ op_log_write() {
 # op_init_case LABEL EXPECTED_LINE [VAR=value...] — one run: EXPECTED_LINE is
 # the one and only init line, nothing leaks, OpenCode stays unrun.
 op_init_case() {
-  local label="$1" expected="$2" out
+  local label="$1" expected="$2" out rc=0
   shift 2
-  if ! out="$(op_run "$@")"; then
-    fail "test failed: doctor must stay exit 0 (OpenCode init: $label)"
-    status=1
+  out="$(op_run "$@")" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "OpenCode init: $label" "$rc" "$out"
     return
   fi
   op_init_check "$label" "$expected" "$out"
@@ -3005,13 +2993,13 @@ if kill -0 "$op_fifo_pid" 2>/dev/null; then
   wait "$op_fifo_pid" 2>/dev/null || true
   fail "test failed: OpenCode init: a FIFO in place of the log hung doctor (killed after 120s)"
   status=1
-elif ! wait "$op_fifo_pid"; then
-  fail "test failed: doctor must stay exit 0 (OpenCode init: a FIFO in place of the log)"
-  status=1
-else
+elif wait "$op_fifo_pid"; then
   op_init_check "a FIFO in place of the log -> not confirmed, no hang" \
     "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)" \
     "$(cat "$fixture_home/op-fifo.out")"
+else
+  op_fifo_rc=$?
+  doctor_exit_fail "OpenCode init: a FIFO in place of the log" "$op_fifo_rc" "$(cat "$fixture_home/op-fifo.out")"
 fi
 rm -f "$op_log" "$fixture_home/op-fifo.out"
 mv "$op_log.keep" "$op_log"
@@ -3476,10 +3464,11 @@ aip_trust_case() {
   shift 2
   printf '%s\n' "$@" '[mcp_servers.fake.env]' 'FAKE_TOKEN = "CANARY_FORM_ENV_309"' \
     > "$fixture_home/.codex/config.toml"
-  if ! aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-    fail "test failed: doctor must stay exit 0 (trust form: $label)"
-    status=1
+  local rc=0
+  aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "trust form: $label" "$rc" "$aip_out"
   elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
     fail "test failed: trust form $label leaked a config value"
     status=1
@@ -3673,8 +3662,7 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
       status=1
     fi
   else
-    fail "test failed: doctor must stay exit 0 (Codex result $aip_case)"
-    status=1
+    doctor_exit_fail "Codex result $aip_case" "$?" "$aip_out"
   fi
 done
 rm -f "$aip_result"
