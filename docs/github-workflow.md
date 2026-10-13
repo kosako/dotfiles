@@ -132,13 +132,13 @@ git diff --check
 
 `test-render.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` /
 `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
-(CI では version pin して導入する。render job 所属)。`test-starship.sh` は source の静的検査と Git fixture での条件実行なので chezmoi は
-不要だが、CI では render job で走る。
-`test-codex-settings.sh` は、render した Codex の rules を `codex execpolicy check` で評価する節も持つ。CI の render job は
-version と sha256 を固定した codex(release の Linux 用 binary)を入れて回し、codex が無ければ CI では fail、手元では表示して飛ばす。
+(CI では version pin して導入する。render job と、macOS の bash32 job の render group 所属)。`test-starship.sh` は source の静的検査と
+Git fixture での条件実行なので chezmoi は不要だが、CI では同じく render job と bash32 の render group で走る。
+`test-codex-settings.sh` は、render した Codex の rules を `codex execpolicy check` で評価する節も持つ。CI の render job と
+bash32 の render group は、version と sha256 を固定した codex(release の Linux 用 / macOS 用の binary)を入れて回し、codex が無ければ CI では fail、手元では表示して飛ばす。
 rules を変える PR は、codex の入った手元でもこの test を回す(CI の codex は手元の版と同じとは限らない。#332 F36)。
 `test-npmrc.sh` は両 job で走る(静的検査は validate job、chezmoi が要る rendered-content
-検査は render job で実行される。#150)。
+検査は render job で実行される。#150。bash32 job でも others と render の両方の group で走る)。
 `test-inventory.sh` は `test-install-packages.sh` から呼ばれるため個別には載せない(単独実行も可)。
 `test-lib.sh` はテスト共通の helper で、source 専用(直接は実行しない)。
 この一覧は `.github/workflows/validate.yml` が正なので、CI にテストを足したらここも更新する。
@@ -148,7 +148,11 @@ CI は fresh checkout で差分が無いため、代わりに commit 済み tree
 
 `bash32` job は、validate job の test(shellcheck・zsh の構文検査・whitespace check を除く)を macOS の runner で、
 `/bin/bash`(3.2)を PATH の先頭に置いて回す(#333 F06。契約は `scripts/README.md` の「実行環境の契約(bash 3.2)」)。
-macOS の runner では `test-doctor.sh` だけで約 40 分かかるので、doctor / private-backup / その他の 3 つの group に分けて並列に回す。
+render job の test も、同じ job の render group で、macOS 用の chezmoi と codex(render job と同じ version を sha256 で固定)を
+入れて回す(#382。managed file は macOS に apply され、Claude settings の modify script も macOS の `/bin/sh`・`mktemp`・
+`trap`・`jq` で走るため)。
+macOS の runner では `test-doctor.sh` だけで約 40 分かかるので、doctor / private-backup / その他 / render の 4 つの group に分けて
+並列に回す(待ち時間は最も遅い doctor の group で決まる)。
 手元で 3.2 で回すときも同じく、`/bin/bash` への symlink を置いた directory を PATH の先頭に置く
 (`#!/usr/bin/env bash` が 3.2 に解決される):
 

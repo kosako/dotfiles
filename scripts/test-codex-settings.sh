@@ -342,7 +342,8 @@ fi
 #     -> forbidden (outranking the git commit allow: the strictest match
 #     wins), the everyday forms -> allow or no match, and the documented
 #     prefix gaps (an option after other arguments, global options) -> not
-#     caught. The render job installs a pinned codex for this (#332 F36);
+#     caught. The render job and the bash32 job's render group (macOS, #382)
+#     install a pinned codex for this (#332 F36);
 #     where codex is not installed this is reported and skipped locally (the
 #     exact pin above still holds the content) and fails on CI (codex_gate).
 #     An installed codex whose `execpolicy check` cannot be used, a non-zero
@@ -417,7 +418,7 @@ else
 fi
 gate="$(codex_gate)"
 if [[ "$gate" == fail ]]; then
-  fail "test failed: codex not found on CI; the execpolicy decisions must be checked there (the render job installs a pinned codex)"
+  fail "test failed: codex not found on CI; the execpolicy decisions must be checked there (the render job and the bash32 render group install a pinned codex)"
   status=1
 elif [[ "$gate" == skip ]]; then
   item "codex not installed here; execpolicy decisions not checked (the exact pin above still holds the content)"
