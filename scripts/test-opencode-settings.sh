@@ -187,7 +187,8 @@ fi
 #    later broader ask would override an earlier deny (last match wins). The
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
-#    bare command fall through to the allow-all base (Codex review, PR #235).
+#    bare command fall through to the base, allow-all before #381 (Codex
+#    review, PR #235).
 #    #304 adds the same git rules as the Claude floor (dot_claude/
 #    modify_settings.json.tmpl): the work-discarding forms and the hook skips in
 #    any placement ask, each option a word of its own; the hook skips right
