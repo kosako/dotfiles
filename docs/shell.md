@@ -32,7 +32,7 @@
 2 行構成(1 行目=情報、2 行目=入力 `❯`)。表示されるもの:
 
 - ディレクトリ(repo root 基準で短縮)、git ブランチ + 状態(dirty / ahead-behind / stash 等)。
-- **git identity context**(誤コミット防止):🟢 `personal` / 🟡 `<email>`(personal 以外の解決済み identity。実 email を表示)/ 🔴 `⚠ no-identity`(repo 内なのに identity 未解決 = このままでは commit 失敗)。判定は runtime に local の `~/.config/git/personal.gitconfig` と照合([git-identity](git-identity.md))。
+- **git identity context**(誤コミット防止):🟢 `personal` / 🟡 `<email>`(personal 以外の解決済み identity。実 email を表示)/ 🔴 `⚠ no-identity`(repo 内なのに identity 未解決 = name か email が空。commit が拒否されるか、空 email の壊れた identity になる)。判定は runtime に local の `~/.config/git/personal.gitconfig` と照合([git-identity](git-identity.md))。
 - runtime version(関係する project でのみ・mise 連動)、コマンド実行時間(2 秒超のみ)、`❯`(直前成功=緑 / 失敗=赤。非ゼロ終了コードは数値も表示)。
 
 ### 移動

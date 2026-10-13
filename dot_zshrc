@@ -114,11 +114,13 @@ fi
 # rebinding wins) and before the widget-wrapping plugins. See docs/shell.md.
 
 # Strip ANSI/OSC escapes so the pasted text is plain (easier for an AI to read).
+# An OSC ends at the FIRST BEL or ST (ESC \): the body may not cross an ESC, so
+# a hyperlink (OSC 8 ... ST text OSC 8 ST) keeps its visible text (#383).
 # perl ships with macOS; if it is ever absent, copy the raw output rather than
 # failing the whole capture.
 _ai_clip_strip_ansi() {
   if command -v perl >/dev/null 2>&1; then
-    perl -CS -pe 's/\e\[[0-9;:?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(\a|\e\\)//g; s/\r//g'
+    perl -CS -pe 's/\e\[[0-9;:?]*[ -\/]*[@-~]//g; s/\e\][^\a\e]*(\a|\e\\)//g; s/\r//g'
   else
     cat
   fi

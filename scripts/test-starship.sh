@@ -103,6 +103,47 @@ done
 run_isolated git -C "$fixture/personal" config user.email dotfiles-test@example.invalid
 run_isolated git -C "$fixture/other" config user.email dotfiles-other@example.invalid
 
+# Email-only contexts (#383): the personal email with no user.name at all, and
+# another email with user.name set to empty (what the identity reset leaves
+# when a context file holds only an email). Git refuses to commit in both, so
+# the prompt must show none (red), not personal / other. The commit attempts
+# confirm the fixtures really are the fail-closed case; the personal context
+# is the control that commits.
+for context in personal-noname other-emptyname; do
+  mkdir -p "$fixture/$context"
+  run_isolated git -C "$fixture/$context" init --quiet --template="$fixture/empty-template"
+  run_isolated git -C "$fixture/$context" config user.useConfigOnly true
+done
+run_isolated git -C "$fixture/personal-noname" config user.email dotfiles-test@example.invalid
+run_isolated git -C "$fixture/other-emptyname" config user.name ""
+run_isolated git -C "$fixture/other-emptyname" config user.email dotfiles-other@example.invalid
+for context in personal personal-noname other-emptyname; do
+  if run_isolated git -C "$fixture/$context" commit --quiet --allow-empty -m probe >/dev/null 2>&1; then
+    committed=yes
+  else
+    committed=no
+  fi
+  want=no
+  [[ "$context" == personal ]] && want=yes
+  if [[ "$committed" == "$want" ]]; then
+    ok "test passed: fixture $context commits=$committed (as Git decides)"
+  else
+    fail "test failed: fixture $context commits=$committed, expected $want"
+    status=1
+  fi
+done
+
+# expected_module CONTEXT -> the one custom module whose `when` must pass there
+# ("-" for none of them).
+expected_module() {
+  case "$1" in
+    personal) printf "%s\n" git_ctx_personal ;;
+    other) printf "%s\n" git_ctx_other ;;
+    none|personal-noname|other-emptyname) printf "%s\n" git_ctx_none ;;
+    *) printf "%s\n" - ;;
+  esac
+}
+
 extract_when() {
   local module="$1"
   if [[ "$has_tomllib" -eq 1 ]]; then
@@ -158,9 +199,9 @@ for module in git_ctx_personal git_ctx_other git_ctx_none; do
     shell_args+=("$arg")
   done < "$fixture/$module.shell"
 
-  for context in personal other none outside; do
+  for context in personal other none personal-noname other-emptyname outside; do
     expected=1
-    [[ "$module" == "git_ctx_$context" ]] && expected=0
+    [[ "$module" == "$(expected_module "$context")" ]] && expected=0
     # Starship feeds the script to the configured shell's stdin. Keep the
     # script itself out of any generated shell command string.
     if (cd "$fixture/$context" && run_isolated "${shell_args[@]}" < "$fixture/$module.when"); then
