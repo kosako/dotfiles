@@ -29,9 +29,22 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     **read の deny は read tool にだけ効く**: OpenCode の `grep` は正規表現に、`glob` は pattern に当てる別の permission で、
     path の deny に従わない(OpenCode の docs)。project の外の path はどの tool でも `external_directory`(下記、ask)が
     掛かるが、**project の中の `.env` などは grep で読める**。home を project root にして OpenCode を起動しない(#315)。
-    secret を含みうる設定 file(`~/.codex/config.toml`・`~/.zshrc.local`・`~/.config/opencode/opencode.local.json`)の
+    secret を含みうる設定 file(`~/.codex/config.toml`・`~/.zshrc.local`・`~/.zprofile.local`・`~/.config/opencode/opencode.local.json`)の
     読み取りは **ask**(Claude の床の `Read` の ask と同じ集合。#334)。
-  - `bash`: `*` allow の上に、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
+  - `bash`: **既定を ask** にする(`*`、#381。列挙で ask にする方式では `ssh` / `scp` / `npm publish` などが allow all の
+    既定に落ちた。`gh` で #240 が塞いだのと同じ穴)。その直後に、machine の外に出ず、引数で起動する program を指定できない
+    command だけを allow に戻す: 読み取り(`ls` / `pwd` / `cat` / `head` / `tail` / `wc` / `file` / `stat` / `du` /
+    `tree` / `which` / `diff` / `cmp` / `cut` / `uniq` / `grep` / `rg` / `echo` / `basename` / `dirname` / `realpath`)と
+    local の git(`status` / `diff` / `log` / `show` / `rev-parse` / `ls-files` / `blame` / `describe` / `branch` / `tag` /
+    `add` / `commit` / `checkout` / `switch` / `reset` / `stash` / `worktree`)。どれも完全一致と `… *` の 2 本
+    1 組で、`git remote` は完全一致と `git remote -v` だけ。`rg` の `--pre` と `--hostname-bin` は起動する program を
+    指定するので ask に戻す。option が決まった補助の program を起動するもの(`rg -z` / `file -z` の解凍、`diff -l` の
+    `pr`)は、引数で program を選べないので allow のまま。
+    `find`(`-exec`)・`sort`(`--compress-program`)・`awk` / `sed` / `xargs`・`jq` / `yq`(環境変数を読める)・
+    `git merge`(`-s` で `git-merge-<strategy>` を起動する)・interpreter・build / test の runner・network を使う git
+    (`fetch` / `pull`)・global option の前置(`git -C …`)は ask のまま。allow はすべて下の ask / deny より前に置くので、
+    last-match-wins で後ろの ask / deny が勝つ。
+    その後ろで、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
     **ask**。GitHub CLI は **`gh *` を既定 ask** にし、read 系の subcommand(`pr view|list|diff|checks|status`、
     `issue view|list|status`、`repo view`、`release view|list`、`run view|list`、`workflow view|list`、
     `label list`、`gist view|list`、`search`、`status`、bare の `auth status`、`--version` / `version` / `help`)だけを
@@ -47,7 +60,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     option を挟む形も。#315))は **map の末尾**に置く(last-match-wins で、
     後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
-    `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で allow-all に落ちる。read の allow は原則
+    `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で既定の ask に落ちる(#381 までは allow-all)。read の allow は原則
     「完全一致」と「`… *`(space 付き)」の 2 本 1 組で命令名を区切る(`gh status*` のような space なしの allow だと
     `gh status-token` のような alias 名まで通る。ask / deny は過剰一致しても安全側なので space なし `*` のまま)。
     例外: `gh search` は `gh search *` だけで bare の `gh search` は ask。`gh auth status` / `gh --version` /
@@ -83,7 +96,11 @@ work / client には配らない(`opencode-settings` module を持たない。cl
 - permission は OpenCode 内部で評価されるが、`bash` の rule は command 文字列への glob 照合なので、Claude の Bash matcher と同じく
   **steering であって enforcement ではない**(`$( )` や等価な別 command で迂回しうる。下記)。さらに **boundary では
   ない**: 設定は global → `OPENCODE_CONFIG` → project `opencode.json` → … の順で **merge・後勝ち**なので、
-  project の `opencode.json` や agent 定義が床を allow に戻せる。managed `~/.claude/settings.json` と同じ
+  project の `opencode.json` や agent 定義が床を allow に戻せる。bash を既定 ask にしても(#381)、allow に戻した
+  command は設定や環境変数が選ぶ program を起動しうる(git の editor・署名の program・hook・`core.fsmonitor`・外部 diff、
+  `GIT_*` の環境変数、rg の `RIPGREP_CONFIG_PATH` など)。option を ask にしても塞げない(bare の `git commit` も
+  editor を起動し、設定は edit tool で書き換えられる)ので、床が見るのは「引数で program を指定できるか」まで。
+  外向きを確実に止めるのは OS 側の egress の制限(#188)の領分。managed `~/.claude/settings.json` と同じ
   「public-safe な既定」の位置づけ([ai-environment-boundary](ai-environment-boundary.md))。
 - `bash` の pattern は解析後の command に対する glob。`$( )` や別経路(plugin・MCP)は対象外。
 - OpenCode 自身の egress / fs sandbox は無い。OS 側の sandbox tier は別([ai-environment-boundary](ai-environment-boundary.md))。
@@ -134,11 +151,13 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
   assert する(#240): doctor の Codex probe 39 本(外向き・昇格 27 + 認証情報の表示 3、#287 + secret の読み出し 9、#334。secret の読み出しは期待する判定つき)に、短縮 flag / alias / read 形、
+  #381 の既定 ask(allow に戻した local の読み取りと git、名前の似た command(`lsx` など)、外向き・別 program を起動する
+  command(`ssh` / `npm publish` / `python3 -c` / `find -exec` / `rg --pre` / `rg --hostname-bin` / `git merge -s` / `git fetch` など)が ask に落ちること)、
   認証情報を扱う command の置き方(#315)、#304 の git の形を足した集合。doctor.sh の 2 つの配列を literal に読み出し、全 probe がこの集合の行にあることも機械的に確かめる(#332)。edit の rule map も同じ glob で、参照先 note と
   名前の似た file の path に当てて判定する(#304)。期待値は
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
   こと(secret floor 30 件 + #304 の hook の skip と note の deny 4 件 + personal 既定の `mcp__github` と `gateUnusedClaudeMcp` の 21 件(#341)で計 56 件の deny と、
-  1Password の CLI 全体・#334 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 75 件を順序込みで
+  1Password の CLI 全体・#334 / #381 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 76 件を順序込みで
   exact pin。#315 / #304 / #334)。

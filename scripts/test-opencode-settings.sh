@@ -78,10 +78,10 @@ fi
 # 3) The read floor, EXACT and ordered (last match wins in OpenCode, so the
 #    order is part of the contract: the .env.example allow must come after the
 #    .env denies).
-expected_read=$'*=allow\n~/.ssh/*=deny\n~/.aws/*=deny\n~/.config/gh/*=deny\n~/.netrc=deny\n~/.codex/auth.json=deny\n~/.local/share/opencode/auth.json=deny\n*.env=deny\n*.env.*=deny\n*.env.example=allow\n~/.codex/config.toml=ask\n~/.zshrc.local=ask\n~/.config/opencode/opencode.local.json=ask'
+expected_read=$'*=allow\n~/.ssh/*=deny\n~/.aws/*=deny\n~/.config/gh/*=deny\n~/.netrc=deny\n~/.codex/auth.json=deny\n~/.local/share/opencode/auth.json=deny\n*.env=deny\n*.env.*=deny\n*.env.example=allow\n~/.codex/config.toml=ask\n~/.zshrc.local=ask\n~/.zprofile.local=ask\n~/.config/opencode/opencode.local.json=ask'
 actual_read="$(yq -p json '.permission.read | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_read" == "$expected_read" ]]; then
-  ok "test passed: permission.read is exactly the secret floor plus #334's config-read asks (13 rules, ordered)"
+  ok "test passed: permission.read is exactly the secret floor plus #334's config-read asks (14 rules, ordered)"
 else
   fail "test failed: permission.read drifted from the pinned floor; was:"
   printf '%s\n' "$actual_read" >&2
@@ -110,8 +110,8 @@ opencode_read_decision() {
   printf '%s\n' "$decision"
 }
 read_misses=""
-for read_case in "ask|$read_home/.codex/config.toml" "ask|$read_home/.zshrc.local" "ask|$read_home/.config/opencode/opencode.local.json" \
-  "allow|$read_home/.codex/config.toml.bak" "allow|$read_home/.zshrc" "allow|$read_home/.config/opencode/opencode.json" "allow|$read_home/src/repo/.zshrc.local" \
+for read_case in "ask|$read_home/.codex/config.toml" "ask|$read_home/.zshrc.local" "ask|$read_home/.zprofile.local" "ask|$read_home/.config/opencode/opencode.local.json" \
+  "allow|$read_home/.codex/config.toml.bak" "allow|$read_home/.zshrc" "allow|$read_home/.config/opencode/opencode.json" "allow|$read_home/src/repo/.zshrc.local" "allow|$read_home/.zprofile" "allow|$read_home/src/repo/.zprofile.local" \
   "deny|$read_home/.ssh/id_ed25519" "deny|$read_home/.codex/auth.json" "deny|$read_home/.config/gh/hosts.yml" "deny|app/.env" "allow|app/.env.example"; do
   read_got="$(opencode_read_decision "${read_case#*|}")"
   [[ "$read_got" == "${read_case%%|*}" ]] || read_misses+="  ${read_case#*|} -> ${read_got:-<no rule>} (expected ${read_case%%|*})"$'\n'
@@ -174,7 +174,12 @@ else
   status=1
 fi
 
-# 4) The bash floor, EXACT and ordered: allow-all base; outward (`git push` /
+# 4) The bash floor, EXACT and ordered: ask base (#381: enumerating the outward
+#    commands left ssh / scp / npm publish ... on the old allow-all base); the
+#    local commands allowed back right after it as exact + '... *' pairs (read-
+#    only inspection and the local git work; `git remote` / `git remote -v`
+#    exact only; rg's --pre asks again); then, so that they still win over
+#    those allows, outward (`git push` /
 #    `git clone`) and escalation (sudo / curl / wget) ask; the GitHub CLI ask
 #    BY DEFAULT (`gh *`) with only read-only subcommands allowed back (#240:
 #    enumerating mutations left `gh issue edit`, `gh pr close`, `gh api
@@ -182,17 +187,18 @@ fi
 #    later broader ask would override an earlier deny (last match wins). The
 #    ask patterns end in `*` WITHOUT a space so the argument-less forms (`git
 #    push`, `gh pr create`) match too; a `git push *` spelling would let the
-#    bare command fall through to the allow-all base (Codex review, PR #235).
+#    bare command fall through to the base, allow-all before #381 (Codex
+#    review, PR #235).
 #    #304 adds the same git rules as the Claude floor (dot_claude/
 #    modify_settings.json.tmpl): the work-discarding forms and the hook skips in
 #    any placement ask, each option a word of its own; the hook skips right
 #    after `git commit` / `git push` deny, last. OpenCode has no rule that
 #    makes a trailing " *" match the bare command, so those denies list the
 #    bare form too.
-expected_bash=$'*=allow\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *push* :*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *push* --mirror=ask\ngit *push* --mirror *=ask\ngit *push* --delete=ask\ngit *push* --delete *=ask\ngit *push* -d=ask\ngit *push* -d *=ask\ngit *branch* -M=ask\ngit *branch* -M *=ask\ngit *stash* drop=ask\ngit *stash* drop *=ask\ngit *stash* clear=ask\ngit *stash* clear *=ask\ngit *worktree remove* --force=ask\ngit *worktree remove* --force *=ask\ngit *worktree remove* -f=ask\ngit *worktree remove* -f *=ask\ngit *--no-verify*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
+expected_bash=$'*=ask\nls=allow\nls *=allow\npwd=allow\npwd *=allow\ncat=allow\ncat *=allow\nhead=allow\nhead *=allow\ntail=allow\ntail *=allow\nwc=allow\nwc *=allow\nfile=allow\nfile *=allow\nstat=allow\nstat *=allow\ndu=allow\ndu *=allow\ntree=allow\ntree *=allow\nwhich=allow\nwhich *=allow\ndiff=allow\ndiff *=allow\ncmp=allow\ncmp *=allow\ncut=allow\ncut *=allow\nuniq=allow\nuniq *=allow\ngrep=allow\ngrep *=allow\nrg=allow\nrg *=allow\necho=allow\necho *=allow\nbasename=allow\nbasename *=allow\ndirname=allow\ndirname *=allow\nrealpath=allow\nrealpath *=allow\ngit status=allow\ngit status *=allow\ngit diff=allow\ngit diff *=allow\ngit log=allow\ngit log *=allow\ngit show=allow\ngit show *=allow\ngit rev-parse=allow\ngit rev-parse *=allow\ngit ls-files=allow\ngit ls-files *=allow\ngit blame=allow\ngit blame *=allow\ngit describe=allow\ngit describe *=allow\ngit branch=allow\ngit branch *=allow\ngit tag=allow\ngit tag *=allow\ngit add=allow\ngit add *=allow\ngit commit=allow\ngit commit *=allow\ngit checkout=allow\ngit checkout *=allow\ngit switch=allow\ngit switch *=allow\ngit reset=allow\ngit reset *=allow\ngit stash=allow\ngit stash *=allow\ngit worktree=allow\ngit worktree *=allow\ngit remote=allow\ngit remote -v=allow\nrg *--pre*=ask\nrg *--hostname-bin*=ask\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *push* :*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *push* --mirror=ask\ngit *push* --mirror *=ask\ngit *push* --delete=ask\ngit *push* --delete *=ask\ngit *push* -d=ask\ngit *push* -d *=ask\ngit *branch* -M=ask\ngit *branch* -M *=ask\ngit *stash* drop=ask\ngit *stash* drop *=ask\ngit *stash* clear=ask\ngit *stash* clear *=ask\ngit *worktree remove* --force=ask\ngit *worktree remove* --force *=ask\ngit *worktree remove* -f=ask\ngit *worktree remove* -f *=ask\ngit *--no-verify*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (allow-all, 7 ask incl. gh default and the whole 1Password CLI, 44 read allow-backs as exact + '... *' pairs, #304 / #334's 71 work-discarding git / hook-skip asks, 27 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, keychain password read / dump / export with and without leading options, and #304's hook skips right after git commit / git push; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (ask base, #381's 38 local commands allowed back as 76 exact + '... *' allows + git remote / git remote -v + the rg --pre / --hostname-bin asks, then 7 ask incl. gh default and the whole 1Password CLI, 44 read allow-backs as exact + '... *' pairs, #304 / #334's 71 work-discarding git / hook-skip asks, 27 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, keychain password read / dump / export with and without leading options, and #304's hook skips right after git commit / git push; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -431,14 +437,70 @@ deny	security -q find-generic-password -s gh:github.com -w
 deny	security -v find-internet-password -s example.invalid -g
 deny	security -q dump-keychain -d
 deny	security -q export -k login.keychain
-allow	security find-identity -v -p codesigning
-allow	security -q find-identity -v -p codesigning
+ask	security find-identity -v -p codesigning
+ask	security -q find-identity -v -p codesigning
 allow	git status
 allow	git commit -m x
-allow	git fetch origin
-allow	ghq get o/r
+ask	git fetch origin
+ask	git pull
+ask	ghq get o/r
 allow	ls -la
 allow	cat README.md
+allow	pwd
+allow	head -n 5 README.md
+allow	tail -n 5 README.md
+allow	wc -l README.md
+allow	grep -rn x .
+allow	rg -n x src
+allow	echo done
+allow	diff a b
+allow	diff -l a b
+allow	file -z f.gz
+allow	cmp a b
+allow	git diff --stat
+allow	git log --oneline -5
+allow	git show HEAD
+allow	git rev-parse HEAD
+allow	git ls-files
+allow	git blame README.md
+allow	git add -A
+allow	git tag v1
+ask	git merge feat
+ask	git merge --no-ff --strategy=publish feat
+ask	git merge -s publish feat
+allow	git reset HEAD~1
+allow	git remote
+allow	git remote -v
+ask	git remote add o https://example.invalid/r
+ask	git remote set-url origin https://example.invalid/r
+ask	git config user.email x
+ask	git -c core.pager=cat log
+ask	git rebase -x make main
+ask	ssh example.invalid
+ask	scp f example.invalid:
+ask	rsync -a d example.invalid:
+ask	nc example.invalid 80
+ask	npm publish
+ask	npm test
+ask	python3 -c x
+ask	node -e x
+ask	bash -c x
+ask	sh -c x
+ask	find . -exec rm {} +
+ask	xargs rm
+ask	awk x f
+ask	sed -n 1p f
+ask	sort f
+ask	jq -n env
+ask	yq .x f
+ask	rg --pre cat x
+ask	rg -n --pre=cat x src
+ask	rg --hostname-bin=./helper --hyperlink-format=file://{host}{path} --color=always -H x README.md
+ask	rg -n --hostname-bin ./helper x
+allow	rg -z x logs
+ask	rm -rf build
+ask	lsx
+ask	cat-file x
 ask	git reset --hard
 ask	git reset HEAD~1 --hard
 ask	git -C /tmp/x reset --hard
@@ -460,7 +522,7 @@ ask	git -C /tmp/x push --mirror origin
 ask	git -C /tmp/x push --delete origin feat
 ask	git -C /tmp/x push -d origin feat
 ask	git -C /tmp/x push origin :feat
-allow	git -C /tmp/x push origin main:main
+ask	git -C /tmp/x push origin main:main
 ask	git branch -M main
 ask	git stash drop
 ask	git stash clear
@@ -492,7 +554,7 @@ allow	git branch -d feature-Draft
 allow	git branch -d feature-f
 allow	git checkout feature-f
 allow	git reset --soft HEAD~1
-allow	git -C /tmp/x status
+ask	git -C /tmp/x status
 allow	git commit -m "tidy cleanup"
 CASES
 if [[ "$decision_failures" -gt 0 ]]; then

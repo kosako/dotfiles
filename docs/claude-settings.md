@@ -151,7 +151,8 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
   user の note。`Edit` の deny は Write・NotebookEdit と、path を名指しする Bash の file command / リダイレクトにも効くが、
   自分で file を開く script には効かない。
 - **ask**(#334): secret を含みうると repo 自身が扱っている設定 file の読み取り — `~/.codex/config.toml`(MCP の env)、
-  `~/.zshrc.local`、OpenCode の local 設定 `~/.config/opencode/opencode.local.json`(provider の option、MCP の header)。
+  `~/.zshrc.local` と `~/.zprofile.local`(secret を置く local override。[local-overrides](local-overrides.md)。後者は #381)、
+  OpenCode の local 設定 `~/.config/opencode/opencode.local.json`(provider の option、MCP の header)。
   doctor は値を出さないが、Codex の設定の調査など正当な理由もありうるので、deny ではなく承認。
 
 日常の git(普通の commit / push、`--force-with-lease`、branch の作成・切替・force なしの rename、merge 済みの `-d`、

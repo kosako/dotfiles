@@ -14,7 +14,7 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 | Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は project の `settings.local.json`(管理外)に隔離。managed 側は apply で戻る。project 側に溜まった allow が外向きの操作を承認なしにしていないかを doctor が report-only で監視(#334) |
 | Codex | 承認 rules(コマンド allowlist と、作業を捨てる git の prompt・hook の skip の forbidden(#304)) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
 | Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
-| OpenCode | `permission`(read / bash / edit の pattern rule: secret floor は deny、外向き・昇格と 1Password の CLI(`op`)は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、作業を捨てる git は ask で hook の skip と参照先 note への edit は deny(#304)、他は allow。既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
+| OpenCode | `permission`(read / bash / edit の pattern rule: secret floor は deny、外向き・昇格と 1Password の CLI(`op`)は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、作業を捨てる git は ask で hook の skip と参照先 note への edit は deny(#304)、bash の既定は ask で、local で完結する読み取りと git の操作だけを allow に戻す(#381)。OpenCode 自身の既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
 
 原則(全 tool 共通):
 
@@ -51,9 +51,11 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
   personal)、OpenCode は `permission` の床(opencode-settings module が active な personal。project / local
   設定で上書きできる)で実装する。Codex は承認 rules の baseline に、同じ種類の command の forbidden / prompt を
   prefix で持つ(#334)。file の読み取りを止める rule は書けないので、Codex の床は command 側だけ。
-- 外向き操作・昇格の都度承認: OpenCode が ask にするのは床に列挙した command(`git push` / `git clone` /
-  read 系以外の `gh` / `sudo` / `curl` / `wget`)だけで、それ以外(`ssh` / `scp` / `npm publish` など)は
-  allow all の既定に落ちる。
+- 外向き操作・昇格の都度承認: OpenCode は bash の既定を ask にし、local で完結する読み取りと git の操作だけを allow に
+  戻す(#381。それまでは床に列挙した command だけが ask で、`ssh` / `scp` / `npm publish` などは allow all の既定に
+  落ちていた)。allow に戻した command は、その後ろに置いた ask / deny(`git push`、作業を捨てる git、hook の skip
+  など)に負ける。allow に戻した command も設定や環境変数で別の program を起動しうる(git の hook・fsmonitor・
+  外部 diff など)ので、これも steering であって境界ではない。
 - 破壊的な git・hook の skip・参照先 note への書き込み(#304): 作業を捨てる git(`reset --hard` / `clean` /
   `checkout --` / `restore` / lease なしの force push / `branch -D`、#334 で足した mirror push・remote の branch の削除・
   `branch -M`・`stash drop` / `clear`・force つきの `worktree remove` など)は承認、`--no-verify` で gate を飛ばすことと
@@ -67,7 +69,7 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
   優先する(`codex execpolicy check` で実測)。Codex の rules は command しか見ないので、note への書き込みの deny に
   相当するものは無い。どれも command の文字列への照合で、steering であって境界ではない。
 - 上の項目を除き、ローカルでの書き込みや破壊的な操作(`rm` など)の確認要否は原則では定めず、tool の既定に委ねる(OpenCode は
-  allow all の上に床を置く形、Claude Code は managed settings に承認モードを置かず harness 既定の確認に従う形、
+  bash を既定 ask にして local の command だけを allow に戻し、read / edit は allow all の上に床を置く形、Claude Code は managed settings に承認モードを置かず harness 既定の確認に従う形、
   Codex は承認 rules の baseline と codex 所有の approval_policy に従う形)。
 
 下記「Prohibited By Default」「Approval Required」に挙げた操作も方針として無確認では行わせないが、tool の既定で

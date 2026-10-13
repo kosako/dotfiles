@@ -14,7 +14,29 @@
          the enforceAiSandbox human-legit gate (off on personal), not the
          floor — so this floor is stricter there. bash, per docs/ai-policy.md
          (read-only local work needs no approval; leaving the machine or
-         escalating does): `git push` / `git clone`, sudo, curl, wget are
+         escalating does), is ask BY DEFAULT (`*`, #381): enumerating the
+         outward commands left ssh / scp / npm publish and the like on the
+         allow-all base, the gap #240 closed for gh. Allowed back, right
+         after the base, are only commands that stay on the machine and
+         whose arguments cannot NAME a program for them to run — read-only
+         inspection (ls, cat, grep, rg, ...; rg's --pre and --hostname-bin
+         name one, so they ask again) and the local git work (status, diff,
+         log, add, commit, checkout, branch, stash, worktree, ...) — each an
+         exact + `... *` pair. A fixed helper an option starts is not named
+         by the argument (rg -z / file -z run the decompressors, diff -l runs
+         pr) and stays allowed. Left at ask: find (-exec), sort
+         (--compress-program), awk, sed, xargs, jq / yq (environment
+         access), git merge (-s names a git-merge-<strategy> program), git
+         fetch / pull, interpreters and build / test runners. Every ask /
+         deny below comes after them and so still wins (last match wins):
+         `git push`, the work-discarding git forms and the hook skips keep
+         their decisions. Programs chosen by config or environment are out of
+         reach: an allowed git command can still start the editor, a signer,
+         hooks, core.fsmonitor or an external diff, and rg reads options from
+         RIPGREP_CONFIG_PATH — an ask on an option would not close that,
+         since a bare `git commit` opens the editor too — so this stays
+         steering, not a boundary. Below the allows:
+         `git push` / `git clone`, sudo, curl, wget are
          ask, and the GitHub CLI is ask BY DEFAULT (`gh *`) with only the
          read-only subcommands allowed back (view / list / diff / checks /
          status, auth status, search, help) — enumerating mutations was the
@@ -31,7 +53,7 @@
          matches zero or more characters, so `git push*` covers both the
          argument-less `git push` (upstream set) and `git push origin main`,
          whereas `git push *` would miss the bare form and fall through to
-         the allow-all base (Codex review, PR #235). That spelling is only
+         the base, allow-all until #381 (Codex review, PR #235). That spelling is only
          safe for ask / deny (over-matching asks more); each read ALLOW is
          instead a pair — the exact bare form and `... *` with a space — so
          the command name is delimited and an alias such as `gh status-token`
@@ -53,7 +75,8 @@
          the set the same way as the Claude floor (push --mirror / --delete /
          -d / a :refspec, branch -M, stash drop / clear, worktree remove
          --force / -f) and asks before reading the config files that may hold secrets
-         (~/.codex/config.toml, ~/.zshrc.local, the local opencode.local.json),
+         (~/.codex/config.toml, ~/.zshrc.local, ~/.zprofile.local — #381 — and
+         the local opencode.local.json),
          like the Claude floor's Read asks.
        - edit (#304): allow-all, but the user-owned reference note
          .agent-context.local.md is deny (agents read it, never write it):
@@ -99,6 +122,7 @@
       "*.env.example": "allow",
       "~/.codex/config.toml": "ask",
       "~/.zshrc.local": "ask",
+      "~/.zprofile.local": "ask",
       "~/.config/opencode/opencode.local.json": "ask"
     },
     "edit": {
@@ -108,7 +132,15 @@
     },
     "external_directory": "ask",
     "bash": {
-      "*": "allow",
+      "*": "ask",
+{{- range list "ls" "pwd" "cat" "head" "tail" "wc" "file" "stat" "du" "tree" "which" "diff" "cmp" "cut" "uniq" "grep" "rg" "echo" "basename" "dirname" "realpath" "git status" "git diff" "git log" "git show" "git rev-parse" "git ls-files" "git blame" "git describe" "git branch" "git tag" "git add" "git commit" "git checkout" "git switch" "git reset" "git stash" "git worktree" }}
+      {{ . | toJson }}: "allow",
+      {{ printf "%s *" . | toJson }}: "allow",
+{{- end }}
+      "git remote": "allow",
+      "git remote -v": "allow",
+      "rg *--pre*": "ask",
+      "rg *--hostname-bin*": "ask",
       "git push*": "ask",
       "git clone*": "ask",
       "gh *": "ask",

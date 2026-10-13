@@ -205,10 +205,10 @@ for notion_tool in notion-create-comment notion-create-attachment notion-create-
 done
 expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github\n'"$expected_unused_mcp"
 actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
-expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
+expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
 ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (75, ordered; enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (76, ordered; enforceAiSandbox off)"
 else
   fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -463,11 +463,14 @@ while IFS='|' read -r want path; do
 done <<CASES
 ask|$claude_read_home/.codex/config.toml
 ask|$claude_read_home/.zshrc.local
+ask|$claude_read_home/.zprofile.local
 ask|$claude_read_home/.config/opencode/opencode.local.json
 none|$claude_read_home/.codex/config.toml.bak
 none|$claude_read_home/.zshrc
 none|$claude_read_home/.config/opencode/opencode.json
 none|$claude_read_home/src/repo/.zshrc.local
+none|$claude_read_home/.zprofile
+none|$claude_read_home/src/repo/.zprofile.local
 deny|$claude_read_home/.ssh/id_ed25519
 deny|$claude_read_home/.codex/auth.json
 deny|$claude_read_home/.config/gh/hosts.yml
