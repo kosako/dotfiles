@@ -31,7 +31,8 @@ identity file の中身は最小限にする。
 
 どの identity で commit するかを取り違えないよう、starship プロンプトが現在の context を常時表示する
 ([docs/shell.md](shell.md))。**personal=緑 / その他の解決済み identity=黄(email 表示)/ repo 内で
-identity 未解決(`useConfigOnly` の fail-closed)=赤**。分類は runtime に「解決された committer email」と
+identity 未解決(`useConfigOnly` の fail-closed)=赤**。解決済みは name と email の両方が空でないこと(email だけの context は
+Git が commit を拒否し、name だけの context は空 email の壊れた identity になるので、どちらも赤。#383)。分類は runtime に「解決された committer email」と
 **local の `~/.config/git/personal.gitconfig`** を照合して行い、managed な `starship.toml` には identity 値を
 一切持たない(public-safe。`scripts/test-starship.sh` が回帰固定)。
 
@@ -113,7 +114,7 @@ context file の状態ごとの config 層の結果(git hook gates を通さな�
 
 | context file | 結果 |
 | --- | --- |
-| 無い / 空 / email だけ | commit 拒否(`fatal: empty ident name (for <>) not allowed`) — fail-closed |
+| 無い / 空 / email だけ | commit 拒否(`fatal: empty ident name (for <>) not allowed`) — fail-closed。prompt は赤(no-identity) |
 | name だけ | config 層では context の name + **空 email** で commit が通る(Git は空 name は拒否するが空 email は受理する)。personal ではないが壊れた identity。gate が武装したマシンでは pre-commit の `personal-git-identity-gate` が止める(下記)。prompt は赤(no-identity)、`doctor` が partial として action、gate の無い環境では `git log` で `<>` が見える |
 | 完全 | その context の identity |
 

@@ -25,7 +25,10 @@ dotfiles が提供するのは**規約とガードレールだけ**で、secret 
 
 ```bash
 # .envrc  — direnv が project 入場時に評価する。op:// 参照だけを持ち、値は持たない。
-export DATABASE_URL="$(op read 'op://Personal/example-db/url')"
+# 取得と export を分ける。`export X="$(op read ...)"` の 1 行では export 自体の exit status が返り、
+# 取得の失敗(未ログイン・参照先なし)が隠れて空の値が export される。
+DATABASE_URL="$(op read 'op://Personal/example-db/url')" || exit 1
+export DATABASE_URL
 ```
 
 または env template を `op run` で包む:

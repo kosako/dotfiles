@@ -516,6 +516,33 @@ else
   fi
 fi
 
+# 9) Escape stripping (#383): CSI colours, OSC ended by BEL and by ST (ESC \),
+#    and CR. An OSC ends at its FIRST terminator, so the visible text of a
+#    hyperlink (OSC 8 ... ST text OSC 8 ST) survives, and two OSCs on a line
+#    are removed separately. Control: the pre-#383 expression (OSC body
+#    [^\a]*) loses the hyperlink text on the same input, so the case reaches
+#    the ST path rather than passing on input that never had one.
+printf '\033[31mred\033[0m\n\033]8;;file:///x\033\\link-text\033]8;;\033\\ tail\n\033]8;;https://example.invalid/\alink2\033]8;;\a end\n\033]0;t1\a keep \033]0;t2\a\n\033]0;t\033\\a\033]0;u\a b\nx\r\n' \
+  > "$fixture/escapes.txt"
+cat > "$fixture/cases/strip.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/helpers.zsh"
+_ai_clip_strip_ansi < "$AI_CLIP_FIXTURE/escapes.txt"
+ZSH
+expected_strip=$'red\nlink-text tail\nlink2 end\n keep \na b\nx'
+strip_out="$(run_case "$fixture/nobin" "" strip _ai_clip_strip_ansi 2>&1)" || true
+strip_control="$(perl -CS -pe 's/\e\[[0-9;:?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(\a|\e\\)//g; s/\r//g' \
+  < "$fixture/escapes.txt" 2>&1)" || true
+if [[ "$strip_out" == "$expected_strip" && "$strip_control" != *link-text* ]]; then
+  ok "test passed: escapes stripped -> CSI, BEL- and ST-ended OSC, CR removed; hyperlink text kept (pre-#383 expression loses it)"
+else
+  printf 'out:\n' >&2
+  printf '%s\n' "$strip_out" | LC_ALL=C od -c | head -20 >&2
+  printf 'control:\n' >&2
+  printf '%s\n' "$strip_control" | LC_ALL=C od -c | head -20 >&2
+  fail "test failed: escape stripping (expected the hyperlink text kept and the control to lose it)"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "ai-clip tests passed"
 fi
