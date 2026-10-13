@@ -32,15 +32,18 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     secret を含みうる設定 file(`~/.codex/config.toml`・`~/.zshrc.local`・`~/.zprofile.local`・`~/.config/opencode/opencode.local.json`)の
     読み取りは **ask**(Claude の床の `Read` の ask と同じ集合。#334)。
   - `bash`: **既定を ask** にする(`*`、#381。列挙で ask にする方式では `ssh` / `scp` / `npm publish` などが allow all の
-    既定に落ちた。`gh` で #240 が塞いだのと同じ穴)。その直後に、machine の外に出ず、引数で別の program を起動しない
+    既定に落ちた。`gh` で #240 が塞いだのと同じ穴)。その直後に、machine の外に出ず、引数で起動する program を指定できない
     command だけを allow に戻す: 読み取り(`ls` / `pwd` / `cat` / `head` / `tail` / `wc` / `file` / `stat` / `du` /
     `tree` / `which` / `diff` / `cmp` / `cut` / `uniq` / `grep` / `rg` / `echo` / `basename` / `dirname` / `realpath`)と
     local の git(`status` / `diff` / `log` / `show` / `rev-parse` / `ls-files` / `blame` / `describe` / `branch` / `tag` /
-    `add` / `commit` / `checkout` / `switch` / `reset` / `merge` / `stash` / `worktree`)。どれも完全一致と `… *` の 2 本
-    1 組で、`git remote` は完全一致と `git remote -v` だけ。`rg` の `--pre` は別の program を起動するので ask に戻す。
+    `add` / `commit` / `checkout` / `switch` / `reset` / `stash` / `worktree`)。どれも完全一致と `… *` の 2 本
+    1 組で、`git remote` は完全一致と `git remote -v` だけ。`rg` の `--pre` と `--hostname-bin` は起動する program を
+    指定するので ask に戻す。option が決まった補助の program を起動するもの(`rg -z` / `file -z` の解凍、`diff -l` の
+    `pr`)は、引数で program を選べないので allow のまま。
     `find`(`-exec`)・`sort`(`--compress-program`)・`awk` / `sed` / `xargs`・`jq` / `yq`(環境変数を読める)・
-    interpreter・build / test の runner・network を使う git(`fetch` / `pull`)・global option の前置(`git -C …`)は
-    ask のまま。allow はすべて下の ask / deny より前に置くので、last-match-wins で後ろの ask / deny が勝つ。
+    `git merge`(`-s` で `git-merge-<strategy>` を起動する)・interpreter・build / test の runner・network を使う git
+    (`fetch` / `pull`)・global option の前置(`git -C …`)は ask のまま。allow はすべて下の ask / deny より前に置くので、
+    last-match-wins で後ろの ask / deny が勝つ。
     その後ろで、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
     **ask**。GitHub CLI は **`gh *` を既定 ask** にし、read 系の subcommand(`pr view|list|diff|checks|status`、
     `issue view|list|status`、`repo view`、`release view|list`、`run view|list`、`workflow view|list`、
@@ -94,8 +97,10 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   **steering であって enforcement ではない**(`$( )` や等価な別 command で迂回しうる。下記)。さらに **boundary では
   ない**: 設定は global → `OPENCODE_CONFIG` → project `opencode.json` → … の順で **merge・後勝ち**なので、
   project の `opencode.json` や agent 定義が床を allow に戻せる。bash を既定 ask にしても(#381)、allow に戻した
-  command は設定や環境変数で別の program を起動しうる(git の hook・`core.fsmonitor`・外部 diff・`GIT_*` の環境変数
-  など)。外向きを確実に止めるのは OS 側の egress の制限(#188)の領分。managed `~/.claude/settings.json` と同じ
+  command は設定や環境変数が選ぶ program を起動しうる(git の editor・署名の program・hook・`core.fsmonitor`・外部 diff、
+  `GIT_*` の環境変数、rg の `RIPGREP_CONFIG_PATH` など)。option を ask にしても塞げない(bare の `git commit` も
+  editor を起動し、設定は edit tool で書き換えられる)ので、床が見るのは「引数で program を指定できるか」まで。
+  外向きを確実に止めるのは OS 側の egress の制限(#188)の領分。managed `~/.claude/settings.json` と同じ
   「public-safe な既定」の位置づけ([ai-environment-boundary](ai-environment-boundary.md))。
 - `bash` の pattern は解析後の command に対する glob。`$( )` や別経路(plugin・MCP)は対象外。
 - OpenCode 自身の egress / fs sandbox は無い。OS 側の sandbox tier は別([ai-environment-boundary](ai-environment-boundary.md))。
@@ -147,7 +152,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
   assert する(#240): doctor の Codex probe 39 本(外向き・昇格 27 + 認証情報の表示 3、#287 + secret の読み出し 9、#334。secret の読み出しは期待する判定つき)に、短縮 flag / alias / read 形、
   #381 の既定 ask(allow に戻した local の読み取りと git、名前の似た command(`lsx` など)、外向き・別 program を起動する
-  command(`ssh` / `npm publish` / `python3 -c` / `find -exec` / `rg --pre` / `git fetch` など)が ask に落ちること)、
+  command(`ssh` / `npm publish` / `python3 -c` / `find -exec` / `rg --pre` / `rg --hostname-bin` / `git merge -s` / `git fetch` など)が ask に落ちること)、
   認証情報を扱う command の置き方(#315)、#304 の git の形を足した集合。doctor.sh の 2 つの配列を literal に読み出し、全 probe がこの集合の行にあることも機械的に確かめる(#332)。edit の rule map も同じ glob で、参照先 note と
   名前の似た file の path に当てて判定する(#304)。期待値は
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail

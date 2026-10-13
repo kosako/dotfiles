@@ -792,7 +792,7 @@ chezmoi が必要(render job)。
 
 managed `~/.config/opencode/opencode.json`(OpenCode の permission 床・#234)の rendered content を検証する。
 `permission.read` / `permission.bash` の rule map を**順序込みで exact pin**(OpenCode は last-match-wins なので
-順序も契約。read = secret floor の deny 6 + `.env` 系 + #334 / #381 の secret を含みうる設定 file の ask 4、bash = 既定 ask の直後に local の command の allow 戻し 80(#381。39 command の完全一致と `… *` の組 + `git remote` / `git remote -v`)と `rg --pre` の ask、その後に外向き・昇格と `gh *` の既定 ask と
+順序も契約。read = secret floor の deny 6 + `.env` 系 + #334 / #381 の secret を含みうる設定 file の ask 4、bash = 既定 ask の直後に local の command の allow 戻し 78(#381。38 command の完全一致と `… *` の組 + `git remote` / `git remote -v`)と `rg` の `--pre` / `--hostname-bin` の ask、その後に外向き・昇格と `gh *` の既定 ask と
 1Password の CLI 全体の ask 計 7、read 系 `gh` subcommand の allow 戻し 44、末尾に env dump / gh secret・token 表示 /
 ssh 鍵 / keychain の password の読み出し・dump・export の deny 21 と、#304 / #334 の作業を捨てる git と hook の skip の ask 71・
 `git commit` / `git push` 直後の hook の skip の deny 6。#240 / #315 / #304)、`permission.edit` が allow-all の上で参照先 note
