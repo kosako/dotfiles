@@ -19,9 +19,12 @@ set -euo pipefail
 #     (alias / bindkey の前) へ動かしても通ってしまう)。
 # fake の mise は「activate が PATH の先頭に dir を足す」形だけを模す (実 mise が
 # precmd の hook で installs の bin を足す側は hermetic に再現できないので対象外)。
-# dot_zprofile は /opt/homebrew の絶対 path を見るので source せず、driver が
-# `brew shellenv` の PATH 前置だけを模す。`zsh -n` は構文しか見ないので、この種の
-# 順序の退行は検出できない。
+# dot_zprofile は /opt/homebrew の絶対 path を見るので、1.〜6. の driver は source せず
+# `brew shellenv` の PATH 前置だけを模す。dot_zprofile 自体は 7. で、/opt/homebrew を
+# fixture の相対 path に置き換えた copy を source して確かめる (#384):
+#   - fake の brew の shellenv を読んだ後に ~/.zprofile.local を読み、local が勝つ
+#     (変数も PATH も)。~/.zprofile.local が無くても壊れずに終わる。
+# `zsh -n` は構文しか見ないので、この種の順序の退行は検出できない。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
@@ -176,6 +179,68 @@ elif [[ "$(read_out ctrl-o-after-zshrc)" == '"^O" zshrc-test-local-accept-line' 
 else
   fail "test failed: a Ctrl-O rebinding from ~/.zshrc.local must survive to the end of .zshrc (got $(read_out ctrl-o-after-zshrc))"
   status=1
+fi
+
+# 7. dot_zprofile (#384): Homebrew の shellenv を読んだ後に ~/.zprofile.local を読み、
+#    local が勝つ。dot_zprofile は /opt/homebrew の絶対 path を見るので、その文字列だけを
+#    fixture の相対 path (./opt-homebrew。driver が fixture へ cd する) に置き換えた copy を
+#    source する (固定の文字列への置き換えなので、fixture の path の文字に左右されない)。
+#    fake の brew は shellenv で目印の変数と PATH の前置を出し、order log に印を書く。
+#    対照: ~/.zprofile.local を置かない run では brew の値が残る (local が値を変えている
+#    ことと、brew の行に届いていることを確かめる)。
+zp="$fixture/zprofile"
+mkdir -p "$zp/opt-homebrew/bin" "$zp/local-bin" "$zp/home-local" "$zp/home-none" "$zp/out-local" "$zp/out-none"
+cat > "$zp/opt-homebrew/bin/brew" <<'SH'
+#!/bin/sh
+[ "$1" = shellenv ] || exit 1
+printf 'brew\n' >> "$ZPROFILE_TEST_OUT/order"
+printf '%s\n' 'export ZPROFILE_TEST_WHO=brew' 'export PATH="$ZPROFILE_TEST_DIR/opt-homebrew/bin:$PATH"'
+SH
+for dir in "$zp/opt-homebrew/bin" "$zp/local-bin"; do
+  printf '#!/bin/sh\n' > "$dir/zprofile-probe"
+  chmod +x "$dir/zprofile-probe"
+done
+chmod +x "$zp/opt-homebrew/bin/brew"
+cat > "$zp/home-local/.zprofile.local" <<'ZSH'
+print -r -- local >> "$ZPROFILE_TEST_OUT/order"
+export ZPROFILE_TEST_WHO=local
+export PATH="$ZPROFILE_TEST_DIR/local-bin:$PATH"
+ZSH
+brew_refs="$(grep -c '/opt/homebrew' "$DOTFILES_ROOT/dot_zprofile" || true)"
+sed 's|/opt/homebrew|./opt-homebrew|g' "$DOTFILES_ROOT/dot_zprofile" > "$zp/zprofile.zsh"
+cat > "$zp/driver.zsh" <<'ZSH'
+cd "$ZPROFILE_TEST_DIR" || exit 1
+source "$ZPROFILE_TEST_DIR/zprofile.zsh"
+print -r -- "${ZPROFILE_TEST_WHO:-<unset>}" > "$ZPROFILE_TEST_OUT/who"
+command -v zprofile-probe > "$ZPROFILE_TEST_OUT/probe" || print -r -- '<none>' > "$ZPROFILE_TEST_OUT/probe"
+ZSH
+# zp_run HOME_DIR OUT_DIR -> 0 when the driver completed
+zp_run() {
+  env -i PATH="$fixture/bin" HOME="$1" ZPROFILE_TEST_DIR="$zp" ZPROFILE_TEST_OUT="$2" \
+    "$zsh_bin" -f "$zp/driver.zsh" </dev/null >"$2/driver.log" 2>&1
+}
+zp_read() { cat "$1/$2" 2>/dev/null || printf '<missing>'; }
+if [[ "$brew_refs" -lt 1 ]]; then
+  fail "test failed: dot_zprofile no longer mentions /opt/homebrew (the Homebrew line is gone)"
+  status=1
+elif ! zp_run "$zp/home-local" "$zp/out-local" || ! zp_run "$zp/home-none" "$zp/out-none"; then
+  cat "$zp/out-local/driver.log" "$zp/out-none/driver.log" >&2 2>/dev/null || true
+  fail "test failed: sourcing dot_zprofile did not complete"
+  status=1
+else
+  want_local="$(printf '%s\n' brew local)|local|$zp/local-bin/zprofile-probe"
+  want_none="brew|brew|$zp/opt-homebrew/bin/zprofile-probe"
+  got_local="$(zp_read "$zp/out-local" order)|$(zp_read "$zp/out-local" who)|$(zp_read "$zp/out-local" probe)"
+  got_none="$(zp_read "$zp/out-none" order)|$(zp_read "$zp/out-none" who)|$(zp_read "$zp/out-none" probe)"
+  if [[ "$got_none" != "$want_none" ]]; then
+    fail "test failed: without ~/.zprofile.local, dot_zprofile must read the brew shellenv and keep its values (got $got_none)"
+    status=1
+  elif [[ "$got_local" == "$want_local" ]]; then
+    ok "test passed: dot_zprofile reads the brew shellenv, then ~/.zprofile.local, and the local values win (control without local keeps brew's)"
+  else
+    fail "test failed: dot_zprofile must read brew, then ~/.zprofile.local, with local winning (got $got_local)"
+    status=1
+  fi
 fi
 
 # 診断用: fail があったときだけ driver の出力 (stderr を含む) を見せる。空であることは

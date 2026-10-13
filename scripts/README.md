@@ -233,7 +233,10 @@ plugin)を持つ隔離 zsh(`zsh -f`、`env -i`)で対話 login shell の起動�
   order log だけでは、source を PATH 再前置の直後へ動かす退行を捕まえられない)。
 
 fake の mise は「activate が PATH の先頭に dir を足す」形だけを模す(precmd の hook で installs の bin を足す側は対象外)。
-`dot_zprofile` は `/opt/homebrew` の絶対 path を見るので source せず、driver が `brew shellenv` の PATH 前置だけを模す。
+`dot_zprofile` は `/opt/homebrew` の絶対 path を見るので、上の driver は source せず `brew shellenv` の PATH 前置だけを模す。
+`dot_zprofile` 自体は別の driver で、`/opt/homebrew` を fixture の相対 path に置き換えた copy を source して確かめる(#384):
+fake の brew の shellenv を読んだ後に `~/.zprofile.local` を読み、local が変数でも PATH でも勝つこと。`~/.zprofile.local` を
+置かない対照では brew の値が残ること(local が値を変えていることと、brew の行に届いていることを確かめる)。
 
 ## test-ai-clip.sh
 
@@ -815,6 +818,9 @@ chezmoi が必要(render job)。
 git-signing module の gating を検証する。`enableGitSigning` の on/off で
 `~/.config/git/signing.gitconfig` が管理される/されないこと、signing mechanism
 (gpg.format=ssh + op-ssh-sign)が public-safe な骨格のみであることを render で確認する。
+signing mechanism の値は文字列の部分一致ではなく、render した `~/.gitconfig` の include を Git 自身にたどらせて
+(`git config --global --includes --get`)`gpg.format` と `gpg.ssh.program` を完全一致で確かめる。行をコメントにした
+copy と、signer を `[gpg "ssh"]` の外に置いた copy を対照にし、どちらも弾くことを確かめる(#384)。
 chezmoi が必要(render job)。
 
 ## test-git-ignore.sh

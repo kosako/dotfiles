@@ -9,6 +9,9 @@ set -euo pipefail
 # absent). The signing
 # key and the per-context commit.gpgsign live in the local identity files
 # (docs/git-identity.md) and are intentionally out of the managed mechanism.
+# The mechanism's values are read the way Git reads them (through the include in
+# the rendered ~/.gitconfig), with controls that a substring grep would pass
+# (#384).
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +64,21 @@ else
   ok "test passed: enableGitSigning=false does not apply signing.gitconfig"
 fi
 
+# signing_values HOME -> "gpg.format|gpg.ssh.program" as Git itself resolves them
+# from HOME/.gitconfig, following its [include] of ~/.config/git/signing.gitconfig
+# (#384). A substring grep passes on a commented-out line or a key under the
+# wrong section; Git's own reading does not. An empty field means Git found no
+# value.
+expected_signer=/Applications/1Password.app/Contents/MacOS/op-ssh-sign
+signing_values() {
+  local fmt prog
+  fmt="$(env -i PATH="$PATH" HOME="$1" GIT_CONFIG_NOSYSTEM=1 \
+    git config --global --includes --get gpg.format 2>/dev/null || true)"
+  prog="$(env -i PATH="$PATH" HOME="$1" GIT_CONFIG_NOSYSTEM=1 \
+    git config --global --includes --get gpg.ssh.program 2>/dev/null || true)"
+  printf '%s|%s\n' "$fmt" "$prog"
+}
+
 # 2) enableGitSigning=true: signing.gitconfig is applied with the SSH mechanism.
 src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-signing-src.XXXXXX")"
 tmp_roots+=("$src")
@@ -78,11 +96,37 @@ f="$on_home/.config/git/signing.gitconfig"
 if [[ ! -f "$f" ]]; then
   fail "test failed: signing.gitconfig not applied while enableGitSigning=true"
   status=1
-elif grep -q 'format = ssh' "$f" && grep -q 'op-ssh-sign' "$f"; then
-  ok "test passed: enableGitSigning=true applies signing.gitconfig (ssh format + 1Password signer)"
+elif [[ "$(signing_values "$on_home")" == "ssh|$expected_signer" ]]; then
+  ok "test passed: enableGitSigning=true applies signing.gitconfig; Git resolves gpg.format=ssh and the 1Password signer through ~/.gitconfig's include"
 else
-  fail "test failed: signing.gitconfig missing expected ssh/op-ssh-sign content"
+  fail "test failed: Git must resolve gpg.format=ssh and gpg.ssh.program=$expected_signer through ~/.gitconfig (got $(signing_values "$on_home"))"
   status=1
+fi
+
+# 2b) Controls (#384): the same check rejects a signing.gitconfig whose lines are
+#     commented out, and one whose signer sits under [gpg] instead of
+#     [gpg "ssh"]. Both still hold the strings the pre-#384 grep looked for, so
+#     a check that only greps would pass them.
+if [[ -f "$f" ]]; then
+  for ctl in commented wrong-section; do
+    ctl_home="$on_root/ctl-$ctl"
+    mkdir -p "$ctl_home/.config/git"
+    cp "$on_home/.gitconfig" "$ctl_home/.gitconfig"
+    case "$ctl" in
+      commented) sed -E 's/^([[:space:]]*)(format|program)/\1# \2/' "$f" > "$ctl_home/.config/git/signing.gitconfig" ;;
+      wrong-section) grep -v '^\[gpg "ssh"\]$' "$f" > "$ctl_home/.config/git/signing.gitconfig" ;;
+    esac
+    ctl_file="$ctl_home/.config/git/signing.gitconfig"
+    if ! grep -q 'format = ssh' "$ctl_file" || ! grep -q 'op-ssh-sign' "$ctl_file"; then
+      fail "test failed: control $ctl lost the strings the old grep checked (the control would not show the gap)"
+      status=1
+    elif [[ "$(signing_values "$ctl_home")" == "ssh|$expected_signer" ]]; then
+      fail "test failed: control $ctl resolved as a working signer (got $(signing_values "$ctl_home"))"
+      status=1
+    else
+      ok "test passed: control $ctl is rejected (Git resolves $(signing_values "$ctl_home"))"
+    fi
+  done
 fi
 
 # 3) The managed mechanism must NOT carry the key or the per-context opt-in;
