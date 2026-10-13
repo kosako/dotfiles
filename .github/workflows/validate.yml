@@ -14,9 +14,17 @@ env:
   YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
   AGE_VERSION: 1.3.2
   AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+  # chezmoi and codex for the render job (Linux) and the bash32 job's render
+  # group (macOS arm64): one version each, a checksum per platform.
+  CHEZMOI_VERSION: 2.73.0
+  CHEZMOI_SHA256: b597729b687af4488a848240134cb633de8ca0f04e0d26d48f400ee2ac338ffa
+  CODEX_VERSION: 0.162.1
+  CODEX_SHA256: 86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057
   # The same versions for the macOS (arm64) runner of the bash32 job.
   YQ_SHA256_DARWIN_ARM64: fee511a181bd8b3e6b7da98842b41973bfac8cd3bcd341ed29a584620b5b2844
   AGE_SHA256_DARWIN_ARM64: e2020b073c44f692685a24d6abc378817eb81ffaaf49fd0531ef8565f767f2f5
+  CHEZMOI_SHA256_DARWIN_ARM64: 246679a0b200e7e8be4a951be3b95d37c33ecb87eaab5af6f4949f7d0317bcc1
+  CODEX_SHA256_DARWIN_ARM64: b293a0fcdd871900a44c0a4f40a1aa401b31e02854f790ebdb8bd5d1177fd1fe
 
 jobs:
   validate:
@@ -120,13 +128,16 @@ jobs:
   # and an agent started with a minimal PATH resolves `#!/usr/bin/env bash` to
   # /bin/bash. The validate job's tests again, on a macOS runner with /bin/bash
   # first on PATH, so the scripts also meet the BSD userland (mktemp, sed,
-  # stat) they run on (#333 F06).
+  # stat) they run on (#333 F06). The render group runs the render job's
+  # suites the same way, with chezmoi and codex pinned for macOS: the managed
+  # files are applied on macOS, and the Claude settings modify script runs
+  # there with /bin/sh, mktemp, trap and jq (#382).
   bash32:
     name: bash32 (${{ matrix.group }})
     runs-on: macos-latest
     # test-doctor alone takes about 40 minutes here (each case is a full
     # doctor run, and process start-up is slow on the macOS runner), so the
-    # tests run as three parallel groups and the wait is the slowest group's.
+    # tests run as parallel groups and the wait is the slowest group's.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -141,6 +152,14 @@ jobs:
               test-shell-syntax.sh test-ai-clip.sh test-zshrc-compinit.sh
               test-zshrc-order.sh test-gclone.sh test-policy.sh test-gitconfig.sh
               test-npmrc.sh test-install-packages.sh test-preflight.sh
+          # The render job's suites (test-npmrc again: its rendered-content
+          # section needs chezmoi, which only this group installs).
+          - group: render
+            suites: >-
+              test-render.sh test-claude-settings.sh test-codex-settings.sh
+              test-opencode-settings.sh test-git-signing.sh test-git-ignore.sh
+              test-herdr-config.sh test-agent-tools-usage-reader.sh
+              test-git-hook-gates.sh test-starship.sh test-ssh.sh test-npmrc.sh
     steps:
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -163,6 +182,27 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           install -m 0755 age/age "$HOME/.local/bin/age"
           install -m 0755 age/age-keygen "$HOME/.local/bin/age-keygen"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: install chezmoi (pinned, checksum verified)
+        if: matrix.group == 'render'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o chezmoi.tar.gz "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_darwin_arm64.tar.gz"
+          echo "${CHEZMOI_SHA256_DARWIN_ARM64}  chezmoi.tar.gz" | shasum -a 256 -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf chezmoi.tar.gz -C "$HOME/.local/bin" chezmoi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: install codex (pinned, checksum verified)
+        if: matrix.group == 'render'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-aarch64-apple-darwin.tar.gz"
+          echo "${CODEX_SHA256_DARWIN_ARM64}  codex.tar.gz" | shasum -a 256 -c -
+          tar -xzf codex.tar.gz codex-aarch64-apple-darwin
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 codex-aarch64-apple-darwin "$HOME/.local/bin/codex"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Added to GITHUB_PATH last, so it comes before every other entry,
@@ -215,11 +255,6 @@ jobs:
 
   render:
     runs-on: ubuntu-latest
-    env:
-      CHEZMOI_VERSION: 2.73.0
-      CHEZMOI_SHA256: b597729b687af4488a848240134cb633de8ca0f04e0d26d48f400ee2ac338ffa
-      CODEX_VERSION: 0.162.1
-      CODEX_SHA256: 86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057
     steps:
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

@@ -35,7 +35,8 @@ bash が入る前に preflight が走り、最小の PATH で起動された age
 - macOS の userland(BSD の `mktemp` / `sed` / `stat` / `date`)で動かす。GNU だけの option を使わない。BSD の `mktemp` は
   template が無いと `TMPDIR` を見ないので、template を付ける(#372)。
 
-CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置いて validate job の test を回す。手元で同じことを
+CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置いて validate job の test と render job の test
+(render group。macOS 用の chezmoi と codex を固定して入れる。#382)を回す。手元で同じことを
 するには `docs/github-workflow.md` の「最低限の validation」に従う。
 
 ## validate-policy.sh
