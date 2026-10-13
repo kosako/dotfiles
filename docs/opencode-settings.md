@@ -29,7 +29,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     **read の deny は read tool にだけ効く**: OpenCode の `grep` は正規表現に、`glob` は pattern に当てる別の permission で、
     path の deny に従わない(OpenCode の docs)。project の外の path はどの tool でも `external_directory`(下記、ask)が
     掛かるが、**project の中の `.env` などは grep で読める**。home を project root にして OpenCode を起動しない(#315)。
-    secret を含みうる設定 file(`~/.codex/config.toml`・`~/.zshrc.local`・`~/.config/opencode/opencode.local.json`)の
+    secret を含みうる設定 file(`~/.codex/config.toml`・`~/.zshrc.local`・`~/.zprofile.local`・`~/.config/opencode/opencode.local.json`)の
     読み取りは **ask**(Claude の床の `Read` の ask と同じ集合。#334)。
   - `bash`: `*` allow の上に、マシン外に出る操作と昇格(`git push` / `git clone` / `sudo` / `curl` / `wget`)を
     **ask**。GitHub CLI は **`gh *` を既定 ask** にし、read 系の subcommand(`pr view|list|diff|checks|status`、
@@ -140,5 +140,5 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
   こと(secret floor 30 件 + #304 の hook の skip と note の deny 4 件 + personal 既定の `mcp__github` と `gateUnusedClaudeMcp` の 21 件(#341)で計 56 件の deny と、
-  1Password の CLI 全体・#334 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 75 件を順序込みで
+  1Password の CLI 全体・#334 / #381 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 76 件を順序込みで
   exact pin。#315 / #304 / #334)。

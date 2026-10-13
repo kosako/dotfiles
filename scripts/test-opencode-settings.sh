@@ -78,7 +78,7 @@ fi
 # 3) The read floor, EXACT and ordered (last match wins in OpenCode, so the
 #    order is part of the contract: the .env.example allow must come after the
 #    .env denies).
-expected_read=$'*=allow\n~/.ssh/*=deny\n~/.aws/*=deny\n~/.config/gh/*=deny\n~/.netrc=deny\n~/.codex/auth.json=deny\n~/.local/share/opencode/auth.json=deny\n*.env=deny\n*.env.*=deny\n*.env.example=allow\n~/.codex/config.toml=ask\n~/.zshrc.local=ask\n~/.config/opencode/opencode.local.json=ask'
+expected_read=$'*=allow\n~/.ssh/*=deny\n~/.aws/*=deny\n~/.config/gh/*=deny\n~/.netrc=deny\n~/.codex/auth.json=deny\n~/.local/share/opencode/auth.json=deny\n*.env=deny\n*.env.*=deny\n*.env.example=allow\n~/.codex/config.toml=ask\n~/.zshrc.local=ask\n~/.zprofile.local=ask\n~/.config/opencode/opencode.local.json=ask'
 actual_read="$(yq -p json '.permission.read | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_read" == "$expected_read" ]]; then
   ok "test passed: permission.read is exactly the secret floor plus #334's config-read asks (13 rules, ordered)"
@@ -110,8 +110,8 @@ opencode_read_decision() {
   printf '%s\n' "$decision"
 }
 read_misses=""
-for read_case in "ask|$read_home/.codex/config.toml" "ask|$read_home/.zshrc.local" "ask|$read_home/.config/opencode/opencode.local.json" \
-  "allow|$read_home/.codex/config.toml.bak" "allow|$read_home/.zshrc" "allow|$read_home/.config/opencode/opencode.json" "allow|$read_home/src/repo/.zshrc.local" \
+for read_case in "ask|$read_home/.codex/config.toml" "ask|$read_home/.zshrc.local" "ask|$read_home/.zprofile.local" "ask|$read_home/.config/opencode/opencode.local.json" \
+  "allow|$read_home/.codex/config.toml.bak" "allow|$read_home/.zshrc" "allow|$read_home/.config/opencode/opencode.json" "allow|$read_home/src/repo/.zshrc.local" "allow|$read_home/.zprofile" "allow|$read_home/src/repo/.zprofile.local" \
   "deny|$read_home/.ssh/id_ed25519" "deny|$read_home/.codex/auth.json" "deny|$read_home/.config/gh/hosts.yml" "deny|app/.env" "allow|app/.env.example"; do
   read_got="$(opencode_read_decision "${read_case#*|}")"
   [[ "$read_got" == "${read_case%%|*}" ]] || read_misses+="  ${read_case#*|} -> ${read_got:-<no rule>} (expected ${read_case%%|*})"$'\n'
