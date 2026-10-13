@@ -331,7 +331,7 @@ Codex は書き換えない(codex 所有の `config.toml` とは別 file)。
 
 第 3 の AI harness。capability ではなく **module 列挙だけで gate**(claude-settings / codex-settings と
 同型): managed な `~/.config/opencode/opencode.json` に permission の床(secret floor の read / bash
-deny・外向きと昇格の bash は ask・他は allow)、`autoupdate: false`(update-policy)、`share: "disabled"`、
+deny・bash は既定 ask で local の読み取りと git の操作だけ allow(#381)・外向きと昇格は ask)、`autoupdate: false`(update-policy)、`share: "disabled"`、
 `instructions`(agent-tools 配布の運用ルール。OpenCode は `@` import を辿らない)を置く。provider /
 model / auth / plugin / mcp は local(`OPENCODE_CONFIG` が指す file・`auth.json`)で managed には書かない。
 skill は `~/.claude/skills` を OpenCode が直接読むので再配布しない。

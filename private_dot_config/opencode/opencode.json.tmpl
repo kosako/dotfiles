@@ -14,7 +14,22 @@
          the enforceAiSandbox human-legit gate (off on personal), not the
          floor — so this floor is stricter there. bash, per docs/ai-policy.md
          (read-only local work needs no approval; leaving the machine or
-         escalating does): `git push` / `git clone`, sudo, curl, wget are
+         escalating does), is ask BY DEFAULT (`*`, #381): enumerating the
+         outward commands left ssh / scp / npm publish and the like on the
+         allow-all base, the gap #240 closed for gh. Allowed back, right
+         after the base, are only commands that stay on the machine and take
+         no argument that starts another program — read-only inspection
+         (ls, cat, grep, rg, ...; rg's --pre runs a program, so it asks
+         again) and the local git work (status, diff, log, add, commit,
+         checkout, branch, stash, worktree, ...) — each an exact + `... *`
+         pair; find (-exec), sort (--compress-program), awk, sed, xargs,
+         jq / yq (environment access), interpreters and build / test runners
+         stay ask. Every ask / deny below comes after them and so still wins
+         (last match wins): `git push`, the work-discarding git forms and the
+         hook skips keep their decisions. git can still start other programs
+         through config and environment (hooks, fsmonitor, an external
+         diff), so this stays steering, not a boundary. Below the allows:
+         `git push` / `git clone`, sudo, curl, wget are
          ask, and the GitHub CLI is ask BY DEFAULT (`gh *`) with only the
          read-only subcommands allowed back (view / list / diff / checks /
          status, auth status, search, help) — enumerating mutations was the
@@ -31,7 +46,7 @@
          matches zero or more characters, so `git push*` covers both the
          argument-less `git push` (upstream set) and `git push origin main`,
          whereas `git push *` would miss the bare form and fall through to
-         the allow-all base (Codex review, PR #235). That spelling is only
+         the base, allow-all until #381 (Codex review, PR #235). That spelling is only
          safe for ask / deny (over-matching asks more); each read ALLOW is
          instead a pair — the exact bare form and `... *` with a space — so
          the command name is delimited and an alias such as `gh status-token`
@@ -110,7 +125,14 @@
     },
     "external_directory": "ask",
     "bash": {
-      "*": "allow",
+      "*": "ask",
+{{- range list "ls" "pwd" "cat" "head" "tail" "wc" "file" "stat" "du" "tree" "which" "diff" "cmp" "cut" "uniq" "grep" "rg" "echo" "basename" "dirname" "realpath" "git status" "git diff" "git log" "git show" "git rev-parse" "git ls-files" "git blame" "git describe" "git branch" "git tag" "git add" "git commit" "git checkout" "git switch" "git reset" "git merge" "git stash" "git worktree" }}
+      {{ . | toJson }}: "allow",
+      {{ printf "%s *" . | toJson }}: "allow",
+{{- end }}
+      "git remote": "allow",
+      "git remote -v": "allow",
+      "rg *--pre*": "ask",
       "git push*": "ask",
       "git clone*": "ask",
       "gh *": "ask",
