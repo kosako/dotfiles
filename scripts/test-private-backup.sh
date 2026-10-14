@@ -55,7 +55,29 @@ elif [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]]; then
 fi
 
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-pb-test.XXXXXX")"
-trap 'rm -rf "$fixture_home"' EXIT
+active_backup_pid=""
+
+# pb_kill_tree PID — KILL PID and its descendants (collected before the kill).
+pb_kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    pb_kill_tree "$child"
+  done
+  kill -KILL "$1" 2>/dev/null || true
+}
+# Reap the background FIFO case before removing its HOME and staging. A
+# background command can ignore INT, so the suite owns its whole process tree.
+cleanup() {
+  if [[ -n "$active_backup_pid" ]]; then
+    pb_kill_tree "$active_backup_pid"
+    wait "$active_backup_pid" 2>/dev/null || true
+    active_backup_pid=""
+  fi
+  rm -rf "$fixture_home" || true
+}
+trap 'trap "" INT TERM; cleanup' EXIT
+trap 'trap "" INT TERM; cleanup; trap - INT; kill -INT $$' INT
+trap 'trap "" INT TERM; cleanup; trap - TERM; kill -TERM $$' TERM
 
 mkdir -p "$fixture_home/.ssh" "$fixture_home/fakebin" "$fixture_home/keys" "$fixture_home/out"
 # Baseline files declared in .chezmoidata/backup-paths.yaml.
@@ -1375,14 +1397,6 @@ printf 'backup_paths:\n  - { path: link-file, type: file }\n  - { path: link-dir
 # regular-file check) blocks for good on a FIFO with no writer and would
 # never reach the assertions (Codex review, PR #351). Past the deadline the
 # run and everything it started are killed and the case fails.
-# pb_kill_tree PID — KILL PID and its descendants (collected before the kill).
-pb_kill_tree() {
-  local child
-  for child in $(pgrep -P "$1" 2>/dev/null || true); do
-    pb_kill_tree "$child"
-  done
-  kill -KILL "$1" 2>/dev/null || true
-}
 kind_log="$fixture_home/kind-backup.log"
 # A TMPDIR of its own inside the fixture: a KILL skips backup's EXIT trap, and
 # the staging it made would otherwise outlive the suite's cleanup (Codex
@@ -1391,18 +1405,19 @@ kind_tmp="$fixture_home/kind-tmp"
 mkdir -p "$kind_tmp"
 HOME="$kind_home" TMPDIR="$kind_tmp" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$kind_home/k.age" --recipient "$recipient" --yes > "$kind_log" 2>&1 &
-kind_pid=$!
+active_backup_pid=$!
 kind_deadline=$((SECONDS + 60))
-while kill -0 "$kind_pid" 2>/dev/null && [[ "$SECONDS" -lt "$kind_deadline" ]]; do
+while kill -0 "$active_backup_pid" 2>/dev/null && [[ "$SECONDS" -lt "$kind_deadline" ]]; do
   sleep 0.2
 done
 kind_timed_out=0
-if kill -0 "$kind_pid" 2>/dev/null; then
+if kill -0 "$active_backup_pid" 2>/dev/null; then
   kind_timed_out=1
-  pb_kill_tree "$kind_pid"
+  pb_kill_tree "$active_backup_pid"
 fi
 kind_rc=0
-wait "$kind_pid" 2>/dev/null || kind_rc=$?
+wait "$active_backup_pid" 2>/dev/null || kind_rc=$?
+active_backup_pid=""
 kind_out="$(cat "$kind_log")"
 kind_extract="$fixture_home/kind-extract"
 mkdir -p "$kind_extract"
