@@ -1858,9 +1858,9 @@ if module_active_for_profile "$profile" claude-settings; then
   # settings.json (SSH-key / credential-store / env-dump / gh-secret reads;
   # credential stores — aws, gh OAuth, netrc, codex auth — joined in #136).
   # The human never legitimately asks Claude to do these and the deny binds
-  # only Claude's own tool calls, so it is always on. Live on personal today,
-  # no enforceAiSandbox needed.
-  ok "secret floor active: SSH-key / credential-store / env-dump / gh-secret reads denied unconditionally (best-effort, not a boundary)"
+  # only Claude's own tool calls. This reports the managed declaration, not
+  # the live settings; no enforceAiSandbox needed.
+  ok 'secret floor declared: managed ~/.claude/settings.json denies SSH-key / credential-store / env-dump / gh-secret reads unconditionally (best-effort, not a boundary; live drift shows in "managed drift")'
   # Tier 2 — human-legit write gate: main-push deny, .env read deny, and the
   # release/branch-protection ask still ride on enforceAiSandbox, which personal
   # keeps false (its egress block is unusable on a daily driver). A restricted
