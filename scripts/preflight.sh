@@ -235,10 +235,10 @@ elif [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
   hook_gates_missing=0
   for hook_gates_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
-    if [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]]; then
+    if [[ -f "$hook_gates_deploy_dir/$hook_gates_script" && -x "$hook_gates_deploy_dir/$hook_gates_script" ]]; then
       ok "deployed: $hook_gates_deploy_dir/$hook_gates_script"
     else
-      warn "missing or not executable: $hook_gates_deploy_dir/$hook_gates_script"
+      warn "missing, not a regular file, or not executable: $hook_gates_deploy_dir/$hook_gates_script"
       hook_gates_missing=1
     fi
   done

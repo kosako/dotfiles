@@ -187,7 +187,7 @@ agent-tools の残量の読み取り口の apply impact(既存 `~/.config/agent-
 policy validation 失敗時のみ非 0 / commands 節が確認する tool がすべて catalog(name / pkg / bin)か
 catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)/
 git hook gates の deploy 4 本の readiness(完全な deploy は script ごとと武装と hooksPath が ok、identity gate が欠けた旧 deploy は
-その script と「武装しない」の warn、#307)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
+その script と「武装しない」の warn、script の path が directory でも不完全とする、#307 / #392)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
 値を出さないこと(それぞれの warn は出し、canary は出ない、#307)、をカバーする。
 
 ## test-lib.sh
@@ -454,7 +454,7 @@ query だけを実機で実行する(書き込みはしない)。
   clean の ok になる)。root では skip。
 - git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
   欠けた旧 deploy、または実行 bit の無い gate → commit が止まる warn / 配線なし + dispatcher だけ → 両方が不完全の warn。
-  doctor の一覧が短くなれば落ちる。
+  deploy script や shim の path が directory なら完了 / 配線済みと数えない(#392)。doctor の一覧が短くなれば落ちる。
 - git hook gates の残置(#258): `enableGitHookGates=false` で配管が残るとき、module が active な personal では apply の
   action、非 active な work では実在する file だけを名指しした `rm -i` の手順と core.hooksPath の確認 / 何も無ければ
   not wired で action なし。

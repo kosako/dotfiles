@@ -322,7 +322,7 @@ fi
 rm -f "$pf_hg_deploy/personal-git-identity-gate"
 pf_rc=0
 pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
-if [[ "$pf_rc" -eq 0 ]] && grep -Fxq "[warn] missing or not executable: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
+if [[ "$pf_rc" -eq 0 ]] && grep -Fxq "[warn] missing, not a regular file, or not executable: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
   && grep -Fxq "[warn] agent-tools deploy incomplete: apply will NOT arm the commit gates (two-key gate); run agent-tools sync first, then apply again. Do not arm a partial deploy — the dispatcher fails closed and would block every git commit" <<< "$pf_out" \
   && ! grep -Fq "agent-tools deploy complete" <<< "$pf_out"; then
   pass "git hook gates: the pre-#281 deploy (identity gate missing) names it and will not arm"
@@ -330,6 +330,21 @@ else
   printf '%s\n' "$pf_out" >&2
   miss "git hook gates: a deploy without the identity gate must not be reported as complete"
 fi
+#     A searchable directory must not count as an executable deploy script.
+mkdir "$pf_hg_deploy/personal-git-identity-gate"
+pf_rc=0
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
+if [[ "$pf_rc" -eq 0 ]] \
+  && grep -Fxq "[warn] missing, not a regular file, or not executable: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
+  && grep -Fq "[warn] agent-tools deploy incomplete:" <<< "$pf_out" \
+  && ! grep -Fq "[ok] deployed: $pf_hg_deploy/personal-git-identity-gate" <<< "$pf_out" \
+  && ! grep -Fq "apply arms the commit gates" <<< "$pf_out"; then
+  pass "git hook gates: a directory script is an incomplete deploy and will not arm"
+else
+  printf '%s\n' "$pf_out" >&2
+  miss "git hook gates: a directory must not count as a deployed script"
+fi
+rmdir "$pf_hg_deploy/personal-git-identity-gate"
 #     The capability alone arms nothing (#329): with the git-hook-gates module
 #     taken out of the profile, .chezmoiignore keeps the shims and
 #     hooks.gitconfig out of apply, so a complete deploy must be reported as a

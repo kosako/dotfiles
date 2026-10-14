@@ -181,7 +181,7 @@ hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
 hook_gates_scripts=(personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate)
 hook_gates_deploy_complete=1
 for hook_gates_script in "${hook_gates_scripts[@]}"; do
-  [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
+  [[ -f "$hook_gates_deploy_dir/$hook_gates_script" && -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
 done
 # The shim stages are the module's declared .config/git-hook-gates/hooks/*
 # paths (modules.yaml is the one list; #361 grew it from pre-commit /
@@ -197,10 +197,10 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     hook_gates_wired=1
     hook_gates_present=0
     for hook_stage in ${hook_gates_stages[@]+"${hook_gates_stages[@]}"}; do
-      if [[ -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
+      if [[ -f "$hook_gates_dir/hooks/$hook_stage" && -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
         hook_gates_present=$((hook_gates_present + 1))
       else
-        warn "shim missing or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
+        warn "shim missing, not a regular file, or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
         hook_gates_wired=0
       fi
     done

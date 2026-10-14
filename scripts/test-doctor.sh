@@ -2615,8 +2615,8 @@ hg_expect "wired + complete deploy -> all ok" -- \
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_shims/pre-push"
 hg_expect "wired + one pass-through shim missing -> named" -- \
-  "[warn] shim missing or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
-  ! "shims present and executable: all" "shim missing or not executable: $hg_shims/pre-commit"
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  ! "shims present and executable: all" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit"
 # HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
 hg_expect "wired + pre-#281 deploy (identity gate missing) -> BLOCKED warning" -- \
@@ -2626,10 +2626,23 @@ hg_setup 1 "${hg_all[@]}"
 chmod 644 "$hg_deploy/personal-public-safety-gate"
 hg_expect "wired + a non-executable gate -> BLOCKED warning" -- \
   "$hg_wired_incomplete" ! "$hg_complete"
+# HG-3b) a searchable directory is not a deployed script, even with -x.
+hg_setup 1 "${hg_all[@]}"
+rm -f "$hg_deploy/personal-public-safety-gate"
+mkdir "$hg_deploy/personal-public-safety-gate"
+hg_expect "wired + a directory gate -> BLOCKED warning" -- \
+  "$hg_wired_incomplete" ! "$hg_complete"
+# HG-3c) a directory at a shim path must not count as wired.
+hg_setup 1 "${hg_all[@]}"
+rm -f "$hg_shims/pre-push"
+mkdir "$hg_shims/pre-push"
+hg_expect "a directory shim -> wiring incomplete" -- \
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  ! "shims present and executable: all"
 # HG-4) nothing wired + the dispatcher alone -> both halves incomplete.
 hg_setup 0 personal-git-hook-dispatcher
 hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- \
-  "[warn] shim missing or not executable: $hg_shims/pre-commit (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-commit (chezmoi apply arms it once the agent-tools deploy is complete)" \
   "[warn] global core.hooksPath is not set (chezmoi apply arms it via the ~/.gitconfig include once the agent-tools deploy is complete)" \
   "$hg_both_incomplete" ! "$hg_complete"
 rm -rf "$hg_home"
