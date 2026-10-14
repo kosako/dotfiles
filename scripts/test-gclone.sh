@@ -26,7 +26,8 @@ miss() {
   status=1
 }
 
-fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gclone-test.XXXXXX")"
+# All cases exercise a fixture path containing both whitespace and a quote.
+fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gclone-test space's.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
 
 # Extract exactly one marker-delimited function body from the managed source.
@@ -53,7 +54,7 @@ run_gclone() {
   shift 3
   local out rc=0
   out="$(HOME="$fixture_home" zsh -f -c \
-    "source '$fn_file'; gclone \"\$@\"" gclone "$@" </dev/null 2>/dev/null)" || rc=$?
+    'source "$1"; shift; gclone "$@"' gclone "$fn_file" "$@" </dev/null 2>/dev/null)" || rc=$?
   if [[ "$rc" == "$expected_rc" && "$out" == "$expected_out" ]]; then
     pass "$name"
   else
