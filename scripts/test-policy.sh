@@ -499,6 +499,20 @@ run_fail_contains \
   "duplicate backup path: .zshrc.local" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# Distinct paths must stay distinct, including a single trailing pipe (#390).
+make_fixture
+printf 'backup_paths:\n  - { path: cfg, type: file }\n  - { path: "cfg|", type: file }\n' \
+  > "$fixture/.chezmoidata/backup-paths.yaml"
+run_ok_contains \
+  "preserves a trailing pipe without a false duplicate" \
+  "[ok] backup path: cfg|" \
+  "$fixture/scripts/validate-policy.sh" personal
+printf '  - { path: "cfg|", type: file }\n' >> "$fixture/.chezmoidata/backup-paths.yaml"
+run_fail_contains \
+  "reports the full duplicate path including its trailing pipe" \
+  "duplicate backup path: cfg|" \
+  "$fixture/scripts/validate-policy.sh" personal
+
 # Structural validation happens in the shared parser before any row is
 # emitted (#246): a missing path, a "|" in a free-form label (which would
 # shift the fields and corrupt the path), or a control character in any

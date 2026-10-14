@@ -214,6 +214,43 @@ make_archive() {
   tar -cf - -C "$stage" . | age -r "$recipient" -o "$out"
 }
 
+# A trailing pipe is part of the path (#390), even when the truncated name
+# also exists. Check the manifest, payload, verify and restore independently.
+pipe_home="$fixture_home/pipe-home"
+pipe_extract="$fixture_home/pipe-extract"
+pipe_restore="$fixture_home/pipe-restore"
+mkdir -p "$pipe_home/.config/dotfiles" "$pipe_extract" "$pipe_restore"
+printf 'wanted content\n' > "$pipe_home/cfg|"
+printf 'wrong content\n' > "$pipe_home/cfg"
+printf 'backup_paths:\n  - { path: "cfg|", type: file, category: label }\n' \
+  > "$pipe_home/.config/dotfiles/backup-paths.local"
+if HOME="$pipe_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$pipe_home/pipe.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  age -d -i "$fixture_home/keys/id.txt" "$pipe_home/pipe.age" | tar -xpf - -C "$pipe_extract"
+  pipe_sum="$(shasum -a 256 "$pipe_home/cfg|" | awk '{print $1}')"
+  if SUM="$pipe_sum" yq -e -p=json '
+    ([.entries[] | select(.path == "cfg|" and .type == "file" and .category == "label" and .origin == "local")] | length) == 1 and
+    ([.files[] | select(.path == "cfg|" and .sha256 == strenv(SUM))] | length) == 1 and
+    ([.files[] | select(.path == "cfg")] | length) == 0
+  ' "$pipe_extract/manifest.json" >/dev/null \
+    && cmp -s "$pipe_home/cfg|" "$pipe_extract/files/cfg|" \
+    && [[ ! -e "$pipe_extract/files/cfg" ]]; then
+    pass "backup preserves a trailing pipe in the manifest and payload"
+  else
+    miss "backup lost a trailing pipe or captured the truncated path"
+  fi
+  if run verify --in "$pipe_home/pipe.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
+    && run restore --in "$pipe_home/pipe.age" --identity "$fixture_home/keys/id.txt" \
+      --target-home "$pipe_restore" --apply >/dev/null 2>&1 \
+    && cmp -s "$pipe_home/cfg|" "$pipe_restore/cfg|" && [[ ! -e "$pipe_restore/cfg" ]]; then
+    pass "verify and restore preserve a trailing pipe path"
+  else
+    miss "verify or restore failed to preserve a trailing pipe path"
+  fi
+else
+  miss "backup with a trailing pipe path failed"
+fi
+
 # 6. A checksum mismatch (manifest sha does not match the file) is caught.
 bad="$fixture_home/stage-badsum"
 mkdir -p "$bad/files"
@@ -224,10 +261,11 @@ TS="2026-01-01T00:00:00Z" yq -n -o=json '{
   "files": [{"path": ".zshrc.local", "mode": "600", "size": 13, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}]
 }' > "$bad/manifest.json"
 make_archive "$bad" "$fixture_home/out/badsum.age"
-# Capture then grep: verify exits non-zero on these negative cases, which
-# under `set -o pipefail` would otherwise mask the matched message.
-out="$(run verify --in "$fixture_home/out/badsum.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "checksum mismatch" <<< "$out"; then
+# Capture the status separately: each negative case must exit 1 as well as
+# report the cause, so a diagnostic alone cannot hide a successful exit.
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/badsum.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "checksum mismatch" <<< "$out"; then
   pass "verify detects a checksum mismatch"
 else
   miss "verify missed a checksum mismatch"
@@ -245,8 +283,9 @@ SUM="$sum" yq -n -o=json '{
   "files": [{"path": "declared", "mode": "644", "size": 2, "sha256": strenv(SUM)}]
 }' > "$extra/manifest.json"
 make_archive "$extra" "$fixture_home/out/extra.age"
-out="$(run verify --in "$fixture_home/out/extra.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "not in manifest" <<< "$out"; then
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/extra.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "not in manifest" <<< "$out"; then
   pass "verify detects an archive file missing from the manifest"
 else
   miss "verify missed an undeclared archive file"
@@ -264,8 +303,9 @@ yq -n -o=json '{
   "files": [{"path": "evil", "mode": "777", "size": 0, "sha256": "x"}]
 }' > "$slink/manifest.json"
 make_archive "$slink" "$fixture_home/out/symlink.age"
-out="$(run verify --in "$fixture_home/out/symlink.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "symlink" <<< "$out" && grep -Fq "before extraction" <<< "$out"; then
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/symlink.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "symlink" <<< "$out" && grep -Fq "before extraction" <<< "$out"; then
   pass "verify rejects a symlink member before extraction"
 else
   printf '%s\n' "$out" >&2
@@ -283,8 +323,9 @@ yq -n -o=json '{
   "created_at": "2026-01-01T00:00:00Z", "entries": [], "files": []
 }' > "$ddir/manifest.json"
 make_archive "$ddir" "$fixture_home/out/disallowed.age"
-out="$(run verify --in "$fixture_home/out/disallowed.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "disallowed member name" <<< "$out"; then
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/disallowed.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "disallowed member name" <<< "$out"; then
   pass "verify rejects a disallowed member name before extraction"
 else
   printf '%s\n' "$out" >&2
@@ -556,8 +597,9 @@ SUM="$msum" SZ="$msize" yq -n -o=json '{
   "files": [{"path": ".zshrc.local", "mode": "600", "size": (strenv(SZ) | tonumber), "sha256": strenv(SUM)}]
 }' > "$mdir/manifest.json"
 make_archive "$mdir" "$fixture_home/out/mode.age"
-out="$(run verify --in "$fixture_home/out/mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "mode mismatch" <<< "$out"; then
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "mode mismatch" <<< "$out"; then
   pass "verify detects a mode mismatch"
 else
   printf '%s\n' "$out" >&2
@@ -568,8 +610,9 @@ fi
 #     member listing must reject it before extraction, not swallow tar's
 #     error).
 printf 'this is not a tar archive\n' | age -r "$recipient" -o "$fixture_home/out/notar.age"
-out="$(run verify --in "$fixture_home/out/notar.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "could not list archive members" <<< "$out"; then
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/notar.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "could not list archive members" <<< "$out"; then
   pass "verify fails closed on a non-tar payload"
 else
   printf '%s\n' "$out" >&2
@@ -1343,8 +1386,9 @@ mkdir -p "$tam_stage"
 age -d -i "$fixture_home/keys/id.txt" "$sup_home/s.age" | tar -xpf - -C "$tam_stage"
 printf '  - { path: "injected", type: file }\n' >> "$tam_stage/files/$sup_rel"
 make_archive "$tam_stage" "$fixture_home/out/tampered-supplement.age"
-out="$(run verify --in "$fixture_home/out/tampered-supplement.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || true
-if grep -Fq "checksum mismatch: $sup_rel" <<< "$out"; then
+verify_rc=0
+out="$(run verify --in "$fixture_home/out/tampered-supplement.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "checksum mismatch: $sup_rel" <<< "$out"; then
   pass "verify rejects a tampered supplement payload"
 else
   printf '%s\n' "$out" >&2
