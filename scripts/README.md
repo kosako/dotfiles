@@ -65,8 +65,9 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 - module の `paths:` が home 相対のリテラル path であること(glob / pattern 文字・空白・
   先頭 `~` / `./`・末尾 `/` は fail。`.chezmoiignore` allowlist の `!<path>` 行になるため、#207)。
   同一 path を複数 module が宣言していないこと。
-- module の `requires:` の capability が定義済みで、値が schema の型に適合すること。
-- `requires:` があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
+- module の `requires:` は map であること。省略・null・空の map は条件なしとし、それ以外の型は fail。
+  各 capability が定義済みで、値が schema の型に適合すること。条件の列挙に失敗した場合も fail。
+- `requires:` に条件があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
 - backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
   重複なしであること。entry の構造(map・非空 string の `path`・`type` / `category` は `|` と制御文字を
@@ -281,9 +282,11 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - enum capability の許可値を正しく受け入れること。
 - unknown profile / module / capability(module の `requires:` 内も)、重複 capability / module、enum の不正値、
   environmentKind の欠落 / 未知の値、schema が宣言する capability の欠落を拒否すること。
-- boolean capability・`requires:`・`implemented:` は YAML boolean の小文字 `true` / `false` だけを受け入れ、
+- boolean capability・`requires:` 内の boolean 条件値・`implemented:` は YAML boolean の小文字 `true` / `false` だけを受け入れ、
   文字列 / 数値 / null / 大文字綴りを拒否すること(#206)。
-- 同一 path を複数 module が宣言したら fail、`requires:` を持つ module は `paths:` 必須。
+- `requires:` 自体の boolean / 文字列 / 数値 / 配列は exit 1 で拒否し、module 名と map が必要な旨を表示すること。
+  省略・null・空の map は条件なしとして許容。不正な型や列挙失敗時には runtime の active 判定も失敗すること(#391)。
+- 同一 path を複数 module が宣言したら fail、`requires:` に条件を持つ module は `paths:` 必須。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar

@@ -346,9 +346,19 @@ module_paths() {
 
 # Print "capability value" pairs from a module requires: section.
 module_requires() {
-  local module="$1"
+  local module="$1" requires_type
+  # Only absence/null means no conditions. `// {}` would also accept false.
+  requires_type="$(m="$module" yq '.modules[strenv(m)].requires | tag' "$MODULES_FILE")" || return 1
+  case "$requires_type" in
+    '!!null') return 0 ;;
+    '!!map') ;;
+    *)
+      fail "module requires must be a map or null: $module"
+      return 1
+      ;;
+  esac
   m="$module" \
-    yq '.modules[strenv(m)].requires // {} | to_entries | .[] | .key + " " + (.value | tostring)' "$MODULES_FILE"
+    yq '.modules[strenv(m)].requires | to_entries | .[] | .key + " " + (.value | tostring)' "$MODULES_FILE"
 }
 
 # A module's paths are managed for a profile when the profile lists the
@@ -357,7 +367,7 @@ module_requires() {
 module_active_for_profile() {
   local profile="$1"
   local module="$2"
-  local capability value modules
+  local capability value modules requires
 
   # Capture, then test against a here-string. A `yq | grep -q` pipe
   # would make yq exit with SIGPIPE once grep -q closes it early, which
@@ -365,10 +375,12 @@ module_active_for_profile() {
   modules="$(profile_modules "$profile")"
   grep -Fxq -- "$module" <<< "$modules" || return 1
 
+  # Process substitution hides a failed read and can make a module active.
+  requires="$(module_requires "$module")" || return 1
   while read -r capability value; do
     [[ -z "$capability" ]] && continue
     [[ "$(capability_value "$profile" "$capability")" == "$value" ]] || return 1
-  done < <(module_requires "$module")
+  done <<< "$requires"
   return 0
 }
 
