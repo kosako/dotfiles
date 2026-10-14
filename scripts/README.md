@@ -179,7 +179,8 @@ managed-path orphan、managed drift、Codex projects trust の stale / home 全�
 非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
 `-` 始まりの引数(`-h` / `--all` / `--list-profiles` など)と 2 つ目の引数を exit 2 で拒否し report を走らせない(#309)/
 git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
-`core.excludesFile` が設定済み・明示的な空値のときの warn(値は出さない)、work の left-as-is、不在時の ok。
+`core.excludesFile` が別の file を指す・明示的な空値のときの warn、managed path または同じ file の別名なら ok
+(設定値は出さない)、work の left-as-is、不在時の ok。
 `env -i` で hermetic に回す、#248)/
 herdr config の apply impact(既存 `~/.config/herdr/config.toml` の置換 warn、work の left-as-is、不在時の ok、#261)/
 agent-tools の残量の読み取り口の apply impact(既存 `~/.config/agent-tools/usage-reader.json` の置換 warn、work の left-as-is、不在時の ok、#301)/

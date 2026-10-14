@@ -133,8 +133,8 @@ fi
 
 # 5b. git-ignore apply impact (#248): personal manages ~/.config/git/ignore
 #     (git's default global excludes file), so an existing one warns with the
-#     .git/info/exclude pointer, and a set core.excludesFile warns WITHOUT
-#     showing its value; an explicitly empty one has its own wording. work
+#     .git/info/exclude pointer, and a redirected core.excludesFile warns
+#     WITHOUT showing its value; an explicitly empty one has its own wording. work
 #     does not list the module: left-as-is item. The runs are hermetic
 #     (`env -i` with PATH, HOME and GIT_CONFIG_NOSYSTEM only), so the
 #     developer shell's GIT_CONFIG_GLOBAL / XDG_CONFIG_HOME and the host's
@@ -157,6 +157,22 @@ else
   printf '%s\n' "$pf_out" >&2
   miss "preflight must exit 0 with an existing global gitignore"
 fi
+# The managed path itself and an alias of the same file must not redirect.
+# The exact path is already named by the apply-impact report; pin the entire
+# config-status line to prove that it does not disclose the setting again.
+ln -s "$gi_home/.config/git/ignore" "$gi_home/canary-managed-alias-392"
+for gi_same in "$gi_home/.config/git/ignore" "$gi_home/canary-managed-alias-392"; do
+  printf '[core]\n\texcludesFile = %s\n' "$gi_same" > "$gi_home/.gitconfig"
+  if pf_out="$(env -i PATH="$PATH" HOME="$gi_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+    && grep -Fxq "[ok] core.excludesFile points at the managed global gitignore (value not shown)" <<< "$pf_out" \
+    && ! grep -Fq "core.excludesFile is set (value not shown" <<< "$pf_out" \
+    && ! grep -Fq "canary-managed-alias-392" <<< "$pf_out"; then
+    pass "git-ignore: managed path or same-file alias does not warn about redirecting"
+  else
+    printf '%s\n' "${pf_out:-<no output>}" >&2
+    miss "git-ignore: managed path and same-file alias must not redirect or disclose the setting"
+  fi
+done
 printf '[core]\n\texcludesFile =\n' > "$gi_home/.gitconfig"
 if pf_out="$(env -i PATH="$PATH" HOME="$gi_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
   && grep -Fq "core.excludesFile is explicitly empty (global or system config) — git reads no global excludes file" <<< "$pf_out" \

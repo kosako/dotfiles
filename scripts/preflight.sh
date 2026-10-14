@@ -179,9 +179,15 @@ if module_active_for_profile "$profile" git-ignore; then
     ok "absent: $global_ignore (apply creates the managed global gitignore)"
   fi
   if command -v git >/dev/null 2>&1; then
-    case "$(git_excludes_file_setting)" in
+    excludes_setting="$(git_excludes_file_setting)"
+    case "$excludes_setting" in
       path\ *)
-        warn "core.excludesFile is set (value not shown; global or system config) — git reads that file instead of the managed $global_ignore; unset it and fold its patterns into per-repo .git/info/exclude (see docs/git-ignore.md)"
+        effective_ignore="${excludes_setting#path }"
+        if [[ "$effective_ignore" == "$global_ignore" || "$effective_ignore" -ef "$global_ignore" ]]; then
+          ok "core.excludesFile points at the managed global gitignore (value not shown)"
+        else
+          warn "core.excludesFile is set (value not shown; global or system config) — git reads that file instead of the managed $global_ignore; unset it and fold its patterns into per-repo .git/info/exclude (see docs/git-ignore.md)"
+        fi
         ;;
       empty)
         warn "core.excludesFile is explicitly empty (global or system config) — git reads no global excludes file, so the managed $global_ignore would not be in effect; unset the key (see docs/git-ignore.md)"

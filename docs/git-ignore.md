@@ -46,7 +46,8 @@ managed file `~/.config/git/ignore`(source: `private_dot_config/git/ignore`)が�
 
 - `preflight`(apply 前): module active で `~/.config/git/ignore` が**既にある**と「apply が置換する。
   host 固有 pattern は `.git/info/exclude` へ」の warn(中身は読まない)。`core.excludesFile` が global /
-  system のどちらかに設定されていれば「managed file は読まれない」の warn(値は出さない)、明示的に
+  system のどちらかに設定され、managed path と文字列が一致せず、同じ file でもなければ「managed file は
+  読まれない」の warn。同じ path または同じ file を指す別名(symlink 等)なら ok(設定値は出さない)。明示的に
   空なら「global excludes を読まない」の warn、config が読めなければその旨の warn。非 active profile
   では left-as-is の item。
 - `doctor`(apply 後、Git section): managed file の presence、git が**実際に読む** excludes path が
