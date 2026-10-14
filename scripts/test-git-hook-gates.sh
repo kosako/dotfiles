@@ -313,14 +313,59 @@ EOF
   run_git() {
     local repo="$1"
     shift
-    env -u EMAIL -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    env -i PATH="$PATH" \
       HOME="$home" \
       XDG_CONFIG_HOME="$home/.config" \
       LC_ALL=C \
       GIT_CONFIG_NOSYSTEM=1 \
       GIT_CONFIG_GLOBAL="$home/.gitconfig" \
+      FAKE_DISPATCHER_EXIT="${FAKE_DISPATCHER_EXIT:-0}" \
       git -C "$repo" "$@"
   }
+
+  # A hook may export repository selectors and command-scope config. Exercise
+  # init/add/commit/checkout/config under that environment, and compare the
+  # unrelated throwaway repo byte-for-byte for HEAD, refs, index and config.
+  isolation_parent="$home/src/personal/isolation-parent"
+  isolation_repo="$home/src/personal/isolation-fixture"
+  isolation_before="$home/isolation-before"
+  mkdir -p "$isolation_parent" "$isolation_repo" "$isolation_before"
+  run_git "$isolation_parent" init --quiet --initial-branch=main
+  printf 'parent\n' > "$isolation_parent/tracked"
+  run_git "$isolation_parent" add tracked
+  run_git "$isolation_parent" commit --quiet -m parent
+  cp "$isolation_parent/.git/HEAD" "$isolation_parent/.git/index" \
+    "$isolation_parent/.git/config" "$isolation_before/"
+  cp -R "$isolation_parent/.git/refs" "$isolation_before/refs"
+  printf 'fixture\n' > "$isolation_repo/tracked"
+  isolation_rc=0
+  (
+    export GIT_DIR="$isolation_parent/.git" GIT_WORK_TREE="$isolation_parent"
+    export GIT_INDEX_FILE="$isolation_parent/.git/index"
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0='Inherited Identity'
+    run_git "$isolation_repo" init --quiet --initial-branch=main &&
+      run_git "$isolation_repo" add tracked &&
+      run_git "$isolation_repo" commit --quiet -m fixture &&
+      run_git "$isolation_repo" checkout --quiet -b fixture-topic &&
+      run_git "$isolation_repo" config isolation.marker fixture
+  ) > "$home/isolation.log" 2>&1 || isolation_rc=$?
+  if [[ "$isolation_rc" -eq 0 && -d "$isolation_repo/.git" ]] \
+    && [[ "$(run_git "$isolation_repo" log -1 --format='%an|%s')" == 'Dotfiles Test|fixture' ]] \
+    && [[ "$(run_git "$isolation_repo" show HEAD:tracked)" == fixture ]] \
+    && [[ "$(run_git "$isolation_repo" symbolic-ref --short HEAD)" == fixture-topic ]] \
+    && [[ "$(run_git "$isolation_repo" config isolation.marker)" == fixture ]] \
+    && cmp -s "$isolation_before/HEAD" "$isolation_parent/.git/HEAD" \
+    && cmp -s "$isolation_before/index" "$isolation_parent/.git/index" \
+    && cmp -s "$isolation_before/config" "$isolation_parent/.git/config" \
+    && diff -r "$isolation_before/refs" "$isolation_parent/.git/refs" >/dev/null; then
+    ok "test passed: inherited Git environment leaves parent HEAD/refs/index/config unchanged and commits in the fixture"
+  else
+    cat "$home/isolation.log" >&2
+    fail "test failed: inherited Git environment escaped the fixture or changed parent HEAD/refs/index/config"
+    status=1
+  fi
+
+  : > "$dispatcher_log"
 
   repo="$home/src/personal/demo"
   run_git "$repo" init --quiet --initial-branch=main
