@@ -36,7 +36,7 @@ fail_duplicates() {
 # declarations must be valid on their own (independent of any profile).
 validate_modules() {
   local status=0
-  local module path capability value type paths_count requires_count
+  local module path capability value type paths_count requires_count requires
   # Collected in a variable, not a temp file, so an interrupt leaves nothing
   # behind (#329; the same holds for the lists in validate_packages and
   # validate_backup_paths).
@@ -69,6 +69,13 @@ validate_modules() {
       esac
     done < <(module_paths "$module")
 
+    # Capture the status before consuming entries; a failed enumeration is
+    # not an empty set of conditions, even if yq emitted partial output.
+    if ! requires="$(module_requires "$module")"; then
+      fail "cannot enumerate module requires: $module"
+      status=1
+      continue
+    fi
     requires_count=0
     while read -r capability value; do
       [[ -z "$capability" ]] && continue
@@ -108,7 +115,7 @@ validate_modules() {
           status=1
           ;;
       esac
-    done < <(module_requires "$module")
+    done <<< "$requires"
 
     if [[ "$requires_count" -gt 0 && "$paths_count" -eq 0 ]]; then
       fail "module has requires but no paths: $module"

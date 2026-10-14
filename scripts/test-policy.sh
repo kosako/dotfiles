@@ -235,6 +235,65 @@ run_fail_contains \
   "missing capability in personal: enableDirenv" \
   "$fixture/scripts/validate-policy.sh" personal
 
+# #391: the requires container is a map, not a boolean capability value.
+# Pin exit 1 as well as the diagnostic, and test the runtime gate directly.
+for invalid_requires in false true '"yes"' 42 '[]' '[true]'; do
+  make_fixture
+  V="$invalid_requires" yq -i '.modules.runtime.requires = env(V)' "$fixture/.chezmoidata/modules.yaml"
+  requires_rc=0
+  requires_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || requires_rc=$?
+  if [[ "$requires_rc" -ne 1 ]] ||
+    ! grep -Fq 'module requires must be a map or null: runtime' <<< "$requires_output"; then
+    printf '%s\n' "$requires_output" >&2
+    fail "test failed: requires=$invalid_requires must fail validation with exit 1 (got $requires_rc)"
+    exit 1
+  fi
+  ok "test passed: rejects requires=$invalid_requires with exit 1 and module diagnostic"
+  run_ok "requires=$invalid_requires cannot activate runtime" \
+    env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" bash -c '
+      source "$FIXTURE_LIB"
+      ! module_active_for_profile personal runtime
+    '
+done
+
+for empty_requires in absent null '{}'; do
+  make_fixture
+  if [[ "$empty_requires" == absent ]]; then
+    yq -i 'del(.modules.runtime.requires)' "$fixture/.chezmoidata/modules.yaml"
+  else
+    V="$empty_requires" yq -i '.modules.runtime.requires = env(V)' "$fixture/.chezmoidata/modules.yaml"
+  fi
+  run_ok_contains "accepts requires=$empty_requires" "module validation passed" \
+    "$fixture/scripts/validate-policy.sh" personal
+  run_ok "requires=$empty_requires keeps runtime active" \
+    env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" bash -c '
+      source "$FIXTURE_LIB"
+      module_active_for_profile personal runtime
+    '
+done
+
+# A yq failure must propagate even when the container is a valid map and
+# the failed enumeration prints a matching condition before exiting.
+make_fixture
+cat >> "$fixture/scripts/lib-policy.sh" <<'SH'
+yq() {
+  case "$*" in
+    *'.modules[strenv(m)].requires'*'to_entries'*)
+      printf 'enableRuntimeManagement true\n'
+      return 1
+      ;;
+  esac
+  command yq "$@"
+}
+SH
+run_fail_contains "rejects failed requires enumeration with partial output" \
+  "cannot enumerate module requires: runtime" "$fixture/scripts/validate-policy.sh" personal
+run_ok "failed requires enumeration cannot activate runtime" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" bash -c '
+    source "$FIXTURE_LIB"
+    ! module_active_for_profile personal runtime
+  '
+
 make_fixture
 insert_once "$fixture/.chezmoidata/modules.yaml" "      enableRuntimeManagement: true" "      notACapability: true"
 run_fail_contains \
