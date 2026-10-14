@@ -786,7 +786,9 @@ elif ! baseline_rows="$(backup_paths 2>/dev/null)"; then
 else
   baseline_present=0
   baseline_total=0
-  while IFS='|' read -r _bp_type _bp_category bp_path; do
+  while IFS= read -r bp_line; do
+    bp_line="${bp_line#*|}"
+    bp_path="${bp_line#*|}"
     [[ -z "$bp_path" ]] && continue
     baseline_total=$((baseline_total + 1))
     if [[ -e "$HOME/$bp_path" ]]; then

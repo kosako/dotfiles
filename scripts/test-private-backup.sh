@@ -214,6 +214,43 @@ make_archive() {
   tar -cf - -C "$stage" . | age -r "$recipient" -o "$out"
 }
 
+# A trailing pipe is part of the path (#390), even when the truncated name
+# also exists. Check the manifest, payload, verify and restore independently.
+pipe_home="$fixture_home/pipe-home"
+pipe_extract="$fixture_home/pipe-extract"
+pipe_restore="$fixture_home/pipe-restore"
+mkdir -p "$pipe_home/.config/dotfiles" "$pipe_extract" "$pipe_restore"
+printf 'wanted content\n' > "$pipe_home/cfg|"
+printf 'wrong content\n' > "$pipe_home/cfg"
+printf 'backup_paths:\n  - { path: "cfg|", type: file, category: label }\n' \
+  > "$pipe_home/.config/dotfiles/backup-paths.local"
+if HOME="$pipe_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$pipe_home/pipe.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  age -d -i "$fixture_home/keys/id.txt" "$pipe_home/pipe.age" | tar -xpf - -C "$pipe_extract"
+  pipe_sum="$(shasum -a 256 "$pipe_home/cfg|" | awk '{print $1}')"
+  if SUM="$pipe_sum" yq -e -p=json '
+    ([.entries[] | select(.path == "cfg|" and .type == "file" and .category == "label" and .origin == "local")] | length) == 1 and
+    ([.files[] | select(.path == "cfg|" and .sha256 == strenv(SUM))] | length) == 1 and
+    ([.files[] | select(.path == "cfg")] | length) == 0
+  ' "$pipe_extract/manifest.json" >/dev/null \
+    && cmp -s "$pipe_home/cfg|" "$pipe_extract/files/cfg|" \
+    && [[ ! -e "$pipe_extract/files/cfg" ]]; then
+    pass "backup preserves a trailing pipe in the manifest and payload"
+  else
+    miss "backup lost a trailing pipe or captured the truncated path"
+  fi
+  if run verify --in "$pipe_home/pipe.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
+    && run restore --in "$pipe_home/pipe.age" --identity "$fixture_home/keys/id.txt" \
+      --target-home "$pipe_restore" --apply >/dev/null 2>&1 \
+    && cmp -s "$pipe_home/cfg|" "$pipe_restore/cfg|" && [[ ! -e "$pipe_restore/cfg" ]]; then
+    pass "verify and restore preserve a trailing pipe path"
+  else
+    miss "verify or restore failed to preserve a trailing pipe path"
+  fi
+else
+  miss "backup with a trailing pipe path failed"
+fi
+
 # 6. A checksum mismatch (manifest sha does not match the file) is caught.
 bad="$fixture_home/stage-badsum"
 mkdir -p "$bad/files"

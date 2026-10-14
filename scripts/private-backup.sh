@@ -285,9 +285,12 @@ collect_declared() {
   # A valid file with no entries declares nothing (an empty here-string would
   # otherwise read as one blank row).
   [[ -n "$rows" ]] || return 0
-  local type category path known_types
+  local line type category path known_types
   known_types="$(known_backup_path_types)"
-  while IFS='|' read -r type category path; do
+  while IFS= read -r line; do
+    type="${line%%|*}"; line="${line#*|}"
+    category="${line%%|*}"; line="${line#*|}"
+    path="$line"
     # backup_paths_in validated the whole file (#246): an entry without a
     # path can no longer reach here, so treat one as a broken invariant
     # rather than skipping it silently.
@@ -393,7 +396,7 @@ cmd_backup() {
       "files": []
     }' > "$manifest"
 
-  local origin type category path target captured=0 skipped=0 supplement_captured=0
+  local line origin type category path target captured=0 skipped=0 supplement_captured=0
   # Set when a declared directory could not be enumerated completely (#242);
   # recorded in the marker so doctor can show it after the fact.
   local capture_incomplete=0 incomplete_dirs=0 find_rc
@@ -413,7 +416,11 @@ cmd_backup() {
     captured=$((captured + 1))
     supplement_captured=1
   fi
-  while IFS='|' read -r origin type category path; do
+  while IFS= read -r line; do
+    origin="${line%%|*}"; line="${line#*|}"
+    type="${line%%|*}"; line="${line#*|}"
+    category="${line%%|*}"; line="${line#*|}"
+    path="$line"
     [[ -z "$path" ]] && continue
     # Defence in depth: the catalog is validated, but the (non-committed)
     # local supplement is not, so re-check every path at runtime.
