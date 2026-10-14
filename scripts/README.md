@@ -127,7 +127,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 - OpenCode(report-only): `opencode` の presence、`opencode-settings` module が active な profile では managed な permission 床 `~/.config/opencode/opencode.json` の presence — 無ければ apply 手順の action、非 active なら not managed。credential store `~/.local/share/opencode/auth.json` は**存在のみ**で中身も provider 名も読まない(#234)。agent-tools の plugin(`plugins/personal-*.js`)は静的に、global の plugins dir にあるかと、`personal-agent-tools` の init(OpenCode の既存の log の目印の行で「確認できた / 未確認(理由つき)」。いちばん新しい目印の build_id が配置中の marker と一致するときだけ確認できた。過去の起動の証拠で、直近の起動の成功ではない。log の行は出さない。#311)と、二重読込(`.ts` / `.mjs` の併置・単数形 `plugin/` dir・OpenCode が読む設定 — managed の床と `OPENCODE_CONFIG` の指す file — の `plugin` 欄に同じ名前。読まれていない `opencode.local.json` だけなら注記)を報告する — OpenCode は起動しない(`opencode debug config` でさえ DB に書き込むため)、設定ファイルは `plugin` 欄だけを読み表示しない。`opencode.local.json` があるのに `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も報告する(#263)。この section の末尾に enforceAiSandbox(sandbox ブロックと human-legit write gate の live state)の行も出る。
 - Claude MCP exposure(report-only): `gateUnusedClaudeMcp` の deny(claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs の connector と、利用の無いかまれな Notion の書込 tool)の wired 状態。live の file は読まない(#341)。
 - tool call record hook(report-only): `enableToolCallRecordHook` の登録(SessionStart と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied に `personal-tool-call-record-hook`)の wired 状態。live の file は読まない(#353)。
-- GitHub injection guard(report-only): secret floor は常時 deny、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
+- GitHub injection guard(report-only): secret floor は managed settings.json の常時 deny 宣言として報告(live の状態は managed drift を参照)、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
 - herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ綴りか、両方あれば `-ef` で同じ file と判定。presence とは独立に warn し、欠損時の action は読み先がずれていれば「既定値で動く」と断定しない。ずれていれば検証もしない)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
@@ -180,14 +180,15 @@ managed-path orphan、managed drift、Codex projects trust の stale / home 全�
 非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
 `-` 始まりの引数(`-h` / `--all` / `--list-profiles` など)と 2 つ目の引数を exit 2 で拒否し report を走らせない(#309)/
 git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
-`core.excludesFile` が設定済み・明示的な空値のときの warn(値は出さない)、work の left-as-is、不在時の ok。
+`core.excludesFile` が別の file を指す・明示的な空値のときの warn、managed path または同じ file の別名なら ok
+(設定値は出さない)、work の left-as-is、不在時の ok。
 `env -i` で hermetic に回す、#248)/
 herdr config の apply impact(既存 `~/.config/herdr/config.toml` の置換 warn、work の left-as-is、不在時の ok、#261)/
 agent-tools の残量の読み取り口の apply impact(既存 `~/.config/agent-tools/usage-reader.json` の置換 warn、work の left-as-is、不在時の ok、#301)/
 policy validation 失敗時のみ非 0 / commands 節が確認する tool がすべて catalog(name / pkg / bin)か
 catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)/
 git hook gates の deploy 4 本の readiness(完全な deploy は script ごとと武装と hooksPath が ok、identity gate が欠けた旧 deploy は
-その script と「武装しない」の warn、#307)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
+その script と「武装しない」の warn、script の path が directory でも不完全とする、#307 / #392)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
 値を出さないこと(それぞれの warn は出し、canary は出ない、#307)、をカバーする。
 
 ## test-lib.sh
@@ -389,7 +390,7 @@ query だけを実機で実行する(書き込みはしない)。
   config が読めなければ「不明」の warn / pattern 行の欠落は drift の action / work は not managed。どの run も
   `env -i` で hermetic。
 - git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling。
-- GitHub injection guard(#119 / #137): secret floor 常時 deny、`gateGitHubMcp` / `enableGitHubIsolatedReader`
+- GitHub injection guard(#119 / #137): secret floor の常時 deny 宣言と managed drift への案内(旧 active 文言は出さない)、`gateGitHubMcp` / `enableGitHubIsolatedReader`
   の wired 状態、hook body の presence(contents-blind)、`enforceAiSandbox` の human-legit gate 開示。
 - quality loop hooks(#199): 両 home の登録 + body presence、`checks.local.json` は presence のみ(canary で
   中身を漏らさない)、cap off の not-wired、live file に残置した登録の lingering warn、module 除去の dangling。
@@ -456,7 +457,7 @@ query だけを実機で実行する(書き込みはしない)。
   clean の ok になる)。root では skip。
 - git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
   欠けた旧 deploy、または実行 bit の無い gate → commit が止まる warn / 配線なし + dispatcher だけ → 両方が不完全の warn。
-  doctor の一覧が短くなれば落ちる。
+  deploy script や shim の path が directory なら完了 / 配線済みと数えない(#392)。doctor の一覧が短くなれば落ちる。
 - git hook gates の残置(#258): `enableGitHookGates=false` で配管が残るとき、module が active な personal では apply の
   action、非 active な work では実在する file だけを名指しした `rm -i` の手順と core.hooksPath の確認 / 何も無ければ
   not wired で action なし。

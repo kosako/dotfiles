@@ -1244,6 +1244,7 @@ fi
 # Throwaway repo copy so the flip does not touch the real data files.
 gh_root="$fixture_home/.dotfiles-ghguard"
 copy_repo_fixture "$gh_root"
+gh_secret_floor_declared='[ok] secret floor declared: managed ~/.claude/settings.json denies SSH-key / credential-store / env-dump / gh-secret reads unconditionally (best-effort, not a boundary; live drift shows in "managed drift")'
 
 # P) committed personal: gateGitHubMcp AND enableGitHubIsolatedReader are ON
 #    (Phase 2 / #137) and claude-settings is active, so doctor reports the
@@ -1255,9 +1256,10 @@ if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; 
   if grep -Fq "denies the github MCP server" <<< "$gh_out" \
     && grep -Fq "hook registered in managed settings.json but the body is absent" <<< "$gh_out" \
     && grep -Fq "registered in managed ~/.codex/hooks.json but the body is absent" <<< "$gh_out" \
-    && grep -Fq "secret floor active" <<< "$gh_out" \
+    && grep -Fxq "$gh_secret_floor_declared" <<< "$gh_out" \
+    && ! grep -Fq "secret floor active" <<< "$gh_out" \
     && grep -Fq "human-legit write gate INERT" <<< "$gh_out"; then
-    ok "test passed: MCP deny + secret floor active + human-legit gate inert + Claude & Codex hooks registered with absent bodies warned (fail-open)"
+    ok "test passed: MCP deny + secret floor declared + human-legit gate inert + Claude & Codex hooks registered with absent bodies warned (fail-open)"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: GitHub guard capability not reported"
@@ -1394,14 +1396,15 @@ rm -f "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
 
 # R) enforceAiSandbox=true: the injection-guard section discloses the human-legit
 #    write gate as ACTIVE (it rides on enforceAiSandbox), with the always-on secret
-#    floor active too. Covers the other branch; case P covered the inert
+#    floor declared too. Covers the other branch; case P covered the inert
 #    (enforceAiSandbox=false) branch. Builds on case Q's mutated copy
 #    (claude-settings active for personal). exit 0.
 set_capability_all "$gh_root" enforceAiSandbox true
 if gh_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "human-legit write gate active" <<< "$gh_out" \
-    && grep -Fq "secret floor active" <<< "$gh_out"; then
-    ok "test passed: enforceAiSandbox=true -> human-legit write gate active (secret floor active too)"
+    && grep -Fxq "$gh_secret_floor_declared" <<< "$gh_out" \
+    && ! grep -Fq "secret floor active" <<< "$gh_out"; then
+    ok "test passed: enforceAiSandbox=true -> human-legit write gate active (secret floor declared too)"
   else
     printf '%s\n' "$gh_out" >&2
     fail "test failed: human-legit write gate active-state not reported when enforceAiSandbox=true"
@@ -2615,8 +2618,8 @@ hg_expect "wired + complete deploy -> all ok" -- \
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_shims/pre-push"
 hg_expect "wired + one pass-through shim missing -> named" -- \
-  "[warn] shim missing or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
-  ! "shims present and executable: all" "shim missing or not executable: $hg_shims/pre-commit"
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  ! "shims present and executable: all" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit"
 # HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
 hg_expect "wired + pre-#281 deploy (identity gate missing) -> BLOCKED warning" -- \
@@ -2626,10 +2629,23 @@ hg_setup 1 "${hg_all[@]}"
 chmod 644 "$hg_deploy/personal-public-safety-gate"
 hg_expect "wired + a non-executable gate -> BLOCKED warning" -- \
   "$hg_wired_incomplete" ! "$hg_complete"
+# HG-3b) a searchable directory is not a deployed script, even with -x.
+hg_setup 1 "${hg_all[@]}"
+rm -f "$hg_deploy/personal-public-safety-gate"
+mkdir "$hg_deploy/personal-public-safety-gate"
+hg_expect "wired + a directory gate -> BLOCKED warning" -- \
+  "$hg_wired_incomplete" ! "$hg_complete"
+# HG-3c) a directory at a shim path must not count as wired.
+hg_setup 1 "${hg_all[@]}"
+rm -f "$hg_shims/pre-push"
+mkdir "$hg_shims/pre-push"
+hg_expect "a directory shim -> wiring incomplete" -- \
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  ! "shims present and executable: all"
 # HG-4) nothing wired + the dispatcher alone -> both halves incomplete.
 hg_setup 0 personal-git-hook-dispatcher
 hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- \
-  "[warn] shim missing or not executable: $hg_shims/pre-commit (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-commit (chezmoi apply arms it once the agent-tools deploy is complete)" \
   "[warn] global core.hooksPath is not set (chezmoi apply arms it via the ~/.gitconfig include once the agent-tools deploy is complete)" \
   "$hg_both_incomplete" ! "$hg_complete"
 rm -rf "$hg_home"

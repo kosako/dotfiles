@@ -179,9 +179,15 @@ if module_active_for_profile "$profile" git-ignore; then
     ok "absent: $global_ignore (apply creates the managed global gitignore)"
   fi
   if command -v git >/dev/null 2>&1; then
-    case "$(git_excludes_file_setting)" in
+    excludes_setting="$(git_excludes_file_setting)"
+    case "$excludes_setting" in
       path\ *)
-        warn "core.excludesFile is set (value not shown; global or system config) — git reads that file instead of the managed $global_ignore; unset it and fold its patterns into per-repo .git/info/exclude (see docs/git-ignore.md)"
+        effective_ignore="${excludes_setting#path }"
+        if [[ "$effective_ignore" == "$global_ignore" || "$effective_ignore" -ef "$global_ignore" ]]; then
+          ok "core.excludesFile points at the managed global gitignore (value not shown)"
+        else
+          warn "core.excludesFile is set (value not shown; global or system config) — git reads that file instead of the managed $global_ignore; unset it and fold its patterns into per-repo .git/info/exclude (see docs/git-ignore.md)"
+        fi
         ;;
       empty)
         warn "core.excludesFile is explicitly empty (global or system config) — git reads no global excludes file, so the managed $global_ignore would not be in effect; unset the key (see docs/git-ignore.md)"
@@ -229,10 +235,10 @@ elif [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
   hook_gates_missing=0
   for hook_gates_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
-    if [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]]; then
+    if [[ -f "$hook_gates_deploy_dir/$hook_gates_script" && -x "$hook_gates_deploy_dir/$hook_gates_script" ]]; then
       ok "deployed: $hook_gates_deploy_dir/$hook_gates_script"
     else
-      warn "missing or not executable: $hook_gates_deploy_dir/$hook_gates_script"
+      warn "missing, not a regular file, or not executable: $hook_gates_deploy_dir/$hook_gates_script"
       hook_gates_missing=1
     fi
   done

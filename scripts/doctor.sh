@@ -181,7 +181,7 @@ hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
 hook_gates_scripts=(personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate)
 hook_gates_deploy_complete=1
 for hook_gates_script in "${hook_gates_scripts[@]}"; do
-  [[ -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
+  [[ -f "$hook_gates_deploy_dir/$hook_gates_script" && -x "$hook_gates_deploy_dir/$hook_gates_script" ]] || hook_gates_deploy_complete=0
 done
 # The shim stages are the module's declared .config/git-hook-gates/hooks/*
 # paths (modules.yaml is the one list; #361 grew it from pre-commit /
@@ -197,10 +197,10 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     hook_gates_wired=1
     hook_gates_present=0
     for hook_stage in ${hook_gates_stages[@]+"${hook_gates_stages[@]}"}; do
-      if [[ -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
+      if [[ -f "$hook_gates_dir/hooks/$hook_stage" && -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
         hook_gates_present=$((hook_gates_present + 1))
       else
-        warn "shim missing or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
+        warn "shim missing, not a regular file, or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
         hook_gates_wired=0
       fi
     done
@@ -1858,9 +1858,9 @@ if module_active_for_profile "$profile" claude-settings; then
   # settings.json (SSH-key / credential-store / env-dump / gh-secret reads;
   # credential stores — aws, gh OAuth, netrc, codex auth — joined in #136).
   # The human never legitimately asks Claude to do these and the deny binds
-  # only Claude's own tool calls, so it is always on. Live on personal today,
-  # no enforceAiSandbox needed.
-  ok "secret floor active: SSH-key / credential-store / env-dump / gh-secret reads denied unconditionally (best-effort, not a boundary)"
+  # only Claude's own tool calls. This reports the managed declaration, not
+  # the live settings; no enforceAiSandbox needed.
+  ok 'secret floor declared: managed ~/.claude/settings.json denies SSH-key / credential-store / env-dump / gh-secret reads unconditionally (best-effort, not a boundary; live drift shows in "managed drift")'
   # Tier 2 — human-legit write gate: main-push deny, .env read deny, and the
   # release/branch-protection ask still ride on enforceAiSandbox, which personal
   # keeps false (its egress block is unusable on a daily driver). A restricted
