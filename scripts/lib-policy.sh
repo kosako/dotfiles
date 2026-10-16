@@ -1133,11 +1133,14 @@ git_excludes_file_setting() {
 # dangling gitdir pointer, an unparsable config): the caller must not read
 # that as clean (#359). The git status is taken from the capture, not from
 # PIPESTATUS, so the answer does not depend on the caller's pipefail setting.
+# --includes: `--local` names one file, and Git then leaves include.path off
+# unless asked, so a URL kept only in a file the repo config includes was
+# never read and the repo counted as clean (#401).
 git_remotes_with_credentials() {
   local repo="$1" remote_lines="" git_status=0
   # C locale and stderr discarded: the URLs are another repo's data, and awk
   # under a UTF-8 locale reports an invalid byte with the input quoted (#335).
-  remote_lines="$(git -C "$repo" config --local --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null)" || git_status=$?
+  remote_lines="$(git -C "$repo" config --local --includes --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null)" || git_status=$?
   case "$git_status" in
     0) ;;
     1) return 0 ;;  # no key matched: a repo without remotes

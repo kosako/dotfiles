@@ -430,6 +430,24 @@ else
   status=1
 fi
 
+# A URL kept only in a file the repo config includes is read too (#401):
+# `git config --local` leaves include.path off unless --includes is given.
+# The relative include path resolves next to .git/config.
+include_repo="$fixture/src/personal/include-demo"
+mkdir -p "$include_repo"
+run_git "$include_repo" init --quiet --initial-branch=main
+run_fixture git config --file "$include_repo/.git/remotes.inc" \
+  remote.origin.url "https://user:secret-placeholder@invalid.example/repo.git"
+run_git "$include_repo" config include.path remotes.inc
+
+flagged="$(fixture_remotes_with_credentials "$include_repo")"
+if [[ "$flagged" == "origin" ]]; then
+  ok "test passed: credential-like remote URL in an included file detected"
+else
+  fail "test failed: expected flagged remote 'origin' from the included file, got: ${flagged:-<none>}"
+  status=1
+fi
+
 section "fixture checks: identity reset per non-personal context (#202)"
 
 # The managed reset file has to exist in the fixture HOME: GIT_CONFIG_GLOBAL is
