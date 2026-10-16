@@ -918,6 +918,49 @@ else
   miss "restore wrote through a symlinked parent"
 fi
 
+# 16a. The same refusal for a path whose first component starts with "-"
+#      (#397). The parent check took the parent with dirname, which read such
+#      a path as an option and failed with no output, so the check found no
+#      parent to test and the write went through the symlink. The archive is
+#      hand-crafted (anyone with the public key can make one). The control
+#      restores the same archive without the symlink, so the case does not
+#      pass by refusing every "-" path.
+dash_stage="$fixture_home/stage-dash-parent"
+dash_path="-cfg/config.local"
+dash_archive="$fixture_home/out/dash-parent.age"
+mkdir -p "$dash_stage/files/-cfg"
+printf 'Host private\n' > "$dash_stage/files/$dash_path"
+chmod 600 "$dash_stage/files/$dash_path"
+sum="$(shasum -a 256 "$dash_stage/files/$dash_path" | awk '{print $1}')"
+SUM="$sum" P="$dash_path" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": strenv(P), "mode": "600", "size": 13, "sha256": strenv(SUM)}]
+}' > "$dash_stage/manifest.json"
+make_archive "$dash_stage" "$dash_archive"
+dash_dst="$fixture_home/restore-dash-dst"
+dash_escape="$fixture_home/dash-escape-target"
+mkdir -p "$dash_dst" "$dash_escape"
+ln -s "$dash_escape" "$dash_dst/-cfg"
+dash_rc=0
+out="$(run restore --in "$dash_archive" --identity "$fixture_home/keys/id.txt" --target-home "$dash_dst" --apply 2>&1)" || dash_rc=$?
+if [[ "$dash_rc" -ne 0 ]] && grep -Fq "skip (symlinked parent in target path): $dash_path" <<< "$out" \
+  && [[ -z "$(find "$dash_escape" -mindepth 1)" ]]; then
+  pass "restore refuses a symlinked parent whose name starts with - (no escape)"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore wrote through a symlinked parent whose name starts with - (exit $dash_rc)"
+fi
+dash_plain="$fixture_home/restore-dash-plain"
+mkdir -p "$dash_plain"
+if out="$(run restore --in "$dash_archive" --identity "$fixture_home/keys/id.txt" --target-home "$dash_plain" --apply 2>&1)" \
+  && cmp -s "$dash_stage/files/$dash_path" "$dash_plain/$dash_path"; then
+  pass "restore writes a path whose first component starts with - when no symlink is in the way"
+else
+  printf '%s\n' "$out" >&2
+  miss "restore failed to write a path whose first component starts with -"
+fi
+
 # 16b. restore refuses when the backup-state path is a symlink (the
 #      displaced-file move must not escape via ~/.local -> outside).
 bdst="$fixture_home/restore-bdir-dst"
