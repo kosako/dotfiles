@@ -13,7 +13,7 @@ set -euo pipefail
 #     does not change it;
 #   - the command runs in the CURRENT shell (cd / export / source persist);
 #   - $? in the command is the status the line was entered with, as with
-#     Enter (#400);
+#     Enter, also with ERR_RETURN / ERR_EXIT set (#400);
 #   - the copied text is "$ <command>", the output, "[exit status: N]".
 #   - assignments to wrapper variable names cannot redirect cleanup or
 #     corrupt the copied command/status; ordinary assignments persist (#280).
@@ -165,6 +165,18 @@ source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 _ai_clip_run 'print -r -- "in=$?"'
 print -r -- "rc=$?"
 ZSH
+# The same with ERR_RETURN / ERR_EXIT set (#400 review): setting the status
+# again must not trip them, or the wrapper (or the shell) ends before the
+# command runs. `false && true` leaves $? at 1 without tripping them.
+for err_opt in ERR_RETURN ERR_EXIT; do
+  cat > "$fixture/cases/status_in_$err_opt.zsh" <<ZSH
+source "\$AI_CLIP_FIXTURE/cases/prelude.zsh"
+setopt $err_opt
+false && true
+_ai_clip_run 'print -r -- "in=\$?"'
+print -r -- "rc=\$?"
+ZSH
+done
 cat > "$fixture/cases/mktemp_failure.zsh" <<'ZSH'
 source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 mktemp() { return 1; }
@@ -402,6 +414,22 @@ else
   fail "test failed: \$? in the command must be the status before the call"
   status=1
 fi
+
+# 4c / 4d) With ERR_RETURN or ERR_EXIT set, the command still runs and reads
+#     the status before the call; the temp is removed.
+for err_opt in ERR_RETURN ERR_EXIT; do
+  rm -f "$fixture/clip.txt"
+  if out="$(run_case "$with_clip" "" "status_in_$err_opt" _ai_clip_run 2>&1)" \
+    && [[ "$out" == $'in=1\nrc=0' ]] \
+    && [[ "$(cat "$fixture/clip.txt")" == $'$ print -r -- "in=$?"\nin=1\n[exit status: 0]' ]] \
+    && [[ "$(leftovers)" == 0 ]]; then
+    ok "test passed: with $err_opt set, the command still runs and reads the status before the call"
+  else
+    printf 'out=%s\nclip=%s\n' "$out" "$(cat "$fixture/clip.txt" 2>/dev/null)" >&2
+    fail "test failed: with $err_opt set, the command must run and read the status before the call"
+    status=1
+  fi
+done
 
 # 5) No clipboard target (no pbcopy on PATH, OSC 52 not opted in): warning
 #    on stderr, command status unchanged, temp removed, nothing copied.

@@ -158,7 +158,11 @@ _ai_clip_copy() {
 # The status the line was entered with is taken first (the temp's command
 # substitution would replace it) and kept as the fourth positional parameter,
 # then set again right before eval, so $? in the command reads the previous
-# command's status as with Enter (#400). $pipestatus is not carried over.
+# command's status as with Enter (#400). $pipestatus is not carried over. A
+# non-zero status is set on the left of a || list, where it does not trip
+# ERR_EXIT / ERR_RETURN (as a plain command it would end the wrapper, or the
+# shell, before the command ran); a zero status needs nothing set, since the
+# if condition leaves $? at 0 in its then branch.
 # Temp file is mktemp 0600 and holds the plain-text output, so it is removed in
 # an `always` block: on a normal exit, a non-zero exit, AND when the command is
 # interrupted (Ctrl-C) — a trailing `rm` alone never ran on SIGINT and left the
@@ -170,8 +174,11 @@ _ai_clip_run() {
   argv=( "$1" "$?" )
   argv=( "$1" "$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" 1 "$2" ) || return 1
   {
-    () { return "$1" } "$4"
-    () { eval "$1" } "$1" > "$2" 2>&1
+    if (( $4 == 0 )); then
+      () { eval "$1" } "$1" > "$2" 2>&1
+    else
+      () { return "$1" } "$4" || () { eval "$1" } "$1" > "$2" 2>&1
+    fi
     set -- "$1" "$2" "$?"
     cat -- "$2"
     {
