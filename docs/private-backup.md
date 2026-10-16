@@ -111,9 +111,11 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   受理条件は 3 コマンドで共有し、backup 独自の緩い検査は持たない。off にする flag は無い(対象は小さな
   private path 集合で再 hash のコストは無視できる)。
 - **書き込みは rename で置き換える(#398)**: archive は `--out` の隣に実行ごとに作る dir
-  (`<out>.partial.XXXXXX`)へ書いてから `--out` へ rename し、marker も隣の一時 file に書いてから rename する。
-  同じ `--out` への並行の実行が互いの書きかけの file を取り違えず、失敗・中断した実行は既存の `--out` と
-  前回の marker をそのまま残す(一時の dir と file は後始末で消す)。
+  (`<out>.partial.XXXXXX`)へ書き、marker の記録も隣の一時 file に書き終えてから、archive、marker の順に
+  rename で置き換える。同じ `--out` への並行の実行が互いの書きかけの file を取り違えない。archive の rename
+  より前に失敗・中断した実行は、既存の `--out` と前回の marker をそのまま残す(一時の dir と file は後始末で
+  消す)。archive の rename の後に marker の rename が失敗したときだけ、新しい archive と前回の marker が
+  残り、exit は非 0。marker の path が directory なら拒否する。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(復元先 home(既定 `~`、
   `--target-home` 指定時はその dir)の `.local/state/dotfiles/restore-backup-<UTC ts>.<ランダム>/`。

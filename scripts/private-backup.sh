@@ -582,30 +582,31 @@ cmd_backup() {
   # removing and re-creating it while another was still encrypting made
   # the other run move a half-written file into place and record success
   # (#398). The dir is script-global, so cleanup_temps removes it when the
-  # write fails or the run is interrupted, and an existing --out is left
-  # untouched.
+  # write fails or the run is interrupted.
   partial_dir="$(mktemp -d "$out.partial.XXXXXX")"
   if ! tar -cf - -C "$staging" . | age "${age_recipient_args[@]}" -o "$partial_dir/archive"; then
     fail "failed to create encrypted archive"
     return 1
   fi
-  mv -f "$partial_dir/archive" "$out"
-  rmdir "$partial_dir"
-  partial_dir=""
-  if [[ ! -f "$out" ]]; then
-    fail "encrypted archive is not a regular file at the requested path: $out"
-    return 1
-  fi
-  ok "wrote encrypted archive: $out"
 
   # Marker: repo-external, minimal, machine-neutral (basename only; no
   # absolute path, no hostname, no entry contents). capture_incomplete is a
   # boolean (#242): true when a declared directory could not be fully
   # enumerated; doctor treats a marker without the field as unknown.
-  # The record is written to a temp next to the marker and renamed onto it:
-  # a redirect straight into the marker truncated it before yq ran, so a
-  # failed or interrupted write lost the last good record too (#398).
+  # The record is written to a temp next to the marker BEFORE --out is
+  # replaced, then the archive and the record are each renamed into place
+  # (#398): a redirect straight into the marker truncated it before yq ran,
+  # and a record made only after the archive replacement lost the previous
+  # archive when making it failed. A failure or interrupt up to the archive
+  # rename leaves --out and the marker as they were; only a failed rename of
+  # the record after it leaves the new archive with the previous marker, and
+  # the run still exits non-zero. A marker path that is a directory is
+  # refused: mv would move the record into it and report success.
   mkdir -p "$(dirname "$MARKER_FILE")"
+  if [[ -d "$MARKER_FILE" ]]; then
+    fail "backup marker path is a directory: $MARKER_FILE"
+    return 1
+  fi
   marker_tmp="$(mktemp "$MARKER_FILE.XXXXXX")"
   SV="$MANIFEST_SCHEMA_VERSION" TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     AB="$(basename "$out")" FC="$captured" CI="$capture_incomplete" \
@@ -616,7 +617,24 @@ cmd_backup() {
       "file_count": (strenv(FC) | tonumber),
       "capture_incomplete": (strenv(CI) == "1")
     }' > "$marker_tmp"
+
+  mv -f "$partial_dir/archive" "$out"
+  rmdir "$partial_dir"
+  partial_dir=""
+  if [[ ! -f "$out" ]]; then
+    fail "encrypted archive is not a regular file at the requested path: $out"
+    return 1
+  fi
+  ok "wrote encrypted archive: $out"
+
   mv -f "$marker_tmp" "$MARKER_FILE"
+  if [[ -d "$MARKER_FILE" ]]; then
+    # It turned into a directory after the check above, and mv moved the
+    # record into it: name the moved file so cleanup_temps removes it.
+    marker_tmp="$MARKER_FILE/${marker_tmp##*/}"
+    fail "backup marker path is a directory: $MARKER_FILE"
+    return 1
+  fi
   marker_tmp=""
   ok "updated marker: $MARKER_FILE"
   return 0

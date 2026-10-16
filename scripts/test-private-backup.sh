@@ -1742,7 +1742,8 @@ sv_type_out="$(HOME="$sv_type" PATH="$fixture_home/fakebin:$PATH" "$PB" \
 if [[ "$sv_type_rc" -ne 0 ]] \
   && grep -Fxq "[fail] unknown backup path type in $sv_type/.config/dotfiles/backup-paths.local: .config/foo: directory (known: file, dir)" <<< "$sv_type_out" \
   && ! grep -Fq "invalid manifest schema" <<< "$sv_type_out" \
-  && [[ ! -e "$sv_type/s.age" && ! -e "$sv_type/s.age.partial" && ! -e "$sv_type/.local/state/dotfiles/private-backup.json" ]]; then
+  && [[ ! -e "$sv_type/s.age" && ! -e "$sv_type/.local/state/dotfiles/private-backup.json" ]] \
+  && no_partial "$sv_type/s.age"; then
   pass "an unknown supplement entry type is refused by name before capture: no archive, no marker"
 else
   printf '%s\n' "$sv_type_out" >&2
@@ -1781,7 +1782,7 @@ for out_kind in directory symlink; do
       PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
       backup --out "$out_path" --recipient "$recipient" --yes 2>&1)" || out_rc=$?
     if [[ "$out_rc" -eq 2 ]] && grep -Fq '[fail]' <<< "$out_log" \
-      && [[ ! -e "$out_home/mktemp-calls" && ! -e "$out_path.partial" ]] \
+      && [[ ! -e "$out_home/mktemp-calls" ]] && no_partial "$out_path" \
       && [[ -z "$(find "$out_home/destination" -mindepth 1 -print)" ]]; then
       pass "--out $out_kind ($marker_state marker) is refused before staging without an archive"
     else
@@ -2275,10 +2276,13 @@ else
   miss "a failed archive write left a partial dir or changed --out (rc=$pd_rc)"
 fi
 
-# 36. A failed marker write keeps the last good record (#398). The record
-#     went straight into the marker by a redirect, which truncated it before
-#     yq ran; it is now written to a temp next to the marker and renamed. A
-#     yq first on PATH fails only the marker's yq -n call.
+# 36. A failed marker write keeps the last good record and the previous
+#     archive (#398). The record went straight into the marker by a
+#     redirect, which truncated it before yq ran, and it was made only after
+#     --out had been replaced. It is now written to a temp next to the marker
+#     before the archive rename. A yq first on PATH fails only the marker's
+#     yq -n call; the second run uses the same --out as the first, so a
+#     replaced archive shows.
 mk_home="$fixture_home/marker-keep-home"
 mk_marker="$mk_home/.local/state/dotfiles/private-backup.json"
 mk_fakebin="$fixture_home/marker-keep-fakebin"
@@ -2296,19 +2300,45 @@ mk_rc=0
 HOME="$mk_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$mk_home/first.age" --recipient "$recipient" --yes >/dev/null 2>&1 || mk_rc=$?
 cp "$mk_marker" "$fixture_home/marker-keep-before.json" 2>/dev/null || mk_rc=99
+cp "$mk_home/first.age" "$fixture_home/marker-keep-before.age" 2>/dev/null || mk_rc=99
 mk_out=""
 if [[ "$mk_rc" -eq 0 ]]; then
   mk_out="$(HOME="$mk_home" REAL_YQ="$real_yq" PATH="$mk_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$mk_home/second.age" --recipient "$recipient" --yes 2>&1)" || mk_rc=$?
+    backup --out "$mk_home/first.age" --recipient "$recipient" --yes 2>&1)" || mk_rc=$?
 fi
 mk_left="$(find "$mk_home/.local/state/dotfiles" -maxdepth 1 -name 'private-backup.json.*' 2>/dev/null)"
 if [[ "$mk_rc" -ne 0 && "$mk_rc" -ne 99 && -z "$mk_left" ]] \
   && cmp -s "$fixture_home/marker-keep-before.json" "$mk_marker" \
-  && [[ "$(yq -p=json -o=tsv '.archive' "$mk_marker")" == "first.age" ]]; then
-  pass "a failed marker write keeps the last good record and leaves no temp"
+  && cmp -s "$fixture_home/marker-keep-before.age" "$mk_home/first.age" \
+  && no_partial "$mk_home/first.age" \
+  && ! grep -Fq 'wrote encrypted archive:' <<< "$mk_out"; then
+  pass "a failed marker write keeps the last good record and the previous archive, and leaves no temp"
 else
   printf '%s\nleft: %s\n' "$mk_out" "$mk_left" >&2
-  miss "a failed marker write lost the last record or left a temp (rc=$mk_rc)"
+  miss "a failed marker write lost the last record or the previous archive, or left a temp (rc=$mk_rc)"
+fi
+
+# 37. A marker path that is a directory is refused before --out is replaced
+#     (#398 review): mv would move the record into the directory and report
+#     success. The run fails, keeps --out, and leaves nothing in the
+#     directory, no marker temp and no partial dir.
+md_home="$fixture_home/marker-dir-home"
+md_marker="$md_home/.local/state/dotfiles/private-backup.json"
+mkdir -p "$md_marker"
+printf 'fixture\n' > "$md_home/.zshrc.local"
+printf 'previous archive\n' > "$md_home/keep.age"
+md_rc=0
+md_out="$(HOME="$md_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$md_home/keep.age" --recipient "$recipient" --yes 2>&1)" || md_rc=$?
+md_left="$(find "$md_home/.local/state/dotfiles" -mindepth 1 ! -path "$md_marker" 2>/dev/null)"
+if [[ "$md_rc" -ne 0 && -d "$md_marker" && -z "$(find "$md_marker" -mindepth 1)" && -z "$md_left" ]] \
+  && grep -Fq "backup marker path is a directory" <<< "$md_out" \
+  && ! grep -Fq 'updated marker:' <<< "$md_out" \
+  && [[ "$(cat "$md_home/keep.age")" == "previous archive" ]] && no_partial "$md_home/keep.age"; then
+  pass "a marker path that is a directory is refused before --out is replaced, leaving nothing behind"
+else
+  printf '%s\nleft: %s\n' "$md_out" "$md_left" >&2
+  miss "a marker path that is a directory was not refused cleanly (rc=$md_rc)"
 fi
 
 if [[ "$status" -eq 0 ]]; then
