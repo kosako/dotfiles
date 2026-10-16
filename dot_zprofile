@@ -5,5 +5,15 @@
 # Homebrew (Apple Silicon). No-op if brew is not at this path.
 [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 
+# A login shell reads ~/.zshenv, then /etc/zprofile (macOS path_helper moves
+# the system paths to the front) and the brew shellenv above, which bury the
+# mise shims and ~/.local/bin that ~/.zshenv put first. ~/.zshrc re-asserts
+# them, but a login shell that is not interactive (`zsh -lc`, which Codex
+# uses to run commands) never reads it, so they are re-prepended here, in
+# the same order as ~/.zshenv (#400). The local override below still wins.
+# See docs/shell.md.
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
+
 # Local overrides win.
 [ -r "$HOME/.zprofile.local" ] && source "$HOME/.zprofile.local"

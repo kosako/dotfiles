@@ -57,7 +57,7 @@
 ### 出力のコピー(AI 連携)
 
 - `Ctrl-O` … **Enter の代わりに**押すと、そのコマンドを実行しつつ「`$ コマンド` + 出力 + `[exit status]`」をクリップボードへコピーする(AI チャットに貼って相談する用途)。普段は今までどおり Enter、コピーしたいコマンドだけ Ctrl-O。`&&` 連結 / pipe / 複数行コマンドも行全体を捕捉する。
-  - 出力は ANSI(色・制御列)を除去したプレーンテキストでコピーする。実行内容は通常の Enter と同じ(alias・オプション・`cd` / `export` などの状態変化もそのまま残る)。
+  - 出力は ANSI(色・制御列)を除去したプレーンテキストでコピーする。実行内容は通常の Enter と同じ(alias・オプション・`cd` / `export` などの状態変化もそのまま残る)。直前のコマンドの終了状態(`$?`)も Enter と同じくコマンドから読める(`$pipestatus` は引き継がない。#400)。
   - 出力はコマンド**終了後にまとめて表示**する(逐次ストリームしない・画面では色が付かない)。長時間・全画面・対話のコマンドには向かない。
   - バックグラウンドジョブ(`&`)が**コマンド本体の終了後**に出す出力は捕捉対象外(本体終了時点までを記録する)。
   - うっかり Enter で実行した後は取れない → `↑` で呼び出して Ctrl-O で実行し直す(副作用のあるコマンドの再実行に注意)。手で範囲選択するのは従来どおり可能。
@@ -92,7 +92,7 @@
 
 `~/.zshenv` は **すべての zsh 起動**(対話/非対話・login/非login)で読まれる。ここに mise の shims(`$HOME/.local/share/mise/shims`)を PATH 前置し、子プロセスが spawn する非対話 shell でも mise 管理 runtime(`node` 等)が解決するようにする。`~/.zshrc` の `mise activate` は対話 shell でしか走らないため、非対話側は shims が拾う(両者は併用、削除不要)。詳細は [docs/runtime.md](runtime.md)。
 
-あわせて `$HOME/.local/bin` も PATH 前置する。native installer で入れた自己更新型 CLI がここに入るため。代表例が native `claude`(Claude Code。npm-global ではなく `claude.ai/install.sh` で導入)で、stray な npm/Homebrew copy より優先される。経緯は [docs/supply-chain-npm.md](supply-chain-npm.md)。ただし `.zshenv` の前置は**非対話 shell 用**で、対話 shell では後から `brew shellenv`(`~/.zprofile`)と `mise activate`(`~/.zshrc`)が PATH を前置して埋もれるため、`~/.zshrc` が `mise activate` の後で `~/.local/bin` を**再前置**して native を優先させる(`~/.zshrc.local` の override より前なので local PATH は引き続き勝つ)。
+あわせて `$HOME/.local/bin` も PATH 前置する。native installer で入れた自己更新型 CLI がここに入るため。代表例が native `claude`(Claude Code。npm-global ではなく `claude.ai/install.sh` で導入)で、stray な npm/Homebrew copy より優先される。経緯は [docs/supply-chain-npm.md](supply-chain-npm.md)。ただし `.zshenv` の前置は**非対話 shell 用**で、対話 shell では後から `brew shellenv`(`~/.zprofile`)と `mise activate`(`~/.zshrc`)が PATH を前置して埋もれるため、`~/.zshrc` が `mise activate` の後で `~/.local/bin` を**再前置**して native を優先させる(`~/.zshrc.local` の override より前なので local PATH は引き続き勝つ)。login shell では `/etc/zprofile`(macOS の `path_helper` が system の path を先頭に並べ直す)と `brew shellenv`(`~/.zprofile`)も両方を埋めるので、`~/.zprofile` が `brew shellenv` の後で mise の shims と `~/.local/bin` を `.zshenv` と同じ順に前置し直す。`~/.zshrc` を読まない非対話の login shell(`zsh -lc`。Codex が command を実行する形)でも native の CLI と mise の runtime が先に解決する(`~/.zprofile.local` の override より前なので local PATH は引き続き勝つ。#400)。
 
 あわせて `$HOME/go/bin`(`go install` の行き先。managed な mise config が GOBIN を設定させない、#305)を PATH の**末尾**に足す。software catalog の go_install の tool を名前で実行できるようにするためで、末尾なので system や package manager の command を隠さない。詳細は [docs/runtime.md](runtime.md)。
 
