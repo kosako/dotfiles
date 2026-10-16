@@ -34,9 +34,11 @@ MARKER_FILE="$HOME/.local/state/dotfiles/private-backup.json"
 # registered once at the bottom, sees them after the function that made
 # them returned; empty until made, so the cleanup can run before that
 # under set -u (#358). backup: the 0700 staging (plaintext config), the
-# self-check dir and three list files. verify / restore: the 0700 workdir
+# self-check dir and three list files, the run's own partial-output dir next
+# to --out and the marker temp (#398). verify / restore: the 0700 workdir
 # the archive is decrypted and extracted into.
 staging="" selfcheck="" declared="" seen_paths="" dir_listing="" workdir=""
+partial_dir="" marker_tmp=""
 
 usage() {
   cat >&2 <<EOF
@@ -250,9 +252,10 @@ cleanup_temps() {
   for t in "$staging" "$selfcheck"; do
     [[ -z "$t" ]] || rm -rf "$t" || warn "could not remove the temp $t; remove it by hand (it may hold plaintext)"
   done
-  for t in "$declared" "$seen_paths" "$dir_listing"; do
+  for t in "$declared" "$seen_paths" "$dir_listing" "$marker_tmp"; do
     [[ -z "$t" ]] || rm -f "$t" || warn "could not remove the temp $t; remove it by hand"
   done
+  [[ -z "$partial_dir" ]] || rm -rf "$partial_dir" || warn "could not remove the temp $partial_dir; remove it by hand"
   remove_workdir "$workdir"
   return 0
 }
@@ -530,13 +533,9 @@ cmd_backup() {
   # never written as a success, and a producer / consumer drift shows up at
   # backup time instead of at restore time. Scope is staging / manifest
   # consistency only — a decrypt round-trip needs the identity, which backup
-  # does not hold (that stays `verify`'s contract). A stale partial output
-  # from an earlier failed run is removed first, so a failed self-check
-  # leaves no partial behind and writes no new archive (an existing --out
-  # is kept untouched); the marker is only written after a successful
-  # write below.
-  local partial="$out.partial"
-  rm -f "$partial"
+  # does not hold (that stays `verify`'s contract). A failed self-check
+  # writes no new archive (an existing --out is kept untouched); the marker
+  # is only written after a successful write below.
   # Script-global for cleanup_temps, like staging.
   selfcheck="$(mktemp -d "${TMPDIR:-/tmp}/private-backup-check.XXXXXX")"
   chmod 700 "$selfcheck"
@@ -577,12 +576,22 @@ cmd_backup() {
   # tar the 0700 staging, pipe straight into age so no plaintext tar ever
   # lands on disk; "-C staging ." keeps archive paths relative (no
   # absolute home path in the archive).
-  if ! tar -cf - -C "$staging" . | age "${age_recipient_args[@]}" -o "$partial"; then
-    rm -f "$partial"
+  # age writes into this run's own dir next to --out (mktemp -d), and the
+  # file is then renamed onto --out within the same file system. A fixed
+  # "$out.partial" was shared by every run with the same --out: one run
+  # removing and re-creating it while another was still encrypting made
+  # the other run move a half-written file into place and record success
+  # (#398). The dir is script-global, so cleanup_temps removes it when the
+  # write fails or the run is interrupted, and an existing --out is left
+  # untouched.
+  partial_dir="$(mktemp -d "$out.partial.XXXXXX")"
+  if ! tar -cf - -C "$staging" . | age "${age_recipient_args[@]}" -o "$partial_dir/archive"; then
     fail "failed to create encrypted archive"
     return 1
   fi
-  mv -f "$partial" "$out"
+  mv -f "$partial_dir/archive" "$out"
+  rmdir "$partial_dir"
+  partial_dir=""
   if [[ ! -f "$out" ]]; then
     fail "encrypted archive is not a regular file at the requested path: $out"
     return 1
@@ -593,7 +602,11 @@ cmd_backup() {
   # absolute path, no hostname, no entry contents). capture_incomplete is a
   # boolean (#242): true when a declared directory could not be fully
   # enumerated; doctor treats a marker without the field as unknown.
+  # The record is written to a temp next to the marker and renamed onto it:
+  # a redirect straight into the marker truncated it before yq ran, so a
+  # failed or interrupted write lost the last good record too (#398).
   mkdir -p "$(dirname "$MARKER_FILE")"
+  marker_tmp="$(mktemp "$MARKER_FILE.XXXXXX")"
   SV="$MANIFEST_SCHEMA_VERSION" TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     AB="$(basename "$out")" FC="$captured" CI="$capture_incomplete" \
     yq -n -o=json '{
@@ -602,7 +615,9 @@ cmd_backup() {
       "archive": strenv(AB),
       "file_count": (strenv(FC) | tonumber),
       "capture_incomplete": (strenv(CI) == "1")
-    }' > "$MARKER_FILE"
+    }' > "$marker_tmp"
+  mv -f "$marker_tmp" "$MARKER_FILE"
+  marker_tmp=""
   ok "updated marker: $MARKER_FILE"
   return 0
 }
