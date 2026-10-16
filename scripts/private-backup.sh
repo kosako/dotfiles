@@ -598,10 +598,12 @@ cmd_backup() {
   # (#398): a redirect straight into the marker truncated it before yq ran,
   # and a record made only after the archive replacement lost the previous
   # archive when making it failed. A failure or interrupt up to the archive
-  # rename leaves --out and the marker as they were; only a failed rename of
-  # the record after it leaves the new archive with the previous marker, and
-  # the run still exits non-zero. A marker path that is a directory is
-  # refused: mv would move the record into it and report success.
+  # rename leaves --out and the marker as they were; one after the archive
+  # rename and before the record's rename is done (a failed rename or
+  # removal of the partial dir, INT / TERM) leaves the new archive with the
+  # previous marker, and the run exits non-zero. A marker path that is a
+  # directory is refused: mv would move the record into it and report
+  # success.
   mkdir -p "$(dirname "$MARKER_FILE")"
   if [[ -d "$MARKER_FILE" ]]; then
     fail "backup marker path is a directory: $MARKER_FILE"
