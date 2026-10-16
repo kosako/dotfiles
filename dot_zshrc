@@ -155,6 +155,10 @@ _ai_clip_copy() {
 # locals are dynamically scoped in zsh: assignments in eval could overwrite
 # them and redirect cleanup to an unrelated file (#280). No named locals or
 # subshell are needed, so ordinary variable assignments also persist.
+# The status the line was entered with is taken first (the temp's command
+# substitution would replace it) and kept as the fourth positional parameter,
+# then set again right before eval, so $? in the command reads the previous
+# command's status as with Enter (#400). $pipestatus is not carried over.
 # Temp file is mktemp 0600 and holds the plain-text output, so it is removed in
 # an `always` block: on a normal exit, a non-zero exit, AND when the command is
 # interrupted (Ctrl-C) — a trailing `rm` alone never ran on SIGINT and left the
@@ -163,8 +167,10 @@ _ai_clip_copy() {
 # but does not change the exit status: callers and the prompt expect the
 # command's. scripts/test-ai-clip.sh drives all of this in an isolated zsh.
 _ai_clip_run() {
-  argv=( "$1" "$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" 1 ) || return 1
+  argv=( "$1" "$?" )
+  argv=( "$1" "$(mktemp "${TMPDIR:-/tmp}/ai-clip.XXXXXX")" 1 "$2" ) || return 1
   {
+    () { return "$1" } "$4"
     () { eval "$1" } "$1" > "$2" 2>&1
     set -- "$1" "$2" "$?"
     cat -- "$2"

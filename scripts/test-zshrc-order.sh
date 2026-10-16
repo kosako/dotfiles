@@ -24,6 +24,9 @@ set -euo pipefail
 # fixture の相対 path に置き換えた copy を source して確かめる (#384):
 #   - fake の brew の shellenv を読んだ後に ~/.zprofile.local を読み、local が勝つ
 #     (変数も PATH も)。~/.zprofile.local が無くても壊れずに終わる。
+#   - 8.: ~/.zprofile は brew shellenv の後で mise の shims と ~/.local/bin を前置し直し、
+#     ~/.zshrc を読まない login shell (`zsh -lc`) でも native の claude と mise の shims が
+#     system / Homebrew より先に解決する (#400)。
 # `zsh -n` は構文しか見ないので、この種の順序の退行は検出できない。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -239,6 +242,46 @@ else
     ok "test passed: dot_zprofile reads the brew shellenv, then ~/.zprofile.local, and the local values win (control without local keeps brew's)"
   else
     fail "test failed: dot_zprofile must read brew, then ~/.zprofile.local, with local winning (got $got_local)"
+    status=1
+  fi
+fi
+
+# 8. 非対話の login shell (`zsh -lc`。Codex が command を実行する形) は ~/.zshrc を読まない
+#    (#400)。起動順 ~/.zshenv → /etc/zprofile (macOS の path_helper が system の path を
+#    先頭に並べ直す) → ~/.zprofile を模し、~/.zprofile の後で native の claude が
+#    ~/.local/bin に、mise の shims にだけある command (node) が shims に解決することを
+#    確かめる。system の dir と Homebrew の dir にも同名の command を置くので、
+#    ~/.zprofile が前置し直さなければ system か Homebrew の方に解決して fail する。
+#    path_helper は「system の path を先頭に足す」形だけを模す。
+login_home="$zp/home-login"
+mkdir -p "$login_home/.local/bin" "$login_home/.local/share/mise/shims" "$zp/system-bin"
+for login_cmd in "$login_home/.local/bin/claude" "$login_home/.local/share/mise/shims/claude" \
+  "$login_home/.local/share/mise/shims/node" "$zp/opt-homebrew/bin/claude" \
+  "$zp/opt-homebrew/bin/node" "$zp/system-bin/node"; do
+  printf '#!/bin/sh\n' > "$login_cmd"
+  chmod +x "$login_cmd"
+done
+cat > "$zp/login-driver.zsh" <<'ZSH'
+cd "$ZPROFILE_TEST_DIR" || exit 1
+source "$ZSHRC_TEST_SOURCE/dot_zshenv"
+export PATH="$ZPROFILE_TEST_DIR/system-bin:$PATH"
+source "$ZPROFILE_TEST_DIR/zprofile.zsh"
+print -r -- "$(command -v claude)|$(command -v node)" > "$ZPROFILE_TEST_OUT/login"
+ZSH
+mkdir -p "$zp/out-login"
+if ! env -i PATH="$fixture/bin" HOME="$login_home" ZPROFILE_TEST_DIR="$zp" \
+  ZPROFILE_TEST_OUT="$zp/out-login" ZSHRC_TEST_SOURCE="$DOTFILES_ROOT" \
+  "$zsh_bin" -f "$zp/login-driver.zsh" </dev/null >"$zp/out-login/driver.log" 2>&1; then
+  cat "$zp/out-login/driver.log" >&2
+  fail "test failed: the login driver (zshenv -> path_helper -> zprofile) did not complete"
+  status=1
+else
+  want_login="$login_home/.local/bin/claude|$login_home/.local/share/mise/shims/node"
+  got_login="$(zp_read "$zp/out-login" login)"
+  if [[ "$got_login" == "$want_login" ]]; then
+    ok "test passed: a login shell that does not read ~/.zshrc resolves the native claude and the mise shims first after ~/.zprofile"
+  else
+    fail "test failed: after ~/.zprofile, a non-interactive login shell must resolve ~/.local/bin/claude and the mise shims first (got $got_login)"
     status=1
   fi
 fi

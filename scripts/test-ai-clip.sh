@@ -12,6 +12,8 @@ set -euo pipefail
 #   - the command's own exit status is returned, and a clipboard failure
 #     does not change it;
 #   - the command runs in the CURRENT shell (cd / export / source persist);
+#   - $? in the command is the status the line was entered with, as with
+#     Enter (#400);
 #   - the copied text is "$ <command>", the output, "[exit status: N]".
 #   - assignments to wrapper variable names cannot redirect cleanup or
 #     corrupt the copied command/status; ordinary assignments persist (#280).
@@ -154,6 +156,14 @@ print -r -- "$PWD $AI_CLIP_TEST $AI_CLIP_SOURCED"
 ZSH
 cat > "$fixture/sourced.zsh" <<'ZSH'
 export AI_CLIP_SOURCED=set
+ZSH
+# The status before the call is what $? reads inside the command; the call
+# still returns the command's own status.
+cat > "$fixture/cases/status_in.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+() { return 3 }
+_ai_clip_run 'print -r -- "in=$?"'
+print -r -- "rc=$?"
 ZSH
 cat > "$fixture/cases/mktemp_failure.zsh" <<'ZSH'
 source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
@@ -376,6 +386,20 @@ if out="$(run_case "$with_clip" "" persist _ai_clip_run 2>&1)" \
 else
   printf 'out=%s\n' "$out" >&2
   fail "test failed: cd / export / source did not persist"
+  status=1
+fi
+
+# 4b) $? in the command is the status the line was entered with (#400): the
+#     wrapper's own assignment used to make it 0.
+rm -f "$fixture/clip.txt"
+if out="$(run_case "$with_clip" "" status_in _ai_clip_run 2>&1)" \
+  && [[ "$out" == $'in=3\nrc=0' ]] \
+  && [[ "$(cat "$fixture/clip.txt")" == $'$ print -r -- "in=$?"\nin=3\n[exit status: 0]' ]] \
+  && [[ "$(leftovers)" == 0 ]]; then
+  ok "test passed: \$? in the command is the status before the call; the command's own status is returned"
+else
+  printf 'out=%s\nclip=%s\n' "$out" "$(cat "$fixture/clip.txt" 2>/dev/null)" >&2
+  fail "test failed: \$? in the command must be the status before the call"
   status=1
 fi
 

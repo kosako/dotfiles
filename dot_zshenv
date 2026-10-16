@@ -15,7 +15,8 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 # manager — notably the native `claude` from claude.ai/install.sh (NOT the npm
 # package; see docs/supply-chain-npm.md). Prepended here so it wins in
 # non-interactive shells; interactive shells re-assert it in ~/.zshrc after
-# `mise activate` / `brew shellenv` (which prepend later). No-op when empty.
+# `mise activate` / `brew shellenv` (which prepend later), and login shells
+# in ~/.zprofile after `brew shellenv` (#400). No-op when empty.
 export PATH="$HOME/.local/bin:$PATH"
 
 # Go's default install dir, where the software catalog's go_install tools
