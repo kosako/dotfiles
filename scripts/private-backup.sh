@@ -776,10 +776,17 @@ check_manifest() {
 # redirect a write outside the intended tree. <base> itself is trusted
 # (it is $HOME or an explicit --target-home). Returns 0 if a symlinked
 # parent exists.
+# The parent is cut with parameter expansion, not dirname: dirname reads a
+# <rel> that starts with "-" as an option, fails with no output, and the
+# check was left with no component to test, so a write went through the
+# symlink (#397). <rel> is a validated relative path (backup_path_is_safe),
+# so a "/" in it always leaves a non-empty parent.
 path_has_symlinked_parent() {
   local rel="$2" cur="$1" comp dir
-  dir="$(dirname "$rel")"
-  [[ "$dir" == "." ]] && return 1
+  case "$rel" in
+    */*) dir="${rel%/*}" ;;
+    *) return 1 ;;
+  esac
   local IFS='/' comps=()
   read -ra comps <<< "$dir"
   for comp in "${comps[@]}"; do
