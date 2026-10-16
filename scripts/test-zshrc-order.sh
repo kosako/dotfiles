@@ -27,6 +27,8 @@ set -euo pipefail
 #   - 8.: ~/.zprofile は brew shellenv の後で mise の shims と ~/.local/bin を前置し直し、
 #     ~/.zshrc を読まない login shell (`zsh -lc`) でも native の claude と mise の shims が
 #     system / Homebrew より先に解決する (#400)。
+#   - 9.: 対話の login shell (~/.zshenv → ~/.zprofile → ~/.zshrc) でも、~/.zshrc.local の時点で
+#     native の claude、最後は local の entry、node は mise の runtime が先に解決する。
 # `zsh -n` は構文しか見ないので、この種の順序の退行は検出できない。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -282,6 +284,42 @@ else
     ok "test passed: a login shell that does not read ~/.zshrc resolves the native claude and the mise shims first after ~/.zprofile"
   else
     fail "test failed: after ~/.zprofile, a non-interactive login shell must resolve ~/.local/bin/claude and the mise shims first (got $got_login)"
+    status=1
+  fi
+fi
+
+# 9. 対話の login shell は ~/.zshenv → /etc/zprofile → ~/.zprofile → ~/.zshrc の全部を読む
+#    (#400 review)。~/.zprofile の前置し直しが加わっても、~/.zshrc.local の時点で native の
+#    claude が勝ち、最後は ~/.zshrc.local の entry が勝ち、mise の runtime (fake の mise
+#    activate が前置する dir) が shims・Homebrew・system の node より先に解決する。1.〜6. の
+#    HOME (~/.zshrc.local あり) と fake の mise を使い、~/.zprofile は 7. の copy を読む。
+printf '#!/bin/sh\n' > "$mise_bin/node"
+printf '#!/bin/sh\n' > "$home/.local/share/mise/shims/node"
+chmod +x "$mise_bin/node" "$home/.local/share/mise/shims/node"
+cat > "$zp/login-i-driver.zsh" <<'ZSH'
+cd "$ZPROFILE_TEST_DIR" || exit 1
+source "$ZSHRC_TEST_SOURCE/dot_zshenv"
+export PATH="$ZPROFILE_TEST_DIR/system-bin:$PATH"
+source "$ZPROFILE_TEST_DIR/zprofile.zsh"
+source "$ZSHRC_TEST_SOURCE/dot_zshrc"
+print -r -- "$(command -v claude)|$(command -v node)" > "$ZSHRC_TEST_OUT/login-i"
+ZSH
+login_i_out="$zp/out-login-i"
+mkdir -p "$login_i_out"
+if ! env -i PATH="$fixture/bin" HOME="$home" HOMEBREW_PREFIX="$brew" ZPROFILE_TEST_DIR="$zp" \
+  ZPROFILE_TEST_OUT="$login_i_out" ZSHRC_TEST_SOURCE="$DOTFILES_ROOT" ZSHRC_TEST_OUT="$login_i_out" \
+  ZSHRC_TEST_MISE_BIN="$mise_bin" ZSHRC_TEST_LOCAL_BIN="$local_bin" \
+  "$zsh_bin" -f "$zp/login-i-driver.zsh" </dev/null >"$login_i_out/driver.log" 2>&1; then
+  cat "$login_i_out/driver.log" >&2
+  fail "test failed: the interactive login driver (zshenv -> path_helper -> zprofile -> zshrc) did not complete"
+  status=1
+else
+  want_login_i="$home/.local/bin/claude|$local_bin/claude|$mise_bin/node"
+  got_login_i="$(zp_read "$login_i_out" claude-at-local)|$(zp_read "$login_i_out" login-i)"
+  if [[ "$got_login_i" == "$want_login_i" ]]; then
+    ok "test passed: an interactive login shell (zshenv -> zprofile -> zshrc) keeps native claude ahead before ~/.zshrc.local, the local entry last, and the mise runtime ahead of shims / Homebrew / system"
+  else
+    fail "test failed: an interactive login shell must keep native claude ahead before ~/.zshrc.local, the local entry last, and the mise runtime first (got $got_login_i, want $want_login_i)"
     status=1
   fi
 fi
