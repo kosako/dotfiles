@@ -104,6 +104,13 @@ recipient="$(age-keygen -y "$fixture_home/keys/id.txt")"
 # Run private-backup.sh in the fixture environment.
 run() { HOME="$fixture_home" PATH="$fixture_home/fakebin:$PATH" "$PB" "$@"; }
 
+# no_partial OUT — nothing of OUT's partial output is left: neither a run's
+# own "OUT.partial.XXXXXX" dir (#398) nor the fixed "OUT.partial" of older
+# versions.
+no_partial() {
+  [[ -z "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1").partial*" 2>/dev/null)" ]]
+}
+
 archive="$fixture_home/out/backup.age"
 
 # 1. backup writes an archive and a machine-neutral marker.
@@ -755,7 +762,8 @@ for rcpt_err in missing-file both-flags; do
       ;;
   esac
   if [[ "$rcpt_rc" -eq 2 ]] && grep -Fxq "$rcpt_expect" <<< "$rcpt_out" \
-    && [[ ! -e "$rcpt_err_home/x.age" && ! -e "$rcpt_err_home/x.age.partial" && ! -e "$rcpt_err_home/.local/state/dotfiles/private-backup.json" ]]; then
+    && [[ ! -e "$rcpt_err_home/x.age" && ! -e "$rcpt_err_home/.local/state/dotfiles/private-backup.json" ]] \
+    && no_partial "$rcpt_err_home/x.age"; then
     pass "recipient usage error ($rcpt_err) exits 2 and writes no archive, partial or marker"
   else
     printf '%s\n' "$rcpt_out" >&2
@@ -1455,7 +1463,8 @@ for empty_case in nothing supplement-only; do
   empty_out="$(HOME="$empty_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
     backup --out "$empty_home/e.age" --recipient "$recipient" --yes 2>&1)" || empty_rc=$?
   if [[ "$empty_rc" -ne 0 ]] && grep -Fxq "[fail] no files captured; refusing to write an empty archive" <<< "$empty_out" \
-    && [[ ! -e "$empty_home/e.age" && ! -e "$empty_home/e.age.partial" && ! -e "$empty_home/.local/state/dotfiles/private-backup.json" ]]; then
+    && [[ ! -e "$empty_home/e.age" && ! -e "$empty_home/.local/state/dotfiles/private-backup.json" ]] \
+    && no_partial "$empty_home/e.age"; then
     pass "backup with nothing to capture ($empty_case) fails without an archive or a marker"
   else
     printf '%s\n' "$empty_out" >&2
@@ -1567,7 +1576,7 @@ sc_out="$(HOME="$sc_home" REAL_CP="$real_cp" PATH="$sc_fakebin:$fixture_home/fak
   backup --out "$sc_home/bad.age" --recipient "$recipient" --yes 2>&1)" || sc_rc=$?
 if [[ "$sc_rc" -ne 0 ]] && grep -Fq "checksum mismatch" <<< "$sc_out" \
   && grep -Fq "staging failed self-check; no archive written" <<< "$sc_out" \
-  && [[ ! -e "$sc_home/bad.age" && ! -e "$sc_home/bad.age.partial" ]] \
+  && [[ ! -e "$sc_home/bad.age" ]] && no_partial "$sc_home/bad.age" \
   && [[ "$(yq -p=json -o=tsv '.archive' "$sc_home/.local/state/dotfiles/private-backup.json")" == "ok.age" ]]; then
   pass "a staging that no longer matches its manifest is refused: no archive, no partial, marker unchanged"
 else
@@ -1665,7 +1674,8 @@ sv_case() {
   out="$(HOME="$home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
     backup --out "$home/s.age" --recipient "$recipient" --yes 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $home/.config/dotfiles/backup-paths.local" <<< "$out" \
-    && [[ ! -e "$home/s.age" && ! -e "$home/s.age.partial" && ! -e "$home/.local/state/dotfiles/private-backup.json" ]]; then
+    && [[ ! -e "$home/s.age" && ! -e "$home/.local/state/dotfiles/private-backup.json" ]] \
+    && no_partial "$home/s.age"; then
     pass "invalid supplement ($label) is rejected before capture: no archive, no marker"
   else
     printf '%s\n' "$out" >&2
@@ -1732,7 +1742,8 @@ sv_type_out="$(HOME="$sv_type" PATH="$fixture_home/fakebin:$PATH" "$PB" \
 if [[ "$sv_type_rc" -ne 0 ]] \
   && grep -Fxq "[fail] unknown backup path type in $sv_type/.config/dotfiles/backup-paths.local: .config/foo: directory (known: file, dir)" <<< "$sv_type_out" \
   && ! grep -Fq "invalid manifest schema" <<< "$sv_type_out" \
-  && [[ ! -e "$sv_type/s.age" && ! -e "$sv_type/s.age.partial" && ! -e "$sv_type/.local/state/dotfiles/private-backup.json" ]]; then
+  && [[ ! -e "$sv_type/s.age" && ! -e "$sv_type/.local/state/dotfiles/private-backup.json" ]] \
+  && no_partial "$sv_type/s.age"; then
   pass "an unknown supplement entry type is refused by name before capture: no archive, no marker"
 else
   printf '%s\n' "$sv_type_out" >&2
@@ -1771,7 +1782,7 @@ for out_kind in directory symlink; do
       PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
       backup --out "$out_path" --recipient "$recipient" --yes 2>&1)" || out_rc=$?
     if [[ "$out_rc" -eq 2 ]] && grep -Fq '[fail]' <<< "$out_log" \
-      && [[ ! -e "$out_home/mktemp-calls" && ! -e "$out_path.partial" ]] \
+      && [[ ! -e "$out_home/mktemp-calls" ]] && no_partial "$out_path" \
       && [[ -z "$(find "$out_home/destination" -mindepth 1 -print)" ]]; then
       pass "--out $out_kind ($marker_state marker) is refused before staging without an archive"
     else
@@ -1818,7 +1829,9 @@ race_log="$(HOME="$race_home" REAL_MV="$real_mv" RACE_OUT="$race_home/backup.age
   REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$race_home/mktemp-calls" \
   PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$race_home/backup.age" --recipient "$recipient" --yes 2>&1)" || race_rc=$?
-if [[ "$race_rc" -eq 1 && -f "$race_home/backup.age/backup.age.partial" ]] \
+# mv itself succeeded: the file age wrote ("archive" in the run's partial
+# dir since #398) landed inside the directory.
+if [[ "$race_rc" -eq 1 && -f "$race_home/backup.age/archive" ]] \
   && grep -Fq '[fail]' <<< "$race_log" \
   && ! grep -Fq 'wrote encrypted archive:' <<< "$race_log" \
   && cmp -s "$marker" "$race_marker"; then
@@ -2167,7 +2180,11 @@ fi
 #     call's last argument instead, and every call must name a template
 #     under the run's TMPDIR. The run must also leave that TMPDIR empty.
 #     Five calls at least: the three list files, the staging and the
-#     self-check dir.
+#     self-check dir. Two more hold no plaintext and are made next to the
+#     file they are renamed onto, so the rename stays in one file system
+#     (#398): the partial-output dir next to --out and the marker temp next
+#     to the marker. Those two are allowed by their exact template and must
+#     be gone after the run.
 tmpl_fakebin="$fixture_home/tmpl-fakebin"
 tmpl_home="$fixture_home/tmpl-home"
 tmpl_tmp="$fixture_home/tmpl-tmp"
@@ -2191,17 +2208,137 @@ while IFS= read -r tmpl_call; do
   tmpl_count=$((tmpl_count + 1))
   case "$tmpl_call" in
     "$tmpl_tmp"/*) ;;
+    "$tmpl_home/t.age.partial.XXXXXX" | "$tmpl_home/.local/state/dotfiles/private-backup.json.XXXXXX") ;;
     *) tmpl_bad+="${tmpl_call:-(no template)}"$'\n' ;;
   esac
 done <<< "$tmpl_calls"
 [[ -n "$tmpl_calls" ]] || tmpl_count=0
 tmpl_left="$(find "$tmpl_tmp" -mindepth 1 2>/dev/null)"
-if [[ "$tmpl_rc" -eq 0 && -f "$tmpl_home/t.age" && "$tmpl_count" -ge 5 && -z "$tmpl_bad" && -z "$tmpl_left" ]]; then
+tmpl_left+="$(find "$tmpl_home" "$tmpl_home/.local/state/dotfiles" -maxdepth 1 \
+  \( -name 't.age.partial*' -o -name 'private-backup.json.*' \) 2>/dev/null)"
+if [[ "$tmpl_rc" -eq 0 && -f "$tmpl_home/t.age" && "$tmpl_count" -ge 7 && -z "$tmpl_bad" && -z "$tmpl_left" ]]; then
   pass "backup makes every temp from a template under TMPDIR and leaves it empty"
 else
   printf 'calls (last argument):\n%s\nnot under TMPDIR:\n%s\nleft in TMPDIR:\n%s\n%s\n' \
     "$tmpl_calls" "$tmpl_bad" "$tmpl_left" "$tmpl_out" >&2
   miss "backup made a temp outside its TMPDIR or left one behind (rc=$tmpl_rc, calls=$tmpl_count)"
+fi
+
+# 35. Each run writes into its own partial-output dir next to --out (#398).
+#     The fixed "$out.partial" was shared by every run with the same --out,
+#     so one run removed and re-created the file another run was still
+#     encrypting into. A file at that fixed name (another run's, or one left
+#     by an older version) must stay as it was, and the run must leave no
+#     partial dir behind, when the write succeeds and when age fails (an
+#     existing --out is then kept).
+pd_home="$fixture_home/partial-dir-home"
+mkdir -p "$pd_home"
+printf 'fixture\n' > "$pd_home/.zshrc.local"
+printf 'another run\n' > "$pd_home/c.age.partial"
+pd_rc=0
+pd_out="$(HOME="$pd_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$pd_home/c.age" --recipient "$recipient" --yes 2>&1)" || pd_rc=$?
+pd_left="$(find "$pd_home" -maxdepth 1 -name 'c.age.partial.*' 2>/dev/null)"
+if [[ "$pd_rc" -eq 0 && -z "$pd_left" && "$(cat "$pd_home/c.age.partial")" == "another run" ]] \
+  && run verify --in "$pd_home/c.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  pass "backup leaves a file at the fixed .partial name alone and no partial dir behind"
+else
+  printf '%s\nleft: %s\n' "$pd_out" "$pd_left" >&2
+  miss "backup touched the fixed .partial name or left a partial dir (rc=$pd_rc)"
+fi
+pd_fakebin="$fixture_home/partial-dir-fakebin"
+mkdir -p "$pd_fakebin"
+cat > "$pd_fakebin/age" <<'SH'
+#!/bin/sh
+# Fails after writing part of its output, like an age that dies mid-write.
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat > /dev/null
+[ -z "$out" ] || printf 'half-written\n' > "$out"
+exit 1
+SH
+chmod +x "$pd_fakebin/age"
+cp "$pd_home/c.age" "$fixture_home/partial-dir-before.age"
+pd_rc=0
+pd_out="$(HOME="$pd_home" PATH="$pd_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$pd_home/c.age" --recipient "$recipient" --yes 2>&1)" || pd_rc=$?
+pd_left="$(find "$pd_home" -maxdepth 1 -name 'c.age.partial.*' 2>/dev/null)"
+if [[ "$pd_rc" -ne 0 && -z "$pd_left" ]] && grep -Fq "failed to create encrypted archive" <<< "$pd_out" \
+  && cmp -s "$fixture_home/partial-dir-before.age" "$pd_home/c.age"; then
+  pass "a failed archive write removes its partial dir and keeps the existing --out"
+else
+  printf '%s\nleft: %s\n' "$pd_out" "$pd_left" >&2
+  miss "a failed archive write left a partial dir or changed --out (rc=$pd_rc)"
+fi
+
+# 36. A failed marker write keeps the last good record and the previous
+#     archive (#398). The record went straight into the marker by a
+#     redirect, which truncated it before yq ran, and it was made only after
+#     --out had been replaced. It is now written to a temp next to the marker
+#     before the archive rename. A yq first on PATH fails only the marker's
+#     yq -n call; the second run uses the same --out as the first, so a
+#     replaced archive shows.
+mk_home="$fixture_home/marker-keep-home"
+mk_marker="$mk_home/.local/state/dotfiles/private-backup.json"
+mk_fakebin="$fixture_home/marker-keep-fakebin"
+mkdir -p "$mk_home" "$mk_fakebin"
+printf 'fixture\n' > "$mk_home/.zshrc.local"
+cat > "$mk_fakebin/yq" <<'SH'
+#!/bin/sh
+if [ "$1" = "-n" ] && [ -n "${SV:-}" ] && [ -n "${AB:-}" ]; then
+  exit 1
+fi
+exec "$REAL_YQ" "$@"
+SH
+chmod +x "$mk_fakebin/yq"
+mk_rc=0
+HOME="$mk_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$mk_home/first.age" --recipient "$recipient" --yes >/dev/null 2>&1 || mk_rc=$?
+cp "$mk_marker" "$fixture_home/marker-keep-before.json" 2>/dev/null || mk_rc=99
+cp "$mk_home/first.age" "$fixture_home/marker-keep-before.age" 2>/dev/null || mk_rc=99
+mk_out=""
+if [[ "$mk_rc" -eq 0 ]]; then
+  mk_out="$(HOME="$mk_home" REAL_YQ="$real_yq" PATH="$mk_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$mk_home/first.age" --recipient "$recipient" --yes 2>&1)" || mk_rc=$?
+fi
+mk_left="$(find "$mk_home/.local/state/dotfiles" -maxdepth 1 -name 'private-backup.json.*' 2>/dev/null)"
+if [[ "$mk_rc" -ne 0 && "$mk_rc" -ne 99 && -z "$mk_left" ]] \
+  && cmp -s "$fixture_home/marker-keep-before.json" "$mk_marker" \
+  && cmp -s "$fixture_home/marker-keep-before.age" "$mk_home/first.age" \
+  && no_partial "$mk_home/first.age" \
+  && ! grep -Fq 'wrote encrypted archive:' <<< "$mk_out"; then
+  pass "a failed marker write keeps the last good record and the previous archive, and leaves no temp"
+else
+  printf '%s\nleft: %s\n' "$mk_out" "$mk_left" >&2
+  miss "a failed marker write lost the last record or the previous archive, or left a temp (rc=$mk_rc)"
+fi
+
+# 37. A marker path that is a directory is refused before --out is replaced
+#     (#398 review): mv would move the record into the directory and report
+#     success. The run fails, keeps --out, and leaves nothing in the
+#     directory, no marker temp and no partial dir.
+md_home="$fixture_home/marker-dir-home"
+md_marker="$md_home/.local/state/dotfiles/private-backup.json"
+mkdir -p "$md_marker"
+printf 'fixture\n' > "$md_home/.zshrc.local"
+printf 'previous archive\n' > "$md_home/keep.age"
+md_rc=0
+md_out="$(HOME="$md_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$md_home/keep.age" --recipient "$recipient" --yes 2>&1)" || md_rc=$?
+md_left="$(find "$md_home/.local/state/dotfiles" -mindepth 1 ! -path "$md_marker" 2>/dev/null)"
+if [[ "$md_rc" -ne 0 && -d "$md_marker" && -z "$(find "$md_marker" -mindepth 1)" && -z "$md_left" ]] \
+  && grep -Fq "backup marker path is a directory" <<< "$md_out" \
+  && ! grep -Fq 'updated marker:' <<< "$md_out" \
+  && [[ "$(cat "$md_home/keep.age")" == "previous archive" ]] && no_partial "$md_home/keep.age"; then
+  pass "a marker path that is a directory is refused before --out is replaced, leaving nothing behind"
+else
+  printf '%s\nleft: %s\n' "$md_out" "$md_left" >&2
+  miss "a marker path that is a directory was not refused cleanly (rc=$md_rc)"
 fi
 
 if [[ "$status" -eq 0 ]]; then

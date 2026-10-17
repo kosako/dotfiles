@@ -105,11 +105,18 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   各 file の SHA-256・mode・size、archive 内 file 集合との一致を検証する。JSON parse や列挙 query が
   失敗した場合も拒否し、restore は検証済みの path 一覧だけを使用する。
 - **backup の自己検証(#224、採用・常時 on)**: 暗号化の直前に、verify / restore と**同じ検査関数**を
-  staging(manifest + files/)に当てる。不合格なら `--out` を作らず(古い `.partial` も残さず)marker も
-  更新せず exit 非 0。保証範囲は **staging / manifest の整合**まで(producer / consumer のズレを作成時に
+  staging(manifest + files/)に当てる。不合格なら `--out` を作らず marker も更新せず exit 非 0。
+  保証範囲は **staging / manifest の整合**まで(producer / consumer のズレを作成時に
   検出する)。暗号化後の復号 round-trip は identity が要るため backup では行わない(`verify` の契約)。
   受理条件は 3 コマンドで共有し、backup 独自の緩い検査は持たない。off にする flag は無い(対象は小さな
   private path 集合で再 hash のコストは無視できる)。
+- **書き込みは rename で置き換える(#398)**: archive は `--out` の隣に実行ごとに作る dir
+  (`<out>.partial.XXXXXX`)へ書き、marker の記録も隣の一時 file に書き終えてから、archive、marker の順に
+  rename で置き換える。同じ `--out` への並行の実行が互いの書きかけの file を取り違えない。archive の rename
+  より前に失敗・中断した実行は、既存の `--out` と前回の marker をそのまま残す(一時の dir と file は後始末で
+  消す)。archive の rename の後、marker の rename が終わる前に失敗・中断したとき(rename や一時の dir の
+  削除の失敗、INT / TERM)は、新しい archive と前回の marker が残り、exit は非 0。marker の path が
+  directory なら拒否する。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(復元先 home(既定 `~`、
   `--target-home` 指定時はその dir)の `.local/state/dotfiles/restore-backup-<UTC ts>.<ランダム>/`。
