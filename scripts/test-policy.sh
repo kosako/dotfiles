@@ -1010,4 +1010,39 @@ rm -f "$drift_fakebin/go"
 run_drift "catalog drift: skips go_install when go is absent" \
   "skip goreleaser: go not available"
 
+# Report writes survive EINTR (#378). bash 3.2 installs its SIGCHLD handler
+# without SA_RESTART: a child that exits while a report write to a full pipe
+# is blocked failed the printf builtin with EINTR, and under set -e the
+# script stopped half-way (doctor on the macOS bash32 CI job, the line it was
+# writing flushed only at exit). A reader that waits fills the pipe, two
+# children exit during the blocked writes, and every [info] / [warn] line
+# must arrive exactly once and in order, with no "write error" in the
+# report. The script runs under this suite's bash ($BASH): bash 4+ restarts
+# the write by itself, so the case bites under /bin/bash 3.2 (the bash32 job).
+eintr_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-eintr.XXXXXX")"
+tmp_roots+=("$eintr_dir")
+cat > "$eintr_dir/writer.sh" <<'SH'
+set -euo pipefail
+source "$EINTR_LIB"
+( sleep 1 ) &
+( sleep 2 ) &
+for ((i = 0; i < 3000; i++)); do
+  printf -v line '%095d' "$i"
+  if ((i % 2)); then warn "$line"; else item "$line"; fi
+done
+wait
+printf 'writer finished\n' > "$EINTR_DONE"
+SH
+for ((i = 0; i < 3000; i++)); do
+  if ((i % 2)); then printf '[warn] %095d\n' "$i"; else printf '[info] - %095d\n' "$i"; fi
+done > "$eintr_dir/want"
+EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DONE="$eintr_dir/done" \
+  "$BASH" "$eintr_dir/writer.sh" 2>&1 | { sleep 3; cat; } > "$eintr_dir/got" || true
+if [[ "$(cat "$eintr_dir/done" 2>/dev/null)" == "writer finished" ]] && cmp -s "$eintr_dir/want" "$eintr_dir/got"; then
+  ok "test passed: report lines survive an EINTR on a blocked write (each line once, in order, no write error)"
+else
+  fail "test failed: a report write interrupted by SIGCHLD lost, repeated or broke the output, or stopped the script (got $(wc -l < "$eintr_dir/got" | tr -d ' ') of 3000 lines; $(grep -c 'write error' "$eintr_dir/got" || true) write error(s))"
+  exit 1
+fi
+
 ok "policy tests passed"

@@ -12,46 +12,77 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # every informational line so only the next-actions summary and any [fail]
 # reach the terminal; [fail] is never muted (it is the policy exit path).
 # Every line passes through display_safe here, at the one place it is
-# printed (#335), whatever it carries — see display_safe below.
+# printed (#335), whatever it carries — see display_safe below — and is
+# written by report_write.
+
+# report_write FD LINE — write LINE and a newline to fd FD (1, or 2 for
+# [warn] / [fail]): the one write every report line goes through (#378).
+# bash 3.2 installs its SIGCHLD handler without SA_RESTART, so when a child
+# process exits while a write to a full pipe is blocked (the reader of the
+# report lagging, as on a loaded CI runner), the printf builtin fails with
+# EINTR, and under set -e the script ended half-way. The bytes that were not
+# written stay in stdio's buffer, so a failed write is retried by flushing
+# that buffer again (printf ''), never by printing the line a second time,
+# which would write it twice. bash's own "write error" message is discarded
+# (it would land in the report); a write that still fails after the retries
+# (a reader that went away) returns 1, as the bare printf did.
+report_write() {
+  local __rw_tries=0
+  if [[ "$1" == 2 ]]; then
+    printf '%s\n' "$2" >&2 2>/dev/null && return 0
+    until printf '' >&2 2>/dev/null; do
+      __rw_tries=$((__rw_tries + 1))
+      [[ "$__rw_tries" -lt 100 ]] || return 1
+    done
+  else
+    printf '%s\n' "$2" 2>/dev/null && return 0
+    until printf '' 2>/dev/null; do
+      __rw_tries=$((__rw_tries + 1))
+      [[ "$__rw_tries" -lt 100 ]] || return 1
+    done
+  fi
+  return 0
+}
+
 ok() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[ok] %s\n' "$__report_line"
+  report_write 1 "[ok] $__report_line"
 }
 
 info() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[info] %s\n' "$__report_line"
+  report_write 1 "[info] $__report_line"
 }
 
 section() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[info] == %s ==\n' "$__report_line"
+  report_write 1 "[info] == $__report_line =="
 }
 
 item() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[info] - %s\n' "$__report_line"
+  report_write 1 "[info] - $__report_line"
 }
 
 warn() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[warn] %s\n' "$__report_line" >&2
+  report_write 2 "[warn] $__report_line"
 }
 
 fail() {
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[fail] %s\n' "$__report_line" >&2
+  report_write 2 "[fail] $__report_line"
 }
 
 # Report lines are terminal-safe (#335): the helpers above and report_actions
@@ -187,18 +218,18 @@ action() {
 report_actions() {
   local total i step line
   total="${#ACTION_REASONS[@]}"
-  printf '[info] == next actions (%s) ==\n' "$total"
+  report_write 1 "[info] == next actions ($total) =="
   if [[ "$total" -eq 0 ]]; then
-    printf '[ok] next actions: none\n'
+    report_write 1 "[ok] next actions: none"
     return 0
   fi
   for ((i = 0; i < total; i++)); do
     display_safe_into line "${ACTION_REASONS[$i]}"
-    printf '[info] %s. %s\n' "$((i + 1))" "$line"
+    report_write 1 "[info] $((i + 1)). $line"
     while IFS= read -r step; do
       [[ -n "$step" ]] || continue
       display_safe_into line "$step"
-      printf '        %s\n' "$line"
+      report_write 1 "        $line"
     done <<< "${ACTION_STEPS[$i]}"
   done
 }
