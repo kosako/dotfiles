@@ -617,10 +617,13 @@ if [[ "$(capability_value "$profile" enableRuntimeManagement)" == "true" ]]; the
 else
   ok "runtime management disabled for profile"
 fi
+# enableDirenv selects this check only (#401): the managed ~/.zshrc registers
+# the direnv hook wherever direnv is installed, whatever the capability says,
+# so the off branch must not read as "direnv is off".
 if [[ "$(capability_value "$profile" enableDirenv)" == "true" ]]; then
   command_status direnv || true
 else
-  ok "direnv disabled for profile"
+  item "direnv check skipped for profile (enableDirenv=false selects the check only; the shell hook still loads an allowed .envrc wherever direnv is installed)"
 fi
 for command_name in zsh starship; do
   command_status "$command_name" || true

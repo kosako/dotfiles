@@ -52,7 +52,7 @@ secret 供給が有効になるのは `allowSecretsAccess=true` の profile に�
 - `doctor` の `1Password` section は `allowSecretsAccess=true` のときだけ `op` の存在と sign-in を report-only で確認する。secret 値そのものは読まない。`false` の profile では「secret access disabled」と報告して終わる。sign-in 確認の `op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し(未ログインの `op` は対話 unlock を待って応答しないことがある、#231)、期限内に答えが無ければ「sign-in 未確認」と warn して次の section へ進む(「not signed in」とは断定しない)。
 - private-backup(`backup` / `verify` / `restore`)の runtime gate も `allowSecretsAccess` を使う。実 profile を chezmoi config から fail-closed に解決し、`true` 以外では実行を拒否する([private-backup](private-backup.md))。
 
-この gate は **secret を扱う用途**(op による供給と private-backup)だけを縛る。direnv 一般の利用(後述)は別 capability で、ここでは縛らない。
+この gate は **secret を扱う用途**(op による供給と private-backup)だけを縛る。direnv 一般の利用(後述)はこの gate の外で、ここでは縛らない。
 
 ## identity は別ルール(二層)
 
@@ -72,7 +72,7 @@ secret 全般は op + direnv で供給してよいが、**Git identity は対象
 
 direnv には 2 つの用途がある。本 doc が扱うのは後者(secret 供給)だけ。
 
-- **project env(PATH / runtime 切り替え等、secret 無関係)**: `enableDirenv` capability が制御する([runtime](runtime.md))。`work` のように `enableDirenv=true` かつ `allowSecretsAccess=false` の構成があり得る(direnv は使うが secret 注入はしない)。
+- **project env(PATH / runtime 切り替え等、secret 無関係)**: direnv が入っていれば `~/.zshrc` が hook を登録し、allow 済みの `.envrc` を読む。`enableDirenv` capability は doctor が direnv を検査するかだけを決め、hook の on / off は制御しない([runtime](runtime.md)、#401)。`work` のように `enableDirenv=true` かつ `allowSecretsAccess=false` の構成があり得る(direnv は使うが secret 注入はしない)。
 - **secret 供給**: 本 doc の規約。`allowSecretsAccess` で別途 gate する。
 
 `direnv allow` / `mise trust` は自動化しない([runtime](runtime.md))。direnv の有効化と secret 供給の許可は独立した判断とする。
