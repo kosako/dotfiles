@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# A signal that ends the run mid-report leaves no report writer behind
+# (#378, lib-policy.sh).
+trap report_write_stop EXIT
 
 usage() {
   cat <<EOF

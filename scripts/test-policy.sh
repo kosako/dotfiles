@@ -1013,17 +1013,19 @@ run_drift "catalog drift: skips go_install when go is absent" \
 # Report writes survive EINTR (#378). bash 3.2 installs its SIGCHLD handler
 # without SA_RESTART: a child that exits while a report write to a full pipe
 # is blocked failed the printf builtin with EINTR, and under set -e the
-# script stopped half-way (doctor on the macOS bash32 CI job). A reader that
-# waits fills the pipe, children exit during the blocked writes, and every
-# [info] / [warn] line — some longer than any stdio buffer — must arrive
-# exactly once and in order, with no "write error" in the report. The
-# scripts run under this suite's bash ($BASH). A control run writes the same
-# lines with the bare builtin: under bash 3.2 it must hit the write error,
-# or the fixture did not reproduce the condition and the case would pass
-# vacuously (bash 4+ restarts the write by itself, so there the control is
-# only reported). Eight children end every half second while the reader
-# waits five, so one of them ends while the writer is blocked even when the
-# writer starts late (#378 review).
+# script stopped half-way (doctor on the macOS bash32 CI job). The scripts
+# run under this suite's bash ($BASH). Each step waits on a cue, not on a
+# clock (#378 review): the reader reads only once the test releases it; the
+# writer notes the index of each line before writing it, and an index that
+# has stood still for a second with the writer unfinished is a writer
+# blocked on the full pipe (the lines far outgrow any pipe, and nothing
+# reads them yet); only then may the writer's children end, and the reader
+# is released once they all have. Every [info] / [warn] line — some longer
+# than any stdio buffer — must then arrive exactly once and in order. A
+# control run writes the same lines with the bare builtin: under bash 3.2 it
+# must stop short, or the fixture did not reproduce the condition and the
+# case would pass vacuously (bash 4+ restarts the write by itself, so there
+# the control is only reported).
 eintr_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-eintr.XXXXXX")"
 tmp_roots+=("$eintr_dir")
 cat > "$eintr_dir/writer.sh" <<'SH'
@@ -1038,31 +1040,86 @@ emit() {
     item "$2"
   fi
 }
-for delay in 0.5 1 1.5 2 2.5 3 3.5 4; do
-  ( sleep "$delay" ) &
+for n in 1 2 3; do
+  ( until [[ -e "$EINTR_DIR/go" ]]; do sleep 0.05; done ) &
+  printf '%s\n' "$!" >> "$EINTR_DIR/kids"
 done
 for ((i = 0; i < 3000; i++)); do
   if ((i % 500 == 250)); then printf -v line '%070000d' "$i"; else printf -v line '%095d' "$i"; fi
+  printf '%s\n' "$i" > "$EINTR_DIR/at"
   emit "$i" "$line"
 done
 wait
-printf 'writer finished\n' > "$EINTR_DONE"
+printf 'writer finished\n' > "$EINTR_DIR/done"
 SH
 for ((i = 0; i < 3000; i++)); do
   if ((i % 500 == 250)); then printf -v line '%070000d' "$i"; else printf -v line '%095d' "$i"; fi
   if ((i % 2)); then printf '[warn] %s\n' "$line"; else printf '[info] - %s\n' "$line"; fi
 done > "$eintr_dir/want"
-# eintr_run MODE — run the writer with a reader that waits; leaves got / done.
+# eintr_wait_blocked — wait (up to 30 s) until the writer's line index has
+# stood still for a second with the writer unfinished. Returns 1 at the
+# deadline, or when the writer finished (it cannot have blocked).
+eintr_wait_blocked() {
+  local last="" now still=0 tries
+  for ((tries = 0; tries < 300; tries++)); do
+    sleep 0.1
+    [[ ! -e "$eintr_dir/done" ]] || return 1
+    now="$(cat "$eintr_dir/at" 2>/dev/null || true)"
+    if [[ -n "$now" && "$now" == "$last" ]]; then
+      still=$((still + 1))
+      [[ "$still" -lt 10 ]] || return 0
+    else
+      still=0
+      last="$now"
+    fi
+  done
+  return 1
+}
+# eintr_wait_gone FILE TENTHS — wait (up to TENTHS tenths of a second) until
+# no pid listed in FILE is alive. Returns 1 at the deadline, or when FILE
+# lists no pid.
+eintr_wait_gone() {
+  local pid alive listed tries
+  for ((tries = 0; tries < $2; tries++)); do
+    alive=0 listed=0
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] || continue
+      listed=1
+      if kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    done < "$1"
+    [[ "$listed" -eq 1 ]] || return 1
+    [[ "$alive" -eq 1 ]] || return 0
+    sleep 0.1
+  done
+  return 1
+}
+# eintr_run MODE — run the writer through the cued steps; leaves got / done,
+# and eintr_cued=0 when a cue was not met (the run then proves nothing).
+# The reader is released whatever happened, so the run always ends.
 eintr_run() {
-  rm -f "$eintr_dir/got" "$eintr_dir/done"
-  EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DONE="$eintr_dir/done" EINTR_MODE="$1" \
-    "$BASH" "$eintr_dir/writer.sh" 2>&1 | { sleep 5; cat; } > "$eintr_dir/got" || true
+  local pipeline
+  rm -f "$eintr_dir/got" "$eintr_dir/done" "$eintr_dir/at" "$eintr_dir/kids" \
+    "$eintr_dir/go" "$eintr_dir/release"
+  EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DIR="$eintr_dir" EINTR_MODE="$1" \
+    "$BASH" "$eintr_dir/writer.sh" 2>&1 \
+    | { until [[ -e "$eintr_dir/release" ]]; do sleep 0.05; done; cat; } > "$eintr_dir/got" &
+  pipeline=$!
+  eintr_cued=1
+  eintr_wait_blocked || eintr_cued=0
+  : > "$eintr_dir/go"
+  eintr_wait_gone "$eintr_dir/kids" 100 || eintr_cued=0
+  : > "$eintr_dir/release"
+  wait "$pipeline" || true
 }
 # The control's failure shows as a writer that did not finish (set -e ends it
 # at the failed write), not as bash's "write error" message: that message is
 # written to the same blocked pipe, and the next child's SIGCHLD can cut it
 # too.
 eintr_run bare
+if [[ "$eintr_cued" -ne 1 ]]; then
+  fail "test failed: in the EINTR fixture's control run the writer did not block on the full pipe, or its children did not end, within the deadline"
+  exit 1
+fi
 eintr_bare_lines="$(wc -l < "$eintr_dir/got" | tr -d ' ')"
 if [[ "$(cat "$eintr_dir/done" 2>/dev/null)" == "writer finished" ]] && cmp -s "$eintr_dir/want" "$eintr_dir/got"; then
   eintr_bare_whole=1
@@ -1075,6 +1132,10 @@ if [[ "${BASH_VERSINFO[0]}" -lt 4 && "$eintr_bare_whole" -eq 1 ]]; then
 fi
 info "EINTR fixture: the bare builtin wrote $eintr_bare_lines of 3000 lines under bash $BASH_VERSION (finished whole: $eintr_bare_whole)"
 eintr_run report
+if [[ "$eintr_cued" -ne 1 ]]; then
+  fail "test failed: in the EINTR fixture's report run the writer did not block on the full pipe, or its children did not end, within the deadline"
+  exit 1
+fi
 if [[ "$(cat "$eintr_dir/done" 2>/dev/null)" == "writer finished" ]] && cmp -s "$eintr_dir/want" "$eintr_dir/got"; then
   ok "test passed: report lines survive an EINTR on a blocked write (each line once, in order, long lines whole, no write error)"
 else
@@ -1093,47 +1154,76 @@ ok "test passed: report_write still fails when its fd is closed"
 # reader stopped reading) runs the script's trap at once (#378 review):
 # waiting on the write in the foreground would hold the trap — doctor's
 # probe cleanup, private-backup's removal of its plaintext temps — until the
-# reader came back. Only the bash 3.2 path (the background subshell) is held
-# to this: bash 4+ writes with the builtin in place and restarts the write
-# after the trap's signal, as it always did, so the case is skipped there.
+# reader came back. The trap ends the writer in flight with
+# report_write_stop, as the reporting scripts' traps do, so no writer is
+# left behind on the pipe. The reader is released only after both are
+# judged, so a trap held until the reader came back cannot pass. Only the
+# bash 3.2 path (the background writer) is held to this: bash 4+ writes
+# with the builtin in place and restarts the write after the trap's signal,
+# as it always did, so the case is skipped there.
 if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
   info "skipped the blocked-write TERM case under bash $BASH_VERSION (the builtin write is restarted; unchanged by #378)"
 else
 cat > "$eintr_dir/term.sh" <<'SH'
 set -euo pipefail
 source "$EINTR_LIB"
-trap 'printf "trapped\n" > "$EINTR_TRAPPED"; exit 143' TERM
-printf '%s\n' "$$" > "$EINTR_PID"
+trap 'report_write_stop; printf "trapped\n" > "$EINTR_DIR/trapped"; exit 143' TERM
+printf '%s\n' "$$" > "$EINTR_DIR/term.pid"
 for ((i = 0; i < 3000; i++)); do
   printf -v line '%095d' "$i"
+  printf '%s\n' "$i" > "$EINTR_DIR/at"
   item "$line"
 done
 SH
-rm -f "$eintr_dir/term.pid" "$eintr_dir/trapped"
-EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_PID="$eintr_dir/term.pid" EINTR_TRAPPED="$eintr_dir/trapped" \
-  "$BASH" "$eintr_dir/term.sh" | { sleep 6; cat > /dev/null; } &
+rm -f "$eintr_dir/done" "$eintr_dir/at" "$eintr_dir/release" "$eintr_dir/term.pid" \
+  "$eintr_dir/term.writer" "$eintr_dir/trapped"
+EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DIR="$eintr_dir" "$BASH" "$eintr_dir/term.sh" \
+  | { until [[ -e "$eintr_dir/release" ]]; do sleep 0.05; done; cat > /dev/null; } &
 term_pipeline=$!
-for ((i = 0; i < 30; i++)); do
-  [[ -s "$eintr_dir/term.pid" ]] && break
-  sleep 0.1
-done
-sleep 1
-kill -TERM "$(cat "$eintr_dir/term.pid")" 2>/dev/null || true
-term_trapped=0
-for ((i = 0; i < 30; i++)); do
-  if [[ -s "$eintr_dir/trapped" ]]; then
-    term_trapped=1
-    break
+term_failure=""
+if eintr_wait_blocked; then
+  # The writer blocked on the pipe is term.sh's one child.
+  pgrep -P "$(cat "$eintr_dir/term.pid")" > "$eintr_dir/term.writer" 2>/dev/null || true
+  kill -TERM "$(cat "$eintr_dir/term.pid")" 2>/dev/null || true
+  term_trapped=0
+  for ((i = 0; i < 30; i++)); do
+    if [[ -s "$eintr_dir/trapped" ]]; then
+      term_trapped=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$term_trapped" -ne 1 ]]; then
+    term_failure="a TERM to the script while a report write was blocked did not run its trap within 3 seconds (the trap waited for the reader)"
+  elif ! eintr_wait_gone "$eintr_dir/term.writer" 30; then
+    term_failure="the blocked report writer was still alive 3 seconds after the trap, or none was found (report_write_stop did not end it)"
   fi
-  sleep 0.1
-done
-wait "$term_pipeline" 2>/dev/null || true
-if [[ "$term_trapped" -eq 1 ]]; then
-  ok "test passed: a TERM to the script while a report write is blocked runs its trap at once"
 else
-  fail "test failed: a TERM to the script while a report write was blocked did not run its trap within 3 seconds (the trap waited for the reader)"
+  term_failure="the TERM case's writer did not block on the full pipe within the deadline"
+fi
+: > "$eintr_dir/release"
+wait "$term_pipeline" 2>/dev/null || true
+if [[ -n "$term_failure" ]]; then
+  fail "test failed: $term_failure"
   exit 1
 fi
+ok "test passed: a TERM to the script while a report write is blocked runs its trap at once, and the trap leaves no writer behind"
 fi
+# Every script that reports ends a report write in flight from its EXIT trap
+# (doctor and private-backup from their INT / TERM traps too), the call the
+# TERM case above holds to its effect (#378 review).
+for script in doctor preflight validate-policy install-packages private-backup; do
+  for sig in EXIT INT TERM; do
+    case "$script:$sig" in
+      doctor:* | private-backup:* | *:EXIT) ;;
+      *) continue ;;
+    esac
+    if ! grep -Eq "^[[:space:]]*trap .*report_write_stop.* $sig\$" "$SCRIPT_DIR/$script.sh"; then
+      fail "test failed: $script.sh must call report_write_stop from its $sig trap"
+      exit 1
+    fi
+  done
+done
+ok "test passed: the reporting scripts end a report write in flight from their traps"
 
 ok "policy tests passed"

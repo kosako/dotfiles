@@ -33,21 +33,57 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # alone while the reader had stopped reading would have waited on the
 # blocked write (and with it doctor's probe cleanup and private-backup's
 # removal of its plaintext temps); `wait` returns at once on a trapped
-# signal, so the trap runs (#378 review). bash 4 and later restart the
+# signal, so the trap runs (#378 review). The writer in flight is kept in
+# REPORT_WRITER for report_write_stop below, which that trap calls so the
+# writer does not outlive the script. bash 4 and later restart the
 # interrupted write, so they keep the builtin in place (no fork per line).
+REPORT_WRITER=""
+REPORT_WRITER_STARTING=0
 report_write() {
+  local rc=0
   if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    REPORT_WRITER_STARTING=1
     if [[ "$1" == 2 ]]; then
       (printf '%s\n' "$2") >&2 &
     else
       (printf '%s\n' "$2") &
     fi
-    wait "$!"
+    REPORT_WRITER=$!
+    REPORT_WRITER_STARTING=0
+    wait "$REPORT_WRITER" || rc=$?
+    REPORT_WRITER=""
+    return "$rc"
   elif [[ "$1" == 2 ]]; then
     printf '%s\n' "$2" >&2
   else
     printf '%s\n' "$2"
   fi
+}
+
+# report_write_stop — end the bash 3.2 writer still in flight, from the
+# INT / TERM / EXIT trap of every script that reports (#378 review): a
+# script ended by a signal while its reader had stopped reading otherwise
+# left the writer behind, blocked on the pipe (holding its write end) until
+# the reader read again. A signal handled right after the fork, before the
+# pid is kept, finds the writer through $! alone; either pid is trusted only
+# as a live child of this shell, so a stale one reused by an unrelated
+# process is never killed (the form of doctor's probe_cleanup). KILL, not
+# TERM: a writer forked while the script ignored TERM would ignore it too,
+# and the one line it was writing is lost either way. Nothing to do under
+# bash 4+. Always returns 0.
+report_write_stop() {
+  local pid="$REPORT_WRITER" children
+  if [[ -z "$pid" && "$REPORT_WRITER_STARTING" == 1 ]]; then
+    pid="$( ( set +u; printf '%s' "$!" ) 2>/dev/null || true)"
+  fi
+  REPORT_WRITER=""
+  REPORT_WRITER_STARTING=0
+  [[ -n "$pid" ]] || return 0
+  children="$(pgrep -P $$ 2>/dev/null || true)"
+  case $'\n'"$children"$'\n' in
+    *$'\n'"$pid"$'\n'*) kill -KILL "$pid" 2>/dev/null || true ;;
+  esac
+  return 0
 }
 
 ok() {
