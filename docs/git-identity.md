@@ -32,7 +32,9 @@ identity file の中身は最小限にする。
 どの identity で commit するかを取り違えないよう、starship プロンプトが現在の context を常時表示する
 ([docs/shell.md](shell.md))。**personal=緑 / その他の解決済み identity=黄(email 表示)/ repo 内で
 identity 未解決(`useConfigOnly` の fail-closed)=赤**。解決済みは name と email の両方が空でないこと(email だけの context は
-Git が commit を拒否し、name だけの context は空 email の壊れた identity になるので、どちらも赤。#383)。分類は runtime に「解決された committer email」と
+Git が commit を拒否し、name だけの context は空 email の壊れた identity になるので、どちらも赤。#383)。committer は Git が実際に記録するもの
+(`git var GIT_COMMITTER_IDENT`)を読むので、`GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` の環境変数(shell や `.envrc` が設定したもの)が
+`user.name` / `user.email` より優先されるのも Git と同じ(#399)。分類は runtime に「解決された committer email」と
 **local の `~/.config/git/personal.gitconfig`** を照合して行い、managed な `starship.toml` には identity 値を
 一切持たない(public-safe。`scripts/test-starship.sh` が回帰固定)。
 
@@ -67,7 +69,10 @@ identity がそのまま commit に使われていた(後勝ちで上書きす�
 
 対策として、managed な **identity reset file**(`~/.config/git-profile/identity-reset.gitconfig`、
 `git-profile` module。`[user] name =` / `email =` の空値だけで identity 値は持たない)を、非 personal
-4 context それぞれの gitdir include の**直前**に include する:
+4 context それぞれの gitdir include の**直前**に include する。reset は署名の設定も既定に戻す
+(`user.signingkey` を空、`commit.gpgsign` / `tag.gpgsign` を false。#399): personal.gitconfig で署名を
+opt-in していると、personal remote を持つ非 personal の repo に personal の鍵と opt-in が残っていたため。
+署名したい context は、reset の後に読まれる自分の local file で opt-in し直す:
 
 ```ini
 [includeIf "gitdir:~/src/work/"]
