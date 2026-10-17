@@ -69,20 +69,24 @@ report_write() {
 # as a live child of this shell, so a stale one reused by an unrelated
 # process is never killed (the form of doctor's probe_cleanup). KILL, not
 # TERM: a writer forked while the script ignored TERM would ignore it too,
-# and the one line it was writing is lost either way. Nothing to do under
-# bash 4+. Always returns 0.
+# and the one line it was writing is lost either way. The writer stays
+# recorded until it has been killed, so the trap of a second signal that
+# lands mid-way (the scripts' traps ignore INT / TERM first, but not every
+# signal) still finds it (#378 review). Nothing to do under bash 4+. Always
+# returns 0.
 report_write_stop() {
   local pid="$REPORT_WRITER" children
   if [[ -z "$pid" && "$REPORT_WRITER_STARTING" == 1 ]]; then
     pid="$( ( set +u; printf '%s' "$!" ) 2>/dev/null || true)"
   fi
+  if [[ -n "$pid" ]]; then
+    children="$(pgrep -P $$ 2>/dev/null || true)"
+    case $'\n'"$children"$'\n' in
+      *$'\n'"$pid"$'\n'*) kill -KILL "$pid" 2>/dev/null || true ;;
+    esac
+  fi
   REPORT_WRITER=""
   REPORT_WRITER_STARTING=0
-  [[ -n "$pid" ]] || return 0
-  children="$(pgrep -P $$ 2>/dev/null || true)"
-  case $'\n'"$children"$'\n' in
-    *$'\n'"$pid"$'\n'*) kill -KILL "$pid" 2>/dev/null || true ;;
-  esac
   return 0
 }
 

@@ -5,8 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
 # A signal that ends the run mid-report leaves no report writer behind
-# (#378, lib-policy.sh).
-trap report_write_stop EXIT
+# (#378, lib-policy.sh); INT and TERM are ignored first, so a second signal
+# cannot cut that short.
+trap 'trap "" INT TERM; report_write_stop' EXIT
 
 # Arguments: [PROFILE]. A dash-word is rejected HERE, before the validator
 # sees it: validate-policy takes -h / --all / --list-profiles as its own

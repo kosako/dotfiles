@@ -194,8 +194,9 @@ main() {
 # this to unit-test build_install_cmd without performing installs).
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # A signal that ends the run mid-report leaves no report writer behind
-  # (#378, lib-policy.sh). Set here, not at the top, so sourcing this file
-  # does not replace the sourcing script's own EXIT trap.
-  trap report_write_stop EXIT
+  # (#378, lib-policy.sh); INT and TERM are ignored first, so a second
+  # signal cannot cut that short. Set here, not at the top, so sourcing
+  # this file does not replace the sourcing script's own EXIT trap.
+  trap 'trap "" INT TERM; report_write_stop' EXIT
   main "$@"
 fi
