@@ -133,12 +133,35 @@ for context in personal personal-noname other-emptyname; do
   fi
 done
 
+# Committer set by the environment (#399): Git takes GIT_COMMITTER_NAME /
+# GIT_COMMITTER_EMAIL over user.name / user.email, so the prompt must follow
+# what Git will record. personal-envother has the personal config and another
+# email in the environment (-> other); none-envpersonal has a name but no
+# email in the config, and the personal email in the environment
+# (-> personal; the config alone is the none case).
+for context in personal-envother none-envpersonal; do
+  mkdir -p "$fixture/$context"
+  run_isolated git -C "$fixture/$context" init --quiet --template="$fixture/empty-template"
+  run_isolated git -C "$fixture/$context" config user.useConfigOnly true
+  run_isolated git -C "$fixture/$context" config user.name 'Dotfiles Test'
+done
+run_isolated git -C "$fixture/personal-envother" config user.email dotfiles-test@example.invalid
+
+# context_env CONTEXT -> the extra environment of that context, NAME=VALUE per
+# line (none for the others).
+context_env() {
+  case "$1" in
+    personal-envother) printf '%s\n' GIT_COMMITTER_EMAIL=dotfiles-other@example.invalid ;;
+    none-envpersonal) printf '%s\n' GIT_COMMITTER_EMAIL=dotfiles-test@example.invalid ;;
+  esac
+}
+
 # expected_module CONTEXT -> the one custom module whose `when` must pass there
 # ("-" for none of them).
 expected_module() {
   case "$1" in
-    personal) printf "%s\n" git_ctx_personal ;;
-    other) printf "%s\n" git_ctx_other ;;
+    personal|none-envpersonal) printf "%s\n" git_ctx_personal ;;
+    other|personal-envother) printf "%s\n" git_ctx_other ;;
     none|personal-noname|other-emptyname) printf "%s\n" git_ctx_none ;;
     *) printf "%s\n" - ;;
   esac
@@ -199,12 +222,16 @@ for module in git_ctx_personal git_ctx_other git_ctx_none; do
     shell_args+=("$arg")
   done < "$fixture/$module.shell"
 
-  for context in personal other none personal-noname other-emptyname outside; do
+  for context in personal other none personal-noname other-emptyname personal-envother none-envpersonal outside; do
     expected=1
     [[ "$module" == "$(expected_module "$context")" ]] && expected=0
+    env_args=()
+    while IFS= read -r env_kv; do
+      [[ -z "$env_kv" ]] || env_args+=("$env_kv")
+    done < <(context_env "$context")
     # Starship feeds the script to the configured shell's stdin. Keep the
     # script itself out of any generated shell command string.
-    if (cd "$fixture/$context" && run_isolated "${shell_args[@]}" < "$fixture/$module.when"); then
+    if (cd "$fixture/$context" && run_isolated env ${env_args[@]+"${env_args[@]}"} "${shell_args[@]}" < "$fixture/$module.when"); then
       actual=0
     else
       actual=$?

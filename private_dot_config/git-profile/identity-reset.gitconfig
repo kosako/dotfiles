@@ -5,7 +5,17 @@
 # in particular the personal remote-URL fallback — is blanked first. With
 # user.useConfigOnly, a missing or empty context file then refuses to commit
 # ("empty ident name") instead of inheriting another context's identity.
+# Signing goes back to the defaults too (#399): personal.gitconfig may opt into
+# signing (user.signingkey + commit.gpgsign = true), and without this a
+# non-personal repo with a personal remote kept them, so its commits were
+# signed (or blocked on the signer) with the personal key. A context that
+# signs opts in again in its own file, which is included after this one.
 # Contains no identity values by design. See docs/git-identity.md.
 [user]
 	name =
 	email =
+	signingkey =
+[commit]
+	gpgsign = false
+[tag]
+	gpgsign = false

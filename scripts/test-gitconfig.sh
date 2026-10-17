@@ -552,6 +552,54 @@ for ctx in work client sandbox agent; do
   done
 done
 
+# Signing (#399): personal.gitconfig may opt into signing (docs/git-identity.md
+# lets a context's local file hold user.signingkey and commit.gpgsign = true).
+# A non-personal dir whose remote is personal reads it through the hasconfig
+# fallback, so the reset must put signing back to the defaults (no key,
+# commit / tag gpgsign false) and the commit must go through unsigned. A
+# context that opts in in its own file still wins, and a repo in the personal
+# dir keeps the personal opt-in (controls).
+cp "$fixture/.config/git/personal.gitconfig" "$fixture/personal-before-signing.gitconfig"
+printf '[user]\n\tsigningkey = dotfiles-personal-signing-key\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n' \
+  >> "$fixture/.config/git/personal.gitconfig"
+write_identity "$fixture/.config/git/work.gitconfig" complete work
+# signing_state REPO -> "KEY|COMMIT_GPGSIGN|TAG_GPGSIGN" as Git resolves them.
+signing_state() {
+  local key commit_sign tag_sign
+  key="$(run_git "$1" config --get user.signingkey || true)"
+  commit_sign="$(run_git "$1" config --get commit.gpgsign || true)"
+  tag_sign="$(run_git "$1" config --get tag.gpgsign || true)"
+  printf '%s|%s|%s\n' "$key" "$commit_sign" "$tag_sign"
+}
+sign_work="$fixture/src/work/signing-reset"
+sign_personal="$fixture/src/personal/signing-control"
+mkdir -p "$sign_work" "$sign_personal"
+run_git "$sign_work" init --quiet --initial-branch=main
+run_git "$sign_work" config remote.origin.url "https://github.com/kosako/x.git"
+run_git "$sign_personal" init --quiet --initial-branch=main
+if [[ "$(signing_state "$sign_work")" == "|false|false" ]] \
+  && expect_ident "$sign_work" "Dotfiles work Test|dotfiles-work@example.invalid" "work / personal remote / personal signing opt-in"; then
+  ok "test passed: work dir + personal remote does not inherit the personal signing key or opt-in (commit goes through unsigned)"
+else
+  fail "test failed: work dir + personal remote inherited personal signing ($(signing_state "$sign_work"))"
+  status=1
+fi
+printf '[user]\n\tsigningkey = dotfiles-work-signing-key\n[commit]\n\tgpgsign = true\n' >> "$fixture/.config/git/work.gitconfig"
+if [[ "$(signing_state "$sign_work")" == "dotfiles-work-signing-key|true|false" ]]; then
+  ok "test passed: a context that opts into signing in its own file still wins over the reset"
+else
+  fail "test failed: the work context's own signing opt-in must win over the reset (got $(signing_state "$sign_work"))"
+  status=1
+fi
+if [[ "$(signing_state "$sign_personal")" == "dotfiles-personal-signing-key|true|true" ]]; then
+  ok "test passed: the personal dir keeps the personal signing opt-in (the reset is for non-personal contexts only)"
+else
+  fail "test failed: the personal dir must keep the personal signing opt-in (got $(signing_state "$sign_personal"))"
+  status=1
+fi
+cp "$fixture/personal-before-signing.gitconfig" "$fixture/.config/git/personal.gitconfig"
+write_identity "$fixture/.config/git/work.gitconfig" complete work
+
 # Outside ~/src/ the reset never applies (it is gitdir-keyed), so the personal
 # fallback still resolves for a personal remote and a foreign remote stays
 # fail-closed — asserted above in the hasconfig section; re-checked here after

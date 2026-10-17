@@ -37,17 +37,24 @@ error_symbol = "[❯](red)"
 # values live here. Each `when` reads the resolved committer name / email and the LOCAL
 # ~/.config/git/personal.gitconfig (not managed) at runtime to classify the
 # context — personal -> green; any other resolved identity -> yellow (shows the
-# email); inside a repo with no identity -> red. "Resolved" needs BOTH user.name
-# and user.email: an email-only context is refused ("empty ident name") and a
+# email); inside a repo with no identity -> red. "Resolved" needs BOTH a name
+# and an email: an email-only context is refused ("empty ident name") and a
 # name-only one commits with an empty email (a broken identity), so both are
-# red (#383).
+# red (#383). The identity is the one Git will actually record, from
+# `git var GIT_COMMITTER_IDENT` ("Name <email> time zone"), so a committer set
+# by GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL (from a shell or a .envrc) wins
+# over user.name / user.email here as it does in Git (#399); Git failing to
+# form it (useConfigOnly with no name or email) reads as no identity.
 # See docs/git-identity.md.
 [custom.git_ctx_personal]
 description = "git identity resolves to personal"
 when = '''
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
-  n=$(git config user.name 2>/dev/null)
-  e=$(git config user.email 2>/dev/null)
+  id=$(git var GIT_COMMITTER_IDENT 2>/dev/null) || exit 1
+  case $id in *' <'*'>'*) ;; *) exit 1 ;; esac
+  n=${id%% <*}
+  e=${id#* <}
+  e=${e%%>*}
   [ -n "$n" ] && [ -n "$e" ] && [ "$e" = "$(git config --file "$HOME/.config/git/personal.gitconfig" user.email 2>/dev/null)" ]
 '''
 command = "echo personal"
@@ -58,11 +65,18 @@ style = "bold green"
 description = "git identity (name and email) is set but not personal"
 when = '''
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
-  n=$(git config user.name 2>/dev/null)
-  e=$(git config user.email 2>/dev/null)
+  id=$(git var GIT_COMMITTER_IDENT 2>/dev/null) || exit 1
+  case $id in *' <'*'>'*) ;; *) exit 1 ;; esac
+  n=${id%% <*}
+  e=${id#* <}
+  e=${e%%>*}
   [ -n "$n" ] && [ -n "$e" ] && [ "$e" != "$(git config --file "$HOME/.config/git/personal.gitconfig" user.email 2>/dev/null)" ]
 '''
-command = "git config user.email 2>/dev/null"
+command = '''
+  id=$(git var GIT_COMMITTER_IDENT 2>/dev/null) || exit 1
+  e=${id#* <}
+  printf '%s\n' "${e%%>*}"
+'''
 format = "[$output]($style) "
 style = "bold yellow"
 
@@ -70,7 +84,12 @@ style = "bold yellow"
 description = "inside a repo but no git identity resolved: name or email empty (fail-closed)"
 when = '''
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
-  [ -z "$(git config user.name 2>/dev/null)" ] || [ -z "$(git config user.email 2>/dev/null)" ]
+  id=$(git var GIT_COMMITTER_IDENT 2>/dev/null) || exit 0
+  case $id in *' <'*'>'*) ;; *) exit 0 ;; esac
+  n=${id%% <*}
+  e=${id#* <}
+  e=${e%%>*}
+  [ -z "$n" ] || [ -z "$e" ]
 '''
 command = "echo '⚠ no-identity'"
 format = "[$output]($style) "

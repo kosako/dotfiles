@@ -46,7 +46,8 @@
 	path = ~/.config/git/personal.gitconfig
 
 # Each NON-personal context first includes the managed identity reset (blank
-# user.name / user.email, no values) and only then its local identity file.
+# user.name / user.email / user.signingkey and signing back to off, no
+# values; #399) and only then its local identity file.
 # Without the reset, a repo under ~/src/work/ whose remote matches the
 # personal URL above would keep the personal identity whenever the work file
 # is missing (last-match-wins has nothing to overwrite it with) — the
