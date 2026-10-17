@@ -1660,6 +1660,35 @@ else
   miss "verify rejected an archive whose staging and manifest agree"
 fi
 
+# 27b. Both causes in one run (#398 review): the fake find above fails the
+#      directory, and a declared file is unreadable. The warning names both,
+#      joined by "and", and the marker records the capture incomplete. Same
+#      root guard as 22 (mode 000 does not bind for root).
+en2_home="$fixture_home/en2-home"
+mkdir -p "$en2_home/.config/dotfiles" "$en2_home/box"
+printf 'a\n' > "$en2_home/.zshrc.local"
+printf 'listed\n' > "$en2_home/box/listed"
+printf 'locked\n' > "$en2_home/locked"
+chmod 000 "$en2_home/locked"
+printf 'backup_paths:\n  - { path: "box", type: dir }\n  - { path: "locked", type: file }\n' \
+  > "$en2_home/.config/dotfiles/backup-paths.local"
+if [[ ! -r "$en2_home/locked" ]]; then
+  en2_rc=0
+  en2_out="$(HOME="$en2_home" REAL_FIND="$real_find" FAKE_FIND_DIR="$en2_home/box" PATH="$en_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$en2_home/both.age" --recipient "$recipient" --yes 2>&1)" || en2_rc=$?
+  if [[ "$en2_rc" -eq 0 && -f "$en2_home/both.age" ]] \
+    && grep -Fq "capture INCOMPLETE: enumeration failed for 1 declared director(y/ies) and 1 existing file(s) could not be read;" <<< "$en2_out" \
+    && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$en2_home/.local/state/dotfiles/private-backup.json")" == "true" ]]; then
+    pass "a failed enumeration and an unreadable file in one run are both named in the warning, and the marker records the capture incomplete"
+  else
+    printf '%s\n' "$en2_out" >&2
+    miss "a failed enumeration and an unreadable file in one run were not both reported (rc=$en2_rc)"
+  fi
+else
+  warn "mode 000 files are still readable here (root?); combined incomplete case skipped"
+fi
+chmod 600 "$en2_home/locked" # so the EXIT trap can clean up
+
 # 28. The local supplement is user input: a structurally invalid entry must
 #     not be dropped silently or mangled (issue #246). The shared parser
 #     rejects the whole file before any row is used, so backup fails with the
