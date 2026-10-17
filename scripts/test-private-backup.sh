@@ -1099,7 +1099,9 @@ fi
 
 # 22. An unreadable file is skipped with a warning; the backup still succeeds
 #     and captures the readable files (issue #141: set -e aborted the whole
-#     run mid-archive before).
+#     run mid-archive before). The capture is recorded INCOMPLETE (#398): a
+#     file that exists but could not be read is real configuration missing
+#     from the archive, unlike an absent optional file.
 unr_home="$fixture_home/unr"
 mkdir -p "$unr_home/.ssh" "$unr_home/.config/dotfiles" "$unr_home/box"
 printf 'a\n' > "$unr_home/.zshrc.local"
@@ -1120,8 +1122,10 @@ if [[ ! -r "$unr_home/locked" && ! -r "$unr_home/box/locked-in-dir" ]]; then
     backup --out "$unr_home/u.age" --recipient "$recipient" --yes 2>&1)" || unr_rc=$?
   if [[ "$unr_rc" -eq 0 && -f "$unr_home/u.age" ]] \
     && grep -Fq "unreadable (skipped): locked" <<< "$unr_out" \
-    && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out"; then
-    pass "unreadable files (declared file and inside a dir) are skipped with a warning, backup still succeeds"
+    && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out" \
+    && grep -Fq "capture INCOMPLETE: 2 existing file(s) could not be read;" <<< "$unr_out" \
+    && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$unr_home/.local/state/dotfiles/private-backup.json")" == "true" ]]; then
+    pass "unreadable files (declared file and inside a dir) are skipped with a warning, backup still succeeds, and the marker records the capture incomplete"
   else
     printf '%s\n' "$unr_out" >&2
     miss "unreadable files should be skipped without aborting, got rc=$unr_rc"
