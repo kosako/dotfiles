@@ -34,7 +34,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 ## capability との対応
 
 - `enableRuntimeManagement`: mise config の管理と `doctor.sh` の mise 検査を制御する。
-- `enableDirenv`: direnv の利用方針と `doctor.sh` の direnv 検査を制御する。
+- `enableDirenv`: `doctor.sh` が direnv の存在を検査するかだけを決める。shell の direnv hook はこの値に関係なく、direnv が入っていれば `~/.zshrc` が登録する(#401)。direnv を使わない環境では、direnv を入れないか `.envrc` を allow しない。
 
 ## update policy との関係
 

@@ -1324,6 +1324,27 @@ else
   status=1
 fi
 
+# DR) enableDirenv selects the doctor check only (#401): with it false, the
+#     report says the check is skipped and that the shell hook still runs,
+#     not that direnv is off (the managed ~/.zshrc registers the hook
+#     wherever direnv is installed).
+direnv_root="$fixture_home/.dotfiles-direnv-off"
+copy_repo_fixture "$direnv_root"
+set_capability_all "$direnv_root" enableDirenv false
+direnv_rc=0
+direnv_out="$(HOME="$fixture_home" "$direnv_root/scripts/doctor.sh" personal 2>&1)" || direnv_rc=$?
+if [[ "$direnv_rc" -ne 0 ]]; then
+  doctor_exit_fail "enableDirenv=false" "$direnv_rc" "$direnv_out"
+  status=1
+elif grep -Fxq "[info] - direnv check skipped for profile (enableDirenv=false selects the check only; the shell hook still loads an allowed .envrc wherever direnv is installed)" <<< "$direnv_out" \
+  && ! grep -Fq "direnv disabled" <<< "$direnv_out"; then
+  ok "test passed: enableDirenv=false reports the skipped check and the hook that still runs, not direnv off"
+else
+  printf '%s\n' "$direnv_out" >&2
+  fail "test failed: enableDirenv=false must report the skipped check without saying direnv is off"
+  status=1
+fi
+
 # P2) trust list (#119 PR3): the injection-guard section points to the
 #     non-committed trust list, and the private-backup section reports its
 #     presence contents-blind (it is in backup-paths.yaml). The fixture HOME has
