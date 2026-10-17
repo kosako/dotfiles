@@ -139,13 +139,23 @@ done
 # email in the environment (-> other); none-envpersonal has a name but no
 # email in the config, and the personal email in the environment
 # (-> personal; the config alone is the none case).
-for context in personal-envother none-envpersonal; do
+for context in personal-envother none-envpersonal other-emptyemail; do
   mkdir -p "$fixture/$context"
   run_isolated git -C "$fixture/$context" init --quiet --template="$fixture/empty-template"
   run_isolated git -C "$fixture/$context" config user.useConfigOnly true
   run_isolated git -C "$fixture/$context" config user.name 'Dotfiles Test'
 done
 run_isolated git -C "$fixture/personal-envother" config user.email dotfiles-test@example.invalid
+# other-emptyemail: user.email set to empty, what the identity reset leaves
+# when a context file holds only a name. Git forms "Name <> ..." and commits
+# with an empty email (#383), so the prompt must show none (#399 review).
+run_isolated git -C "$fixture/other-emptyemail" config user.email ""
+if [[ "$(cd "$fixture/other-emptyemail" && run_isolated git var GIT_COMMITTER_IDENT)" == "Dotfiles Test <> "* ]]; then
+  ok "test passed: fixture other-emptyemail forms an ident with an empty email (as Git decides)"
+else
+  fail "test failed: fixture other-emptyemail must form an ident with an empty email"
+  status=1
+fi
 
 # context_env CONTEXT -> the extra environment of that context, NAME=VALUE per
 # line (none for the others).
@@ -162,7 +172,7 @@ expected_module() {
   case "$1" in
     personal|none-envpersonal) printf "%s\n" git_ctx_personal ;;
     other|personal-envother) printf "%s\n" git_ctx_other ;;
-    none|personal-noname|other-emptyname) printf "%s\n" git_ctx_none ;;
+    none|personal-noname|other-emptyname|other-emptyemail) printf "%s\n" git_ctx_none ;;
     *) printf "%s\n" - ;;
   esac
 }
@@ -222,7 +232,7 @@ for module in git_ctx_personal git_ctx_other git_ctx_none; do
     shell_args+=("$arg")
   done < "$fixture/$module.shell"
 
-  for context in personal other none personal-noname other-emptyname personal-envother none-envpersonal outside; do
+  for context in personal other none personal-noname other-emptyname personal-envother none-envpersonal other-emptyemail outside; do
     expected=1
     [[ "$module" == "$(expected_module "$context")" ]] && expected=0
     env_args=()
@@ -244,6 +254,61 @@ for module in git_ctx_personal git_ctx_other git_ctx_none; do
     fi
   done
 done
+
+# The yellow module also SHOWS the email (#399 review): its command must print
+# the committer Git will record, the environment override included, not
+# user.email. Read from the real TOML like the `when` scripts, and run with
+# the same shell.
+extract_other_command() {
+  if [[ "$has_tomllib" -eq 1 ]]; then
+    python3 - "$STARSHIP_SRC" "$fixture" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+source, fixture = sys.argv[1:]
+with open(source, "rb") as f:
+    command = tomllib.load(f)["custom"]["git_ctx_other"]["command"]
+if not isinstance(command, str) or not command.strip():
+    sys.exit("custom.git_ctx_other.command must be a nonempty script")
+pathlib.Path(fixture, "git_ctx_other.command").write_text(command)
+PY
+  else
+    awk -v header="[custom.git_ctx_other]" -v quote="'''" '
+      $0 == header { active = 1; next }
+      active && reading {
+        if ($0 == quote) { reading = 0; closed++; next }
+        print
+        next
+      }
+      /^\[/ { active = 0 }
+      active && $0 == "command = " quote { reading = 1; opened++ }
+      END { exit (reading || opened != 1 || closed != 1) }
+    ' "$STARSHIP_SRC" > "$fixture/git_ctx_other.command"
+  fi
+}
+if ! extract_other_command; then
+  fail "test failed: extracting custom.git_ctx_other.command"
+  status=1
+else
+  shell_args=()
+  while IFS= read -r -d '' arg; do
+    shell_args+=("$arg")
+  done < "$fixture/git_ctx_other.shell"
+  for context in other personal-envother; do
+    env_args=()
+    while IFS= read -r env_kv; do
+      [[ -z "$env_kv" ]] || env_args+=("$env_kv")
+    done < <(context_env "$context")
+    shown="$(cd "$fixture/$context" && run_isolated env ${env_args[@]+"${env_args[@]}"} "${shell_args[@]}" < "$fixture/git_ctx_other.command")" || shown="<failed>"
+    if [[ "$shown" == "dotfiles-other@example.invalid" ]]; then
+      ok "test passed: $context / git_ctx_other shows the committer email Git will record"
+    else
+      fail "test failed: $context / git_ctx_other must show dotfiles-other@example.invalid (got $shown)"
+      status=1
+    fi
+  done
+fi
 
 if [[ "$status" -eq 0 ]]; then
   ok "starship tests passed"
