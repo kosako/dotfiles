@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# A signal that ends doctor mid-report leaves no report writer behind
+# (#378, lib-policy.sh); the INT / TERM / EXIT traps set with
+# probe_cleanup below keep doing so. Each trap first ignores INT and TERM,
+# so a second signal cannot cut its cleanup short (the form of
+# private-backup.sh).
+trap 'trap "" INT TERM; report_write_stop' EXIT
 
 # Arguments: [PROFILE] [--actions-only]. --actions-only mutes every report
 # line except [fail] and the closing next-actions summary (#227), so the
@@ -678,7 +684,9 @@ kill_process_tree() {
 # AND it is a live child of this doctor, because a stale $! from an earlier
 # process substitution could have been reused by an unrelated process. bash
 # 3.2 errors on an unset $! under set -u, so it is read in a subshell with
-# -u off (Codex review, PR #226 rounds 3-4).
+# -u off (Codex review, PR #226 rounds 3-4). The traps also end a report
+# write in flight (report_write_stop, #378), after ignoring INT and TERM so
+# a second signal cannot cut that short.
 probe_cleanup() {
   local job
   job="$probe_job"
@@ -694,9 +702,9 @@ probe_cleanup() {
   probe_job=""
   return 0
 }
-trap probe_cleanup EXIT
-trap 'probe_cleanup; trap - INT; kill -INT $$' INT
-trap 'probe_cleanup; trap - TERM; kill -TERM $$' TERM
+trap 'trap "" INT TERM; report_write_stop; probe_cleanup' EXIT
+trap 'trap "" INT TERM; report_write_stop; probe_cleanup; trap - INT; kill -INT $$' INT
+trap 'trap "" INT TERM; report_write_stop; probe_cleanup; trap - TERM; kill -TERM $$' TERM
 # Bounded run WITHOUT a temp file: the probe's stdout comes through a
 # process substitution whose subshell appends the probe's exit status as a
 # status line (a per-call nonce, then the status), preceded by a newline of

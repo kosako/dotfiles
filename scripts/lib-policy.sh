@@ -12,46 +12,123 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # every informational line so only the next-actions summary and any [fail]
 # reach the terminal; [fail] is never muted (it is the policy exit path).
 # Every line passes through display_safe here, at the one place it is
-# printed (#335), whatever it carries — see display_safe below.
+# printed (#335), whatever it carries — see display_safe below — and is
+# written by report_write.
+
+# report_write FD LINE — write LINE and a newline to fd FD (1, or 2 for
+# [warn] / [fail]): the one write every report line goes through (#378).
+# bash 3.2 installs its SIGCHLD handler without SA_RESTART, so when a child
+# process (a process substitution's, a background probe's) exits while the
+# printf builtin's write to a full pipe is blocked (the reader of the report
+# lagging, as on a loaded CI runner), the write fails with EINTR, and under
+# set -e the script ended half-way. What was not written cannot be recovered
+# from bash (how much stdio kept depends on the libc and the line length),
+# so under bash 3.2 the builtin writes in a subshell instead: a process with
+# no children of its own gets no SIGCHLD, so its blocked write is not
+# interrupted, and a real failure (a reader that went away, a closed fd)
+# still shows in its exit status. Not the external printf: macOS's
+# /usr/bin/printf exits 0 when its write fails. The subshell is started in
+# the background and waited for, not run in the foreground: bash runs a
+# trap only after a foreground child ends, so a TERM sent to this script
+# alone while the reader had stopped reading would have waited on the
+# blocked write (and with it doctor's probe cleanup and private-backup's
+# removal of its plaintext temps); `wait` returns at once on a trapped
+# signal, so the trap runs (#378 review). The writer in flight is kept in
+# REPORT_WRITER for report_write_stop below, which that trap calls so the
+# writer does not outlive the script. bash 4 and later restart the
+# interrupted write, so they keep the builtin in place (no fork per line).
+REPORT_WRITER=""
+REPORT_WRITER_STARTING=0
+report_write() {
+  local rc=0
+  if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    REPORT_WRITER_STARTING=1
+    if [[ "$1" == 2 ]]; then
+      (printf '%s\n' "$2") >&2 &
+    else
+      (printf '%s\n' "$2") &
+    fi
+    REPORT_WRITER=$!
+    REPORT_WRITER_STARTING=0
+    wait "$REPORT_WRITER" || rc=$?
+    REPORT_WRITER=""
+    return "$rc"
+  elif [[ "$1" == 2 ]]; then
+    printf '%s\n' "$2" >&2
+  else
+    printf '%s\n' "$2"
+  fi
+}
+
+# report_write_stop — end the bash 3.2 writer still in flight, from the
+# INT / TERM / EXIT trap of every script that reports (#378 review): a
+# script ended by a signal while its reader had stopped reading otherwise
+# left the writer behind, blocked on the pipe (holding its write end) until
+# the reader read again. A signal handled right after the fork, before the
+# pid is kept, finds the writer through $! alone; either pid is trusted only
+# as a live child of this shell, so a stale one reused by an unrelated
+# process is never killed (the form of doctor's probe_cleanup). KILL, not
+# TERM: a writer forked while the script ignored TERM would ignore it too,
+# and the one line it was writing is lost either way. The writer stays
+# recorded until it has been killed, so the trap of a second signal that
+# lands mid-way (the scripts' traps ignore INT / TERM first, but not every
+# signal) still finds it (#378 review). Nothing to do under bash 4+. Always
+# returns 0.
+report_write_stop() {
+  local pid="$REPORT_WRITER" children
+  if [[ -z "$pid" && "$REPORT_WRITER_STARTING" == 1 ]]; then
+    pid="$( ( set +u; printf '%s' "$!" ) 2>/dev/null || true)"
+  fi
+  if [[ -n "$pid" ]]; then
+    children="$(pgrep -P $$ 2>/dev/null || true)"
+    case $'\n'"$children"$'\n' in
+      *$'\n'"$pid"$'\n'*) kill -KILL "$pid" 2>/dev/null || true ;;
+    esac
+  fi
+  REPORT_WRITER=""
+  REPORT_WRITER_STARTING=0
+  return 0
+}
+
 ok() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[ok] %s\n' "$__report_line"
+  report_write 1 "[ok] $__report_line"
 }
 
 info() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[info] %s\n' "$__report_line"
+  report_write 1 "[info] $__report_line"
 }
 
 section() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[info] == %s ==\n' "$__report_line"
+  report_write 1 "[info] == $__report_line =="
 }
 
 item() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[info] - %s\n' "$__report_line"
+  report_write 1 "[info] - $__report_line"
 }
 
 warn() {
   [[ "${POLICY_REPORT_QUIET:-0}" == 1 ]] && return 0
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[warn] %s\n' "$__report_line" >&2
+  report_write 2 "[warn] $__report_line"
 }
 
 fail() {
   local __report_line
   display_safe_into __report_line "$*"
-  printf '[fail] %s\n' "$__report_line" >&2
+  report_write 2 "[fail] $__report_line"
 }
 
 # Report lines are terminal-safe (#335): the helpers above and report_actions
@@ -187,18 +264,18 @@ action() {
 report_actions() {
   local total i step line
   total="${#ACTION_REASONS[@]}"
-  printf '[info] == next actions (%s) ==\n' "$total"
+  report_write 1 "[info] == next actions ($total) =="
   if [[ "$total" -eq 0 ]]; then
-    printf '[ok] next actions: none\n'
+    report_write 1 "[ok] next actions: none"
     return 0
   fi
   for ((i = 0; i < total; i++)); do
     display_safe_into line "${ACTION_REASONS[$i]}"
-    printf '[info] %s. %s\n' "$((i + 1))" "$line"
+    report_write 1 "[info] $((i + 1)). $line"
     while IFS= read -r step; do
       [[ -n "$step" ]] || continue
       display_safe_into line "$step"
-      printf '        %s\n' "$line"
+      report_write 1 "        $line"
     done <<< "${ACTION_STEPS[$i]}"
   done
 }

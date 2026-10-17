@@ -1044,8 +1044,10 @@ main() {
 # a second signal killed the rm under way and errexit ended the run by an
 # exit instead of the signal (bash 3.2), and a signal at every removal kept
 # the plaintext: bash 3.2 ended with it left, and bash 5 re-ran the trap
-# without finishing for as long as the signals came.
-trap 'trap "" INT TERM; cleanup_temps' EXIT
-trap 'trap "" INT TERM; cleanup_temps; trap - INT; kill -INT $$' INT
-trap 'trap "" INT TERM; cleanup_temps; trap - TERM; kill -TERM $$' TERM
+# without finishing for as long as the signals came. Each trap also ends a
+# report write in flight (report_write_stop, #378), so a run ended by a
+# signal while its reader had stopped reading leaves no writer behind.
+trap 'trap "" INT TERM; report_write_stop; cleanup_temps' EXIT
+trap 'trap "" INT TERM; report_write_stop; cleanup_temps; trap - INT; kill -INT $$' INT
+trap 'trap "" INT TERM; report_write_stop; cleanup_temps; trap - TERM; kill -TERM $$' TERM
 main "$@"
