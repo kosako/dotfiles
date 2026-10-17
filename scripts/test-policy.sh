@@ -1021,7 +1021,9 @@ run_drift "catalog drift: skips go_install when go is absent" \
 # lines with the bare builtin: under bash 3.2 it must hit the write error,
 # or the fixture did not reproduce the condition and the case would pass
 # vacuously (bash 4+ restarts the write by itself, so there the control is
-# only reported).
+# only reported). Eight children end every half second while the reader
+# waits five, so one of them ends while the writer is blocked even when the
+# writer starts late (#378 review).
 eintr_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-eintr.XXXXXX")"
 tmp_roots+=("$eintr_dir")
 cat > "$eintr_dir/writer.sh" <<'SH'
@@ -1036,8 +1038,9 @@ emit() {
     item "$2"
   fi
 }
-( sleep 1 ) &
-( sleep 2 ) &
+for delay in 0.5 1 1.5 2 2.5 3 3.5 4; do
+  ( sleep "$delay" ) &
+done
 for ((i = 0; i < 3000; i++)); do
   if ((i % 500 == 250)); then printf -v line '%070000d' "$i"; else printf -v line '%095d' "$i"; fi
   emit "$i" "$line"
@@ -1053,15 +1056,24 @@ done > "$eintr_dir/want"
 eintr_run() {
   rm -f "$eintr_dir/got" "$eintr_dir/done"
   EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DONE="$eintr_dir/done" EINTR_MODE="$1" \
-    "$BASH" "$eintr_dir/writer.sh" 2>&1 | { sleep 3; cat; } > "$eintr_dir/got" || true
+    "$BASH" "$eintr_dir/writer.sh" 2>&1 | { sleep 5; cat; } > "$eintr_dir/got" || true
 }
+# The control's failure shows as a writer that did not finish (set -e ends it
+# at the failed write), not as bash's "write error" message: that message is
+# written to the same blocked pipe, and the next child's SIGCHLD can cut it
+# too.
 eintr_run bare
-eintr_bare_errors="$(grep -c 'write error' "$eintr_dir/got" || true)"
-if [[ "${BASH_VERSINFO[0]}" -lt 4 && "$eintr_bare_errors" -eq 0 ]]; then
-  fail "test failed: the EINTR fixture did not reproduce under bash $BASH_VERSION (the bare builtin wrote without a write error), so the report case below would pass vacuously"
+eintr_bare_lines="$(wc -l < "$eintr_dir/got" | tr -d ' ')"
+if [[ "$(cat "$eintr_dir/done" 2>/dev/null)" == "writer finished" ]] && cmp -s "$eintr_dir/want" "$eintr_dir/got"; then
+  eintr_bare_whole=1
+else
+  eintr_bare_whole=0
+fi
+if [[ "${BASH_VERSINFO[0]}" -lt 4 && "$eintr_bare_whole" -eq 1 ]]; then
+  fail "test failed: the EINTR fixture did not reproduce under bash $BASH_VERSION (the bare builtin wrote every line), so the report case below would pass vacuously"
   exit 1
 fi
-info "EINTR fixture: the bare builtin hit $eintr_bare_errors write error(s) under bash $BASH_VERSION"
+info "EINTR fixture: the bare builtin wrote $eintr_bare_lines of 3000 lines under bash $BASH_VERSION (finished whole: $eintr_bare_whole)"
 eintr_run report
 if [[ "$(cat "$eintr_dir/done" 2>/dev/null)" == "writer finished" ]] && cmp -s "$eintr_dir/want" "$eintr_dir/got"; then
   ok "test passed: report lines survive an EINTR on a blocked write (each line once, in order, long lines whole, no write error)"
@@ -1077,5 +1089,51 @@ if (source "$SCRIPT_DIR/lib-policy.sh"; report_write 1 'x') >&- 2>/dev/null \
   exit 1
 fi
 ok "test passed: report_write still fails when its fd is closed"
+# A TERM sent to the script alone while a report write is blocked (the
+# reader stopped reading) runs the script's trap at once (#378 review):
+# waiting on the write in the foreground would hold the trap — doctor's
+# probe cleanup, private-backup's removal of its plaintext temps — until the
+# reader came back. Only the bash 3.2 path (the background subshell) is held
+# to this: bash 4+ writes with the builtin in place and restarts the write
+# after the trap's signal, as it always did, so the case is skipped there.
+if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+  info "skipped the blocked-write TERM case under bash $BASH_VERSION (the builtin write is restarted; unchanged by #378)"
+else
+cat > "$eintr_dir/term.sh" <<'SH'
+set -euo pipefail
+source "$EINTR_LIB"
+trap 'printf "trapped\n" > "$EINTR_TRAPPED"; exit 143' TERM
+printf '%s\n' "$$" > "$EINTR_PID"
+for ((i = 0; i < 3000; i++)); do
+  printf -v line '%095d' "$i"
+  item "$line"
+done
+SH
+rm -f "$eintr_dir/term.pid" "$eintr_dir/trapped"
+EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_PID="$eintr_dir/term.pid" EINTR_TRAPPED="$eintr_dir/trapped" \
+  "$BASH" "$eintr_dir/term.sh" | { sleep 6; cat > /dev/null; } &
+term_pipeline=$!
+for ((i = 0; i < 30; i++)); do
+  [[ -s "$eintr_dir/term.pid" ]] && break
+  sleep 0.1
+done
+sleep 1
+kill -TERM "$(cat "$eintr_dir/term.pid")" 2>/dev/null || true
+term_trapped=0
+for ((i = 0; i < 30; i++)); do
+  if [[ -s "$eintr_dir/trapped" ]]; then
+    term_trapped=1
+    break
+  fi
+  sleep 0.1
+done
+wait "$term_pipeline" 2>/dev/null || true
+if [[ "$term_trapped" -eq 1 ]]; then
+  ok "test passed: a TERM to the script while a report write is blocked runs its trap at once"
+else
+  fail "test failed: a TERM to the script while a report write was blocked did not run its trap within 3 seconds (the trap waited for the reader)"
+  exit 1
+fi
+fi
 
 ok "policy tests passed"

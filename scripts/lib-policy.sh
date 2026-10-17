@@ -27,15 +27,22 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # no children of its own gets no SIGCHLD, so its blocked write is not
 # interrupted, and a real failure (a reader that went away, a closed fd)
 # still shows in its exit status. Not the external printf: macOS's
-# /usr/bin/printf exits 0 when its write fails. bash 4 and later restart the
+# /usr/bin/printf exits 0 when its write fails. The subshell is started in
+# the background and waited for, not run in the foreground: bash runs a
+# trap only after a foreground child ends, so a TERM sent to this script
+# alone while the reader had stopped reading would have waited on the
+# blocked write (and with it doctor's probe cleanup and private-backup's
+# removal of its plaintext temps); `wait` returns at once on a trapped
+# signal, so the trap runs (#378 review). bash 4 and later restart the
 # interrupted write, so they keep the builtin in place (no fork per line).
 report_write() {
   if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     if [[ "$1" == 2 ]]; then
-      (printf '%s\n' "$2") >&2
+      (printf '%s\n' "$2") >&2 &
     else
-      (printf '%s\n' "$2")
+      (printf '%s\n' "$2") &
     fi
+    wait "$!"
   elif [[ "$1" == 2 ]]; then
     printf '%s\n' "$2" >&2
   else
