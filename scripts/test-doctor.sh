@@ -500,7 +500,7 @@ fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2,"capture_incomplete":true}\n' \
   > "$fixture_home/.local/state/dotfiles/private-backup.json"
 if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
-  && grep -Fq "[warn] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2) was INCOMPLETE: a declared directory could not be fully enumerated, so files under it are missing from that archive" <<< "$pb_out" \
+  && grep -Fq "[warn] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2) was INCOMPLETE: a declared directory could not be fully enumerated or an existing file could not be read, so files are missing from that archive" <<< "$pb_out" \
   && grep -Fq "then run ./scripts/private-backup.sh backup again" <<< "$pb_out"; then
   ok "test passed: marker capture_incomplete=true -> INCOMPLETE action with the re-run step (exit 0)"
 else

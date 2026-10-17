@@ -401,8 +401,10 @@ cmd_backup() {
 
   local line origin type category path target captured=0 skipped=0 supplement_captured=0
   # Set when a declared directory could not be enumerated completely (#242);
-  # recorded in the marker so doctor can show it after the fact.
-  local capture_incomplete=0 incomplete_dirs=0 find_rc
+  # recorded in the marker so doctor can show it after the fact. Also set when
+  # a file that exists could not be read (#398): unlike an absent optional
+  # file, real configuration is then missing from the archive.
+  local capture_incomplete=0 incomplete_dirs=0 unreadable_files=0 find_rc
   # The supplement itself goes in first, as ordinary payload at its canonical
   # path (#208): restore then lands it with the same dry-run / skip-existing /
   # displace / symlink rules as every other file, verify hashes it, and the
@@ -491,6 +493,8 @@ cmd_backup() {
         if [[ ! -r "$f" ]]; then
           warn "skip unreadable file under $path: $rel"
           skipped=$((skipped + 1))
+          unreadable_files=$((unreadable_files + 1))
+          capture_incomplete=1
           continue
         fi
         stage_file "$f" "$rel" "$manifest" "$staging"
@@ -513,6 +517,8 @@ cmd_backup() {
       if [[ ! -r "$target" ]]; then
         warn "unreadable (skipped): $path"
         skipped=$((skipped + 1))
+        unreadable_files=$((unreadable_files + 1))
+        capture_incomplete=1
         continue
       fi
       stage_file "$target" "$path" "$manifest" "$staging"
@@ -552,7 +558,13 @@ cmd_backup() {
   # later. The self-check above proves staging and manifest agree — it
   # cannot prove the capture was complete, which is what this flag is for.
   if [[ "$capture_incomplete" -eq 1 ]]; then
-    warn "capture INCOMPLETE: enumeration failed for $incomplete_dirs declared director(y/ies); files it could not list are missing from this archive (fix the unreadable entries and back up again)"
+    local incomplete_what=""
+    [[ "$incomplete_dirs" -eq 0 ]] || incomplete_what="enumeration failed for $incomplete_dirs declared director(y/ies)"
+    if [[ "$unreadable_files" -gt 0 ]]; then
+      [[ -z "$incomplete_what" ]] || incomplete_what+=" and "
+      incomplete_what+="$unreadable_files existing file(s) could not be read"
+    fi
+    warn "capture INCOMPLETE: $incomplete_what; the files it could not list or read are missing from this archive (fix the unreadable entries and back up again)"
   fi
   item "destination: $out"
   if [[ "$assume_yes" -ne 1 ]]; then

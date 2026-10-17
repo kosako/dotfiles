@@ -838,7 +838,7 @@ if [[ -f "$backup_marker" ]]; then
   if [[ -z "$marker_last" ]]; then
     warn "backup marker present but unreadable"
   elif [[ "$marker_capture" == "INCOMPLETE" ]]; then
-    action "last backup: $marker_last (archive: $marker_archive, files: $marker_count) was INCOMPLETE: a declared directory could not be fully enumerated, so files under it are missing from that archive" \
+    action "last backup: $marker_last (archive: $marker_archive, files: $marker_count) was INCOMPLETE: a declared directory could not be fully enumerated or an existing file could not be read, so files are missing from that archive" \
       "fix the unreadable entries (see the backup run's warnings), then run ./scripts/private-backup.sh backup again with --out PATH"
   else
     ok "last backup: $marker_last (archive: $marker_archive, files: $marker_count, capture: $marker_capture)"
