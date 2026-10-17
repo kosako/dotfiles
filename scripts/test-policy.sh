@@ -1013,36 +1013,69 @@ run_drift "catalog drift: skips go_install when go is absent" \
 # Report writes survive EINTR (#378). bash 3.2 installs its SIGCHLD handler
 # without SA_RESTART: a child that exits while a report write to a full pipe
 # is blocked failed the printf builtin with EINTR, and under set -e the
-# script stopped half-way (doctor on the macOS bash32 CI job, the line it was
-# writing flushed only at exit). A reader that waits fills the pipe, two
-# children exit during the blocked writes, and every [info] / [warn] line
-# must arrive exactly once and in order, with no "write error" in the
-# report. The script runs under this suite's bash ($BASH): bash 4+ restarts
-# the write by itself, so the case bites under /bin/bash 3.2 (the bash32 job).
+# script stopped half-way (doctor on the macOS bash32 CI job). A reader that
+# waits fills the pipe, children exit during the blocked writes, and every
+# [info] / [warn] line — some longer than any stdio buffer — must arrive
+# exactly once and in order, with no "write error" in the report. The
+# scripts run under this suite's bash ($BASH). A control run writes the same
+# lines with the bare builtin: under bash 3.2 it must hit the write error,
+# or the fixture did not reproduce the condition and the case would pass
+# vacuously (bash 4+ restarts the write by itself, so there the control is
+# only reported).
 eintr_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-eintr.XXXXXX")"
 tmp_roots+=("$eintr_dir")
 cat > "$eintr_dir/writer.sh" <<'SH'
 set -euo pipefail
 source "$EINTR_LIB"
+emit() {
+  if [[ "$EINTR_MODE" == bare ]]; then
+    if (($1 % 2)); then printf '[warn] %s\n' "$2" >&2; else printf '[info] - %s\n' "$2"; fi
+  elif (($1 % 2)); then
+    warn "$2"
+  else
+    item "$2"
+  fi
+}
 ( sleep 1 ) &
 ( sleep 2 ) &
 for ((i = 0; i < 3000; i++)); do
-  printf -v line '%095d' "$i"
-  if ((i % 2)); then warn "$line"; else item "$line"; fi
+  if ((i % 500 == 250)); then printf -v line '%070000d' "$i"; else printf -v line '%095d' "$i"; fi
+  emit "$i" "$line"
 done
 wait
 printf 'writer finished\n' > "$EINTR_DONE"
 SH
 for ((i = 0; i < 3000; i++)); do
-  if ((i % 2)); then printf '[warn] %095d\n' "$i"; else printf '[info] - %095d\n' "$i"; fi
+  if ((i % 500 == 250)); then printf -v line '%070000d' "$i"; else printf -v line '%095d' "$i"; fi
+  if ((i % 2)); then printf '[warn] %s\n' "$line"; else printf '[info] - %s\n' "$line"; fi
 done > "$eintr_dir/want"
-EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DONE="$eintr_dir/done" \
-  "$BASH" "$eintr_dir/writer.sh" 2>&1 | { sleep 3; cat; } > "$eintr_dir/got" || true
+# eintr_run MODE — run the writer with a reader that waits; leaves got / done.
+eintr_run() {
+  rm -f "$eintr_dir/got" "$eintr_dir/done"
+  EINTR_LIB="$SCRIPT_DIR/lib-policy.sh" EINTR_DONE="$eintr_dir/done" EINTR_MODE="$1" \
+    "$BASH" "$eintr_dir/writer.sh" 2>&1 | { sleep 3; cat; } > "$eintr_dir/got" || true
+}
+eintr_run bare
+eintr_bare_errors="$(grep -c 'write error' "$eintr_dir/got" || true)"
+if [[ "${BASH_VERSINFO[0]}" -lt 4 && "$eintr_bare_errors" -eq 0 ]]; then
+  fail "test failed: the EINTR fixture did not reproduce under bash $BASH_VERSION (the bare builtin wrote without a write error), so the report case below would pass vacuously"
+  exit 1
+fi
+info "EINTR fixture: the bare builtin hit $eintr_bare_errors write error(s) under bash $BASH_VERSION"
+eintr_run report
 if [[ "$(cat "$eintr_dir/done" 2>/dev/null)" == "writer finished" ]] && cmp -s "$eintr_dir/want" "$eintr_dir/got"; then
-  ok "test passed: report lines survive an EINTR on a blocked write (each line once, in order, no write error)"
+  ok "test passed: report lines survive an EINTR on a blocked write (each line once, in order, long lines whole, no write error)"
 else
   fail "test failed: a report write interrupted by SIGCHLD lost, repeated or broke the output, or stopped the script (got $(wc -l < "$eintr_dir/got" | tr -d ' ') of 3000 lines; $(grep -c 'write error' "$eintr_dir/got" || true) write error(s))"
   exit 1
 fi
+# A write that cannot be made at all still fails (it is not turned into a
+# success): stdout or stderr closed.
+if (source "$SCRIPT_DIR/lib-policy.sh"; report_write 1 'x') >&- 2>/dev/null \
+  || (source "$SCRIPT_DIR/lib-policy.sh"; report_write 2 'x' 2>&-) 2>/dev/null; then
+  fail "test failed: report_write must fail when its fd is closed"
+  exit 1
+fi
+ok "test passed: report_write still fails when its fd is closed"
 
 ok "policy tests passed"

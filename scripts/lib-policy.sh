@@ -18,30 +18,29 @@ BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
 # report_write FD LINE — write LINE and a newline to fd FD (1, or 2 for
 # [warn] / [fail]): the one write every report line goes through (#378).
 # bash 3.2 installs its SIGCHLD handler without SA_RESTART, so when a child
-# process exits while a write to a full pipe is blocked (the reader of the
-# report lagging, as on a loaded CI runner), the printf builtin fails with
-# EINTR, and under set -e the script ended half-way. The bytes that were not
-# written stay in stdio's buffer, so a failed write is retried by flushing
-# that buffer again (printf ''), never by printing the line a second time,
-# which would write it twice. bash's own "write error" message is discarded
-# (it would land in the report); a write that still fails after the retries
-# (a reader that went away) returns 1, as the bare printf did.
+# process (a process substitution's, a background probe's) exits while the
+# printf builtin's write to a full pipe is blocked (the reader of the report
+# lagging, as on a loaded CI runner), the write fails with EINTR, and under
+# set -e the script ended half-way. What was not written cannot be recovered
+# from bash (how much stdio kept depends on the libc and the line length),
+# so under bash 3.2 the builtin writes in a subshell instead: a process with
+# no children of its own gets no SIGCHLD, so its blocked write is not
+# interrupted, and a real failure (a reader that went away, a closed fd)
+# still shows in its exit status. Not the external printf: macOS's
+# /usr/bin/printf exits 0 when its write fails. bash 4 and later restart the
+# interrupted write, so they keep the builtin in place (no fork per line).
 report_write() {
-  local __rw_tries=0
-  if [[ "$1" == 2 ]]; then
-    printf '%s\n' "$2" >&2 2>/dev/null && return 0
-    until printf '' >&2 2>/dev/null; do
-      __rw_tries=$((__rw_tries + 1))
-      [[ "$__rw_tries" -lt 100 ]] || return 1
-    done
+  if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    if [[ "$1" == 2 ]]; then
+      (printf '%s\n' "$2") >&2
+    else
+      (printf '%s\n' "$2")
+    fi
+  elif [[ "$1" == 2 ]]; then
+    printf '%s\n' "$2" >&2
   else
-    printf '%s\n' "$2" 2>/dev/null && return 0
-    until printf '' 2>/dev/null; do
-      __rw_tries=$((__rw_tries + 1))
-      [[ "$__rw_tries" -lt 100 ]] || return 1
-    done
+    printf '%s\n' "$2"
   fi
-  return 0
 }
 
 ok() {
