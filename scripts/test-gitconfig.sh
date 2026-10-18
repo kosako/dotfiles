@@ -294,9 +294,11 @@ fi
 # (#413): with warn it goes on to connect and fails for another reason, so a
 # non-zero exit plus that text cannot tell them apart. Only die stops with a
 # fatal: line before connecting, so that line is the pass condition. The warn
-# control (a closed localhost port, so it fails fast without a lookup) shows
-# that the condition rejects warn.
-if output="$(run_git "$fixture/src/personal/demo" ls-remote https://user:secret-placeholder@invalid.example/repo.git 2>&1)"; then
+# control shows that the condition rejects warn. Both point at a closed
+# localhost port: a regression to warn then fails fast, with no name lookup
+# and nothing sent off the machine.
+credential_url="http://user:secret-placeholder@127.0.0.1:1/repo.git"
+if output="$(run_git "$fixture/src/personal/demo" ls-remote "$credential_url" 2>&1)"; then
   fail "test failed: credential URL was not rejected"
   status=1
 elif grep -Eq '^fatal: .*plaintext credentials' <<< "$output"; then
@@ -307,7 +309,7 @@ else
   status=1
 fi
 output="$(run_git "$fixture/src/personal/demo" -c transfer.credentialsInUrl=warn \
-  ls-remote http://user:secret-placeholder@127.0.0.1:1/repo.git 2>&1 || true)"
+  ls-remote "$credential_url" 2>&1 || true)"
 if grep -Eq '^fatal: .*plaintext credentials' <<< "$output"; then
   fail "test failed: transfer.credentialsInUrl=warn also printed the fatal line, so the check above cannot tell warn from die"
   status=1

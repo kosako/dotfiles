@@ -325,8 +325,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - local fixture で、`~/src/personal/` 配下では identity file の identity が解決されること。
 - credential 入り remote URL が、接続の前に `fatal:` の行で拒否されること(#413。git は warn でも die でも同じ
   「uses plaintext credentials」を出し、warn は接続に進んで別の理由で失敗するので、exit status と文言だけでは区別できない)。
-  対照として、`-c transfer.credentialsInUrl=warn` では同じ文言が `fatal:` なしで出ること(閉じた localhost の port に向け、
-  名前解決をしない)。
+  対照として、`-c transfer.credentialsInUrl=warn` では同じ文言が `fatal:` なしで出ること。どちらも閉じた localhost の port に
+  向けるので、warn に退行しても名前解決をせず、machine の外へ出ない。
 - 全 context(personal / work / client / sandbox / agent と root の外)で、managed な include(identity reset・signing)を
   置いた状態の `transfer.credentialsInUrl` の実効値が `die` であること(#413。後から読む include の上書きを見る)。
   template の git-hook-gates の include は、source がこの key を書かないことを確かめる。
