@@ -205,14 +205,16 @@ cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp す�
 限定 capability flip。boolean 専用。personal が宣言していない capability は fail する、#332)、`copy_repo_fixture`(scripts + .chezmoidata の最小
 repo copy)。
 
-process の後始末の helper(#413): `kill_tree`(PID と子孫を KILL。各 process を SIGSTOP で止めてから子を列挙するので、辿っている間に
-新しい子を作れない)、`stop_child_trees`(この shell が起動して回収していない
+process の後始末の helper(#413): `kill_tree`(PID と子孫を KILL。各 process を SIGSTOP で止め、ps で止まったことを確かめてから子を
+列挙するので、辿っている間に新しい子を作れない。確かめられなければ warn して続ける)、`stop_child_trees`(この shell が起動して回収していない
 process を子孫ごと KILL して回収する。suite の cleanup が、登録した PID ではなく全部の子を止めるので、中断の signal が届かない
 background の case(`set -m` の job や、INT を無視する非対話 shell の background job)の登録漏れが起きない)。
 `check_suite_interrupt` / `suite_interrupt_inner` は、suite を `SUITE_INTERRUPT_CUE` 付きで起動し直し、trap を張った直後に
 background の case と同じ形の process の木を 2 つ起動させてから TERM を送る。1 つは `set -m` の job、もう 1 つは素の background job で、
-最初の子が終わると新しい子を起動する wrapper(辿っている間に増える木)。5 つの process が TERM の前に生きていて、suite が TERM で
-終わり、どれも(6 つ目も)残らず、fixture が消えることを確かめる。check の一時 dir と内側の run の fixture(TMPDIR)は呼び出し側の
+最初の子が終わると新しい子を起動する wrapper(辿っている間に増える木)。run の PATH の先頭の `pgrep` の shim が、wrapper の子を決まった
+順で返し、2 つ目の子の列挙の前に「wrapper が止まった」か「新しい子が記録された」まで待つので、止めずに辿る cleanup は timing に依らず
+新しい子を残す。`sleep` はすべて check ごとに一意の時間で起動し、記録されなかった process も `pgrep -f` で見つける。異なる 5 つの
+process が TERM の前に生きていて、suite が TERM で終わり、check の process がどれも残らず、fixture が消えることを確かめる。check の一時 dir と内側の run の fixture(TMPDIR)は呼び出し側の
 fixture の下に作るので、呼び出し側の suite が check の途中で中断されても残らない(test-private-backup.sh / test-doctor.sh の冒頭で使う)。
 
 ## test-shell-syntax.sh

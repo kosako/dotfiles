@@ -176,13 +176,27 @@ set_environment_kind() {
 }
 
 # kill_tree PID — KILL PID and its descendants. Each process is stopped
-# (SIGSTOP) before its children are listed, so it cannot start another one
-# while the tree is walked (a wrapper that starts a new child when one ends
-# would otherwise get past the listing; Codex review R1, PR #419); the kill
-# then goes bottom-up.
+# before its children are listed, so it cannot start another one while the
+# tree is walked (a wrapper that starts a new child when one ends would get
+# past the listing; Codex review, PR #419). SIGSTOP is delivered
+# asynchronously, so the listing waits (up to 5 s) until ps shows the process
+# stopped, a zombie or gone; when that cannot be confirmed it warns and goes
+# on (the process may still add a child after the listing). The kill then
+# goes bottom-up. Returns 0: callers are cleanups and deadlines.
 kill_tree() {
-  local child
-  kill -STOP "$1" 2>/dev/null || true
+  local child state t
+  kill -STOP "$1" 2>/dev/null || return 0
+  for ((t = 0; t < 250; t++)); do
+    state="$(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
+    case "$state" in
+      '' | T* | Z*) break ;;
+    esac
+    sleep 0.02
+  done
+  case "$state" in
+    '' | T* | Z*) ;;
+    *) warn "kill_tree: could not confirm that process $1 stopped (state ${state}); a child it starts now may be missed" ;;
+  esac
   for child in $(pgrep -P "$1" 2>/dev/null || true); do
     kill_tree "$child"
   done
@@ -211,33 +225,40 @@ stop_child_trees() {
 # re-runs SUITE (with the extra env) and SUITE_INTERRUPT_CUE naming a cue
 # file. The suite calls suite_interrupt_inner right after it sets its traps
 # when SUITE_INTERRUPT_CUE is set: that starts two trees the way the
-# background cases start theirs, lists their PIDs and the fixture dir in the
-# cue, and waits. One is a `set -m` job (`sh` with a `sleep` under it); the
-# other a plain background job: a wrapper with two `sleep`s that starts a
-# third when the first ends, so a cleanup that lets it run while the tree is
-# walked leaves the new one behind. check_suite_interrupt then sends the run
-# TERM and succeeds when all five listed processes were alive before it, the
-# run ended by TERM, none is left (nor a sixth one) and the fixture dir is
-# gone; otherwise it prints what it saw and fails. Everything it makes,
-# the inner run's fixture included (its TMPDIR), is under DIR, the calling
-# suite's fixture, so an interrupt of the calling suite removes it too
-# (Codex review R2, PR #419).
+# background cases start theirs, lists each process as "pid PID ROLE" in the
+# cue, and waits.
+# - A `set -m` job: `sh` (job) with a `sleep` (job-sleep) under it.
+# - A plain background job: a wrapper with two `sleep`s (a, b) that starts a
+#   third (c) when a ends and lists it. A pgrep shim first on the run's PATH
+#   makes that race certain instead of timing-dependent: it lists the
+#   wrapper's children a first, and before it answers for b's children it
+#   waits (up to 5 s) until the wrapper is stopped or c is listed. A cleanup
+#   that lets the wrapper run while the tree is walked therefore always
+#   leaves c behind; one that stops it first never sees c.
+# Every `sleep` runs for a duration unique to the check, so one that was
+# started but never listed is found too (pgrep -f). check_suite_interrupt
+# then sends the run TERM and succeeds when five different listed processes
+# were alive before it, the run ended by TERM, no process of the check is
+# left and the fixture dir is gone; otherwise it prints what it saw and
+# fails. Everything it makes, the inner run's fixture included (its TMPDIR),
+# is under DIR, the calling suite's fixture, so an interrupt of the calling
+# suite removes it too.
 suite_interrupt_inner() {
   local cue="$1" t
   printf 'fixture %s\n' "$2" >> "$cue"
   set -m
-  sh -c 'sleep 300 & printf "pid %s\n" "$!" >> "$1"; wait' suite-interrupt "$cue" &
-  printf 'pid %s\n' "$!" >> "$cue"
+  sh -c 'sleep "$2" & printf "pid %s job-sleep\n" "$!" >> "$1"; wait' suite-interrupt "$cue" "$SUITE_INTERRUPT_SLEEP" &
+  printf 'pid %s job\n' "$!" >> "$cue"
   set +m
   sh -c '
-    sleep 300 & a=$!
-    sleep 300 & b=$!
-    printf "pid %s\npid %s\n" "$a" "$b" >> "$1"
+    sleep "$2" & a=$!
+    sleep "$2" & b=$!
+    printf "pid %s a\npid %s b\n" "$a" "$b" >> "$1"
     wait "$a"
-    sleep 300 &
-    printf "pid %s\n" "$!" >> "$1"
-    wait' suite-interrupt "$cue" &
-  printf 'pid %s\n' "$!" >> "$cue"
+    sleep "$2" &
+    printf "pid %s c\n" "$!" >> "$1"
+    wait' suite-interrupt "$cue" "$SUITE_INTERRUPT_SLEEP" &
+  printf 'pid %s wrapper\n' "$!" >> "$cue"
   for ((t = 0; t < 600; t++)); do
     if [[ "$(grep -c '^pid ' "$cue")" -ge 5 ]]; then
       printf 'ready\n' >> "$cue"
@@ -250,11 +271,41 @@ suite_interrupt_inner() {
 }
 
 check_suite_interrupt() {
-  local suite="$1" dir pid t rc=0 kind value fixture="" listed="" count=0 dead_before="" left="" ready=0
+  local suite="$1" dir pid t rc=0 kind value role fixture="" listed="" distinct=0 dead_before="" left="" ready=0
+  local sleep_for="3000.$RANDOM$RANDOM" strays
   dir="$(mktemp -d "$2/suite-interrupt.XXXXXX")"
   shift 2
-  mkdir "$dir/tmp"
-  env "$@" TMPDIR="$dir/tmp" SUITE_INTERRUPT_CUE="$dir/cue" "$BASH" "$suite" > "$dir/log" 2>&1 < /dev/null &
+  mkdir "$dir/tmp" "$dir/shim"
+  cat > "$dir/shim/pgrep" <<'SH'
+#!/bin/sh
+# pgrep shim of the suite interrupt check (test-lib.sh): see there.
+role() { sed -n "s/^pid \([0-9]*\) $1\$/\1/p" "$SUITE_INTERRUPT_CUE"; }
+if [ "$1" = -P ] && [ "$#" -eq 2 ]; then
+  w="$(role wrapper)" a="$(role a)" b="$(role b)"
+  if [ -n "$w" ] && [ "$2" = "$w" ]; then
+    kids="$("$SUITE_INTERRUPT_PGREP" -P "$2")"
+    for k in $kids; do [ "$k" = "$a" ] && printf '%s\n' "$k"; done
+    for k in $kids; do [ "$k" != "$a" ] && printf '%s\n' "$k"; done
+    exit 0
+  fi
+  if [ -n "$b" ] && [ "$2" = "$b" ]; then
+    i=0
+    while [ "$i" -lt 100 ]; do
+      case "$(LC_ALL=C ps -o stat= -p "$w" 2>/dev/null | tr -d ' ')" in
+        '' | T* | Z*) break ;;
+      esac
+      [ -n "$(role c)" ] && break
+      sleep 0.05
+      i=$((i + 1))
+    done
+  fi
+fi
+exec "$SUITE_INTERRUPT_PGREP" "$@"
+SH
+  chmod +x "$dir/shim/pgrep"
+  env "$@" TMPDIR="$dir/tmp" SUITE_INTERRUPT_CUE="$dir/cue" SUITE_INTERRUPT_SLEEP="$sleep_for" \
+    SUITE_INTERRUPT_PGREP="$(command -v pgrep)" PATH="$dir/shim:$PATH" \
+    "$BASH" "$suite" > "$dir/log" 2>&1 < /dev/null &
   pid=$!
   for ((t = 0; t < 600; t++)); do
     grep -qx ready "$dir/cue" 2>/dev/null && { ready=1; break; }
@@ -262,7 +313,8 @@ check_suite_interrupt() {
     sleep 0.1
   done
   if [[ "$ready" -eq 1 ]]; then
-    for value in $(sed -n 's/^pid //p' "$dir/cue"); do
+    distinct="$(sed -n 's/^pid \([0-9]*\) .*/\1/p' "$dir/cue" | sort -u | grep -c .)"
+    for value in $(sed -n 's/^pid \([0-9]*\) .*/\1/p' "$dir/cue"); do
       kill -0 "$value" 2>/dev/null || dead_before+=" $value"
     done
   fi
@@ -277,9 +329,9 @@ check_suite_interrupt() {
     kill -0 "$pid" && kill_tree "$pid"
     wait "$pid" || rc=$?
   } 2>/dev/null
-  while read -r kind value; do
+  while read -r kind value role; do
     case "$kind" in
-      pid) listed+=" $value"; count=$((count + 1)) ;;
+      pid) listed+=" $value:$role" ;;
       fixture) fixture="$value" ;;
     esac
   done < <(cat "$dir/cue" 2>/dev/null || true)
@@ -288,21 +340,23 @@ check_suite_interrupt() {
   for ((t = 0; t < 50; t++)); do
     left=""
     for value in $listed; do
-      kill -0 "$value" 2>/dev/null && left+=" $value"
+      kill -0 "${value%%:*}" 2>/dev/null && left+=" $value"
     done
-    [[ -n "$left" ]] || break
+    strays="$(pgrep -f "sleep $sleep_for" 2>/dev/null | tr '\n' ' ' || true)"
+    [[ -n "$left" || -n "${strays// /}" ]] || break
     sleep 0.1
   done
   for value in $left; do
-    kill_tree "$value"
+    kill_tree "${value%%:*}"
   done
-  if [[ "$ready" -eq 1 && -z "$dead_before" && "$rc" -eq 143 && "$count" -eq 5 && -z "$left" \
-    && -n "$fixture" && ! -e "$fixture" ]]; then
+  pkill -KILL -f "sleep $sleep_for" 2>/dev/null || true
+  if [[ "$ready" -eq 1 && "$distinct" -eq 5 && -z "$dead_before" && "$rc" -eq 143 && -z "$left" \
+    && -z "${strays// /}" && -n "$fixture" && ! -e "$fixture" ]]; then
     rm -rf "$dir"
     return 0
   fi
-  printf 'ready=%s dead before TERM:%s rc=%s listed (%s):%s left:%s fixture=%s (exists: %s)\n' \
-    "$ready" "${dead_before:- none}" "$rc" "$count" "$listed" "${left:- none}" "${fixture:-<none>}" \
+  printf 'ready=%s distinct=%s dead before TERM:%s rc=%s listed:%s left:%s strays: %s fixture=%s (exists: %s)\n' \
+    "$ready" "$distinct" "${dead_before:- none}" "$rc" "$listed" "${left:- none}" "${strays:-none}" "${fixture:-<none>}" \
     "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" >&2
   cat "$dir/log" >&2 2>/dev/null || true
   chmod -R u+rwX "$dir" 2>/dev/null || true
