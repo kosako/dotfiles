@@ -40,7 +40,7 @@ fail_duplicates() {
 # declarations must be valid on their own (independent of any profile).
 validate_modules() {
   local status=0
-  local module path capability value type paths_count requires_count requires
+  local module path capability value type paths_count paths_shape requires_count requires
   # Collected in a variable, not a temp file, so an interrupt leaves nothing
   # behind (#329; the same holds for the lists in validate_packages and
   # validate_backup_paths).
@@ -50,28 +50,44 @@ validate_modules() {
     [[ -z "$module" ]] && continue
 
     paths_count=0
-    while IFS= read -r path; do
-      [[ -z "$path" ]] && continue
-      paths_count=$((paths_count + 1))
-      case "$path" in
-        /*|*..*)
-          fail "module path must be home-relative: $module: $path"
-          status=1
-          ;;
-        # Each declared path becomes a literal "!<path>" line of the
-        # .chezmoiignore allowlist (#207). Pattern characters, whitespace,
-        # a leading "~" / "./" or a trailing "/" would change what that line
-        # admits (or match nothing), so they are rejected here.
-        *[][*?{}!#\\]*|*[[:space:]]*|~*|.|./*|*/.|*/./*|*//*|*/)
-          fail "module path must be a literal path (no pattern characters, whitespace, or trailing slash): $module: $path"
-          status=1
-          ;;
-        *)
-          ok "module path: $module: $path"
-          all_paths+="$path"$'\n'
-          ;;
-      esac
-    done < <(module_paths "$module")
+    # Same shape check as a profile's modules (#412): a string, bool or number
+    # under paths: lists as nothing and passes when the module has no requires.
+    paths_shape=0
+    m="$module" yaml_string_list '.modules[strenv(m)].paths' "$MODULES_FILE" || paths_shape=$?
+    case "$paths_shape" in
+      0)
+        while IFS= read -r path; do
+          [[ -z "$path" ]] && continue
+          paths_count=$((paths_count + 1))
+          case "$path" in
+            /*|*..*)
+              fail "module path must be home-relative: $module: $path"
+              status=1
+              ;;
+            # Each declared path becomes a literal "!<path>" line of the
+            # .chezmoiignore allowlist (#207). Pattern characters, whitespace,
+            # a leading "~" / "./" or a trailing "/" would change what that line
+            # admits (or match nothing), so they are rejected here.
+            *[][*?{}!#\\]*|*[[:space:]]*|~*|.|./*|*/.|*/./*|*//*|*/)
+              fail "module path must be a literal path (no pattern characters, whitespace, or trailing slash): $module: $path"
+              status=1
+              ;;
+            *)
+              ok "module path: $module: $path"
+              all_paths+="$path"$'\n'
+              ;;
+          esac
+        done < <(module_paths "$module")
+        ;;
+      2)
+        fail "cannot read the paths of module $module"
+        status=1
+        ;;
+      *)
+        fail "module paths must be a list of paths: $module"
+        status=1
+        ;;
+    esac
 
     # Capture the status before consuming entries; a failed enumeration is
     # not an empty set of conditions, even if yq emitted partial output.
@@ -121,7 +137,7 @@ validate_modules() {
       esac
     done <<< "$requires"
 
-    if [[ "$requires_count" -gt 0 && "$paths_count" -eq 0 ]]; then
+    if [[ "$paths_shape" -eq 0 && "$requires_count" -gt 0 && "$paths_count" -eq 0 ]]; then
       fail "module has requires but no paths: $module"
       status=1
     fi
@@ -338,7 +354,7 @@ validate_backup_paths() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type forbidden ek_violations ek_list
+  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -358,15 +374,31 @@ validate_profile() {
     status=1
   fi
 
-  while IFS= read -r module; do
-    [[ -z "$module" ]] && continue
-    if grep -Fxq -- "$module" <<< "$known_modules_list"; then
-      ok "module allowed: $module"
-    else
-      fail "unknown module in $profile: $module"
+  # A string, bool, number or map under modules: would list as nothing or as
+  # the map's values (#412), so the shape is checked before the names.
+  modules_shape=0
+  p="$profile" yaml_string_list '.profiles[strenv(p)].modules' "$PROFILES_FILE" || modules_shape=$?
+  case "$modules_shape" in
+    0)
+      while IFS= read -r module; do
+        [[ -z "$module" ]] && continue
+        if grep -Fxq -- "$module" <<< "$known_modules_list"; then
+          ok "module allowed: $module"
+        else
+          fail "unknown module in $profile: $module"
+          status=1
+        fi
+      done < <(profile_modules "$profile")
+      ;;
+    2)
+      fail "cannot read the modules of profile $profile"
       status=1
-    fi
-  done < <(profile_modules "$profile")
+      ;;
+    *)
+      fail "profile modules must be a list of module names: $profile"
+      status=1
+      ;;
+  esac
 
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
@@ -381,8 +413,10 @@ validate_profile() {
   fail_duplicates "duplicate capability in $profile: " \
     < <(profile_capabilities "$profile" | sort | uniq -d) || status=1
 
-  fail_duplicates "duplicate module in $profile: " \
-    < <(profile_modules "$profile" | sort | uniq -d) || status=1
+  if [[ "$modules_shape" -eq 0 ]]; then
+    fail_duplicates "duplicate module in $profile: " \
+      < <(profile_modules "$profile" | sort | uniq -d) || status=1
+  fi
 
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue

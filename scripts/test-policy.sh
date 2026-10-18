@@ -336,6 +336,43 @@ for bad_path in '.config/*.toml' '.config/mise/' "'!.zshrc'" '.config/my dir' '~
     "$fixture/scripts/validate-policy.sh" personal
 done
 
+# A profile's modules: and a module's paths: must be absent / null or a list
+# of strings (#412). The readers enumerate with `[]?`, so a scalar listed as
+# nothing and a map listed its values; both passed before the shape check.
+# claude-settings has no requires:, so "requires but no paths" cannot catch
+# its paths.
+for bad_list in '"base"' false 42 '{entry: base}' '[base, 1]' '[base, ~]'; do
+  make_fixture
+  V="$bad_list" yq -i '.profiles.personal.modules = env(V)' "$fixture/.chezmoidata/profiles.yaml"
+  run_fail_contains \
+    "rejects profile modules=$bad_list" \
+    "profile modules must be a list of module names: personal" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+for bad_list in '".claude/settings.json"' true 7 '{p: .claude/settings.json}' '[.claude/settings.json, true]'; do
+  make_fixture
+  V="$bad_list" yq -i '.modules["claude-settings"].paths = env(V)' "$fixture/.chezmoidata/modules.yaml"
+  run_fail_contains \
+    "rejects module paths=$bad_list" \
+    "module paths must be a list of paths: claude-settings" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+
+# A failed read of the shape is reported, not taken as a valid list.
+make_fixture
+cat >> "$fixture/scripts/lib-policy.sh" <<'SH'
+yq() {
+  case "$*" in
+    *'.profiles[strenv(p)].modules | '*|*'.modules[strenv(m)].paths | '*) return 1 ;;
+  esac
+  command yq "$@"
+}
+SH
+run_fail_contains "rejects a failed read of profile modules" \
+  "cannot read the modules of profile personal" "$fixture/scripts/validate-policy.sh" personal
+run_fail_contains "rejects a failed read of module paths" \
+  "cannot read the paths of module claude-settings" "$fixture/scripts/validate-policy.sh" personal
+
 # Require both the YAML boolean type and canonical lowercase spelling (#206).
 # Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
 # comparisons in registry disclosure and environmentKind checks.
