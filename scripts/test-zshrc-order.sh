@@ -193,15 +193,19 @@ fi
 #    fake の brew は shellenv で目印の変数と PATH の前置を出し、order log に印を書く。
 #    対照: ~/.zprofile.local を置かない run では brew の値が残る (local が値を変えている
 #    ことと、brew の行に届いていることを確かめる)。
+#    ~/.zprofile.local のある HOME では、dot_zprofile が前置し直す ~/.local/bin と mise の
+#    shims にも同名の probe を置く (#413)。前置し直しの行を ~/.zprofile.local の後へ動かすと、
+#    probe がそちらに解決して fail する。
 zp="$fixture/zprofile"
-mkdir -p "$zp/opt-homebrew/bin" "$zp/local-bin" "$zp/home-local" "$zp/home-none" "$zp/out-local" "$zp/out-none"
+mkdir -p "$zp/opt-homebrew/bin" "$zp/local-bin" "$zp/home-local" "$zp/home-none" "$zp/out-local" "$zp/out-none" \
+  "$zp/home-local/.local/bin" "$zp/home-local/.local/share/mise/shims"
 cat > "$zp/opt-homebrew/bin/brew" <<'SH'
 #!/bin/sh
 [ "$1" = shellenv ] || exit 1
 printf 'brew\n' >> "$ZPROFILE_TEST_OUT/order"
 printf '%s\n' 'export ZPROFILE_TEST_WHO=brew' 'export PATH="$ZPROFILE_TEST_DIR/opt-homebrew/bin:$PATH"'
 SH
-for dir in "$zp/opt-homebrew/bin" "$zp/local-bin"; do
+for dir in "$zp/opt-homebrew/bin" "$zp/local-bin" "$zp/home-local/.local/bin" "$zp/home-local/.local/share/mise/shims"; do
   printf '#!/bin/sh\n' > "$dir/zprofile-probe"
   chmod +x "$dir/zprofile-probe"
 done
@@ -241,7 +245,7 @@ else
     fail "test failed: without ~/.zprofile.local, dot_zprofile must read the brew shellenv and keep its values (got $got_none)"
     status=1
   elif [[ "$got_local" == "$want_local" ]]; then
-    ok "test passed: dot_zprofile reads the brew shellenv, then ~/.zprofile.local, and the local values win (control without local keeps brew's)"
+    ok "test passed: dot_zprofile reads the brew shellenv, then ~/.zprofile.local, and the local values win over brew and the re-prepended ~/.local/bin / mise shims (control without local keeps brew's)"
   else
     fail "test failed: dot_zprofile must read brew, then ~/.zprofile.local, with local winning (got $got_local)"
     status=1
