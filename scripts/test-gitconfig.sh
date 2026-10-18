@@ -655,7 +655,8 @@ fi
 # every context, with the managed include files in place (the identity reset
 # is already in the fixture HOME; the signing mechanism is copied here, at
 # the end, so the cases above do not see it). The hook-gates include is a
-# template, so its source is checked for the key instead.
+# template, so its source is checked for the key instead, ignoring case like
+# Git does for key names (Codex review R2, PR #417).
 cp "$DOTFILES_ROOT/private_dot_config/git/signing.gitconfig" "$fixture/.config/git/signing.gitconfig"
 for context_dir in src/personal src/work src/client src/sandbox src/agent outside; do
   repo="$fixture/$context_dir/credentials-in-url"
@@ -669,7 +670,7 @@ for context_dir in src/personal src/work src/client src/sandbox src/agent outsid
     status=1
   fi
 done
-if grep -q 'credentialsInUrl' "$DOTFILES_ROOT/private_dot_config/git-hook-gates/hooks.gitconfig.tmpl"; then
+if grep -qi 'credentialsInUrl' "$DOTFILES_ROOT/private_dot_config/git-hook-gates/hooks.gitconfig.tmpl"; then
   fail "test failed: the git-hook-gates include must not set transfer.credentialsInUrl"
   status=1
 else
