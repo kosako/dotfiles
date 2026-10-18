@@ -186,8 +186,9 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   `~/.claude/settings.json` の `hooks`、Codex は user 層 `~/.codex/hooks.json`。hooks object は
   `.chezmoitemplates/agent-hooks-json` で両 home 共有(`enableGitHubIsolatedReader` の
   PreToolUse・`enableHerdrIntegration` の SessionStart と同居。各 capability は自分の event だけを
-  足し、3 つの hook capability が全部 false で `hooks` キー自体を出さない / Codex は file ごと
-  消える)。
+  足し、hook capability が全部 false のとき、Claude は `hooks` キー自体を出さず、Codex は file ごと
+  消える。全部の数は Claude が `enableToolCallRecordHook`(#353。Claude だけ)を含む 4 つ、Codex は
+  それを除く 3 つ)。
   - `PostToolUse` / matcher `Edit|Write` → `personal-fast-edit-check`(steering。失敗要約を
     `additionalContext` で返すだけで block しない・自動 fix しない)。
   - `Stop`(matcher なし。Claude Code は非対応・Codex は無視)→ `personal-changed-scope-qa`

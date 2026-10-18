@@ -75,8 +75,10 @@ VS Code は現在この環境で**未使用**(editor は別物)。よって #16 
 
 ## Claude Code settings: managed-wins(user 設定)
 
-managed な `~/.claude/settings.json` は、dotfiles が書く key(model / plugin / sandbox 等)に
-ついて **managed-wins**(source が正)。Claude が動的に足す permission や、`/sandbox` による
+managed な `~/.claude/settings.json` は、dotfiles が書く key(plugin / sandbox / hooks 等)に
+ついて **managed-wins**(source が正)。ただし `model` は、live に在れば `/model` の選択をそのまま残し、
+template の値は file に無いときの既定にだけ使う(`modelSettings` / `autoMode` と同じく手元の key。#360、
+[claude-settings](claude-settings.md) の「apply の仕組み」)。Claude が動的に足す permission や、`/sandbox` による
 per-project の sandbox 調整は **project の `.claude/settings.local.json`**(chezmoi 管理外。
 `.chezmoiignore` は allowlist で宣言外を通さない、#207)に書かれるため、managed な user
 設定とは衝突しない。
