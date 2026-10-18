@@ -92,16 +92,47 @@ sha256_of() {
 # Copy the regular file SRC into STAGING/files/REL (mode preserved) and
 # append its {path, mode, size, sha256} row to MANIFEST's files[]. REL is
 # the home-relative manifest path; the caller has already safety-checked it
-# and deduplicated it against seen_paths.
+# and deduplicated it against seen_paths. The parent is cut with parameter
+# expansion, not dirname: dirname reads a REL that starts with "-" as an
+# option and fails, so the file under it could not be staged (#414; restore
+# had the same problem, #397).
 stage_file() {
   local src="$1" rel="$2" manifest="$3" staging="$4" mode size hash
   mode="$(file_mode "$src")"
   size="$(wc -c < "$src" | tr -d ' ')"
   hash="$(sha256_of "$src")"
-  mkdir -p "$staging/files/$(dirname "$rel")"
+  case "$rel" in
+    */*) mkdir -p "$staging/files/${rel%/*}" ;;
+  esac
   cp -p "$src" "$staging/files/$rel"
   P="$rel" M="$mode" SZ="$size" H="$hash" \
     yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
+}
+
+# Whether HOME/REL is absent for certain. [[ -e ]] is false for a file under a
+# directory without search permission too, and that file may exist (#414):
+# backup must not report it as an absent optional file. Walks the ancestors
+# below HOME the way path_has_symlinked_parent does; absence is confirmed
+# when every existing ancestor is a searchable directory, or one of them is
+# missing or not a directory (the path then cannot exist). REL is a
+# validated relative path (backup_path_is_safe). Returns 0 when confirmed.
+path_absence_confirmed() {
+  local rel="$1" cur="$HOME" comp dir
+  [[ -x "$HOME" ]] || return 1
+  case "$rel" in
+    */*) dir="${rel%/*}" ;;
+    *) return 0 ;;
+  esac
+  local IFS='/' comps=()
+  read -ra comps <<< "$dir"
+  for comp in "${comps[@]}"; do
+    [[ -z "$comp" ]] && continue
+    cur="$cur/$comp"
+    [[ -e "$cur" || -L "$cur" ]] || return 0
+    [[ -d "$cur" ]] || return 0
+    [[ -x "$cur" ]] || return 1
+  done
+  return 0
 }
 
 # Whether a single tar member NAME is allowed in a private-backup archive.
@@ -404,7 +435,7 @@ cmd_backup() {
   # recorded in the marker so doctor can show it after the fact. Also set when
   # a file that exists could not be read (#398): unlike an absent optional
   # file, real configuration is then missing from the archive.
-  local capture_incomplete=0 incomplete_dirs=0 unreadable_files=0 find_rc
+  local capture_incomplete=0 incomplete_dirs=0 unreadable_files=0 unchecked_paths=0 find_rc
   # The supplement itself goes in first, as ordinary payload at its canonical
   # path (#208): restore then lands it with the same dry-run / skip-existing /
   # displace / symlink rules as every other file, verify hashes it, and the
@@ -450,8 +481,16 @@ cmd_backup() {
       continue
     fi
     if [[ ! -e "$target" ]]; then
-      warn "declared but absent (skipped): $path"
       skipped=$((skipped + 1))
+      if path_absence_confirmed "$path"; then
+        warn "declared but absent (skipped): $path"
+      else
+        # It may exist and hold configuration this archive lacks, so the
+        # capture is incomplete, like an existing unreadable file (#414).
+        warn "cannot tell whether it exists, a parent directory is not searchable (skipped): $path"
+        unchecked_paths=$((unchecked_paths + 1))
+        capture_incomplete=1
+      fi
       continue
     fi
 
@@ -564,6 +603,10 @@ cmd_backup() {
       [[ -z "$incomplete_what" ]] || incomplete_what+=" and "
       incomplete_what+="$unreadable_files existing file(s) could not be read"
     fi
+    if [[ "$unchecked_paths" -gt 0 ]]; then
+      [[ -z "$incomplete_what" ]] || incomplete_what+=" and "
+      incomplete_what+="$unchecked_paths declared path(s) could not be checked (a parent directory is not searchable)"
+    fi
     warn "capture INCOMPLETE: $incomplete_what; the files it could not list or read are missing from this archive (fix the unreadable entries and back up again)"
   fi
   item "destination: $out"
@@ -615,7 +658,9 @@ cmd_backup() {
   # removal of the partial dir, INT / TERM) leaves the new archive with the
   # previous marker, and the run exits non-zero. A marker path that is a
   # directory is refused: mv would move the record into it and report
-  # success.
+  # success. Nothing locks the two renames together, so concurrent runs to
+  # the same --out are not supported: the last archive and the last marker
+  # can come from different runs (#414, docs/private-backup.md).
   mkdir -p "$(dirname "$MARKER_FILE")"
   if [[ -d "$MARKER_FILE" ]]; then
     fail "backup marker path is a directory: $MARKER_FILE"
