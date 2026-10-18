@@ -73,6 +73,11 @@ cleanup() {
     wait "$active_backup_pid" 2>/dev/null || true
     active_backup_pid=""
   fi
+  # Cases that take a permission away (case 22's mode 000 files, case 39's
+  # unsearchable directory) give it back on their normal path only. Modes
+  # are opened first, so a run interrupted inside that window still removes
+  # the whole fixture (Codex review R2, PR #418; test-doctor does the same).
+  chmod -R u+rwX "$fixture_home" 2>/dev/null || true
   rm -rf "$fixture_home" || true
 }
 trap 'trap "" INT TERM; cleanup' EXIT
