@@ -358,20 +358,30 @@ for bad_list in '".claude/settings.json"' true 7 '{p: .claude/settings.json}' '[
     "$fixture/scripts/validate-policy.sh" personal
 done
 
-# A failed read of the shape is reported, not taken as a valid list.
-make_fixture
-cat >> "$fixture/scripts/lib-policy.sh" <<'SH'
-yq() {
-  case "$*" in
-    *'.profiles[strenv(p)].modules | '*|*'.modules[strenv(m)].paths | '*) return 1 ;;
-  esac
-  command yq "$@"
+# A failed read is reported, not taken as an empty list: of the shape, and of
+# the listing after a valid shape. Each case fails only its own read, so the
+# run cannot fail through another branch.
+# fail_fixture_yq_on TEXT — the fixture's yq exits 1 with no output for the
+# calls whose arguments contain TEXT (a literal without a single quote).
+fail_fixture_yq_on() {
+  printf "yq() {\n  case \"\$*\" in\n    *'%s'*) return 1 ;;\n  esac\n  command yq \"\$@\"\n}\n" "$1" \
+    >> "$fixture/scripts/lib-policy.sh"
 }
-SH
-run_fail_contains "rejects a failed read of profile modules" \
-  "cannot read the modules of profile personal" "$fixture/scripts/validate-policy.sh" personal
-run_fail_contains "rejects a failed read of module paths" \
-  "cannot read the paths of module claude-settings" "$fixture/scripts/validate-policy.sh" personal
+# expect_read_failure NAME TEXT MESSAGE — in a fresh fixture whose yq fails
+# only on TEXT, validate-policy must exit non-zero with MESSAGE.
+expect_read_failure() {
+  make_fixture
+  fail_fixture_yq_on "$2"
+  run_fail_contains "rejects a failed read of the $1" "$3" "$fixture/scripts/validate-policy.sh" personal
+}
+expect_read_failure "profile modules shape" '.profiles[strenv(p)].modules | ' \
+  "cannot read the modules of profile personal"
+expect_read_failure "profile modules listing" '.profiles[strenv(p)].modules[]?' \
+  "cannot read the modules of profile personal"
+expect_read_failure "module paths shape" '.modules[strenv(m)].paths | ' \
+  "cannot read the paths of module claude-settings"
+expect_read_failure "module paths listing" '.modules[strenv(m)].paths[]?' \
+  "cannot read the paths of module claude-settings"
 
 # Require both the YAML boolean type and canonical lowercase spelling (#206).
 # Quoted "false" is truthy in templates; uppercase booleans bypass lowercase

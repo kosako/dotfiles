@@ -40,7 +40,7 @@ fail_duplicates() {
 # declarations must be valid on their own (independent of any profile).
 validate_modules() {
   local status=0
-  local module path capability value type paths_count paths_shape requires_count requires
+  local module path capability value type paths_count paths_shape paths_list requires_count requires
   # Collected in a variable, not a temp file, so an interrupt leaves nothing
   # behind (#329; the same holds for the lists in validate_packages and
   # validate_backup_paths).
@@ -54,6 +54,11 @@ validate_modules() {
     # under paths: lists as nothing and passes when the module has no requires.
     paths_shape=0
     m="$module" yaml_string_list '.modules[strenv(m)].paths' "$MODULES_FILE" || paths_shape=$?
+    # Captured, not read through a process substitution, so a failed listing
+    # after the shape check is reported too.
+    if [[ "$paths_shape" -eq 0 ]] && ! paths_list="$(module_paths "$module")"; then
+      paths_shape=2
+    fi
     case "$paths_shape" in
       0)
         while IFS= read -r path; do
@@ -77,7 +82,7 @@ validate_modules() {
               all_paths+="$path"$'\n'
               ;;
           esac
-        done < <(module_paths "$module")
+        done <<< "$paths_list"
         ;;
       2)
         fail "cannot read the paths of module $module"
@@ -354,7 +359,7 @@ validate_backup_paths() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape
+  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape modules_list
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -378,6 +383,10 @@ validate_profile() {
   # the map's values (#412), so the shape is checked before the names.
   modules_shape=0
   p="$profile" yaml_string_list '.profiles[strenv(p)].modules' "$PROFILES_FILE" || modules_shape=$?
+  # Captured once (a failed listing is reported too) and reused below.
+  if [[ "$modules_shape" -eq 0 ]] && ! modules_list="$(profile_modules "$profile")"; then
+    modules_shape=2
+  fi
   case "$modules_shape" in
     0)
       while IFS= read -r module; do
@@ -388,7 +397,7 @@ validate_profile() {
           fail "unknown module in $profile: $module"
           status=1
         fi
-      done < <(profile_modules "$profile")
+      done <<< "$modules_list"
       ;;
     2)
       fail "cannot read the modules of profile $profile"
@@ -415,7 +424,7 @@ validate_profile() {
 
   if [[ "$modules_shape" -eq 0 ]]; then
     fail_duplicates "duplicate module in $profile: " \
-      < <(profile_modules "$profile" | sort | uniq -d) || status=1
+      < <(sort <<< "$modules_list" | uniq -d) || status=1
   fi
 
   while IFS= read -r capability; do
