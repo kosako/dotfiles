@@ -88,15 +88,18 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   home 相対(`-C` で絶対パスを含めない)。
 - backup は捕捉 0 件なら空アーカイブを書かず fail(補足リストだけの archive も空扱い)。symlink /
   不在 / 非正規 / 読取不可のファイルは skip(warn)。ただし実在するのに読めない file は、設定が archive から
-  欠けるので、下の「捕捉の不完全」として marker に記録する(#398)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+  欠けるので、下の「捕捉の不完全」として marker に記録する(#398)。検索の権限が無い directory の下の宣言は、file が
+  在っても無いように見えるので、不在とは扱わず同じく「捕捉の不完全」にする(#414。不在と扱うのは、親の directory に入れない
+  理由が「途中が無い」(ENOENT)か「途中が directory でない」(ENOTDIR)のとき、または親に入れたときだけ。symlink を
+  経由する path も、解決した先で判定する)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
   補足リスト自身は宣言より先に canonical path で捕捉するので、baseline / 補足が同じ path を宣言して
   いても entry / file は重複しない(補足の copy が優先)。
 - **directory 列挙の途中失敗(#242)**: 宣言 directory の `find` が途中で失敗(読めない subdirectory 等・
   exit 非 0)した場合、列挙できた file は捕捉して**継続**する(読取不能 file と同じ warn + skip の契約。
   abort はしない)が、その directory を skip 1 件として数え、`capture INCOMPLETE` を warn し、marker に
   `capture_incomplete: true` を記録する。実在するのに読めない file(宣言した file も directory の配下も)も
-  同じく `capture INCOMPLETE` と `capture_incomplete: true` にする(#398)。通常の skip(任意の baseline file が
-  不在)とは区別する。
+  同じく `capture INCOMPLETE` と `capture_incomplete: true` にする(#398)。在るかどうかを確かめられない宣言(親の
+  directory を検索できない、#414)も同じ。通常の skip(任意の baseline file が不在)とは区別する。
   self-check / verify は staging と manifest の整合を証明するだけで、**元 directory の完全取得は証明しない**
   (完全性は marker が持つ)。doctor は `capture_incomplete` を読み、true なら再 backup を next action に
   出す。field の無い旧 marker は unknown(完全と推定しない)。
@@ -119,7 +122,12 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
   より前に失敗・中断した実行は、既存の `--out` と前回の marker をそのまま残す(一時の dir と file は後始末で
   消す)。archive の rename の後、marker の rename が終わる前に失敗・中断したとき(rename や一時の dir の
   削除の失敗、INT / TERM)は、新しい archive と前回の marker が残り、exit は非 0。marker の path が
-  directory なら拒否する。
+  directory なら拒否する(rename の時点で directory に変わっていた場合も、rename の後に検査して拒否する)。
+  **同じ `--out` への並行の実行は非対応**(#414): archive と marker は別々に rename し、2 つの更新を一緒に排他する
+  lock は持たない。並行に走ると、最後に残る archive と marker が別の実行のものになりうる(marker は最後に marker を
+  rename した実行のもの)。捕捉の完全さが違う 2 つの実行が交差すると、不完全な archive に `capture_incomplete: false`
+  が対応しうるので、同じ `--out` への backup は 1 つずつ走らせる。lock を入れないのは、強制終了で残った lock が
+  次の backup を手で消すまで止めるため(手動の backup で並行に走らせる場面より起きやすい失敗になる)。
 - restore は verify を通った後のみ復元する(整合 NG なら拒否)。**既定 dry-run**(何も書かない)、
   `--apply` で実行。既存ファイルは上書き前に **timestamp 付き退避 dir**(復元先 home(既定 `~`、
   `--target-home` 指定時はその dir)の `.local/state/dotfiles/restore-backup-<UTC ts>.<ランダム>/`。

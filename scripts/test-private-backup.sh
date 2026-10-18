@@ -73,6 +73,11 @@ cleanup() {
     wait "$active_backup_pid" 2>/dev/null || true
     active_backup_pid=""
   fi
+  # Cases that take a permission away (case 22's mode 000 files, case 39's
+  # unsearchable directory) give it back on their normal path only. Modes
+  # are opened first, so a run interrupted inside that window still removes
+  # the whole fixture (Codex review R2, PR #418; test-doctor does the same).
+  chmod -R u+rwX "$fixture_home" 2>/dev/null || true
   rm -rf "$fixture_home" || true
 }
 trap 'trap "" INT TERM; cleanup' EXIT
@@ -2373,6 +2378,166 @@ else
   printf '%s\nleft: %s\n' "$md_out" "$md_left" >&2
   miss "a marker path that is a directory was not refused cleanly (rc=$md_rc)"
 fi
+
+# 38. Files under a directory whose name starts with "-" round-trip (#414):
+#     stage_file cut the parent with dirname, which read "-cfg/..." as an
+#     option and failed, so the cp after it stopped the whole backup. A
+#     declared file and a file found under a declared directory, both below
+#     such a name, are captured, verified and restored with content and mode.
+ld_home="$fixture_home/leading-dash-home"
+ld_dst="$fixture_home/leading-dash-dst"
+mkdir -p "$ld_home/-cfg" "$ld_home/-box/-sub" "$ld_home/.config/dotfiles" "$ld_dst"
+printf 'fixture\n' > "$ld_home/.zshrc.local"
+printf 'Host dash\n' > "$ld_home/-cfg/config.local"
+printf 'inner\n' > "$ld_home/-box/-sub/inner"
+chmod 600 "$ld_home/-cfg/config.local" "$ld_home/-box/-sub/inner"
+printf 'backup_paths:\n  - { path: "-cfg/config.local", type: file }\n  - { path: "-box", type: dir }\n' \
+  > "$ld_home/.config/dotfiles/backup-paths.local"
+ld_rc=0
+ld_out="$(HOME="$ld_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$ld_home/d.age" --recipient "$recipient" --yes 2>&1)" || ld_rc=$?
+if [[ "$ld_rc" -eq 0 ]] \
+  && run verify --in "$ld_home/d.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
+  && run restore --in "$ld_home/d.age" --identity "$fixture_home/keys/id.txt" --target-home "$ld_dst" --apply >/dev/null 2>&1 \
+  && cmp -s "$ld_home/-cfg/config.local" "$ld_dst/-cfg/config.local" \
+  && cmp -s "$ld_home/-box/-sub/inner" "$ld_dst/-box/-sub/inner" \
+  && [[ "$(file_mode "$ld_dst/-cfg/config.local")" == 600 && "$(file_mode "$ld_dst/-box/-sub/inner")" == 600 ]]; then
+  pass "files under a directory whose name starts with - are backed up, verified and restored"
+else
+  printf '%s\n' "$ld_out" >&2
+  miss "a file under a directory whose name starts with - did not round-trip (backup rc=$ld_rc)"
+fi
+
+# 39. A declared file under a directory without search permission is not an
+#     absent file (#414): [[ -e ]] is false there even though it exists, and
+#     backup skipped it as "declared but absent" with the capture complete.
+#     It is now recorded incomplete, like an existing unreadable file, also
+#     when the way there is a symlink to such a directory (Codex review R1,
+#     PR #418). The control declares paths that really are absent: under a
+#     searchable directory, under a missing directory, and under a dangling
+#     symlink. They are ordinary skips, and the capture stays complete. The
+#     run without search permission is skipped where permissions do not bind
+#     (root), as in case 22.
+ns_home="$fixture_home/unsearchable-home"
+mkdir -p "$ns_home/locked-dir/sub" "$ns_home/open-dir" "$ns_home/.config/dotfiles"
+printf 'fixture\n' > "$ns_home/.zshrc.local"
+printf 'config\n' > "$ns_home/locked-dir/config"
+printf 'config\n' > "$ns_home/locked-dir/sub/config"
+ln -s locked-dir/sub "$ns_home/link-to-locked"
+ln -s nowhere "$ns_home/dangling-link"
+ns_marker="$ns_home/.local/state/dotfiles/private-backup.json"
+printf 'backup_paths:\n  - { path: "open-dir/missing", type: file }\n  - { path: "no-dir/missing", type: file }\n  - { path: "dangling-link/config", type: file }\n' \
+  > "$ns_home/.config/dotfiles/backup-paths.local"
+ns_rc=0
+ns_out="$(HOME="$ns_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+  backup --out "$ns_home/n.age" --recipient "$recipient" --yes 2>&1)" || ns_rc=$?
+if [[ "$ns_rc" -eq 0 ]] && grep -Fq "declared but absent (skipped): open-dir/missing" <<< "$ns_out" \
+  && grep -Fq "declared but absent (skipped): no-dir/missing" <<< "$ns_out" \
+  && grep -Fq "declared but absent (skipped): dangling-link/config" <<< "$ns_out" \
+  && ! grep -Fq "capture INCOMPLETE" <<< "$ns_out" \
+  && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$ns_marker")" == "false" ]]; then
+  pass "control: declared paths that are absent (searchable parent, missing parent, dangling symlink) are ordinary skips (capture complete)"
+else
+  printf '%s\n' "$ns_out" >&2
+  miss "control: a really absent path changed the capture to incomplete or failed the backup (rc=$ns_rc)"
+fi
+printf 'backup_paths:\n  - { path: "locked-dir/config", type: file }\n  - { path: "link-to-locked/config", type: file }\n' \
+  > "$ns_home/.config/dotfiles/backup-paths.local"
+chmod 600 "$ns_home/locked-dir"
+if [[ ! -e "$ns_home/locked-dir/config" && ! -e "$ns_home/link-to-locked/config" ]]; then
+  ns_rc=0
+  ns_out="$(HOME="$ns_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$ns_home/n.age" --recipient "$recipient" --yes 2>&1)" || ns_rc=$?
+  if [[ "$ns_rc" -eq 0 ]] \
+    && grep -Fq "cannot tell whether it exists, a parent directory is not searchable (skipped): locked-dir/config" <<< "$ns_out" \
+    && grep -Fq "cannot tell whether it exists, a parent directory is not searchable (skipped): link-to-locked/config" <<< "$ns_out" \
+    && ! grep -Fq "declared but absent (skipped): locked-dir/config" <<< "$ns_out" \
+    && ! grep -Fq "declared but absent (skipped): link-to-locked/config" <<< "$ns_out" \
+    && grep -Fq "capture INCOMPLETE: 2 declared path(s) could not be checked (a parent directory is not searchable);" <<< "$ns_out" \
+    && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$ns_marker")" == "true" ]]; then
+    pass "declared files under a directory without search permission (directly and through a symlink) are recorded as incomplete, not absent"
+  else
+    printf '%s\n' "$ns_out" >&2
+    miss "a declared file under a directory without search permission was taken as absent (rc=$ns_rc)"
+  fi
+else
+  warn "a directory without search permission is still searchable here (root?); unsearchable-parent case skipped"
+fi
+chmod 700 "$ns_home/locked-dir" # so the EXIT trap can clean up
+
+# 40. Failures after the archive rename (#414): the docs promise the new
+#     archive with the previous marker and a non-zero exit, and no temp left
+#     behind. Shims fail the removal of the run's partial dir, fail the
+#     marker's rename, or turn the marker path into a directory right before
+#     that rename (after the check up front; mv then moves the record into
+#     it, and the check after the rename must catch that). Each run starts
+#     from a home whose marker and --out come from a good first run, and has
+#     a TMPDIR of its own that must be empty afterwards (the staging and the
+#     self-check dir hold plaintext; Codex review R1, PR #418).
+ar_fakebin="$fixture_home/after-rename-fakebin"
+mkdir -p "$ar_fakebin"
+real_rmdir="$(command -v rmdir)"
+cat > "$ar_fakebin/mv" <<'SH'
+#!/bin/sh
+for last; do :; done
+if [ "$last" = "$AR_MARKER" ]; then
+  case "$AR_MODE" in
+    marker-mv) exit 1 ;;
+    marker-dir) rm -f "$AR_MARKER" && mkdir "$AR_MARKER" || exit 1 ;;
+  esac
+fi
+exec "$REAL_MV" "$@"
+SH
+cat > "$ar_fakebin/rmdir" <<'SH'
+#!/bin/sh
+for last; do :; done
+case "$AR_MODE:$last" in
+  rmdir:*.partial.*) exit 1 ;;
+esac
+exec "$REAL_RMDIR" "$@"
+SH
+chmod +x "$ar_fakebin/mv" "$ar_fakebin/rmdir"
+for ar_mode in rmdir marker-mv marker-dir; do
+  ar_home="$fixture_home/after-rename-$ar_mode"
+  ar_marker="$ar_home/.local/state/dotfiles/private-backup.json"
+  mkdir -p "$ar_home"
+  printf 'fixture\n' > "$ar_home/.zshrc.local"
+  ar_rc=0
+  HOME="$ar_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$ar_home/a.age" --recipient "$recipient" --yes >/dev/null 2>&1 || ar_rc=99
+  cp "$ar_home/a.age" "$fixture_home/after-rename-$ar_mode-before.age" 2>/dev/null || ar_rc=99
+  cp "$ar_marker" "$fixture_home/after-rename-$ar_mode-before.json" 2>/dev/null || ar_rc=99
+  ar_out=""
+  ar_tmp="$fixture_home/after-rename-$ar_mode-tmp"
+  mkdir -p "$ar_tmp"
+  if [[ "$ar_rc" -eq 0 ]]; then
+    ar_out="$(HOME="$ar_home" TMPDIR="$ar_tmp" AR_MODE="$ar_mode" AR_MARKER="$ar_marker" REAL_MV="$real_mv" REAL_RMDIR="$real_rmdir" \
+      PATH="$ar_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
+      backup --out "$ar_home/a.age" --recipient "$recipient" --yes 2>&1)" || ar_rc=$?
+  fi
+  ar_left="$(find "$ar_home/.local/state/dotfiles" -mindepth 1 ! -path "$ar_marker" 2>/dev/null)"
+  ar_state="the new archive and the previous marker"
+  if [[ "$ar_mode" == marker-dir ]]; then
+    ar_state="the new archive and refuses the marker path that became a directory"
+    ar_marker_ok=0
+    [[ -d "$ar_marker" && -z "$(find "$ar_marker" -mindepth 1)" ]] \
+      && grep -Fq "backup marker path is a directory" <<< "$ar_out" && ar_marker_ok=1
+  else
+    ar_marker_ok=0
+    cmp -s "$fixture_home/after-rename-$ar_mode-before.json" "$ar_marker" && ar_marker_ok=1
+  fi
+  if [[ "$ar_rc" -ne 0 && "$ar_rc" -ne 99 && "$ar_marker_ok" -eq 1 && -z "$ar_left" ]] \
+    && [[ -z "$(find "$ar_tmp" -mindepth 1)" ]] \
+    && ! cmp -s "$fixture_home/after-rename-$ar_mode-before.age" "$ar_home/a.age" \
+    && run verify --in "$ar_home/a.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
+    && no_partial "$ar_home/a.age" \
+    && ! grep -Fq 'updated marker:' <<< "$ar_out"; then
+    pass "a failure after the archive rename ($ar_mode) leaves $ar_state, exits non-zero and removes its temps (TMPDIR empty)"
+  else
+    printf '%s\nleft: %s\ntmp: %s\n' "$ar_out" "$ar_left" "$(find "$ar_tmp" -mindepth 1)" >&2
+    miss "a failure after the archive rename ($ar_mode) broke the documented state or left a temp (rc=$ar_rc)"
+  fi
+done
 
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
