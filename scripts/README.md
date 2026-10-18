@@ -698,9 +698,10 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   BSD の mktemp(macOS)は template が無いと TMPDIR を見ずに user ごとの temp dir に作るので、一覧 file 3 つが呼び出し側の
   決めた TMPDIR の外に出て、KILL ではそこに残っていた。GNU の mktemp(CI)は template が無くても TMPDIR に従うので、file の
   できた場所ではどちらの platform でも区別できない。PATH 先頭の `mktemp` が呼び出しごとの最後の引数を記録し、どの呼び出しも
-  run の TMPDIR の下の template を名指しすることを確かめる。例外は平文を持たない 2 つで、rename で置き換える先と同じ file
-  system に置くため、`--out` の隣の archive の dir(`<out>.partial.XXXXXX`)と marker の隣の一時 file を、その正確な template
-  でだけ許す。呼び出しは 7 回以上(TMPDIR の下の 5 つと隣の 2 つ)で、run の後に TMPDIR が空で、隣の 2 つも残らないこと。
+  run の TMPDIR の下の template を名指しすることを確かめる。例外は捕捉した設定の中身を平文で持たない 2 つ(暗号化した
+  archive と、日時や件数を書く marker の記録)で、rename で置き換える先と同じ file system に置くため、`--out` の隣の
+  archive の dir(`<out>.partial.XXXXXX`)と marker の隣の一時 file を、その正確な template でだけ許す。呼び出しは 7 回以上
+  (TMPDIR の下の 5 つと隣の 2 つ)で、run の後に TMPDIR が空で、隣の 2 つも残らないこと。
 - 名前が `-` で始まる directory の下の file(宣言した file と、宣言した directory の配下)を backup → verify → restore で
   往復できること(#414。staging の親を dirname で切ると option と読まれて backup ごと止まっていた)。
 - 検索の権限が無い directory の下の宣言(直接と、そこへの symlink の経由)を「不在」と扱わず、`capture INCOMPLETE` と marker の

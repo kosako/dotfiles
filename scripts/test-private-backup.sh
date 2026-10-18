@@ -2216,7 +2216,8 @@ fi
 #     call's last argument instead, and every call must name a template
 #     under the run's TMPDIR. The run must also leave that TMPDIR empty.
 #     Five calls at least: the three list files, the staging and the
-#     self-check dir. Two more hold no plaintext and are made next to the
+#     self-check dir. Two more hold none of the captured config in clear
+#     (the encrypted archive and the marker record) and are made next to the
 #     file they are renamed onto, so the rename stays in one file system
 #     (#398): the partial-output dir next to --out and the marker temp next
 #     to the marker. Those two are allowed by their exact template and must
