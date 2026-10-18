@@ -39,6 +39,11 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
   復元した home からの次回 backup は flag なしでそれを読む。`--local-supplement PATH` で別の場所を
   渡しても、その source path は manifest に記録されず復元先にも使わない(backup 時の入力に過ぎない。
   #208)。public-safety を守りつつリストごと復元できる。
+  既定の場所に補足が無ければ、補足なしで続ける(補足を持たない machine の普通の状態)。`--local-supplement` で
+  渡した path に file が無ければ usage error(exit 2。recipients file と同じ扱いで、打ち間違えた path で private な
+  path が全部欠けた archive を作らない)。補足が在るかを確かめられない(親の directory を検索できない。下の #414 と
+  同じ判定)ときは、どの path が欠けるかも分からないので、既定の場所でも渡した path でも、何も書かずに backup を
+  止める(exit 1。読めない補足と同じ扱い、#421)。
   **旧 archive**(#208 以前)は補足を archive 最上位に同梱していた。この member は今も受理されるが
   検証も復元もされないので、更新後に backup を取り直す(旧形式を読む分岐は持たない)。
 

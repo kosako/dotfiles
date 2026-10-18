@@ -2538,6 +2538,98 @@ for ar_mode in rmdir marker-mv marker-dir; do
   fi
 done
 
+# 41. A local supplement that cannot be checked, or that was named with
+#     --local-supplement and is not there, stops the backup before anything
+#     is written (#421). [[ -f ]] is false for a supplement under a directory
+#     without search permission, and backup went on with "no local
+#     supplement", so the private paths it lists were missing from an archive
+#     recorded as complete; a mistyped --local-supplement did the same. The
+#     controls back up with the default supplement present, with it absent
+#     (the normal state without one) and with an existing named one. The
+#     runs without search permission are skipped where permissions do not
+#     bind (root), as in case 22.
+sx_home="$fixture_home/supplement-check-home"
+mkdir -p "$sx_home/.config/dotfiles" "$sx_home/lists"
+printf 'fixture\n' > "$sx_home/.zshrc.local"
+printf 'config\n' > "$sx_home/private.conf"
+printf 'backup_paths:\n  - { path: "private.conf", type: file }\n' > "$sx_home/.config/dotfiles/backup-paths.local"
+cp "$sx_home/.config/dotfiles/backup-paths.local" "$sx_home/lists/named.local"
+sx_marker="$sx_home/.local/state/dotfiles/private-backup.json"
+# sx_backup NAME [ARG...] — back up from sx_home to NAME.age with ARGs;
+# sets sx_rc and sx_out.
+sx_backup() {
+  local name="$1"
+  shift
+  sx_rc=0
+  sx_out="$(HOME="$sx_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
+    backup --out "$sx_home/$name.age" --recipient "$recipient" --yes "$@" 2>&1)" || sx_rc=$?
+}
+# sx_captures_private NAME — the archive NAME.age carries private.conf, the
+# file only the supplement declares.
+sx_captures_private() {
+  [[ "$(age -d -i "$fixture_home/keys/id.txt" "$sx_home/$1.age" 2>/dev/null | tar -xOf - ./manifest.json 2>/dev/null \
+    | yq -p=json -o=tsv '[.files[].path | select(. == "private.conf")] | length' 2>/dev/null)" == "1" ]]
+}
+sx_backup default
+if [[ "$sx_rc" -eq 0 ]] && grep -Fq "local supplement present" <<< "$sx_out" && sx_captures_private default; then
+  pass "control: the default local supplement is read and what it lists is captured"
+else
+  printf '%s\n' "$sx_out" >&2
+  miss "control: the backup with the default local supplement failed or skipped it (rc=$sx_rc)"
+fi
+sx_backup named --local-supplement "$sx_home/lists/named.local"
+if [[ "$sx_rc" -eq 0 ]] && sx_captures_private named; then
+  pass "control: an existing --local-supplement is read"
+else
+  printf '%s\n' "$sx_out" >&2
+  miss "control: the backup with an existing --local-supplement failed (rc=$sx_rc)"
+fi
+sx_backup missing --local-supplement "$sx_home/lists/mistyped.local"
+if [[ "$sx_rc" -eq 2 ]] \
+  && grep -Fq "local supplement not found or not a regular file: $sx_home/lists/mistyped.local" <<< "$sx_out" \
+  && [[ ! -e "$sx_home/missing.age" ]] && ! grep -Fq "captured files:" <<< "$sx_out"; then
+  pass "a --local-supplement that is not there is a usage error (exit 2) and writes no archive"
+else
+  printf '%s\n' "$sx_out" >&2
+  miss "a missing --local-supplement did not stop the backup with exit 2 (rc=$sx_rc)"
+fi
+mv "$sx_home/.config/dotfiles/backup-paths.local" "$sx_home/lists/default.local"
+sx_backup absent
+if [[ "$sx_rc" -eq 0 ]] && grep -Fq "no local supplement at $sx_home/.config/dotfiles/backup-paths.local" <<< "$sx_out" \
+  && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$sx_marker")" == "false" ]]; then
+  pass "control: no supplement at the default location is the normal state (backup goes on, capture complete)"
+else
+  printf '%s\n' "$sx_out" >&2
+  miss "control: an absent default local supplement failed the backup or marked it incomplete (rc=$sx_rc)"
+fi
+mv "$sx_home/lists/default.local" "$sx_home/.config/dotfiles/backup-paths.local"
+sx_marker_before="$(cat "$sx_marker")"
+chmod 600 "$sx_home/.config/dotfiles" "$sx_home/lists"
+if [[ ! -e "$sx_home/.config/dotfiles/backup-paths.local" && ! -e "$sx_home/lists/named.local" ]]; then
+  sx_backup locked-default
+  if [[ "$sx_rc" -eq 1 ]] \
+    && grep -Fq "cannot tell whether the local supplement exists, a parent directory is not searchable: $sx_home/.config/dotfiles/backup-paths.local" <<< "$sx_out" \
+    && ! grep -Fq "no local supplement at" <<< "$sx_out" \
+    && [[ ! -e "$sx_home/locked-default.age" && "$(cat "$sx_marker")" == "$sx_marker_before" ]]; then
+    pass "a default local supplement under a directory without search permission stops the backup (no archive, marker kept)"
+  else
+    printf '%s\n' "$sx_out" >&2
+    miss "a default local supplement under a directory without search permission was taken as absent (rc=$sx_rc)"
+  fi
+  sx_backup locked-named --local-supplement "$sx_home/lists/named.local"
+  if [[ "$sx_rc" -eq 1 ]] \
+    && grep -Fq "cannot tell whether the local supplement exists, a parent directory is not searchable: $sx_home/lists/named.local" <<< "$sx_out" \
+    && [[ ! -e "$sx_home/locked-named.age" && "$(cat "$sx_marker")" == "$sx_marker_before" ]]; then
+    pass "a --local-supplement under a directory without search permission stops the backup (no archive, marker kept)"
+  else
+    printf '%s\n' "$sx_out" >&2
+    miss "a --local-supplement under a directory without search permission did not stop the backup (rc=$sx_rc)"
+  fi
+else
+  warn "a directory without search permission is still searchable here (root?); unsearchable-supplement cases skipped"
+fi
+chmod 700 "$sx_home/.config/dotfiles" "$sx_home/lists" # so the EXIT trap can clean up
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi
