@@ -242,6 +242,8 @@ fake の mise は「activate が PATH の先頭に dir を足す」形だけを�
 `dot_zprofile` 自体は別の driver で、`/opt/homebrew` を fixture の相対 path に置き換えた copy を source して確かめる(#384):
 fake の brew の shellenv を読んだ後に `~/.zprofile.local` を読み、local が変数でも PATH でも勝つこと。`~/.zprofile.local` を
 置かない対照では brew の値が残ること(local が値を変えていることと、brew の行に届いていることを確かめる)。
+`~/.zprofile.local` のある HOME では、`dot_zprofile` が前置し直す `~/.local/bin` と mise の shims にも同名の probe を置き、
+local の dir の方に解決すること(#413。前置し直しの行を `~/.zprofile.local` の後へ動かすと fail する)。
 
 ## test-ai-clip.sh
 
@@ -326,7 +328,13 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - source に chezmoi のテンプレート構文が含まれないこと(fixture は source を git に直接渡すため)。
 - local fixture で、known root 外では commit が identity 未解決を理由に失敗すること。
 - local fixture で、`~/src/personal/` 配下では identity file の identity が解決されること。
-- credential 入り remote URL が拒否されること。
+- credential 入り remote URL が、接続の前に `fatal:` の行で拒否されること(#413。git は warn でも die でも同じ
+  「uses plaintext credentials」を出し、warn は接続に進んで別の理由で失敗するので、exit status と文言だけでは区別できない)。
+  対照として、`-c transfer.credentialsInUrl=warn` では同じ文言が `fatal:` なしで出ること。どちらも閉じた localhost の port に
+  向けるので、warn に退行しても名前解決をせず、machine の外へ出ない。
+- 全 context(personal / work / client / sandbox / agent と root の外)で、managed な include(identity reset・signing)を
+  置いた状態の `transfer.credentialsInUrl` の実効値が `die` であること(#413。後から読む include の上書きを見る)。
+  template の git-hook-gates の include は、source がこの key を書かないことを確かめる。
 - credential らしき remote URL(`scheme://user:password@host`)を `git_remotes_with_credentials` が検出すること。
 - credential なし・username のみの remote URL は誤検出しないこと。
 - identity reset(#202)の matrix: 非 personal 4 context × identity file の状態(absent / empty / name-only /

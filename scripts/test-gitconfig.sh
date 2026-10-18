@@ -290,14 +290,34 @@ else
   status=1
 fi
 
-if output="$(run_git "$fixture/src/personal/demo" ls-remote https://user:secret-placeholder@invalid.example/repo.git 2>&1)"; then
+# Git prints the same "uses plaintext credentials" message for warn and die
+# (#413): with warn it goes on to connect and fails for another reason, so a
+# non-zero exit plus that text cannot tell them apart. Only die stops with a
+# fatal: line before connecting, so that line is the pass condition. The warn
+# control shows that the condition rejects warn. Both point at a closed
+# localhost port: a regression to warn then fails fast, with no name lookup
+# and nothing sent off the machine.
+credential_url="http://user:secret-placeholder@127.0.0.1:1/repo.git"
+if output="$(run_git "$fixture/src/personal/demo" ls-remote "$credential_url" 2>&1)"; then
   fail "test failed: credential URL was not rejected"
   status=1
-elif grep -qi "credential" <<< "$output"; then
-  ok "test passed: credential URL rejected"
+elif grep -Eq '^fatal: .*plaintext credentials' <<< "$output"; then
+  ok "test passed: credential URL rejected before connecting (fatal, die)"
 else
   printf '%s\n' "$output" >&2
-  fail "test failed: credential URL failed for another reason"
+  fail "test failed: credential URL was not refused with a fatal: plaintext-credentials line"
+  status=1
+fi
+output="$(run_git "$fixture/src/personal/demo" -c transfer.credentialsInUrl=warn \
+  ls-remote "$credential_url" 2>&1 || true)"
+if grep -Eq '^fatal: .*plaintext credentials' <<< "$output"; then
+  fail "test failed: transfer.credentialsInUrl=warn also printed the fatal line, so the check above cannot tell warn from die"
+  status=1
+elif grep -q 'plaintext credentials' <<< "$output"; then
+  ok "test passed: control: warn prints the same message without the fatal line"
+else
+  printf '%s\n' "$output" >&2
+  fail "test failed: control: warn did not print the plaintext-credentials warning"
   status=1
 fi
 
@@ -628,6 +648,33 @@ if expect_ident "$fixture/src/work/wt-linked" "Dotfiles Test|dotfiles-test@examp
   ok "test passed: a linked worktree keeps its main repo's context (documented: placement and reset do not apply)"
 else
   status=1
+fi
+
+# The static check above only sees dot_gitconfig; an include read after its
+# [transfer] section could weaken the value (#413). Resolve it as Git does in
+# every context, with the managed include files in place (the identity reset
+# is already in the fixture HOME; the signing mechanism is copied here, at
+# the end, so the cases above do not see it). The hook-gates include is a
+# template, so its source is checked for the key instead, ignoring case like
+# Git does for key names (Codex review R2, PR #417).
+cp "$DOTFILES_ROOT/private_dot_config/git/signing.gitconfig" "$fixture/.config/git/signing.gitconfig"
+for context_dir in src/personal src/work src/client src/sandbox src/agent outside; do
+  repo="$fixture/$context_dir/credentials-in-url"
+  mkdir -p "$repo"
+  run_git "$repo" init --quiet --initial-branch=main
+  value="$(run_git "$repo" config --get transfer.credentialsInUrl || true)"
+  if [[ "$value" == die ]]; then
+    ok "test passed: transfer.credentialsInUrl resolves to die in $context_dir"
+  else
+    fail "test failed: transfer.credentialsInUrl must resolve to die in $context_dir (got ${value:-<unset>})"
+    status=1
+  fi
+done
+if grep -qi 'credentialsInUrl' "$DOTFILES_ROOT/private_dot_config/git-hook-gates/hooks.gitconfig.tmpl"; then
+  fail "test failed: the git-hook-gates include must not set transfer.credentialsInUrl"
+  status=1
+else
+  ok "test passed: the git-hook-gates include does not set transfer.credentialsInUrl"
 fi
 
 if [[ "$status" -eq 0 ]]; then
