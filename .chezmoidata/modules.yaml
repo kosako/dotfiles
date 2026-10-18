@@ -70,11 +70,11 @@ modules:
   ai-policy:
     description: AI agent 権限方針。
   claude-settings:
-    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。hooks 登録は 3 capability が同じ hooks object(.chezmoitemplates/agent-hooks-json、Codex と共有)に出す — enableGitHubIsolatedReader(PreToolUse safe-gh 誘導・#137)、enableQualityLoopHooks(PostToolUse fast-edit-check + Stop changed-scope-qa・#199)、enableHerdrIntegration(SessionStart herdr-agent-state.sh・#225)。registration=dotfiles / body=agent-tools(herdr hook の body は herdr の installer)。
+    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。hooks 登録は 4 capability が同じ hooks object(.chezmoitemplates/agent-hooks-json、Codex と共有)に出す — enableGitHubIsolatedReader(PreToolUse safe-gh 誘導・#137)、enableQualityLoopHooks(PostToolUse fast-edit-check + Stop changed-scope-qa・#199)、enableHerdrIntegration(SessionStart herdr-agent-state.sh・#225)、enableToolCallRecordHook(SessionStart と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied の tool-call-record-hook・#353。Claude だけ)。4 つとも false なら hooks キーを出さない。registration=dotfiles / body=agent-tools(herdr hook の body は herdr の installer)。
     paths:
       - .claude/settings.json
   opencode-settings:
-    description: OpenCode harness 設定(#234)。managed な ~/.config/opencode/opencode.json に permission の床(secret floor の read / bash deny・外向き / 昇格 bash は ask・他は allow)、autoupdate off(update-policy)、share disabled、instructions(agent-tools 配布の運用ルール。OpenCode は @ import を解釈しないので明示)を置く。provider / model / auth / plugin / TUI の好みは書かない(local は OPENCODE_CONFIG が指す file で merge 上書き)。skill は ~/.claude/skills を OpenCode が直接読むので配布不要。plugin による hook parity と相互レビュー契約への追加は OpenCode 導入 Phase 2(agent-tools#295)。
+    description: OpenCode harness 設定(#234)。managed な ~/.config/opencode/opencode.json に permission の床(secret floor の read / bash deny・bash は既定 ask で、限定した読み取りと local の Git 操作だけ allow(#381))、autoupdate off(update-policy)、share disabled、instructions(agent-tools 配布の運用ルール。OpenCode は @ import を解釈しないので明示)を置く。provider / model / auth / plugin / TUI の好みは書かない(local は OPENCODE_CONFIG が指す file で merge 上書き)。skill は ~/.claude/skills を OpenCode が直接読むので配布不要。plugin による hook parity と相互レビュー契約への追加は OpenCode 導入 Phase 2(agent-tools#295)。
     paths:
       - .config/opencode/opencode.json
   git-hook-gates:

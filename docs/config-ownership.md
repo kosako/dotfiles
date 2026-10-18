@@ -53,10 +53,11 @@ build / sync)あり、さらにどちらにも属さない unmanaged なファ�
 
 ## どこを直すか(判定)
 
-1. ハーネスの振る舞い(model / permission / hooks 登録 / sandbox / plugin /
+1. ハーネスの振る舞い(model の既定 / permission / hooks 登録 / sandbox / plugin /
    statusLine 等の global preference)を変えたい →
    dotfiles の template を変更して PR。live の `~/.claude/settings.json` を直接編集
-   しない(managed-wins。`chezmoi apply` で戻る)。
+   しない(managed-wins。`chezmoi apply` で戻る)。ただし template の `model` は file に無いときの
+   既定だけで、既存の machine で使う model は `/model` で選ぶ(live の `model` は apply で残る。#360)。
 2. skill / 指示文 / hook スクリプトの中身を変えたい → agent-tools(herdr hook の body は herdr の
    release。手で編集しない — `herdr integration install` で上書きされる)。
 3. 参照先・個人 context を変えたい → ユーザー手書きファイル(agent は書き換えず、

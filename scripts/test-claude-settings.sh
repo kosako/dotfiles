@@ -24,8 +24,10 @@ set -euo pipefail
 # and one matcher-less Stop hook (personal-changed-scope-qa); enableHerdrIntegration
 # (ON for personal, #225) -> exactly one SessionStart command hook in the
 # shape herdr's installer emits (matcher ^(startup|resume|clear|compact|fork)$, herdr 0.9.3 / #274) (bash '<home>/.claude/hooks/herdr-agent-state.sh'
-# session, timeout 10); each capability adds exactly its own events, and all
-# three false -> no hooks key at all.
+# session, timeout 10); enableToolCallRecordHook (ON for personal, #353) ->
+# the record hook on SessionStart and PreToolUse / PostToolUse /
+# PostToolUseFailure / PermissionDenied (Claude only); each capability adds
+# exactly its own events, and all four false -> no hooks key at all.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
