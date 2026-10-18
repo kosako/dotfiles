@@ -694,11 +694,13 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   bash 3.2 では加えて twice の SIGINT の backup が exit で終わって fail する(bash 5 の twice は通る)。wrapper が SIGINT を既定に
   戻すので、非対話 shell の background list(`… &`)として suite を起動しても走る。python3 が無ければ手元は warn して
   skip、CI(`CI=true`)では fail(age が無いときと同じ形。#330)。
-- backup はすべての temp を TMPDIR の下の template から作ること(#372): BSD の mktemp(macOS)は template が無いと
-  TMPDIR を見ずに user ごとの temp dir に作るので、一覧 file 3 つが呼び出し側の決めた TMPDIR の外に出て、KILL ではそこに
-  残っていた。GNU の mktemp(CI)は template が無くても TMPDIR に従うので、file のできた場所ではどちらの platform でも
-  区別できない。PATH 先頭の `mktemp` が呼び出しごとの最後の引数を記録し、どの呼び出しも run の TMPDIR の下の template を
-  名指しすること(一覧 file 3 つ・staging・self-check の dir で 5 回以上)と、run の後に TMPDIR が空であることを確かめる。
+- backup の temp の置き場所(#372・#398): 一覧 file 3 つ・staging・self-check の dir は TMPDIR の下の template から作ること。
+  BSD の mktemp(macOS)は template が無いと TMPDIR を見ずに user ごとの temp dir に作るので、一覧 file 3 つが呼び出し側の
+  決めた TMPDIR の外に出て、KILL ではそこに残っていた。GNU の mktemp(CI)は template が無くても TMPDIR に従うので、file の
+  できた場所ではどちらの platform でも区別できない。PATH 先頭の `mktemp` が呼び出しごとの最後の引数を記録し、どの呼び出しも
+  run の TMPDIR の下の template を名指しすることを確かめる。例外は平文を持たない 2 つで、rename で置き換える先と同じ file
+  system に置くため、`--out` の隣の archive の dir(`<out>.partial.XXXXXX`)と marker の隣の一時 file を、その正確な template
+  でだけ許す。呼び出しは 7 回以上(TMPDIR の下の 5 つと隣の 2 つ)で、run の後に TMPDIR が空で、隣の 2 つも残らないこと。
 - 名前が `-` で始まる directory の下の file(宣言した file と、宣言した directory の配下)を backup → verify → restore で
   往復できること(#414。staging の親を dirname で切ると option と読まれて backup ごと止まっていた)。
 - 検索の権限が無い directory の下の宣言(直接と、そこへの symlink の経由)を「不在」と扱わず、`capture INCOMPLETE` と marker の

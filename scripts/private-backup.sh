@@ -396,7 +396,7 @@ cmd_backup() {
   section "private-backup: resolve targets"
 
   # Script-global; cleanup_temps removes them (the 0700 staging holds
-  # plaintext config). Every temp is made from a template under TMPDIR, as
+  # plaintext config). Each is made from a template under TMPDIR, as
   # the staging is: BSD mktemp (macOS) without a template ignores TMPDIR
   # and uses the per-user temp dir (#372).
   declared="$(mktemp "${TMPDIR:-/tmp}/private-backup-declared.XXXXXX")"

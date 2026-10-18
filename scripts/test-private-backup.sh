@@ -2207,7 +2207,7 @@ PY
   done
 fi
 
-# 34. backup makes every temp from a template under TMPDIR (#372). BSD
+# 34. backup makes its TMPDIR temps from a template under TMPDIR (#372). BSD
 #     mktemp (macOS) without a template ignores TMPDIR and puts the file in
 #     the per-user temp dir, so the three list files left the TMPDIR a
 #     caller (or a case above) chose, and a KILL left them there. GNU mktemp
@@ -2253,11 +2253,11 @@ tmpl_left="$(find "$tmpl_tmp" -mindepth 1 2>/dev/null)"
 tmpl_left+="$(find "$tmpl_home" "$tmpl_home/.local/state/dotfiles" -maxdepth 1 \
   \( -name 't.age.partial*' -o -name 'private-backup.json.*' \) 2>/dev/null)"
 if [[ "$tmpl_rc" -eq 0 && -f "$tmpl_home/t.age" && "$tmpl_count" -ge 7 && -z "$tmpl_bad" && -z "$tmpl_left" ]]; then
-  pass "backup makes every temp from a template under TMPDIR and leaves it empty"
+  pass "backup makes its temps under TMPDIR or, for the two rename temps, next to their target, and leaves none behind"
 else
-  printf 'calls (last argument):\n%s\nnot under TMPDIR:\n%s\nleft in TMPDIR:\n%s\n%s\n' \
+  printf 'calls (last argument):\n%s\nneither under TMPDIR nor an allowed rename template:\n%s\nleft behind:\n%s\n%s\n' \
     "$tmpl_calls" "$tmpl_bad" "$tmpl_left" "$tmpl_out" >&2
-  miss "backup made a temp outside its TMPDIR or left one behind (rc=$tmpl_rc, calls=$tmpl_count)"
+  miss "backup made a temp outside its TMPDIR and the allowed rename templates, or left one behind (rc=$tmpl_rc, calls=$tmpl_count)"
 fi
 
 # 35. Each run writes into its own partial-output dir next to --out (#398).
