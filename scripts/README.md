@@ -54,7 +54,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 - profile が存在すること。
 - `environmentKind` が許可された値であること。
 - profile の `modules:` が module 名の list であること(省略・null は module なし。文字列・bool・数値・map・
-  文字列でない要素は fail。型の読み取りと列挙の失敗も fail、#412)。profile が参照する module が定義済みであること。
+  文字列でない要素・制御文字(改行など)を含む要素は fail。型の読み取りと列挙の失敗も fail、#412・#422)。profile が参照する
+  module が定義済みであること。
 - profile が参照する capability が定義済みであること。
 - すべての定義済み capability が profile に存在すること。
 - boolean capability が `true` または `false` であること。
@@ -307,6 +308,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - profile の `modules:` と module の `paths:` の型(#412): 文字列・bool・数値・map と、文字列でない要素を含む list を
   拒否すること(`requires:` の無い module の `paths:` でも)。型の読み取りと、型が正しいあとの列挙のどちらに失敗しても、空の list と扱わずに fail すること
   (失敗させる読み取りは 1 case に 1 つ)。
+- 要素の中の制御文字(#422): 列挙は要素ごとに 1 行を出すので、改行を含む 1 要素が 2 つの名前に分かれ、どちらも検証を通って
+  いた(`.chezmoiignore` は要素そのものを `has` で比べるので、どちらも有効にならない)。正しい 2 要素を改行で 1 要素に
+  つないだ modules と paths、tab を含む module 名を拒否すること。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar

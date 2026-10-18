@@ -346,7 +346,7 @@ for bad_list in '"base"' false 42 '{entry: base}' '[base, 1]' '[base, ~]'; do
   V="$bad_list" yq -i '.profiles.personal.modules = env(V)' "$fixture/.chezmoidata/profiles.yaml"
   run_fail_contains \
     "rejects profile modules=$bad_list" \
-    "profile modules must be a list of module names: personal" \
+    "profile modules must be a list of module names (strings without control characters): personal" \
     "$fixture/scripts/validate-policy.sh" personal
 done
 for bad_list in '".claude/settings.json"' true 7 '{p: .claude/settings.json}' '[.claude/settings.json, true]'; do
@@ -354,9 +354,37 @@ for bad_list in '".claude/settings.json"' true 7 '{p: .claude/settings.json}' '[
   V="$bad_list" yq -i '.modules["claude-settings"].paths = env(V)' "$fixture/.chezmoidata/modules.yaml"
   run_fail_contains \
     "rejects module paths=$bad_list" \
-    "module paths must be a list of paths: claude-settings" \
+    "module paths must be a list of paths (strings without control characters): claude-settings" \
     "$fixture/scripts/validate-policy.sh" personal
 done
+# An element must not hold a control character (#422): the listing prints one
+# line per element, so a newline split one entry into two names that each
+# passed, while .chezmoiignore matches the element itself (`has`) and enables
+# neither. The joined element replaces two valid entries, so without the
+# check the run passes; the tab case has no such twin and fails as unknown.
+make_fixture
+V=$'git-profile\nsupply-chain-git' yq -i '
+  (.profiles.personal.modules[] | select(. == "git-profile")) = strenv(V) |
+  del(.profiles.personal.modules[] | select(. == "supply-chain-git"))' \
+  "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile module name holding a newline" \
+  "profile modules must be a list of module names (strings without control characters): personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+V=$'base\tx' yq -i '(.profiles.personal.modules[] | select(. == "base")) = strenv(V)' \
+  "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile module name holding a tab" \
+  "profile modules must be a list of module names (strings without control characters): personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+V=$'.gitconfig\n.config/git-profile/identity-reset.gitconfig' yq -i '.modules["git-profile"].paths = [strenv(V)]' \
+  "$fixture/.chezmoidata/modules.yaml"
+run_fail_contains \
+  "rejects a module path holding a newline" \
+  "module paths must be a list of paths (strings without control characters): git-profile" \
+  "$fixture/scripts/validate-policy.sh" personal
 
 # A failed read is reported, not taken as an empty list: of the shape, and of
 # the listing after a valid shape. Each case fails only its own read, so the

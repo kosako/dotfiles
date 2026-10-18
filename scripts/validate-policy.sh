@@ -50,8 +50,9 @@ validate_modules() {
     [[ -z "$module" ]] && continue
 
     paths_count=0
-    # Same shape check as a profile's modules (#412): a string, bool or number
-    # under paths: lists as nothing and passes when the module has no requires.
+    # Same shape check as a profile's modules (#412, #422): a string, bool or
+    # number under paths: lists as nothing and passes when the module has no
+    # requires, and a newline in one path lists as two.
     paths_shape=0
     m="$module" yaml_string_list '.modules[strenv(m)].paths' "$MODULES_FILE" || paths_shape=$?
     # Captured, not read through a process substitution, so a failed listing
@@ -89,7 +90,7 @@ validate_modules() {
         status=1
         ;;
       *)
-        fail "module paths must be a list of paths: $module"
+        fail "module paths must be a list of paths (strings without control characters): $module"
         status=1
         ;;
     esac
@@ -380,7 +381,8 @@ validate_profile() {
   fi
 
   # A string, bool, number or map under modules: would list as nothing or as
-  # the map's values (#412), so the shape is checked before the names.
+  # the map's values (#412), and a newline in one name as two names (#422),
+  # so the shape is checked before the names.
   modules_shape=0
   p="$profile" yaml_string_list '.profiles[strenv(p)].modules' "$PROFILES_FILE" || modules_shape=$?
   # Captured once (a failed listing is reported too) and reused below.
@@ -404,7 +406,7 @@ validate_profile() {
       status=1
       ;;
     *)
-      fail "profile modules must be a list of module names: $profile"
+      fail "profile modules must be a list of module names (strings without control characters): $profile"
       status=1
       ;;
   esac

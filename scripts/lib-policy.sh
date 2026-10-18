@@ -368,15 +368,17 @@ profile_environment_kind() {
 }
 
 # Succeed when the node a yq path selects is absent / null or a sequence of
-# strings (#412). profile_modules and module_paths enumerate with `[]?`,
-# which yields nothing for a string, bool or number and the values of a map,
-# so validate-policy checks the shape before trusting the listing. Returns
-# 1 for any other shape (including a parent that is not a map) and 2 when
-# yq cannot read the file. Args: yq-path file; the path reads the caller's
-# env (p / m) through strenv().
+# strings without control characters (#412, #422). profile_modules and
+# module_paths enumerate with `[]?`, which yields nothing for a string, bool
+# or number and the values of a map, and print one line per element, so an
+# element holding a newline would read as two; validate-policy checks the
+# shape before trusting the listing. Returns 1 for any other shape
+# (including a parent that is not a map) and 2 when yq cannot read the file.
+# Args: yq-path file; the path reads the caller's env (p / m) through
+# strenv().
 yaml_string_list() {
   local shape
-  shape="$(yq "$1"' | ((tag == "!!null") or ((tag == "!!seq") and (([.[] | select(tag != "!!str")] | length) == 0)))' "$2")" || return 2
+  shape="$(yq "$1"' | ((tag == "!!null") or ((tag == "!!seq") and (([.[] | select(tag != "!!str")] | length) == 0) and (([.[] | select(tag == "!!str") | select(test("[[:cntrl:]]"))] | length) == 0)))' "$2")" || return 2
   [[ "$shape" == "true" ]]
 }
 
