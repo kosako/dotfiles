@@ -385,6 +385,22 @@ run_fail_contains \
   "rejects a module path holding a newline" \
   "module paths must be a list of paths (strings without control characters): git-profile" \
   "$fixture/scripts/validate-policy.sh" personal
+# A C1 control character (U+009B, CSI) passes ASCII's [[:cntrl:]] and the
+# literal path check (Codex review, PR #425); the control is a non-ASCII
+# name, which the shape check still takes (the names are checked later).
+make_fixture
+V='[".config/\u009bfile"]' yq -i '.modules["claude-settings"].paths = env(V)' "$fixture/.chezmoidata/modules.yaml"
+run_fail_contains \
+  "rejects a module path holding a C1 control character" \
+  "module paths must be a list of paths (strings without control characters): claude-settings" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+V='["ü-名前", "base"]' yq -n '.list = env(V)' > "$fixture/non-ascii.yaml"
+run_ok "yaml_string_list takes non-ASCII strings (only control characters are refused)" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" FIXTURE_YAML="$fixture/non-ascii.yaml" bash -c '
+    source "$FIXTURE_LIB"
+    yaml_string_list ".list" "$FIXTURE_YAML"
+  '
 
 # A failed read is reported, not taken as an empty list: of the shape, and of
 # the listing after a valid shape. Each case fails only its own read, so the

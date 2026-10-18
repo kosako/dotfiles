@@ -310,7 +310,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   (失敗させる読み取りは 1 case に 1 つ)。
 - 要素の中の制御文字(#422): 列挙は要素ごとに 1 行を出すので、改行を含む 1 要素が 2 つの名前に分かれ、どちらも検証を通って
   いた(`.chezmoiignore` は要素そのものを `has` で比べるので、どちらも有効にならない)。正しい 2 要素を改行で 1 要素に
-  つないだ modules と paths、tab を含む module 名を拒否すること。
+  つないだ modules と paths、tab を含む module 名、C1 の制御文字(U+009B)を含む path を拒否し、非 ASCII の名前は型の検査を
+  通すこと(制御文字は Unicode の Cc。ASCII の `[[:cntrl:]]` は C1 を通していた)。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar
