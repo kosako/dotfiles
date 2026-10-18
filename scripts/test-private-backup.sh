@@ -55,24 +55,13 @@ elif [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]]; then
 fi
 
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-pb-test.XXXXXX")"
-active_backup_pid=""
 
-# pb_kill_tree PID — KILL PID and its descendants (collected before the kill).
-pb_kill_tree() {
-  local child
-  for child in $(pgrep -P "$1" 2>/dev/null || true); do
-    pb_kill_tree "$child"
-  done
-  kill -KILL "$1" 2>/dev/null || true
-}
-# Reap the background FIFO case before removing its HOME and staging. A
-# background command can ignore INT, so the suite owns its whole process tree.
+# Stop the background cases (the FIFO case, the signal cases) and reap them
+# before removing their HOME and staging. A background command can ignore
+# INT, and a `set -m` job does not get the suite's signal at all, so the
+# suite owns every process it started (#389, #413).
 cleanup() {
-  if [[ -n "$active_backup_pid" ]]; then
-    pb_kill_tree "$active_backup_pid"
-    wait "$active_backup_pid" 2>/dev/null || true
-    active_backup_pid=""
-  fi
+  stop_child_trees
   # Cases that take a permission away (case 22's mode 000 files, case 39's
   # unsearchable directory) give it back on their normal path only. Modes
   # are opened first, so a run interrupted inside that window still removes
@@ -83,6 +72,16 @@ cleanup() {
 trap 'trap "" INT TERM; cleanup' EXIT
 trap 'trap "" INT TERM; cleanup; trap - INT; kill -INT $$' INT
 trap 'trap "" INT TERM; cleanup; trap - TERM; kill -TERM $$' TERM
+[[ -z "${SUITE_INTERRUPT_CUE:-}" ]] || suite_interrupt_inner "$SUITE_INTERRUPT_CUE" "$fixture_home"
+# The traps above, checked by interrupting a run of this suite (#413). Run
+# once, from the outer run only (an inner run stops at the check above).
+if [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]]; then
+  if check_suite_interrupt "${BASH_SOURCE[0]}" "$fixture_home" PRIVATE_BACKUP_TEST_INNER=1; then
+    pass "a suite interrupted while background cases run stops their whole trees and removes its fixture"
+  else
+    miss "an interrupted suite left processes behind or kept its fixture"
+  fi
+fi
 
 mkdir -p "$fixture_home/.ssh" "$fixture_home/fakebin" "$fixture_home/keys" "$fixture_home/out"
 # Baseline files declared in .chezmoidata/backup-paths.yaml.
@@ -1510,19 +1509,18 @@ kind_tmp="$fixture_home/kind-tmp"
 mkdir -p "$kind_tmp"
 HOME="$kind_home" TMPDIR="$kind_tmp" PATH="$fixture_home/fakebin:$PATH" "$PB" \
   backup --out "$kind_home/k.age" --recipient "$recipient" --yes > "$kind_log" 2>&1 &
-active_backup_pid=$!
+kind_pid=$!
 kind_deadline=$((SECONDS + 60))
-while kill -0 "$active_backup_pid" 2>/dev/null && [[ "$SECONDS" -lt "$kind_deadline" ]]; do
+while kill -0 "$kind_pid" 2>/dev/null && [[ "$SECONDS" -lt "$kind_deadline" ]]; do
   sleep 0.2
 done
 kind_timed_out=0
-if kill -0 "$active_backup_pid" 2>/dev/null; then
+if kill -0 "$kind_pid" 2>/dev/null; then
   kind_timed_out=1
-  pb_kill_tree "$active_backup_pid"
+  kill_tree "$kind_pid"
 fi
 kind_rc=0
-wait "$active_backup_pid" 2>/dev/null || kind_rc=$?
-active_backup_pid=""
+wait "$kind_pid" 2>/dev/null || kind_rc=$?
 kind_out="$(cat "$kind_log")"
 kind_extract="$fixture_home/kind-extract"
 mkdir -p "$kind_extract"
@@ -1978,7 +1976,7 @@ fi
 #     (rmfail, endrmfail); SIG_NO_FIRST stops the fake yq at its snapshot
 #     (the end runs). Every other call goes to the real tool. A TMPDIR of
 #     its own per run, so a leftover shows and a KILL at the deadline
-#     (pb_kill_tree) cannot leak into the suite's temp. backup's three list
+#     (kill_tree) cannot leak into the suite's temp. backup's three list
 #     files are made under that TMPDIR too (#372; case 34 pins how), so a
 #     cleanup that forgot them shows as a leftover (Codex review R5): the
 #     backup runs check that the three were in the temp at the manifest
@@ -2127,7 +2125,7 @@ PY
         sig_timed_out=0
         if kill -0 "$sig_pid" 2>/dev/null; then
           sig_timed_out=1
-          pb_kill_tree "$sig_pid"
+          kill_tree "$sig_pid"
         fi
         sig_rc=0
         wait "$sig_pid" 2>/dev/null || sig_rc=$?
