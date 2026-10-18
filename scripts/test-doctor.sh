@@ -104,7 +104,7 @@ trap 'cleanup_fixtures; trap - TERM; kill -TERM $$' TERM
 [[ -z "${SUITE_INTERRUPT_CUE:-}" ]] || suite_interrupt_inner "$SUITE_INTERRUPT_CUE" "$fixture_home"
 # The traps above, checked by interrupting a run of this suite (#413; the
 # inner run stops at the line above).
-if check_suite_interrupt "${BASH_SOURCE[0]}"; then
+if check_suite_interrupt "${BASH_SOURCE[0]}" "$fixture_home"; then
   ok "test passed: a suite interrupted while background cases run stops their whole trees and removes its fixture"
 else
   fail "test failed: an interrupted suite left processes behind or kept its fixture"

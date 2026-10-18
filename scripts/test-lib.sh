@@ -175,9 +175,14 @@ set_environment_kind() {
   P="$profile" K="$kind" yq -i '.profiles[strenv(P)].environmentKind = strenv(K)' "$file"
 }
 
-# kill_tree PID — KILL PID and its descendants (collected before the kill).
+# kill_tree PID — KILL PID and its descendants. Each process is stopped
+# (SIGSTOP) before its children are listed, so it cannot start another one
+# while the tree is walked (a wrapper that starts a new child when one ends
+# would otherwise get past the listing; Codex review R1, PR #419); the kill
+# then goes bottom-up.
 kill_tree() {
   local child
+  kill -STOP "$1" 2>/dev/null || true
   for child in $(pgrep -P "$1" 2>/dev/null || true); do
     kill_tree "$child"
   done
@@ -202,16 +207,21 @@ stop_child_trees() {
   done
 }
 
-# Suite interrupt check (#413). check_suite_interrupt SUITE [NAME=VALUE...]
+# Suite interrupt check (#413). check_suite_interrupt SUITE DIR [NAME=VALUE...]
 # re-runs SUITE (with the extra env) and SUITE_INTERRUPT_CUE naming a cue
 # file. The suite calls suite_interrupt_inner right after it sets its traps
 # when SUITE_INTERRUPT_CUE is set: that starts two trees the way the
-# background cases start theirs (a `set -m` job and a plain background job,
-# each `sh` with a `sleep` under it), lists their PIDs and the fixture dir in
-# the cue and waits. check_suite_interrupt then sends the run TERM and
-# succeeds when it ended by TERM, no listed process is left and the fixture
-# dir is gone; otherwise it prints what it saw and fails. It cleans up what
-# it started either way.
+# background cases start theirs, lists their PIDs and the fixture dir in the
+# cue, and waits. One is a `set -m` job (`sh` with a `sleep` under it); the
+# other a plain background job: a wrapper with two `sleep`s that starts a
+# third when the first ends, so a cleanup that lets it run while the tree is
+# walked leaves the new one behind. check_suite_interrupt then sends the run
+# TERM and succeeds when all five listed processes were alive before it, the
+# run ended by TERM, none is left (nor a sixth one) and the fixture dir is
+# gone; otherwise it prints what it saw and fails. Everything it makes,
+# the inner run's fixture included (its TMPDIR), is under DIR, the calling
+# suite's fixture, so an interrupt of the calling suite removes it too
+# (Codex review R2, PR #419).
 suite_interrupt_inner() {
   local cue="$1" t
   printf 'fixture %s\n' "$2" >> "$cue"
@@ -219,28 +229,43 @@ suite_interrupt_inner() {
   sh -c 'sleep 300 & printf "pid %s\n" "$!" >> "$1"; wait' suite-interrupt "$cue" &
   printf 'pid %s\n' "$!" >> "$cue"
   set +m
-  sh -c 'sleep 300 & printf "pid %s\n" "$!" >> "$1"; wait' suite-interrupt "$cue" &
+  sh -c '
+    sleep 300 & a=$!
+    sleep 300 & b=$!
+    printf "pid %s\npid %s\n" "$a" "$b" >> "$1"
+    wait "$a"
+    sleep 300 &
+    printf "pid %s\n" "$!" >> "$1"
+    wait' suite-interrupt "$cue" &
   printf 'pid %s\n' "$!" >> "$cue"
   for ((t = 0; t < 600; t++)); do
-    [[ "$(grep -c '^pid ' "$cue")" -lt 4 ]] || break
+    if [[ "$(grep -c '^pid ' "$cue")" -ge 5 ]]; then
+      printf 'ready\n' >> "$cue"
+      break
+    fi
     sleep 0.05
   done
-  printf 'ready\n' >> "$cue"
   wait
   exit 1
 }
 
 check_suite_interrupt() {
-  local suite="$1" dir pid t rc=0 kind value fixture="" listed="" left="" ready=0
-  shift
-  dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-suite-interrupt.XXXXXX")"
-  env "$@" SUITE_INTERRUPT_CUE="$dir/cue" "$BASH" "$suite" > "$dir/log" 2>&1 < /dev/null &
+  local suite="$1" dir pid t rc=0 kind value fixture="" listed="" count=0 dead_before="" left="" ready=0
+  dir="$(mktemp -d "$2/suite-interrupt.XXXXXX")"
+  shift 2
+  mkdir "$dir/tmp"
+  env "$@" TMPDIR="$dir/tmp" SUITE_INTERRUPT_CUE="$dir/cue" "$BASH" "$suite" > "$dir/log" 2>&1 < /dev/null &
   pid=$!
   for ((t = 0; t < 600; t++)); do
     grep -qx ready "$dir/cue" 2>/dev/null && { ready=1; break; }
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1
   done
+  if [[ "$ready" -eq 1 ]]; then
+    for value in $(sed -n 's/^pid //p' "$dir/cue"); do
+      kill -0 "$value" 2>/dev/null || dead_before+=" $value"
+    done
+  fi
   # bash 3.2 reports a job that a signal ended ("Terminated: 15") on stderr
   # when it reaps it; that is the expected end here, so it is not shown.
   {
@@ -254,7 +279,7 @@ check_suite_interrupt() {
   } 2>/dev/null
   while read -r kind value; do
     case "$kind" in
-      pid) listed+=" $value" ;;
+      pid) listed+=" $value"; count=$((count + 1)) ;;
       fixture) fixture="$value" ;;
     esac
   done < <(cat "$dir/cue" 2>/dev/null || true)
@@ -271,17 +296,16 @@ check_suite_interrupt() {
   for value in $left; do
     kill_tree "$value"
   done
-  if [[ "$ready" -eq 1 && "$rc" -eq 143 && -n "$listed" && -z "$left" && -n "$fixture" && ! -e "$fixture" ]]; then
+  if [[ "$ready" -eq 1 && -z "$dead_before" && "$rc" -eq 143 && "$count" -eq 5 && -z "$left" \
+    && -n "$fixture" && ! -e "$fixture" ]]; then
     rm -rf "$dir"
     return 0
   fi
-  printf 'ready=%s rc=%s listed:%s left:%s fixture=%s (exists: %s)\n' \
-    "$ready" "$rc" "$listed" "${left:- none}" "${fixture:-<none>}" "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" >&2
+  printf 'ready=%s dead before TERM:%s rc=%s listed (%s):%s left:%s fixture=%s (exists: %s)\n' \
+    "$ready" "${dead_before:- none}" "$rc" "$count" "$listed" "${left:- none}" "${fixture:-<none>}" \
+    "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" >&2
   cat "$dir/log" >&2 2>/dev/null || true
-  # Only a fixture made the way the suites make theirs is removed.
-  case "$fixture" in
-    "${TMPDIR:-/tmp}"/dotfiles-*) rm -rf "$fixture" ;;
-  esac
+  chmod -R u+rwX "$dir" 2>/dev/null || true
   rm -rf "$dir"
   return 1
 }

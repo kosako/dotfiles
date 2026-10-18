@@ -76,7 +76,7 @@ trap 'trap "" INT TERM; cleanup; trap - TERM; kill -TERM $$' TERM
 # The traps above, checked by interrupting a run of this suite (#413). Run
 # once, from the outer run only (an inner run stops at the check above).
 if [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]]; then
-  if check_suite_interrupt "${BASH_SOURCE[0]}" PRIVATE_BACKUP_TEST_INNER=1; then
+  if check_suite_interrupt "${BASH_SOURCE[0]}" "$fixture_home" PRIVATE_BACKUP_TEST_INNER=1; then
     pass "a suite interrupted while background cases run stops their whole trees and removes its fixture"
   else
     miss "an interrupted suite left processes behind or kept its fixture"
