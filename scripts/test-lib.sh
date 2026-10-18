@@ -180,22 +180,31 @@ set_environment_kind() {
 # tree is walked (a wrapper that starts a new child when one ends would get
 # past the listing; Codex review, PR #419). SIGSTOP is delivered
 # asynchronously, so the listing waits (up to 5 s) until ps shows the process
-# stopped, a zombie or gone; when that cannot be confirmed it warns and goes
-# on (the process may still add a child after the listing). The kill then
-# goes bottom-up. Returns 0: callers are cleanups and deadlines.
+# stopped or a zombie, or it is gone (ps fails and kill -0 finds nothing; a ps
+# that fails while the process is there is a failed read, not an exit). When
+# that cannot be confirmed it warns and goes on (the process may still add a
+# child after the listing). The kill then goes bottom-up. Returns 0: callers
+# are cleanups and deadlines, under set -e.
 kill_tree() {
   local child state t
   kill -STOP "$1" 2>/dev/null || return 0
   for ((t = 0; t < 250; t++)); do
-    state="$(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
+    if state="$(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null)"; then
+      state="${state//[[:space:]]/}"
+    elif kill -0 "$1" 2>/dev/null; then
+      state="unreadable"
+    else
+      state="gone"
+    fi
     case "$state" in
-      '' | T* | Z*) break ;;
+      gone | T* | Z*) break ;;
     esac
     sleep 0.02
   done
   case "$state" in
-    '' | T* | Z*) ;;
-    *) warn "kill_tree: could not confirm that process $1 stopped (state ${state}); a child it starts now may be missed" ;;
+    gone | T* | Z*) ;;
+    unreadable) warn "kill_tree: could not read the state of process $1; a child it starts now may be missed" ;;
+    *) warn "kill_tree: process $1 did not stop (state $state); a child it starts now may be missed" ;;
   esac
   for child in $(pgrep -P "$1" 2>/dev/null || true); do
     kill_tree "$child"
@@ -232,15 +241,18 @@ stop_child_trees() {
 #   third (c) when a ends and lists it. A pgrep shim first on the run's PATH
 #   makes that race certain instead of timing-dependent: it lists the
 #   wrapper's children a first, and before it answers for b's children it
-#   waits (up to 5 s) until the wrapper is stopped or c is listed. A cleanup
-#   that lets the wrapper run while the tree is walked therefore always
-#   leaves c behind; one that stops it first never sees c.
-# Every `sleep` runs for a duration unique to the check, so one that was
-# started but never listed is found too (pgrep -f). check_suite_interrupt
-# then sends the run TERM and succeeds when five different listed processes
-# were alive before it, the run ended by TERM, no process of the check is
-# left and the fixture dir is gone; otherwise it prints what it saw and
-# fails. Everything it makes, the inner run's fixture included (its TMPDIR),
+#   waits (up to 5 s) until the wrapper is stopped or c is listed, and notes
+#   in the cue which of the two it saw ("sync ok") or that it gave up ("sync
+#   timeout"). A cleanup that lets the wrapper run while the tree is walked
+#   therefore always leaves c behind; one that stops it first never sees c;
+#   a run that never reached the point, or gave up there, fails the check.
+# Every `sleep` runs for a duration unique to the check (matched whole, the
+# dot literal), so one that was started but never listed is found too
+# (pgrep -f). check_suite_interrupt then sends the run TERM and succeeds when
+# five different listed processes were alive before it, the run ended by
+# TERM, the sync point was passed, no process of the check is left and the
+# fixture dir is gone; otherwise it prints what it saw and fails. Everything
+# it makes, the inner run's fixture included (its TMPDIR),
 # is under DIR, the calling suite's fixture, so an interrupt of the calling
 # suite removes it too.
 suite_interrupt_inner() {
@@ -272,7 +284,9 @@ suite_interrupt_inner() {
 
 check_suite_interrupt() {
   local suite="$1" dir pid t rc=0 kind value role fixture="" listed="" distinct=0 dead_before="" left="" ready=0
-  local sleep_for="3000.$RANDOM$RANDOM" strays
+  local sleep_digits="$RANDOM$RANDOM$RANDOM$RANDOM" sleep_for sleep_match strays line sync=""
+  sleep_for="3000.$sleep_digits"
+  sleep_match="^sleep 3000[.]$sleep_digits\$"
   dir="$(mktemp -d "$2/suite-interrupt.XXXXXX")"
   shift 2
   mkdir "$dir/tmp" "$dir/shim"
@@ -290,14 +304,18 @@ if [ "$1" = -P ] && [ "$#" -eq 2 ]; then
   fi
   if [ -n "$b" ] && [ "$2" = "$b" ]; then
     i=0
+    sync=timeout
     while [ "$i" -lt 100 ]; do
-      case "$(LC_ALL=C ps -o stat= -p "$w" 2>/dev/null | tr -d ' ')" in
-        '' | T* | Z*) break ;;
+      st="$(LC_ALL=C ps -o stat= -p "$w" 2>/dev/null | tr -d ' ')"
+      case "$st" in
+        T* | Z*) sync=ok; break ;;
       esac
-      [ -n "$(role c)" ] && break
+      if [ -z "$st" ] && ! kill -0 "$w" 2>/dev/null; then sync=ok; break; fi
+      if [ -n "$(role c)" ]; then sync=ok; break; fi
       sleep 0.05
       i=$((i + 1))
     done
+    printf 'sync %s\n' "$sync" >> "$SUITE_INTERRUPT_CUE"
   fi
 fi
 exec "$SUITE_INTERRUPT_PGREP" "$@"
@@ -329,10 +347,14 @@ SH
     kill -0 "$pid" && kill_tree "$pid"
     wait "$pid" || rc=$?
   } 2>/dev/null
-  while read -r kind value role; do
-    case "$kind" in
-      pid) listed+=" $value:$role" ;;
-      fixture) fixture="$value" ;;
+  while IFS= read -r line; do
+    case "$line" in
+      'pid '*)
+        read -r kind value role <<< "$line"
+        listed+=" $value:$role"
+        ;;
+      'fixture '*) fixture="${line#fixture }" ;;
+      'sync '*) sync+="${line#sync } " ;;
     esac
   done < <(cat "$dir/cue" 2>/dev/null || true)
   # A KILLed process is a zombie until its parent (or init, once the parent
@@ -342,21 +364,21 @@ SH
     for value in $listed; do
       kill -0 "${value%%:*}" 2>/dev/null && left+=" $value"
     done
-    strays="$(pgrep -f "sleep $sleep_for" 2>/dev/null | tr '\n' ' ' || true)"
+    strays="$(pgrep -f "$sleep_match" 2>/dev/null | tr '\n' ' ' || true)"
     [[ -n "$left" || -n "${strays// /}" ]] || break
     sleep 0.1
   done
   for value in $left; do
     kill_tree "${value%%:*}"
   done
-  pkill -KILL -f "sleep $sleep_for" 2>/dev/null || true
-  if [[ "$ready" -eq 1 && "$distinct" -eq 5 && -z "$dead_before" && "$rc" -eq 143 && -z "$left" \
+  pkill -KILL -f "$sleep_match" 2>/dev/null || true
+  if [[ "$ready" -eq 1 && "$distinct" -eq 5 && -z "$dead_before" && "$rc" -eq 143 && "$sync" == "ok " && -z "$left" \
     && -z "${strays// /}" && -n "$fixture" && ! -e "$fixture" ]]; then
     rm -rf "$dir"
     return 0
   fi
-  printf 'ready=%s distinct=%s dead before TERM:%s rc=%s listed:%s left:%s strays: %s fixture=%s (exists: %s)\n' \
-    "$ready" "$distinct" "${dead_before:- none}" "$rc" "$listed" "${left:- none}" "${strays:-none}" "${fixture:-<none>}" \
+  printf 'ready=%s distinct=%s dead before TERM:%s rc=%s sync=%s listed:%s left:%s strays: %s fixture=%s (exists: %s)\n' \
+    "$ready" "$distinct" "${dead_before:- none}" "$rc" "${sync:-<none>}" "$listed" "${left:- none}" "${strays:-none}" "${fixture:-<none>}" \
     "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" >&2
   cat "$dir/log" >&2 2>/dev/null || true
   chmod -R u+rwX "$dir" 2>/dev/null || true
