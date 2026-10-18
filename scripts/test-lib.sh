@@ -174,3 +174,114 @@ set_environment_kind() {
   fi
   P="$profile" K="$kind" yq -i '.profiles[strenv(P)].environmentKind = strenv(K)' "$file"
 }
+
+# kill_tree PID — KILL PID and its descendants (collected before the kill).
+kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    kill_tree "$child"
+  done
+  kill -KILL "$1" 2>/dev/null || true
+}
+
+# stop_child_trees — KILL every process this shell started and has not
+# reaped, with its descendants, then reap them. For a suite's cleanup (#413):
+# a background case (a `set -m` job sits in its own process group, and a
+# background job of a non-interactive shell ignores INT) does not get the
+# signal that interrupts the suite, and would go on using the fixture the
+# cleanup removes. All children, not a PID a case registered: a case that
+# forgot to register was the gap.
+stop_child_trees() {
+  local child children
+  children="$(pgrep -P "$$" 2>/dev/null || true)"
+  for child in $children; do
+    kill_tree "$child"
+  done
+  for child in $children; do
+    wait "$child" 2>/dev/null || true
+  done
+}
+
+# Suite interrupt check (#413). check_suite_interrupt SUITE [NAME=VALUE...]
+# re-runs SUITE (with the extra env) and SUITE_INTERRUPT_CUE naming a cue
+# file. The suite calls suite_interrupt_inner right after it sets its traps
+# when SUITE_INTERRUPT_CUE is set: that starts two trees the way the
+# background cases start theirs (a `set -m` job and a plain background job,
+# each `sh` with a `sleep` under it), lists their PIDs and the fixture dir in
+# the cue and waits. check_suite_interrupt then sends the run TERM and
+# succeeds when it ended by TERM, no listed process is left and the fixture
+# dir is gone; otherwise it prints what it saw and fails. It cleans up what
+# it started either way.
+suite_interrupt_inner() {
+  local cue="$1" t
+  printf 'fixture %s\n' "$2" >> "$cue"
+  set -m
+  sh -c 'sleep 300 & printf "pid %s\n" "$!" >> "$1"; wait' suite-interrupt "$cue" &
+  printf 'pid %s\n' "$!" >> "$cue"
+  set +m
+  sh -c 'sleep 300 & printf "pid %s\n" "$!" >> "$1"; wait' suite-interrupt "$cue" &
+  printf 'pid %s\n' "$!" >> "$cue"
+  for ((t = 0; t < 600; t++)); do
+    [[ "$(grep -c '^pid ' "$cue")" -lt 4 ]] || break
+    sleep 0.05
+  done
+  printf 'ready\n' >> "$cue"
+  wait
+  exit 1
+}
+
+check_suite_interrupt() {
+  local suite="$1" dir pid t rc=0 kind value fixture="" listed="" left="" ready=0
+  shift
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-suite-interrupt.XXXXXX")"
+  env "$@" SUITE_INTERRUPT_CUE="$dir/cue" "$BASH" "$suite" > "$dir/log" 2>&1 < /dev/null &
+  pid=$!
+  for ((t = 0; t < 600; t++)); do
+    grep -qx ready "$dir/cue" 2>/dev/null && { ready=1; break; }
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  # bash 3.2 reports a job that a signal ended ("Terminated: 15") on stderr
+  # when it reaps it; that is the expected end here, so it is not shown.
+  {
+    kill -TERM "$pid" || true
+    for ((t = 0; t < 300; t++)); do
+      kill -0 "$pid" || break
+      sleep 0.1
+    done
+    kill -0 "$pid" && kill_tree "$pid"
+    wait "$pid" || rc=$?
+  } 2>/dev/null
+  while read -r kind value; do
+    case "$kind" in
+      pid) listed+=" $value" ;;
+      fixture) fixture="$value" ;;
+    esac
+  done < <(cat "$dir/cue" 2>/dev/null || true)
+  # A KILLed process is a zombie until its parent (or init, once the parent
+  # is gone) reaps it, and kill -0 still finds a zombie: give that a moment.
+  for ((t = 0; t < 50; t++)); do
+    left=""
+    for value in $listed; do
+      kill -0 "$value" 2>/dev/null && left+=" $value"
+    done
+    [[ -n "$left" ]] || break
+    sleep 0.1
+  done
+  for value in $left; do
+    kill_tree "$value"
+  done
+  if [[ "$ready" -eq 1 && "$rc" -eq 143 && -n "$listed" && -z "$left" && -n "$fixture" && ! -e "$fixture" ]]; then
+    rm -rf "$dir"
+    return 0
+  fi
+  printf 'ready=%s rc=%s listed:%s left:%s fixture=%s (exists: %s)\n' \
+    "$ready" "$rc" "$listed" "${left:- none}" "${fixture:-<none>}" "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" >&2
+  cat "$dir/log" >&2 2>/dev/null || true
+  # Only a fixture made the way the suites make theirs is removed.
+  case "$fixture" in
+    "${TMPDIR:-/tmp}"/dotfiles-*) rm -rf "$fixture" ;;
+  esac
+  rm -rf "$dir"
+  return 1
+}

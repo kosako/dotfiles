@@ -88,14 +88,28 @@ host_stub_dir=""
 # 000 dir is passed; best effort, the removal must still run), and the
 # cleanup is also wired to INT / TERM, so a second signal that lands
 # while it runs starts it over (modes first) instead of killing it
-# halfway (#359 review).
+# halfway (#359 review). The background cases (HI-d3's doctor, OP-i10's
+# FIFO run) do not get the suite's INT (a background job of a
+# non-interactive shell ignores it) and are past the deadline that would
+# have reaped them, so every process the suite started is stopped and
+# reaped before the fixture goes (#413).
 cleanup_fixtures() {
+  stop_child_trees
   chmod -R u+rwX "$fixture_home" 2>/dev/null || true
   rm -rf "$fixture_home" ${host_stub_dir:+"$host_stub_dir"}
 }
 trap cleanup_fixtures EXIT
 trap 'cleanup_fixtures; trap - INT; kill -INT $$' INT
 trap 'cleanup_fixtures; trap - TERM; kill -TERM $$' TERM
+[[ -z "${SUITE_INTERRUPT_CUE:-}" ]] || suite_interrupt_inner "$SUITE_INTERRUPT_CUE" "$fixture_home"
+# The traps above, checked by interrupting a run of this suite (#413; the
+# inner run stops at the line above).
+if check_suite_interrupt "${BASH_SOURCE[0]}"; then
+  ok "test passed: a suite interrupted while background cases run stops their whole trees and removes its fixture"
+else
+  fail "test failed: an interrupted suite left processes behind or kept its fixture"
+  status=1
+fi
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
 for host_tool in op herdr codex opencode; do
@@ -3010,14 +3024,6 @@ op_init_case "relative XDG_DATA_HOME -> not confirmed" \
 #             R2, PR #325).
 mv "$op_log" "$op_log.keep"
 mkfifo "$op_log"
-# op_kill_tree PID — KILL PID and its descendants (collected before the kill).
-op_kill_tree() {
-  local child
-  for child in $(pgrep -P "$1" 2>/dev/null || true); do
-    op_kill_tree "$child"
-  done
-  kill -KILL "$1" 2>/dev/null || true
-}
 op_run > "$fixture_home/op-fifo.out" 2>&1 &
 op_fifo_pid=$!
 op_fifo_waited=0
@@ -3026,7 +3032,7 @@ while kill -0 "$op_fifo_pid" 2>/dev/null && [[ "$op_fifo_waited" -lt 120 ]]; do
   op_fifo_waited=$((op_fifo_waited + 1))
 done
 if kill -0 "$op_fifo_pid" 2>/dev/null; then
-  op_kill_tree "$op_fifo_pid"
+  kill_tree "$op_fifo_pid"
   wait "$op_fifo_pid" 2>/dev/null || true
   fail "test failed: OpenCode init: a FIFO in place of the log hung doctor (killed after 120s)"
   status=1
