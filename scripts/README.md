@@ -672,12 +672,13 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   名指しすること(一覧 file 3 つ・staging・self-check の dir で 5 回以上)と、run の後に TMPDIR が空であることを確かめる。
 - 名前が `-` で始まる directory の下の file(宣言した file と、宣言した directory の配下)を backup → verify → restore で
   往復できること(#414。staging の親を dirname で切ると option と読まれて backup ごと止まっていた)。
-- 検索の権限が無い directory の下の宣言を「不在」と扱わず、`capture INCOMPLETE` と marker の `capture_incomplete: true` に
-  すること(#414)。対照として、検索できる directory の下の本当に無い宣言は通常の skip で、捕捉は complete のまま。
+- 検索の権限が無い directory の下の宣言(直接と、そこへの symlink の経由)を「不在」と扱わず、`capture INCOMPLETE` と marker の
+  `capture_incomplete: true` にすること(#414)。対照として、本当に無い宣言(検索できる directory の下・無い directory の下・
+  dangling な symlink の下)は通常の skip で、捕捉は complete のまま。
   権限の効かない root では飛ばす。
 - archive の rename の後の失敗(#414): PATH 先頭の fake `rmdir` / `mv` で、partial dir の削除の失敗・marker の rename の失敗・
   rename の直前に marker の path が directory に変わる場合を作り、新しい archive が残り(verify が通る)、前回の marker が
-  残る(directory に変わった場合は拒否して中を空にする)、exit 非 0 で、一時の file と dir が残らないことを確かめる。
+  残る(directory に変わった場合は拒否して中を空にする)、exit 非 0 で、一時の file と dir が残らない(run ごとの TMPDIR が空)ことを確かめる。
 
 ## test-secrets-gate.sh
 

@@ -89,8 +89,9 @@ private-backup.sh restore --in PATH (--identity PATH | --identity-command CMD) \
 - backup は捕捉 0 件なら空アーカイブを書かず fail(補足リストだけの archive も空扱い)。symlink /
   不在 / 非正規 / 読取不可のファイルは skip(warn)。ただし実在するのに読めない file は、設定が archive から
   欠けるので、下の「捕捉の不完全」として marker に記録する(#398)。検索の権限が無い directory の下の宣言は、file が
-  在っても無いように見えるので、不在とは扱わず同じく「捕捉の不完全」にする(#414。不在と扱うのは、HOME から辿った
-  祖先がすべて検索できるか、途中が無い・directory でないと確かめられたときだけ)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
+  在っても無いように見えるので、不在とは扱わず同じく「捕捉の不完全」にする(#414。不在と扱うのは、親の directory に入れない
+  理由が「途中が無い」(ENOENT)か「途中が directory でない」(ENOTDIR)のとき、または親に入れたときだけ。symlink を
+  経由する path も、解決した先で判定する)。重複宣言(dir とその配下 file)は 1 回だけ捕捉する。
   補足リスト自身は宣言より先に canonical path で捕捉するので、baseline / 補足が同じ path を宣言して
   いても entry / file は重複しない(補足の copy が優先)。
 - **directory 列挙の途中失敗(#242)**: 宣言 directory の `find` が途中で失敗(読めない subdirectory 等・

@@ -109,30 +109,28 @@ stage_file() {
     yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
 }
 
-# Whether HOME/REL is absent for certain. [[ -e ]] is false for a file under a
-# directory without search permission too, and that file may exist (#414):
-# backup must not report it as an absent optional file. Walks the ancestors
-# below HOME the way path_has_symlinked_parent does; absence is confirmed
-# when every existing ancestor is a searchable directory, or one of them is
-# missing or not a directory (the path then cannot exist). REL is a
-# validated relative path (backup_path_is_safe). Returns 0 when confirmed.
+# Whether HOME/REL is absent for certain. [[ -e ]] / [[ -L ]] are false for a
+# path under a directory without search permission too, and that file may
+# exist (#414): backup must not report it as an absent optional file. The
+# reason the parent cannot be entered tells them apart (the kernel resolves
+# every component, symlinks included): ENOENT (a component is missing) and
+# ENOTDIR (a component is not a directory) mean the path cannot exist;
+# EACCES, ELOOP and the rest mean it could not be checked. bash's own cd
+# reports the reason, so no tool on PATH (whose message format varies) is
+# read; under LC_ALL=C the message ends with the strerror text. A parent it
+# can enter leaves only the last component, and the caller saw no entry
+# there. REL is a validated relative path (backup_path_is_safe). Returns 0
+# when absence is confirmed.
 path_absence_confirmed() {
-  local rel="$1" cur="$HOME" comp dir
-  [[ -x "$HOME" ]] || return 1
-  case "$rel" in
-    */*) dir="${rel%/*}" ;;
-    *) return 0 ;;
+  local parent="$HOME" err
+  case "$1" in
+    */*) parent="$HOME/${1%/*}" ;;
   esac
-  local IFS='/' comps=()
-  read -ra comps <<< "$dir"
-  for comp in "${comps[@]}"; do
-    [[ -z "$comp" ]] && continue
-    cur="$cur/$comp"
-    [[ -e "$cur" || -L "$cur" ]] || return 0
-    [[ -d "$cur" ]] || return 0
-    [[ -x "$cur" ]] || return 1
-  done
-  return 0
+  err="$( (LC_ALL=C; cd -- "$parent") 2>&1)" && return 0
+  case "$err" in
+    *": No such file or directory" | *": Not a directory") return 0 ;;
+  esac
+  return 1
 }
 
 # Whether a single tar member NAME is allowed in a private-backup archive.
