@@ -1979,6 +1979,63 @@ else
   fail "test failed: doctor must stay exit 0 (1Password, stdin isolation)"
   status=1
 fi
+#     OP-e) a probe that starts its next command when the one before is
+#           killed (#423): the fake op runs `sleep 8` past the deadline and,
+#           when that ends, starts a `sleep 3000.<digits>` (C; pid in
+#           c.pid). A PATH-front pgrep shim takes the real listing of the
+#           fake op's children, then holds it until the fake op is stopped
+#           or C has started, so a cleanup that lists the children of a
+#           running process and kills them before the process itself
+#           leaves C behind every time, whatever the timing (the
+#           kill_process_tree doctor had before). The held listing is the
+#           one of the moment pgrep was asked, as the real pgrep's would be.
+op_real_pgrep="$(command -v pgrep)"
+op_respawn_sleep="3000.${RANDOM}${RANDOM}"
+cat > "$op_fakebin/op" <<SH
+#!/bin/sh
+[ "\$1" = whoami ] || exit 2
+printf '%s\\n' "\$\$" > "$op_fakebin/op.pid"
+sleep 8
+sleep $op_respawn_sleep &
+printf '%s\\n' "\$!" > "$op_fakebin/c.pid"
+wait
+SH
+cat > "$op_fakebin/pgrep" <<SH
+#!/bin/sh
+if [ "\$#" -eq 2 ] && [ "\$1" = -P ] && [ -s "$op_fakebin/op.pid" ] && [ "\$2" = "\$(cat "$op_fakebin/op.pid")" ]; then
+  : > "$op_fakebin/held"
+  listing="\$("$op_real_pgrep" -P "\$2")"
+  rc=\$?
+  i=0
+  while [ "\$i" -lt 150 ]; do
+    case "\$(ps -o stat= -p "\$2" 2>/dev/null)" in *T*) break ;; esac
+    [ -s "$op_fakebin/c.pid" ] && break
+    sleep 0.1
+    i=\$((i + 1))
+  done
+  [ -z "\$listing" ] || printf '%s\\n' "\$listing"
+  exit "\$rc"
+fi
+exec "$op_real_pgrep" "\$@"
+SH
+chmod +x "$op_fakebin/op" "$op_fakebin/pgrep"
+rm -f "$op_fakebin/op.pid" "$op_fakebin/c.pid" "$op_fakebin/held"
+op_started=$SECONDS
+op_rc=0
+op_out="$(HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || op_rc=$?
+op_elapsed=$((SECONDS - op_started))
+sleep 0.5
+op_left="$("$op_real_pgrep" -f "^sleep $op_respawn_sleep\$" || true)"
+if [[ "$op_rc" -eq 0 && -s "$op_fakebin/op.pid" && -e "$op_fakebin/held" && -z "$op_left" ]] \
+  && (( op_elapsed < 45 )) && grep -Fxq "$op_unchecked" <<< "$op_out" \
+  && ! grep -Fq "kill_tree:" <<< "$op_out"; then
+  ok "test passed: a probe that starts its next command when one is killed leaves nothing behind (each process stopped before its children are listed)"
+else
+  printf '%s\n' "$op_out" >&2
+  fail "test failed: the respawning probe left a process behind (${op_left:-none}), or doctor did not report it as not checked (rc=$op_rc, ${op_elapsed}s)"
+  status=1
+  [[ -z "$op_left" ]] || kill $op_left 2>/dev/null || true
+fi
 rm -rf "$op_fakebin"
 
 # ID) Git identity contexts (#202): an existing identity file is checked for

@@ -663,17 +663,6 @@ probe_job=""
 probe_launching=0
 probe_rc=""
 probe_lines=""
-# kill_process_tree PID — SIGTERM then SIGKILL PID and every descendant
-# (children first, via pgrep -P), so a wrapper on PATH that forked the real
-# work does not leave an orphan behind the deadline.
-kill_process_tree() {
-  local pid="$1" child
-  while IFS= read -r child; do
-    [[ -n "$child" ]] && kill_process_tree "$child"
-  done < <(pgrep -P "$pid" 2>/dev/null || true)
-  kill -TERM "$pid" 2>/dev/null || true
-  kill -KILL "$pid" 2>/dev/null || true
-}
 # probe_cleanup — reap the probe's process substitution (and thus the probe
 # and anything it forked) if it is still alive; also the INT / TERM / EXIT
 # handler below, so an interrupted doctor leaves no probe behind. The probe
@@ -697,7 +686,10 @@ probe_cleanup() {
     fi
   fi
   if [[ -n "$job" ]] && kill -0 "$job" 2>/dev/null; then
-    kill_process_tree "$job"
+    # The whole tree, each process stopped before its children are listed
+    # (lib-policy.sh): a wrapper on PATH that starts its next command when
+    # the one before is killed would otherwise leave that one behind (#423).
+    kill_tree "$job"
   fi
   probe_job=""
   return 0

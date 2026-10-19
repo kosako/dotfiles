@@ -175,42 +175,9 @@ set_environment_kind() {
   P="$profile" K="$kind" yq -i '.profiles[strenv(P)].environmentKind = strenv(K)' "$file"
 }
 
-# kill_tree PID — KILL PID and its descendants. Each process is stopped
-# before its children are listed, so it cannot start another one while the
-# tree is walked (a wrapper that starts a new child when one ends would get
-# past the listing; Codex review, PR #419). SIGSTOP is delivered
-# asynchronously, so the listing waits (up to 5 s) until ps shows the process
-# stopped or a zombie, or it is gone (ps fails and kill -0 finds nothing; a ps
-# that fails while the process is there is a failed read, not an exit). When
-# that cannot be confirmed it warns and goes on (the process may still add a
-# child after the listing). The kill then goes bottom-up. Returns 0: callers
-# are cleanups and deadlines, under set -e.
-kill_tree() {
-  local child state t
-  kill -STOP "$1" 2>/dev/null || return 0
-  for ((t = 0; t < 250; t++)); do
-    if state="$(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null)"; then
-      state="${state//[[:space:]]/}"
-    elif kill -0 "$1" 2>/dev/null; then
-      state="unreadable"
-    else
-      state="gone"
-    fi
-    case "$state" in
-      gone | T* | Z*) break ;;
-    esac
-    sleep 0.02
-  done
-  case "$state" in
-    gone | T* | Z*) ;;
-    unreadable) warn "kill_tree: could not read the state of process $1; a child it starts now may be missed" ;;
-    *) warn "kill_tree: process $1 did not stop (state $state); a child it starts now may be missed" ;;
-  esac
-  for child in $(pgrep -P "$1" 2>/dev/null || true); do
-    kill_tree "$child"
-  done
-  kill -KILL "$1" 2>/dev/null || true
-}
+# kill_tree (KILL a PID and its descendants, stopping each before listing
+# its children) lives in lib-policy.sh, shared with doctor's probe cleanup
+# (#423).
 
 # stop_child_trees — KILL every process this shell started and has not
 # reaped, with its descendants, then reap them. For a suite's cleanup (#413):
