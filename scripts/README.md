@@ -132,7 +132,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 - tool call record hook(report-only): `enableToolCallRecordHook` の登録(SessionStart と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied に `personal-tool-call-record-hook`)の wired 状態。live の file は読まない(#353)。
 - GitHub injection guard(report-only): secret floor は managed settings.json の常時 deny 宣言として報告(live の状態は managed drift を参照)、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。
-- herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
+- herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。各 process を止めてから子を辿る `kill_tree`(`lib-policy.sh`)で、辿っている間に増える子も残さない、#423。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
 - herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ綴りか、両方あれば `-ef` で同じ file と判定。presence とは独立に warn し、欠損時の action は読み先がずれていれば「既定値で動く」と断定しない。ずれていれば検証もしない)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
 - Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` が配る
   `~/.codex/agent-tools-{review,worker}.config.toml` の **presence のみ**(中身は config 値なので出さない)。
@@ -207,7 +207,8 @@ cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp す�
 repo copy)。
 
 process の後始末の helper(#413): `kill_tree`(PID と子孫を KILL。各 process を SIGSTOP で止め、ps で止まったことを確かめてから子を
-列挙するので、辿っている間に新しい子を作れない。確かめられなければ warn して続ける)、`stop_child_trees`(この shell が起動して回収していない
+列挙するので、辿っている間に新しい子を作れない。確かめられなければ warn して続ける。doctor の期限付き probe の後始末と共有するので
+`lib-policy.sh` に置く、#423)、`stop_child_trees`(この shell が起動して回収していない
 process を子孫ごと KILL して回収する。suite の cleanup が、登録した PID ではなく全部の子を止めるので、中断の signal が届かない
 background の case(`set -m` の job や、INT を無視する非対話 shell の background job)の登録漏れが起きない)。
 `check_suite_interrupt` / `suite_interrupt_inner` は、suite を `SUITE_INTERRUPT_CUE` 付きで起動し直し、trap を張った直後に
@@ -456,6 +457,12 @@ query だけを実機で実行する(書き込みはしない)。
   ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
   stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・
   hang・stdin の mode を持つ。
+- 1Password の respawn(#423): fake op は、自分の子の列挙が取られるまで待ってから次の command(一意の
+  `sleep 3000.<数字>`)を起動する。PATH 先頭の `pgrep` の shim が fake op の子の本物の列挙を取り、取った印を置いてから、
+  「fake op が止まった」か「次の command が起動した」まで答えを返さない。次の command は列挙より前には起動できず、列挙は
+  起動の後にしか返らないので、動いている process の子を先に殺す後始末(以前の `kill_process_tree`)は timing に依らず次の
+  command を残して落ちる。shim の待ちが「止まった」で終わり(timeout は fail)、doctor の後に次の command が残らず、
+  「未確認」の warn が出て、`kill_tree:` の warn が無いこと。
 - Git identity contexts(#202 / #241): identity file の状態(missing / empty / name-only / email-only / complete /
   parse 不能 / 明示的な空値 / 値の無い key(`=` なし))ごとに、missing と partial は action(手順に file path)、
   complete は ok、parse 不能は warn、値の無い key は「git が identity 全体を拒否する」別の action になること
