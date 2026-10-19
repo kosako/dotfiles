@@ -412,7 +412,7 @@ validate_backup_paths() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape modules_list caps_shape
+  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape modules_list caps_shape cap_values_shape
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -492,6 +492,25 @@ validate_profile() {
       status=1
       ;;
   esac
+
+  # The value checks below read each value through a command substitution,
+  # which drops a trailing newline, so "enforce\n" would pass as enforce while
+  # chezmoi compares the value itself (#428, Codex review PR #429).
+  if [[ "$caps_shape" -eq 0 ]]; then
+    cap_values_shape=0
+    p="$profile" yaml_plain_string_values '.profiles[strenv(p)].capabilities' "$PROFILES_FILE" || cap_values_shape=$?
+    case "$cap_values_shape" in
+      0) ;;
+      2)
+        fail "cannot read the capability values of profile $profile"
+        status=1
+        ;;
+      *)
+        fail "profile capability values must not hold control characters: $profile"
+        status=1
+        ;;
+    esac
+  fi
 
   if [[ "$modules_shape" -eq 0 ]]; then
     fail_duplicates "duplicate module in $profile: " \

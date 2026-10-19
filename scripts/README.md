@@ -59,7 +59,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 - profile の `modules:` が module 名の list であること(省略・null は module なし。文字列・bool・数値・map・
   文字列でない要素・制御文字(改行など)を含む要素は fail。型の読み取りと列挙の失敗も fail、#412・#422)。profile が参照する
   module が定義済みであること。
-- profile の `capabilities:` が、capability 名(制御文字を含まない文字列)を key に持つ map であること(#428)。
+- profile の `capabilities:` が、capability 名(制御文字を含まない文字列)を key に持つ map で、文字列の値も制御文字を
+  含まないこと(値は command substitution で読むので末尾の改行が落ち、`"enforce\n"` が `enforce` として通っていた。#428)。
 - profile が参照する capability が定義済みであること。
 - すべての定義済み capability が profile に存在すること。
 - boolean capability が `true` または `false` であること。
@@ -323,7 +324,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   通すこと(制御文字は Unicode の Cc。ASCII の `[[:cntrl:]]` は C1 を通していた)。
 - 名前・条件・許可値の中の制御文字(#428): 正しい名前や値を改行でつないだ module の `requires:` の値と key、enum の
   `values:`、module・capability・profile の名前(`--list-profiles` も)を拒否し、C1 を含む `requires:` の値、tab を含む
-  `values:` の要素と profile の capability 名、map の `values:`、list の `capabilities:` を拒否すること。非 ASCII の key と
+  `values:` の要素と profile の capability 名、末尾に改行や C1 を持つ profile の capability の値、map の `values:`、
+  list の `capabilities:` を拒否すること。非 ASCII の key と
   値は通し、文字列でない key は拒否すること。各読み取りの失敗も fail にすること。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、

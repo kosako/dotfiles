@@ -494,6 +494,16 @@ run_fail_contains \
   "rejects a profile capability name holding a tab" \
   "profile capabilities must be a map keyed by capability names (strings without control characters): personal" \
   "$fixture/scripts/validate-policy.sh" personal
+# A profile value is read through a command substitution, which drops a
+# trailing newline, so "enforce\n" passed as enforce (Codex review, PR #429).
+for bad_value in '"enforce\n"' '"enforce\u009b"'; do
+  make_fixture
+  V="$bad_value" yq -i '.profiles.personal.capabilities.npmHardeningMode = env(V)' "$fixture/.chezmoidata/profiles.yaml"
+  run_fail_contains \
+    "rejects a profile capability value $bad_value" \
+    "profile capability values must not hold control characters: personal" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
 make_fixture
 yq -i '.profiles.personal.capabilities = ["installPackages"]' "$fixture/.chezmoidata/profiles.yaml"
 run_fail_contains \
@@ -523,8 +533,10 @@ expect_read_failure "module requires values" '.modules[strenv(m)].requires | (([
   "cannot read the requires of module supply-chain-npm"
 expect_read_failure "capability values" '.capabilities[strenv(c)].values | ' \
   "cannot read the values of capability npmHardeningMode"
-expect_read_failure "profile capabilities keys" '.profiles[strenv(p)].capabilities | ' \
+expect_read_failure "profile capabilities keys" '.profiles[strenv(p)].capabilities | ((tag' \
   "cannot read the capabilities of profile personal"
+expect_read_failure "profile capability values" '.profiles[strenv(p)].capabilities | (([' \
+  "cannot read the capability values of profile personal"
 # The top-level reads are picked by the start of the expression: the
 # profile-level reads of modules: and capabilities: hold the same text after
 # a prefix, and failing them too would fail the run another way.
