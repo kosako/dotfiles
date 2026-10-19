@@ -43,7 +43,8 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
   渡した path に file が無ければ usage error(exit 2。recipients file と同じ扱いで、打ち間違えた path で private な
   path が全部欠けた archive を作らない)。補足が在るかを確かめられない(親の directory を検索できない。下の #414 と
   同じ判定)ときは、どの path が欠けるかも分からないので、既定の場所でも渡した path でも、何も書かずに backup を
-  止める(exit 1。読めない補足と同じ扱い、#421)。
+  止める(exit 1。読めない補足と同じ扱い、#421)。補足の場所にある symlink が regular file に辿り着かない(dangling、
+  または検索できない directory を通る)ときも同じく止める(exit 1)。相対 path の判定は、継承した `CDPATH` に左右されない。
   **旧 archive**(#208 以前)は補足を archive 最上位に同梱していた。この member は今も受理されるが
   検証も復元もされないので、更新後に backup を取り直す(旧形式を読む分岐は持たない)。
 

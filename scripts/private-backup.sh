@@ -128,13 +128,17 @@ path_absence_confirmed() {
 # absence_confirmed PATH — the same check for any PATH, such as the local
 # supplement, which --local-supplement may name anywhere (#421). The parent
 # is PATH up to its last slash: "/" for a top-level absolute path, the
-# current directory for a PATH without a slash.
+# current directory for a PATH without a slash. CDPATH is cleared: an
+# inherited one would send a relative parent to a same-named directory
+# elsewhere (Codex review, PR #426). Only the parent is checked, so a caller
+# rules out a symlink at PATH first (one whose target cannot be reached is
+# not absent).
 absence_confirmed() {
   local parent=. err
   case "$1" in
     */*) parent="${1%/*}"; [[ -n "$parent" ]] || parent=/ ;;
   esac
-  err="$( (LC_ALL=C; cd -- "$parent") 2>&1)" && return 0
+  err="$( (LC_ALL=C; CDPATH=; cd -- "$parent") 2>&1)" && return 0
   case "$err" in
     *": No such file or directory" | *": Not a directory") return 0 ;;
   esac
@@ -407,10 +411,16 @@ cmd_backup() {
   # like a recipients file (a mistyped path dropped them all). Absence must
   # also be certain: under a directory without search permission [[ -f ]] is
   # false for a supplement that exists (#414), and then what is missing
-  # cannot be told, so the backup stops, as it does for an unreadable one.
+  # cannot be told, so the backup stops, as it does for an unreadable one. A
+  # symlink that leads to no regular file (dangling, or through such a
+  # directory; its own parent is searchable) stops it too (Codex review, PR
+  # #426).
   local supplement_present=0
   if [[ -f "$local_supplement" ]]; then
     supplement_present=1
+  elif [[ -L "$local_supplement" ]]; then
+    fail "local supplement is a symlink that leads to no regular file (dangling, or through a directory without search permission): $local_supplement"
+    return 1
   elif ! absence_confirmed "$local_supplement"; then
     fail "cannot tell whether the local supplement exists, a parent directory is not searchable: $local_supplement"
     return 1
