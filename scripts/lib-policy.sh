@@ -407,8 +407,9 @@ profile_environment_kind() {
 }
 
 # Succeed when the node a yq path selects is absent / null or a sequence of
-# strings without control characters (#412, #422). profile_modules and
-# module_paths enumerate with `[]?`, which yields nothing for a string, bool
+# strings without control characters (#412, #422). profile_modules,
+# module_paths and capability_allowed_values (#428) enumerate with `[]?`,
+# which yields nothing for a string, bool
 # or number and the values of a map, and print one line per element, so an
 # element holding a newline would read as two; validate-policy checks the
 # shape before trusting the listing. Control characters are Unicode's Cc
@@ -420,6 +421,30 @@ profile_environment_kind() {
 yaml_string_list() {
   local shape
   shape="$(yq "$1"' | ((tag == "!!null") or ((tag == "!!seq") and (([.[] | select(tag != "!!str")] | length) == 0) and (([.[] | select(tag == "!!str") | select(test("\\p{Cc}"))] | length) == 0)))' "$2")" || return 2
+  [[ "$shape" == "true" ]]
+}
+
+# The same check for the keys of a map (#428): known_profiles,
+# known_modules, known_capabilities and profile_capabilities print `keys`
+# one per line, and module_requires one line per key, so a key holding a
+# newline would read as two names. Succeed when the node is absent / null or
+# a map whose keys are strings without control characters; returns 1 for any
+# other shape and 2 when yq cannot read the file. Args as yaml_string_list.
+yaml_name_map() {
+  local shape
+  shape="$(yq "$1"' | ((tag == "!!null") or ((tag == "!!map") and (([keys | .[] | select(tag != "!!str")] | length) == 0) and (([keys | .[] | select(tag == "!!str") | select(test("\\p{Cc}"))] | length) == 0)))' "$2")" || return 2
+  [[ "$shape" == "true" ]]
+}
+
+# Succeed when no string value of the map a yq path selects holds a control
+# character (#428): module_requires prints each condition as one
+# `capability value` line, so a value holding a newline would read as two
+# conditions while .chezmoiignore compares the value itself. Other types are
+# left to the per-condition checks. Absent / null passes; returns 2 when yq
+# cannot read the file. Args as yaml_string_list.
+yaml_plain_string_values() {
+  local shape
+  shape="$(yq "$1"' | (([.[] | select(tag == "!!str") | select(test("\\p{Cc}"))] | length) == 0)' "$2")" || return 2
   [[ "$shape" == "true" ]]
 }
 

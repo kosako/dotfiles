@@ -51,11 +51,15 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 
 検証内容:
 
+- profile・module・capability の名前(`.chezmoidata` の各 map の key)が、制御文字を含まない文字列であること
+  (名前は 1 行に 1 つで列挙するので、改行を含む key は 2 つの名前として検証されてしまう。読み取りの失敗も fail、#428)。
+  `--list-profiles` も profile の名前を検査してから一覧を出す。
 - profile が存在すること。
 - `environmentKind` が許可された値であること。
 - profile の `modules:` が module 名の list であること(省略・null は module なし。文字列・bool・数値・map・
   文字列でない要素・制御文字(改行など)を含む要素は fail。型の読み取りと列挙の失敗も fail、#412・#422)。profile が参照する
   module が定義済みであること。
+- profile の `capabilities:` が、capability 名(制御文字を含まない文字列)を key に持つ map であること(#428)。
 - profile が参照する capability が定義済みであること。
 - すべての定義済み capability が profile に存在すること。
 - boolean capability が `true` または `false` であること。
@@ -70,6 +74,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
   同一 path を複数 module が宣言していないこと。
 - module の `requires:` は map であること。省略・null・空の map は条件なしとし、それ以外の型は fail。
   各 capability が定義済みで、値が schema の型に適合すること。条件の列挙に失敗した場合も fail。
+  key と文字列の値は制御文字を含まないこと(条件は 1 行に 1 つで列挙するので、改行を含む値は 2 つの条件として
+  検証され、値そのものを比べる `.chezmoiignore` とずれる。#428)。
 - `requires:` に条件があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
 - backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
@@ -78,6 +84,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
   `backup-paths entry invalid` で fail する(#246。local 補足の backup 時読み取りも同じ検査)。
 - capability registry(#151): 全 capability が `implemented: true|false` を持ち、
   `implemented: false` は doctor.sh が言及していること(source-text の静的 proxy)。
+  `values:` は省略・null か、制御文字を含まない文字列の list であること(map は値を、改行を含む値は 2 つの値を
+  許可値として列挙していた。#428)。
 
 ## preflight.sh
 
@@ -313,6 +321,10 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   いた(`.chezmoiignore` は要素そのものを `has` で比べるので、どちらも有効にならない)。正しい 2 要素を改行で 1 要素に
   つないだ modules と paths、tab を含む module 名、C1 の制御文字(U+009B)を含む path を拒否し、非 ASCII の名前は型の検査を
   通すこと(制御文字は Unicode の Cc。ASCII の `[[:cntrl:]]` は C1 を通していた)。
+- 名前・条件・許可値の中の制御文字(#428): 正しい名前や値を改行でつないだ module の `requires:` の値と key、enum の
+  `values:`、module・capability・profile の名前(`--list-profiles` も)を拒否し、C1 を含む `requires:` の値、tab を含む
+  `values:` の要素と profile の capability 名、map の `values:`、list の `capabilities:` を拒否すること。非 ASCII の key と
+  値は通し、文字列でない key は拒否すること。各読み取りの失敗も fail にすること。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar
