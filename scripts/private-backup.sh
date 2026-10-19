@@ -130,7 +130,9 @@ path_absence_confirmed() {
 # is PATH up to its last slash: "/" for a top-level absolute path, the
 # current directory for a PATH without a slash. CDPATH is cleared: an
 # inherited one would send a relative parent to a same-named directory
-# elsewhere (Codex review, PR #426). Only the parent is checked, so a caller
+# elsewhere. cd -P resolves the parent as the kernel does for the file: the
+# default logical cd drops "link/.." as text and would check another
+# directory (Codex review, PR #426). Only the parent is checked, so a caller
 # rules out a symlink at PATH first (one whose target cannot be reached is
 # not absent).
 absence_confirmed() {
@@ -138,7 +140,7 @@ absence_confirmed() {
   case "$1" in
     */*) parent="${1%/*}"; [[ -n "$parent" ]] || parent=/ ;;
   esac
-  err="$( (LC_ALL=C; CDPATH=; cd -- "$parent") 2>&1)" && return 0
+  err="$( (LC_ALL=C; CDPATH=; cd -P -- "$parent") 2>&1)" && return 0
   case "$err" in
     *": No such file or directory" | *": Not a directory") return 0 ;;
   esac

@@ -2545,8 +2545,8 @@ done
 #     supplement", so the private paths it lists were missing from an archive
 #     recorded as complete; a mistyped --local-supplement did the same. A
 #     symlink that leads to no regular file stops it too, and an inherited
-#     CDPATH does not redirect the check of a relative path (Codex review,
-#     PR #426). Every refusal is observed through a mktemp spy (no call: it
+#     CDPATH does not redirect the check of a relative path, nor does
+#     "symlink/.." read as text (Codex review, PR #426). Every refusal is observed through a mktemp spy (no call: it
 #     stops before the temps) and keeps the marker as it was. The controls
 #     back up with the default supplement present, with it absent (the
 #     normal state without one) and with an existing named one. The runs
@@ -2554,11 +2554,14 @@ done
 #     (root), as in case 22.
 sx_home="$fixture_home/supplement-check-home"
 sx_fakebin="$fixture_home/supplement-check-fakebin"
-mkdir -p "$sx_home/.config/dotfiles" "$sx_home/lists" "$sx_home/decoy/lists" "$sx_fakebin"
+mkdir -p "$sx_home/.config/dotfiles" "$sx_home/lists" "$sx_home/decoy/lists" "$sx_fakebin" \
+  "$sx_home/tree/child" "$sx_home/tree/private" "$sx_home/private"
 printf 'fixture\n' > "$sx_home/.zshrc.local"
 printf 'config\n' > "$sx_home/private.conf"
 printf 'backup_paths:\n  - { path: "private.conf", type: file }\n' > "$sx_home/.config/dotfiles/backup-paths.local"
 cp "$sx_home/.config/dotfiles/backup-paths.local" "$sx_home/lists/named.local"
+cp "$sx_home/.config/dotfiles/backup-paths.local" "$sx_home/tree/private/list.local"
+ln -s tree/child "$sx_home/link-to-child"
 sx_default="$sx_home/.config/dotfiles/backup-paths.local"
 sx_marker="$sx_home/.local/state/dotfiles/private-backup.json"
 sx_real_mktemp="$(command -v mktemp)"
@@ -2640,7 +2643,7 @@ rm -f "$sx_default"
 ln -s ../../lists/named.local "$sx_default"
 ln -s lists/named.local "$sx_home/link-to-locked.local"
 mv "$sx_home/lists/default.local" "$sx_default.real"
-chmod 600 "$sx_home/lists"
+chmod 600 "$sx_home/lists" "$sx_home/tree/private"
 if [[ ! -e "$sx_home/lists/named.local" ]]; then
   sx_backup locked-link-default
   if sx_refused locked-link-default 1 "local supplement is a symlink that leads to no regular file (dangling, or through a directory without search permission): $sx_default"; then
@@ -2674,6 +2677,16 @@ if [[ ! -e "$sx_home/lists/named.local" ]]; then
     printf '%s\n' "$sx_out" >&2
     miss "a relative --local-supplement was checked through CDPATH (rc=$sx_rc)"
   fi
+  # "link-to-child/.." is tree/ for the kernel, so the file is
+  # tree/private/list.local (not searchable); a logical cd would take the
+  # text and check the searchable private/ instead (Codex review, PR #426).
+  sx_backup locked-dotdot --local-supplement "$sx_home/link-to-child/../private/list.local"
+  if sx_refused locked-dotdot 1 "cannot tell whether the local supplement exists, a parent directory is not searchable: $sx_home/link-to-child/../private/list.local"; then
+    pass "a --local-supplement through a symlink and .. into a directory without search permission stops the backup (exit 1), the parent resolved as for the file"
+  else
+    printf '%s\n' "$sx_out" >&2
+    miss "a --local-supplement through a symlink and .. had its parent resolved as text (rc=$sx_rc)"
+  fi
   rm -f "$sx_default"
   mv "$sx_default.real" "$sx_default"
   chmod 600 "$sx_home/.config/dotfiles"
@@ -2687,7 +2700,7 @@ if [[ ! -e "$sx_home/lists/named.local" ]]; then
 else
   warn "a directory without search permission is still searchable here (root?); unsearchable-supplement cases skipped"
 fi
-chmod 700 "$sx_home/.config/dotfiles" "$sx_home/lists" # so the EXIT trap can clean up
+chmod 700 "$sx_home/.config/dotfiles" "$sx_home/lists" "$sx_home/tree/private" # so the EXIT trap can clean up
 
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
