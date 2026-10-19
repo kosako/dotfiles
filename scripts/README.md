@@ -452,10 +452,12 @@ query だけを実機で実行する(書き込みはしない)。
   ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
   stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・
   hang・stdin の mode を持つ。
-- 1Password の respawn(#423): fake op が期限を越える `sleep` の後に次の command(一意の `sleep 3000.<数字>`)を起動する。
-  PATH 先頭の `pgrep` の shim が fake op の子の列挙を、本物の列挙を取ってから「fake op が止まった」か「次の command が起動した」
-  まで返さないので、動いている process の子を先に殺す後始末(以前の `kill_process_tree`)は timing に依らず次の command を
-  残して落ちる。doctor の後に次の command が残らず、「未確認」の warn が出て、`kill_tree:` の warn が無いこと。
+- 1Password の respawn(#423): fake op は、自分の子の列挙が取られるまで待ってから次の command(一意の
+  `sleep 3000.<数字>`)を起動する。PATH 先頭の `pgrep` の shim が fake op の子の本物の列挙を取り、取った印を置いてから、
+  「fake op が止まった」か「次の command が起動した」まで答えを返さない。次の command は列挙より前には起動できず、列挙は
+  起動の後にしか返らないので、動いている process の子を先に殺す後始末(以前の `kill_process_tree`)は timing に依らず次の
+  command を残して落ちる。shim の待ちが「止まった」で終わり(timeout は fail)、doctor の後に次の command が残らず、
+  「未確認」の warn が出て、`kill_tree:` の warn が無いこと。
 - Git identity contexts(#202 / #241): identity file の状態(missing / empty / name-only / email-only / complete /
   parse 不能 / 明示的な空値 / 値の無い key(`=` なし))ごとに、missing と partial は action(手順に file path)、
   complete は ok、parse 不能は warn、値の無い key は「git が identity 全体を拒否する」別の action になること
