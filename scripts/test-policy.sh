@@ -427,6 +427,131 @@ expect_read_failure "module paths shape" '.modules[strenv(m)].paths | ' \
 expect_read_failure "module paths listing" '.modules[strenv(m)].paths[]?' \
   "cannot read the paths of module claude-settings"
 
+# The keys of the profile, module and capability maps, the keys and values of
+# a module's requires, and an enum's values are also listed one per line
+# (#428). A newline in one of them read as two names or conditions, and each
+# case below passed before the check (the joined name stands for names or
+# values that exist); the C1 and tab cases have no such twin and failed for
+# another reason, so they pin the message.
+make_fixture
+V='"enforce\ncorepackMode report"' yq -i '.modules["supply-chain-npm"].requires.npmHardeningMode = env(V)' \
+  "$fixture/.chezmoidata/modules.yaml"
+run_fail_contains \
+  "rejects a module requires value holding a newline" \
+  "module requires must map capability names to values without control characters: supply-chain-npm" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+V='"enforce\u009b"' yq -i '.modules["supply-chain-npm"].requires.npmHardeningMode = env(V)' \
+  "$fixture/.chezmoidata/modules.yaml"
+run_fail_contains \
+  "rejects a module requires value holding a C1 control character" \
+  "module requires must map capability names to values without control characters: supply-chain-npm" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+V='{"corepackMode report\nnpmHardeningMode": enforce}' yq -i '.modules["supply-chain-npm"].requires = env(V)' \
+  "$fixture/.chezmoidata/modules.yaml"
+run_fail_contains \
+  "rejects a module requires key holding a newline" \
+  "module requires must map capability names to values without control characters: supply-chain-npm" \
+  "$fixture/scripts/validate-policy.sh" personal
+# A map under values: listed its values as the allowed ones, the shape hole
+# #412 closed for modules and paths.
+for bad_values in '[off, "report\nenforce"]' '{a: off, b: report, c: enforce}' '[off, "report\tx", enforce]'; do
+  make_fixture
+  V="$bad_values" yq -i '.capabilities.npmHardeningMode.values = env(V)' \
+    "$fixture/.chezmoidata/capabilities.schema.yaml"
+  run_fail_contains \
+    "rejects capability values=$bad_values" \
+    "capability registry: npmHardeningMode values must be a list of strings without control characters" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+make_fixture
+yq -i '.modules["base\nzz-extra"] = .modules.base' "$fixture/.chezmoidata/modules.yaml"
+run_fail_contains \
+  "rejects a module name holding a newline" \
+  "modules must be a map keyed by names (strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+yq -i '.capabilities["corepackMode\nnpmHardeningMode"] = .capabilities.corepackMode' \
+  "$fixture/.chezmoidata/capabilities.schema.yaml"
+run_fail_contains \
+  "rejects a capability name holding a newline" \
+  "capabilities must be a map keyed by names (strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+yq -i '.profiles["work\npersonal"] = .profiles.work' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile name holding a newline" \
+  "profiles must be a map keyed by names (strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" --all
+run_fail_contains \
+  "--list-profiles refuses a profile name holding a newline" \
+  "profiles must be a map keyed by names (strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" --list-profiles
+make_fixture
+V='"corepackMode\tzz"' yq -i '.profiles.personal.capabilities[env(V)] = "report"' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects a profile capability name holding a tab" \
+  "profile capabilities must be a map keyed by capability names (strings without control characters): personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+# A profile value is read through a command substitution, which drops a
+# trailing newline, so "enforce\n" passed as enforce (Codex review, PR #429).
+for bad_value in '"enforce\n"' '"enforce\u009b"'; do
+  make_fixture
+  V="$bad_value" yq -i '.profiles.personal.capabilities.npmHardeningMode = env(V)' "$fixture/.chezmoidata/profiles.yaml"
+  run_fail_contains \
+    "rejects a profile capability value $bad_value" \
+    "profile capability values must not hold control characters: personal" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+make_fixture
+yq -i '.profiles.personal.capabilities = ["installPackages"]' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects profile capabilities that are a list" \
+  "profile capabilities must be a map keyed by capability names (strings without control characters): personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+V='{"ü-名前": "値", "base": true, "n": 1}' yq -n '.map = env(V)' > "$fixture/non-ascii-map.yaml"
+run_ok "yaml_name_map and yaml_plain_string_values take non-ASCII keys and values" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" FIXTURE_YAML="$fixture/non-ascii-map.yaml" bash -c '
+    source "$FIXTURE_LIB"
+    yaml_name_map ".map" "$FIXTURE_YAML" && yaml_plain_string_values ".map" "$FIXTURE_YAML"
+  '
+# A key that is not a string (a number, a boolean) lists as text that names
+# nothing chezmoi reads by that name; the shape check refuses it with 1.
+V='{1: a, true: b}' yq -n '.map = env(V)' > "$fixture/non-string-keys.yaml"
+run_ok "yaml_name_map refuses keys that are not strings" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" FIXTURE_YAML="$fixture/non-string-keys.yaml" bash -c '
+    source "$FIXTURE_LIB"
+    rc=0
+    yaml_name_map ".map" "$FIXTURE_YAML" || rc=$?
+    [[ "$rc" -eq 1 ]]
+  '
+expect_read_failure "module requires keys" '.modules[strenv(m)].requires | ((tag' \
+  "cannot read the requires of module supply-chain-npm"
+expect_read_failure "module requires values" '.modules[strenv(m)].requires | (([' \
+  "cannot read the requires of module supply-chain-npm"
+expect_read_failure "capability values" '.capabilities[strenv(c)].values | ' \
+  "cannot read the values of capability npmHardeningMode"
+expect_read_failure "profile capabilities keys" '.profiles[strenv(p)].capabilities | ((tag' \
+  "cannot read the capabilities of profile personal"
+expect_read_failure "profile capability values" '.profiles[strenv(p)].capabilities | (([' \
+  "cannot read the capability values of profile personal"
+# The top-level reads are picked by the start of the expression: the
+# profile-level reads of modules: and capabilities: hold the same text after
+# a prefix, and failing them too would fail the run another way.
+# expect_name_read_failure NAME MAP MESSAGE — the fixture yq fails only on an
+# expression that starts with "MAP | ((".
+expect_name_read_failure() {
+  make_fixture
+  printf "yq() {\n  case \"\$1\" in\n    '%s'*) return 1 ;;\n  esac\n  command yq \"\$@\"\n}\n" "$2 | ((" \
+    >> "$fixture/scripts/lib-policy.sh"
+  run_fail_contains "rejects a failed read of the $1" "$3" "$fixture/scripts/validate-policy.sh" personal
+}
+expect_name_read_failure "profile names" .profiles "cannot read the profiles in "
+expect_name_read_failure "module names" .modules "cannot read the modules in "
+expect_name_read_failure "capability names" .capabilities "cannot read the capabilities in "
+
 # Require both the YAML boolean type and canonical lowercase spelling (#206).
 # Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
 # comparisons in registry disclosure and environmentKind checks.

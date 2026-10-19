@@ -36,11 +36,26 @@ fail_duplicates() {
   [[ "$found" -eq 0 ]]
 }
 
+# The profiles, modules and capabilities are listed by their keys, one per
+# line, so a key holding a newline would be validated as two names while
+# chezmoi reads the one real key (#428). Checked before anything is listed.
+# Args: label yq-path file.
+check_name_map() {
+  local rc=0
+  yaml_name_map "$2" "$3" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    2) fail "cannot read the $1 in $3" ;;
+    *) fail "$1 must be a map keyed by names (strings without control characters): $3" ;;
+  esac
+  return 1
+}
+
 # Modules that declare paths drive .chezmoiignore generation, so their
 # declarations must be valid on their own (independent of any profile).
 validate_modules() {
   local status=0
-  local module path capability value type paths_count paths_shape paths_list requires_count requires
+  local module path capability value type paths_count paths_shape paths_list requires_count requires requires_shape
   # Collected in a variable, not a temp file, so an interrupt leaves nothing
   # behind (#329; the same holds for the lists in validate_packages and
   # validate_backup_paths).
@@ -102,6 +117,28 @@ validate_modules() {
       status=1
       continue
     fi
+    # The listing has one `capability value` line per condition, so a key or
+    # a value holding a newline would read as two conditions, each of which
+    # could pass, while .chezmoiignore compares the value itself (#428).
+    # module_requires has already refused a requires that is not a map.
+    requires_shape=0
+    m="$module" yaml_name_map '.modules[strenv(m)].requires' "$MODULES_FILE" || requires_shape=$?
+    if [[ "$requires_shape" -eq 0 ]]; then
+      m="$module" yaml_plain_string_values '.modules[strenv(m)].requires' "$MODULES_FILE" || requires_shape=$?
+    fi
+    case "$requires_shape" in
+      0) ;;
+      2)
+        fail "cannot read the requires of module $module"
+        status=1
+        continue
+        ;;
+      *)
+        fail "module requires must map capability names to values without control characters: $module"
+        status=1
+        continue
+        ;;
+    esac
     requires_count=0
     while read -r capability value; do
       [[ -z "$capability" ]] && continue
@@ -172,10 +209,25 @@ validate_modules() {
 # references. The keep-criterion for implemented: false entries is in
 # docs/policy-model.md.
 validate_capability_registry() {
-  local status=0 capability impl
+  local status=0 capability impl values_shape
   local doctor_script="$DOTFILES_ROOT/scripts/doctor.sh"
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
+    # An enum's values are listed one per line (capability_allowed_values),
+    # so a value holding a newline would allow two values (#428).
+    values_shape=0
+    c="$capability" yaml_string_list '.capabilities[strenv(c)].values' "$CAPABILITIES_FILE" || values_shape=$?
+    case "$values_shape" in
+      0) ;;
+      2)
+        fail "cannot read the values of capability $capability"
+        status=1
+        ;;
+      *)
+        fail "capability registry: $capability values must be a list of strings without control characters"
+        status=1
+        ;;
+    esac
     impl="$(capability_implemented "$capability")"
     if ! c="$capability" yq -e \
       '.capabilities[strenv(c)].implemented | ((tag == "!!bool") and (. == true or . == false))' \
@@ -360,7 +412,7 @@ validate_backup_paths() {
 validate_profile() {
   local profile="$1"
   local status=0
-  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape modules_list
+  local environment_kind module capability value type forbidden ek_violations ek_list modules_shape modules_list caps_shape cap_values_shape
 
   if ! profile_exists "$profile"; then
     fail "unknown profile: $profile"
@@ -411,18 +463,54 @@ validate_profile() {
       ;;
   esac
 
-  while IFS= read -r capability; do
-    [[ -z "$capability" ]] && continue
-    if grep -Fxq -- "$capability" <<< "$known_caps_list"; then
-      ok "capability allowed: $capability"
-    else
-      fail "unknown capability in $profile: $capability"
-      status=1
-    fi
-  done < <(profile_capabilities "$profile")
+  # The capabilities are listed by key, so a key holding a newline would read
+  # as two names (#428). The value checks below look each known capability
+  # up by name and run either way.
+  caps_shape=0
+  p="$profile" yaml_name_map '.profiles[strenv(p)].capabilities' "$PROFILES_FILE" || caps_shape=$?
+  case "$caps_shape" in
+    0)
+      while IFS= read -r capability; do
+        [[ -z "$capability" ]] && continue
+        if grep -Fxq -- "$capability" <<< "$known_caps_list"; then
+          ok "capability allowed: $capability"
+        else
+          fail "unknown capability in $profile: $capability"
+          status=1
+        fi
+      done < <(profile_capabilities "$profile")
 
-  fail_duplicates "duplicate capability in $profile: " \
-    < <(profile_capabilities "$profile" | sort | uniq -d) || status=1
+      fail_duplicates "duplicate capability in $profile: " \
+        < <(profile_capabilities "$profile" | sort | uniq -d) || status=1
+      ;;
+    2)
+      fail "cannot read the capabilities of profile $profile"
+      status=1
+      ;;
+    *)
+      fail "profile capabilities must be a map keyed by capability names (strings without control characters): $profile"
+      status=1
+      ;;
+  esac
+
+  # The value checks below read each value through a command substitution,
+  # which drops a trailing newline, so "enforce\n" would pass as enforce while
+  # chezmoi compares the value itself (#428, Codex review PR #429).
+  if [[ "$caps_shape" -eq 0 ]]; then
+    cap_values_shape=0
+    p="$profile" yaml_plain_string_values '.profiles[strenv(p)].capabilities' "$PROFILES_FILE" || cap_values_shape=$?
+    case "$cap_values_shape" in
+      0) ;;
+      2)
+        fail "cannot read the capability values of profile $profile"
+        status=1
+        ;;
+      *)
+        fail "profile capability values must not hold control characters: $profile"
+        status=1
+        ;;
+    esac
+  fi
 
   if [[ "$modules_shape" -eq 0 ]]; then
     fail_duplicates "duplicate module in $profile: " \
@@ -549,6 +637,10 @@ esac
 require_yq || exit 1
 require_data_files || exit 1
 
+# The profile names are listed by --list-profiles and --all; the module and
+# capability names feed every check below (#428).
+check_name_map profiles '.profiles' "$PROFILES_FILE" || exit 1
+
 case "$command" in
   --list-profiles)
     profiles="$(known_profiles)"
@@ -561,6 +653,11 @@ case "$command" in
     exit 0
     ;;
 esac
+
+names_status=0
+check_name_map modules '.modules' "$MODULES_FILE" || names_status=1
+check_name_map capabilities '.capabilities' "$CAPABILITIES_FILE" || names_status=1
+[[ "$names_status" -eq 0 ]] || exit 1
 
 # The known lists are held in variables, not temp files behind an EXIT
 # trap: bash 3.2 runs no EXIT trap when Ctrl-C ends the script, so such
