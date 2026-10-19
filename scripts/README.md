@@ -582,7 +582,8 @@ environmentKind が禁じる capability を true にした profile も、その�
                             [--apply] [--skip-existing] [--target-home DIR]
 ```
 
-- **backup**: baseline(`.chezmoidata/backup-paths.yaml`)+ local 補足を解決 → 0700 temp に
+- **backup**: baseline(`.chezmoidata/backup-paths.yaml`)+ local 補足を解決(既定の場所に無い補足は補足なし。
+  `--local-supplement` の path に無ければ exit 2、在るかを確かめられなければ exit 1 で、どちらも何も書かない。#421)→ 0700 temp に
   staging(補足リスト自体も canonical path `.config/dotfiles/backup-paths.local` の payload として
   先に stage、#208)→ machine-neutral manifest(時刻 / tool version / 各 file の type・mode・sha256。
   絶対 home path・host 名は入れない)生成 → **self-check**(verify / restore と同じ `check_manifest`
@@ -716,6 +717,13 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 - archive の rename の後の失敗(#414): PATH 先頭の fake `rmdir` / `mv` で、partial dir の削除の失敗・marker の rename の失敗・
   rename の直前に marker の path が directory に変わる場合を作り、新しい archive が残り(verify が通る)、前回の marker が
   残る(directory に変わった場合は拒否して中を空にする)、exit 非 0 で、一時の file と dir が残らない(run ごとの TMPDIR が空)ことを確かめる。
+- local 補足を確かめられないとき(#421): 検索の権限が無い directory の下の補足(既定の場所と `--local-supplement`、
+  相対 path は検索できる同名の directory を持つ `CDPATH` を継承させても)と、regular file に辿り着かない補足の symlink
+  (dangling、検索できない directory の中への link。既定の場所と `--local-supplement`)は exit 1、`--local-supplement` の
+  path に file が無ければ exit 2 で、どれも `mktemp` を呼ばず(PATH 先頭の spy で観測)、archive を書かず、marker も
+  変えないこと(以前は「no local supplement」で続け、補足だけが宣言する file が欠けた archive を complete と記録していた)。対照として、
+  既定の補足と在る `--local-supplement` は読まれて補足の宣言する file が archive に入り、既定の場所に補足が無いときは
+  補足なしで続けて complete のまま。権限の効かない root では検索の権限の case を飛ばす。
 
 ## test-secrets-gate.sh
 

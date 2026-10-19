@@ -122,11 +122,25 @@ stage_file() {
 # there. REL is a validated relative path (backup_path_is_safe). Returns 0
 # when absence is confirmed.
 path_absence_confirmed() {
-  local parent="$HOME" err
+  absence_confirmed "$HOME/$1"
+}
+
+# absence_confirmed PATH — the same check for any PATH, such as the local
+# supplement, which --local-supplement may name anywhere (#421). The parent
+# is PATH up to its last slash: "/" for a top-level absolute path, the
+# current directory for a PATH without a slash. CDPATH is cleared: an
+# inherited one would send a relative parent to a same-named directory
+# elsewhere. cd -P resolves the parent as the kernel does for the file: the
+# default logical cd drops "link/.." as text and would check another
+# directory (Codex review, PR #426). Only the parent is checked, so a caller
+# rules out a symlink at PATH first (one whose target cannot be reached is
+# not absent).
+absence_confirmed() {
+  local parent=. err
   case "$1" in
-    */*) parent="$HOME/${1%/*}" ;;
+    */*) parent="${1%/*}"; [[ -n "$parent" ]] || parent=/ ;;
   esac
-  err="$( (LC_ALL=C; cd -- "$parent") 2>&1)" && return 0
+  err="$( (LC_ALL=C; CDPATH=; cd -P -- "$parent") 2>&1)" && return 0
   case "$err" in
     *": No such file or directory" | *": Not a directory") return 0 ;;
   esac
@@ -346,13 +360,13 @@ collect_declared() {
 
 cmd_backup() {
   local out="" recipient="" recipients_file="" local_supplement="$DEFAULT_LOCAL_SUPPLEMENT"
-  local assume_yes=0
+  local assume_yes=0 supplement_named=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --out) require_option_value --out "$#" "${2:-}" || return 2; out="$2"; shift 2 ;;
       --recipient) require_option_value --recipient "$#" "${2:-}" || return 2; recipient="$2"; shift 2 ;;
       --recipients-file) require_option_value --recipients-file "$#" "${2:-}" || return 2; recipients_file="$2"; shift 2 ;;
-      --local-supplement) require_option_value --local-supplement "$#" "${2:-}" || return 2; local_supplement="$2"; shift 2 ;;
+      --local-supplement) require_option_value --local-supplement "$#" "${2:-}" || return 2; local_supplement="$2"; supplement_named=1; shift 2 ;;
       --yes) assume_yes=1; shift ;;
       *) fail "unknown backup argument: $1"; usage; return 2 ;;
     esac
@@ -393,6 +407,30 @@ cmd_backup() {
     return 2
   fi
 
+  # The local supplement lists the private paths, so a backup without it
+  # misses every one of them (#421). None at the default location is normal
+  # (no supplement kept); one named with --local-supplement must be there,
+  # like a recipients file (a mistyped path dropped them all). Absence must
+  # also be certain: under a directory without search permission [[ -f ]] is
+  # false for a supplement that exists (#414), and then what is missing
+  # cannot be told, so the backup stops, as it does for an unreadable one. A
+  # symlink that leads to no regular file (dangling, or through such a
+  # directory; its own parent is searchable) stops it too (Codex review, PR
+  # #426).
+  local supplement_present=0
+  if [[ -f "$local_supplement" ]]; then
+    supplement_present=1
+  elif [[ -L "$local_supplement" ]]; then
+    fail "local supplement is a symlink that leads to no regular file (dangling, or through a directory without search permission): $local_supplement"
+    return 1
+  elif ! absence_confirmed "$local_supplement"; then
+    fail "cannot tell whether the local supplement exists, a parent directory is not searchable: $local_supplement"
+    return 1
+  elif [[ "$supplement_named" -eq 1 ]]; then
+    fail "local supplement not found or not a regular file: $local_supplement"
+    return 2
+  fi
+
   section "private-backup: resolve targets"
 
   # Script-global; cleanup_temps removes them (the 0700 staging holds
@@ -408,7 +446,7 @@ cmd_backup() {
   chmod 700 "$staging"
 
   collect_declared "$BACKUP_PATHS_FILE" baseline "$declared" || return 1
-  if [[ -f "$local_supplement" ]]; then
+  if [[ "$supplement_present" -eq 1 ]]; then
     collect_declared "$local_supplement" local "$declared" || return 1
     item "local supplement present (captured as $SUPPLEMENT_HOME_PATH; entries not listed)"
   else
@@ -442,7 +480,7 @@ cmd_backup() {
   # declaration of that same path is deduplicated below (this copy wins; no
   # second entry or file). The --local-supplement source path is never
   # recorded.
-  if [[ -f "$local_supplement" ]]; then
+  if [[ "$supplement_present" -eq 1 ]]; then
     printf '%s\n' "$SUPPLEMENT_HOME_PATH" >> "$seen_paths"
     P="$SUPPLEMENT_HOME_PATH" \
       yq -i -p=json -o=json '.entries += [{"path": strenv(P), "type": "file", "category": "supplement", "origin": "supplement"}]' "$manifest"
