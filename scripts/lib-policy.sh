@@ -449,17 +449,19 @@ yaml_plain_string_values() {
 }
 
 # Succeed when every entry of the map a yq path selects reads back unchanged
-# through `read -r key value` (#430): no key holds whitespace and no string
-# value starts or ends with it. module_requires prints `capability value`
-# lines; `read` splits each at its first run of whitespace (which takes in
-# any whitespace ending the key or starting the value) and drops what pads
-# the line, so "npmHardeningMode enforce": "" or "enforce " would read as
-# npmHardeningMode=enforce while .chezmoiignore compares the key and the
-# value themselves. Absent / null passes; returns 2 when yq cannot read the
-# file. Args as yaml_string_list.
+# through `read -r key value` (#430): every key is non-empty without
+# whitespace and no string value starts or ends with whitespace.
+# module_requires prints `capability value` lines; `read` splits each at its
+# first run of whitespace (which takes in any whitespace ending the key or
+# starting the value) and drops what pads the line, so
+# "npmHardeningMode enforce": "", "": "npmHardeningMode enforce" or
+# "enforce " would read as npmHardeningMode=enforce, and "": "" as no
+# condition, while .chezmoiignore compares the key and the value themselves.
+# Absent / null passes; returns 2 when yq cannot read the file. Args as
+# yaml_string_list.
 yaml_read_safe_entries() {
   local shape
-  shape="$(yq "$1"' | (([to_entries | .[] | ((.key | select(test("\\s"))), (.value | select(tag == "!!str") | select(test("^\\s|\\s$"))))] | length) == 0)' "$2")" || return 2
+  shape="$(yq "$1"' | (([to_entries | .[] | ((.key | select(test("^$|\\s"))), (.value | select(tag == "!!str") | select(test("^\\s|\\s$"))))] | length) == 0)' "$2")" || return 2
   [[ "$shape" == "true" ]]
 }
 

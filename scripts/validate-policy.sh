@@ -140,8 +140,8 @@ validate_modules() {
         ;;
     esac
     # Each line also splits at its first run of whitespace, and `read` drops
-    # what pads it, so a name holding whitespace or a padded value would be
-    # validated as another condition (#430).
+    # what pads it, so an empty name, a name holding whitespace or a padded
+    # value would be validated as another condition, or as none (#430).
     requires_padding=0
     m="$module" yaml_read_safe_entries '.modules[strenv(m)].requires' "$MODULES_FILE" || requires_padding=$?
     case "$requires_padding" in
@@ -152,7 +152,7 @@ validate_modules() {
         continue
         ;;
       *)
-        fail "module requires must map capability names without whitespace to values without leading or trailing whitespace: $module"
+        fail "module requires must map non-empty capability names without whitespace to values without leading or trailing whitespace: $module"
         status=1
         continue
         ;;

@@ -76,10 +76,10 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 - module の `requires:` は map であること。省略・null・空の map は条件なしとし、それ以外の型は fail。
   各 capability が定義済みで、値が schema の型に適合すること。条件の列挙に失敗した場合も fail。
   key と文字列の値は制御文字を含まないこと(条件は 1 行に 1 つで列挙するので、改行を含む値は 2 つの条件として
-  検証され、値そのものを比べる `.chezmoiignore` とずれる。#428)。key は空白を含まず、文字列の値は前後に空白を
-  持たないこと(各行は最初の空白で key と値に分かれ、前後の空白は読み取りで落ちるので、`"npmHardeningMode enforce": ""`
-  や `"enforce "` が `npmHardeningMode=enforce` として通り、`.chezmoiignore` では有効にならない。値の途中の空白は
-  そのまま読める。#430)。
+  検証され、値そのものを比べる `.chezmoiignore` とずれる。#428)。key は空でなく空白を含まず、文字列の値は前後に
+  空白を持たないこと(各行は最初の空白で key と値に分かれ、前後の空白は読み取りで落ちるので、
+  `"npmHardeningMode enforce": ""`・`"": "npmHardeningMode enforce"`・`"enforce "` が `npmHardeningMode=enforce` として、
+  `"": ""` が条件なしとして通り、`.chezmoiignore` では有効にならない。値の途中の空白はそのまま読める。#430)。
 - `requires:` に条件があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
 - backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
@@ -331,8 +331,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   list の `capabilities:` を拒否すること。非 ASCII の key と
   値は通し、文字列でない key は拒否すること。各読み取りの失敗も fail にすること。
 - `requires:` の空白(#430): 値の前後の空白、key の前後の空白、空白を含む key に空の値の組み合わせ
-  (`"npmHardeningMode enforce": ""`)を拒否し、値の途中の空白・文字列でない値・無い map は空白の検査を通すこと。
-  読み取りの失敗も fail にすること。
+  (`"npmHardeningMode enforce": ""`)、空の key(`"": "npmHardeningMode enforce"` と `"": ""`)を拒否し、値の途中の
+  空白・文字列でない値・無い map は空白の検査を通すこと。読み取りの失敗も fail にすること。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar

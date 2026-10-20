@@ -529,7 +529,7 @@ run_ok "yaml_name_map refuses keys that are not strings" \
   '
 expect_read_failure "module requires keys" '.modules[strenv(m)].requires | ((tag' \
   "cannot read the requires of module supply-chain-npm"
-expect_read_failure "module requires values" '.modules[strenv(m)].requires | (([' \
+expect_read_failure "module requires values" '.modules[strenv(m)].requires | (([.[]' \
   "cannot read the requires of module supply-chain-npm"
 expect_read_failure "capability values" '.capabilities[strenv(c)].values | ' \
   "cannot read the values of capability npmHardeningMode"
@@ -553,16 +553,18 @@ expect_name_read_failure "module names" .modules "cannot read the modules in "
 expect_name_read_failure "capability names" .capabilities "cannot read the capabilities in "
 
 # A requires line also splits at its first run of whitespace, and `read`
-# drops what pads it, so each of these passed as npmHardeningMode=enforce
-# while .chezmoiignore, comparing the key and the value themselves, left the
-# module off (#430).
+# drops what pads it, so each of these passed as npmHardeningMode=enforce,
+# or as no condition for "": "", while .chezmoiignore, comparing the key and
+# the value themselves, left the module off (#430; the empty keys from Codex
+# review, PR #432).
 for bad_requires in '{npmHardeningMode: "enforce "}' '{npmHardeningMode: " enforce"}' \
-  '{"npmHardeningMode ": enforce}' '{" npmHardeningMode": enforce}' '{"npmHardeningMode enforce": ""}'; do
+  '{"npmHardeningMode ": enforce}' '{" npmHardeningMode": enforce}' '{"npmHardeningMode enforce": ""}' \
+  '{"": "npmHardeningMode enforce"}' '{"": ""}'; do
   make_fixture
   V="$bad_requires" yq -i '.modules["supply-chain-npm"].requires = env(V)' "$fixture/.chezmoidata/modules.yaml"
   run_fail_contains \
     "rejects module requires=$bad_requires" \
-    "module requires must map capability names without whitespace to values without leading or trailing whitespace: supply-chain-npm" \
+    "module requires must map non-empty capability names without whitespace to values without leading or trailing whitespace: supply-chain-npm" \
     "$fixture/scripts/validate-policy.sh" personal
 done
 # Whitespace inside a value survives the split; non-string values and an
