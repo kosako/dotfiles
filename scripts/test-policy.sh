@@ -552,6 +552,30 @@ expect_name_read_failure "profile names" .profiles "cannot read the profiles in 
 expect_name_read_failure "module names" .modules "cannot read the modules in "
 expect_name_read_failure "capability names" .capabilities "cannot read the capabilities in "
 
+# A requires line also splits at its first run of whitespace, and `read`
+# drops what pads it, so each of these passed as npmHardeningMode=enforce
+# while .chezmoiignore, comparing the key and the value themselves, left the
+# module off (#430).
+for bad_requires in '{npmHardeningMode: "enforce "}' '{npmHardeningMode: " enforce"}' \
+  '{"npmHardeningMode ": enforce}' '{" npmHardeningMode": enforce}' '{"npmHardeningMode enforce": ""}'; do
+  make_fixture
+  V="$bad_requires" yq -i '.modules["supply-chain-npm"].requires = env(V)' "$fixture/.chezmoidata/modules.yaml"
+  run_fail_contains \
+    "rejects module requires=$bad_requires" \
+    "module requires must map capability names without whitespace to values without leading or trailing whitespace: supply-chain-npm" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+# Whitespace inside a value survives the split; non-string values and an
+# absent map have nothing to pad.
+V='{a: "x y", b: true, c: 1}' yq -n '.map = env(V)' > "$fixture/inner-space-map.yaml"
+run_ok "yaml_read_safe_entries takes inner whitespace, non-string values and an absent map" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" FIXTURE_YAML="$fixture/inner-space-map.yaml" bash -c '
+    source "$FIXTURE_LIB"
+    yaml_read_safe_entries ".map" "$FIXTURE_YAML" && yaml_read_safe_entries ".absent" "$FIXTURE_YAML"
+  '
+expect_read_failure "module requires entries" '.modules[strenv(m)].requires | (([to_entries' \
+  "cannot read the requires of module supply-chain-npm"
+
 # Require both the YAML boolean type and canonical lowercase spelling (#206).
 # Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
 # comparisons in registry disclosure and environmentKind checks.

@@ -55,7 +55,7 @@ check_name_map() {
 # declarations must be valid on their own (independent of any profile).
 validate_modules() {
   local status=0
-  local module path capability value type paths_count paths_shape paths_list requires_count requires requires_shape
+  local module path capability value type paths_count paths_shape paths_list requires_count requires requires_shape requires_padding
   # Collected in a variable, not a temp file, so an interrupt leaves nothing
   # behind (#329; the same holds for the lists in validate_packages and
   # validate_backup_paths).
@@ -135,6 +135,24 @@ validate_modules() {
         ;;
       *)
         fail "module requires must map capability names to values without control characters: $module"
+        status=1
+        continue
+        ;;
+    esac
+    # Each line also splits at its first run of whitespace, and `read` drops
+    # what pads it, so a name holding whitespace or a padded value would be
+    # validated as another condition (#430).
+    requires_padding=0
+    m="$module" yaml_read_safe_entries '.modules[strenv(m)].requires' "$MODULES_FILE" || requires_padding=$?
+    case "$requires_padding" in
+      0) ;;
+      2)
+        fail "cannot read the requires of module $module"
+        status=1
+        continue
+        ;;
+      *)
+        fail "module requires must map capability names without whitespace to values without leading or trailing whitespace: $module"
         status=1
         continue
         ;;
