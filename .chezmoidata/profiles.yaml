@@ -108,9 +108,10 @@ profiles:
       # (dispatcher + all three gates, #239 — the dispatcher is FAIL-CLOSED when a gate
       # next to it is missing), so a fresh personal machine can apply before
       # agent-tools exists without bricking git commit; re-apply after sync
-      # arms the gates (PR #197 Codex must). Best-effort guardrail
-      # (--no-verify / repo-local core.hooksPath bypass), not an enforcement
-      # boundary. See docs/git-hook-gates.md.
+      # arms the gates (PR #197 Codex must). Best-effort guardrail (a
+      # repo-local core.hooksPath bypasses it, --no-verify skips all but the
+      # git-identity check in prepare-commit-msg, git am runs none), not an
+      # enforcement boundary. See docs/git-hook-gates.md.
       enableGitHookGates: true
       # #199 (agent-tools#203, hook plan Phase 2): register the two quality-loop
       # lifecycle hooks in BOTH AI homes — PostToolUse (Edit|Write) ->

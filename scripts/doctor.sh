@@ -165,8 +165,9 @@ fi
 # shims in ~/.config/git-hook-gates/hooks exec agent-tools'
 # personal-git-hook-dispatcher (pre-commit -> public-safety gate then
 # git-identity gate, commit-msg -> public-safety gate on the message then AI
-# trailer gate, then chain to the repo's
-# own .git/hooks; every other declared stage only chains, #361), and global
+# trailer gate, pre-merge-commit / prepare-commit-msg -> git-identity gate
+# alone (agent-tools#449), then chain to the repo's own .git/hooks; every
+# other declared stage only chains, #361), and global
 # core.hooksPath points at the shim directory via the unconditional include in
 # the managed ~/.gitconfig. The wiring is a TWO-KEY gate: the capability
 # (intent) AND a complete agent-tools deploy in the destination (readiness;

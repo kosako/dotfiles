@@ -241,7 +241,8 @@ expected_gitconfig="$(printf '%s\n' \
   '# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).' \
   "# Read via the unconditional [include] in ~/.gitconfig. Points every repo's" \
   '# hooks at the managed shim directory; the shims run the personal gates' \
-  '# (pre-commit / commit-msg) and chain to the repo'"'"'s own .git/hooks/<stage>.' \
+  '# (pre-commit / commit-msg, and git-identity alone in pre-merge-commit /' \
+  '# prepare-commit-msg) and chain to the repo'"'"'s own .git/hooks/<stage>.' \
   '# Repo hooks of the stages without a shim (reference-transaction,' \
   '# post-index-change, push-to-checkout, proc-receive, fsmonitor-watchman) do' \
   '# not run while this is set (docs/git-hook-gates.md).' \
