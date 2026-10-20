@@ -47,6 +47,18 @@ install と update を分けても、install の時点で「どの版が入る�
   claude-code 本体の自己更新(上記の例外)と同じ扱いとし、固定しない。
 - 固定と `autoUpdate: false` は `scripts/test-claude-settings.sh` が全 entry について確認する。
 
+## GitHub Actions(CI)の更新
+
+- CI(`.github/workflows/validate.yml`)の action は commit の SHA で固定し、同じ行の `# vX.Y.Z` に版を書く
+  (Dependabot が SHA と一緒に書き換えるのは、同じ行のこの形のコメントだけ)。
+- Dependabot の version updates(`.github/dependabot.yml`)が週 1 回、新しい版を PR で知らせる(#433)。minor と patch は
+  1 本の PR にまとめ、major は個別の PR にする。security updates もまとめる。公開から 7 日未満の版は version updates に
+  出さない(`cooldown`。npm の `min-release-age` と同じ待ち。security updates には効かない)。
+- PR は自動では merge しない。人が release notes と差分を確かめてから merge する(Dependabot の PR は AI の trailer を
+  持たないので、AI 同士の相互 review には回らない)。
+- CI が版と sha256 を固定して取る binary(yq / age / chezmoi / codex。`validate.yml` の `env`)は Dependabot の対象外。
+  更新は版と sha256 を変える PR で行う。
+
 ## Rationale
 
 勝手に全体を最新版へ上げることは、再現性とサプライチェーン安全性の両方を弱める。
