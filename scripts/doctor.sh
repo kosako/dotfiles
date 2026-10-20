@@ -1897,24 +1897,38 @@ fi
 # lingering check). The next apply drops the registration where this profile
 # manages the file (its settings module active); after a profile switch the
 # module is unlisted, chezmoiignore drops the source but never prunes the
-# target, so it is removed by hand (#201). Warn once per such file, probing it
-# for the body path only, by fixed-string match; never echo its contents.
-# Succeeds when at least one file was warned about.
+# target, so it is removed by hand (#201). Report each such file as an action
+# (it must reach --actions-only), probing it for the body path only, by
+# fixed-string match; never echo its contents. A file that is there but
+# cannot be read leaves the registration unchecked: warn that instead of a
+# not-wired ok (Codex review, #201).
+# Succeeds when at least one file was reported.
 report_lingering_hook() {
-  local capability="$1" label="$2" body="$3" home module live found=0
+  local capability="$1" label="$2" body="$3" home agent module live rc found=0
   for home in .claude .codex; do
     case "$home" in
-      .claude) module=claude-settings live="$HOME/.claude/settings.json" ;;
-      .codex) module=codex-settings live="$HOME/.codex/hooks.json" ;;
+      .claude) agent=claude module=claude-settings live="$HOME/.claude/settings.json" ;;
+      .codex) agent=codex module=codex-settings live="$HOME/.codex/hooks.json" ;;
     esac
-    if [[ ! -f "$live" ]] || ! grep -Fq "agent-tools/scripts/$body" "$live"; then
-      continue
-    fi
-    found=1
+    [[ -e "$live" || -L "$live" ]] || continue
+    rc=0
+    grep -Fq "agent-tools/scripts/$body" "$live" 2>/dev/null || rc=$?
+    case "$rc" in
+      0) found=1 ;;
+      1) continue ;;
+      *)
+        found=1
+        warn "$capability=false but $live could not be read, so a lingering $label registration there is unchecked"
+        continue
+        ;;
+    esac
     if module_active_for_profile "$profile" "$module"; then
-      warn "$capability=false but a $label registration lingers in $live (this profile manages the file) — run chezmoi apply to remove it"
+      action "$capability=false but a $label registration lingers in $live (this profile manages the file) — run chezmoi apply to remove it" \
+        "\$ chezmoi apply"
     else
-      warn "$capability=false but a $label registration lingers in $live (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
+      action "$capability=false but a $label registration lingers in $live (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand" \
+        "edit $(shell_quote_safe "$live") and delete the hook entries that run $body, keeping the rest of the file" \
+        "or remove the whole file: \$ rm -i $(shell_quote_safe "$live")   # then re-run herdr integration install $agent if herdr's hook was registered there"
     fi
   done
   [[ "$found" -eq 1 ]]

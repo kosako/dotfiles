@@ -1589,10 +1589,11 @@ fi
 #     QL-f) after a profile switch (#201): both hook capabilities off and
 #           claude-settings inactive (still removed above), with the safe-gh
 #           and quality-loop registrations left in both live files. Each
-#           file gets one warn per capability: the unmanaged Claude file
+#           file gets one action per capability: the unmanaged Claude file
 #           says apply will not remove it, the managed Codex file names the
 #           apply; no not-wired / not-active ok, and no file contents
-#           (canary). With the files gone both ok lines come back.
+#           (canary). With the files gone both ok lines come back (after
+#           QL-f2 / QL-f3).
 set_capability_all "$ql_root" enableQualityLoopHooks false
 set_capability_all "$ql_root" enableGitHubIsolatedReader false
 for ql_live in "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json"; do
@@ -1619,6 +1620,55 @@ else
   printf '%s\n' "$ql_out" >&2
   fail "test failed: doctor must stay exit 0 (hook registrations left by a profile switch)"
   status=1
+fi
+#     QL-f2) the same state under --actions-only: each lingering file is a
+#            next action with its remedy (apply for the managed Codex file;
+#            hand removal, quoted path and the herdr re-install note for the
+#            Claude one), and nothing else is printed.
+ql_claude_q="$(LC_ALL=C printf '%q' "$fixture_home/.claude/settings.json")"
+if ql_only="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal --actions-only 2>&1)"; then
+  if grep -Eq "^\[info\] [0-9]+\. enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in " <<< "$ql_only" \
+    && grep -Fq ". enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_only" \
+    && grep -Fq ". enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_only" \
+    && grep -Fxq "        edit $ql_claude_q and delete the hook entries that run personal-safe-gh-hook, keeping the rest of the file" <<< "$ql_only" \
+    && grep -Fxq "        or remove the whole file: \$ rm -i $ql_claude_q   # then re-run herdr integration install claude if herdr's hook was registered there" <<< "$ql_only" \
+    && grep -Fxq "        \$ chezmoi apply" <<< "$ql_only" \
+    && ! grep -q -E '^\[(ok|warn)\]' <<< "$ql_only" \
+    && ! grep -Fq "CANARY_SWITCH_LEAK_4e7a" <<< "$ql_only"; then
+    ok "test passed: lingering hook registrations reach --actions-only as next actions with their remedies"
+  else
+    printf '%s\n' "$ql_only" >&2
+    fail "test failed: lingering hook registrations missing from --actions-only, or their remedies wrong"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_only" >&2
+  fail "test failed: doctor must stay exit 0 (lingering hook registrations, --actions-only)"
+  status=1
+fi
+#     QL-f3) a live file that is there but cannot be read: the registration is
+#            unchecked, so doctor warns that per capability instead of either
+#            ok line. Skipped as root (root reads mode 000).
+rm -f "$fixture_home/.codex/hooks.json"
+if [[ "$(id -u)" != "0" ]]; then
+  chmod 000 "$fixture_home/.claude/settings.json"
+  if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+    if grep -Fxq "[warn] enableGitHubIsolatedReader=false but $fixture_home/.claude/settings.json could not be read, so a lingering safe-gh hook registration there is unchecked" <<< "$ql_out" \
+      && grep -Fxq "[warn] enableQualityLoopHooks=false but $fixture_home/.claude/settings.json could not be read, so a lingering quality-loop hook registration there is unchecked" <<< "$ql_out" \
+      && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+      && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+      ok "test passed: an unreadable live file leaves the hook registrations unchecked (warned, no not-wired ok)"
+    else
+      printf '%s\n' "$ql_out" >&2
+      fail "test failed: an unreadable live file was not reported as unchecked, or an ok line still showed"
+      status=1
+    fi
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: doctor must stay exit 0 (unreadable live hook file)"
+    status=1
+  fi
+  chmod 600 "$fixture_home/.claude/settings.json"
 fi
 rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json"
 if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
