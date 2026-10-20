@@ -30,8 +30,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v4.2.2
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # The policy scripts require mikefarah/yq v4. Download outside the
       # checkout so a stray file never affects the working tree.
@@ -161,8 +160,7 @@ jobs:
               test-herdr-config.sh test-agent-tools-usage-reader.sh
               test-git-hook-gates.sh test-starship.sh test-ssh.sh test-npmrc.sh
     steps:
-      # actions/checkout v4.2.2
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: install yq (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
@@ -256,8 +254,7 @@ jobs:
   render:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v4.2.2
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # Download outside the checkout: a stray file in the source
       # directory would show up as an unexpected managed target.

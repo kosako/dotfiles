@@ -1,0 +1,23 @@
+# CI の action (commit の SHA で固定) の新しい版を、週 1 回 PR で知らせる (#433)。
+# merge は人が確かめてから行う (自動では merge しない。docs/update-policy.md)。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # 公開から 7 日未満の版は version updates に出さない (npm の min-release-age=7 と
+    # 同じ待ち。security updates には効かない)。
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
