@@ -1544,16 +1544,16 @@ else
   status=1
 fi
 #     QL-d2) capability off but a registration LINGERS in the live files (a
-#            home that applied personal, then switched to a profile without
-#            the settings modules — chezmoiignore never prunes the target):
-#            doctor must warn instead of the not-wired ok, naming the file,
+#            flip not yet applied here; after a profile switch, QL-f):
+#            doctor must warn instead of the not-wired ok, naming the file
+#            and, as codex-settings is active, the apply that removes it,
 #            and must not echo the file's contents (canary). Codex review,
 #            PR #200.
 mkdir -p "$fixture_home/.claude" "$fixture_home/.codex"
 printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/.codex/agent-tools/scripts/personal-changed-scope-qa"}]}]},"CANARY_LINGER_LEAK_9c2d":true}\n' \
   > "$fixture_home/.codex/hooks.json"
 if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json" <<< "$ql_out" \
+  if grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json (this profile manages the file) — run chezmoi apply to remove it" <<< "$ql_out" \
     && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
     && ! grep -Fq "CANARY_LINGER_LEAK_9c2d" <<< "$ql_out"; then
     ok "test passed: enableQualityLoopHooks=false with a lingering registration warns (file named, contents never echoed)"
@@ -1584,6 +1584,163 @@ if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; 
 else
   printf '%s\n' "$ql_out" >&2
   fail "test failed: doctor must stay exit 0 (quality loop hooks dangling)"
+  status=1
+fi
+#     QL-f) after a profile switch (#201): both hook capabilities off and
+#           claude-settings inactive (still removed above), with the safe-gh
+#           and quality-loop registrations left in both live files. Each
+#           file gets one action per capability: the unmanaged Claude file
+#           says apply will not remove it, the managed Codex file names the
+#           apply; no not-wired / not-active ok, and no file contents
+#           (canary). With the files gone both ok lines come back (after
+#           QL-f2 / QL-f3).
+set_capability_all "$ql_root" enableQualityLoopHooks false
+set_capability_all "$ql_root" enableGitHubIsolatedReader false
+for ql_live in "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json"; do
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-safe-gh-hook"}]}],"Stop":[{"hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-changed-scope-qa"}]}]},"CANARY_SWITCH_LEAK_4e7a":true}\n' \
+    > "$ql_live"
+done
+ql_unmanaged="(applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
+ql_managed="(this profile manages the file) — run chezmoi apply to remove it"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_out" \
+    && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "CANARY_SWITCH_LEAK_4e7a" <<< "$ql_out"; then
+    ok "test passed: hook registrations left by a profile switch warn per file and capability, naming apply only where this profile manages the file (contents never echoed)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: hook registrations left by a profile switch not warned per file with the right remedy, or a file was echoed"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (hook registrations left by a profile switch)"
+  status=1
+fi
+#     QL-f2) the same state under --actions-only: each lingering file is a
+#            next action with its remedy (apply for the managed Codex file;
+#            hand removal, quoted path and the herdr re-install note for the
+#            Claude one), and nothing else is printed.
+ql_claude_q="$(LC_ALL=C printf '%q' "$fixture_home/.claude/settings.json")"
+if ql_only="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal --actions-only 2>&1)"; then
+  if grep -Eq "^\[info\] [0-9]+\. enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in " <<< "$ql_only" \
+    && grep -Fq ". enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_only" \
+    && grep -Fq ". enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_only" \
+    && grep -Fxq "        edit $ql_claude_q and delete the hook entries that run personal-safe-gh-hook, keeping the rest of the file" <<< "$ql_only" \
+    && grep -Fxq "        edit $ql_claude_q and delete the hook entries that run personal-fast-edit-check or personal-changed-scope-qa, keeping the rest of the file" <<< "$ql_only" \
+    && grep -Fxq "        or remove the whole file: \$ rm -i $ql_claude_q   # then re-run herdr integration install claude if herdr's hook was registered there" <<< "$ql_only" \
+    && grep -Fxq "        \$ chezmoi apply" <<< "$ql_only" \
+    && ! grep -q -E '^\[(ok|warn)\]' <<< "$ql_only" \
+    && ! grep -Fq "CANARY_SWITCH_LEAK_4e7a" <<< "$ql_only"; then
+    ok "test passed: lingering hook registrations reach --actions-only as next actions with their remedies"
+  else
+    printf '%s\n' "$ql_only" >&2
+    fail "test failed: lingering hook registrations missing from --actions-only, or their remedies wrong"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_only" >&2
+  fail "test failed: doctor must stay exit 0 (lingering hook registrations, --actions-only)"
+  status=1
+fi
+#     QL-f4) only the PostToolUse half of the quality loop left (fast-edit-
+#            check, no Stop entry): still a lingering registration (Codex
+#            review R2, #201), and the safe-gh hook is not reported.
+rm -f "$fixture_home/.codex/hooks.json"
+printf '{"hooks":{"PostToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-fast-edit-check"}]}]}}\n' \
+  > "$fixture_home/.claude/settings.json"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_out" \
+    && grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+    ok "test passed: a lingering fast-edit-check registration alone counts as a lingering quality-loop hook"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: a lingering fast-edit-check registration alone was not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (lingering fast-edit-check registration)"
+  status=1
+fi
+#     QL-f3) a live file that is there but cannot be read: the registration is
+#            unchecked, so doctor warns that per capability instead of either
+#            ok line. Skipped as root (root reads mode 000).
+ql_unchecked="is not a regular file or could not be read, so a lingering"
+if [[ "$(id -u)" != "0" ]]; then
+  chmod 000 "$fixture_home/.claude/settings.json"
+  if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+    if grep -Fxq "[warn] enableGitHubIsolatedReader=false but $fixture_home/.claude/settings.json $ql_unchecked safe-gh hook registration there is unchecked" <<< "$ql_out" \
+      && grep -Fxq "[warn] enableQualityLoopHooks=false but $fixture_home/.claude/settings.json $ql_unchecked quality-loop hook registration there is unchecked" <<< "$ql_out" \
+      && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+      && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+      ok "test passed: an unreadable live file leaves the hook registrations unchecked (warned, no not-wired ok)"
+    else
+      printf '%s\n' "$ql_out" >&2
+      fail "test failed: an unreadable live file was not reported as unchecked, or an ok line still showed"
+      status=1
+    fi
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: doctor must stay exit 0 (unreadable live hook file)"
+    status=1
+  fi
+  chmod 600 "$fixture_home/.claude/settings.json"
+fi
+#     QL-f5) a FIFO in place of ~/.codex/hooks.json: not a regular file, so it
+#            is never read (a grep on it would block for good) and both
+#            registrations there are unchecked. The run has a deadline, so a
+#            doctor that reads the FIFO fails the case instead of hanging the
+#            suite (same as OP-i10).
+rm -f "$fixture_home/.claude/settings.json"
+mkfifo "$fixture_home/.codex/hooks.json"
+HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal > "$fixture_home/ql-fifo.out" 2>&1 &
+ql_fifo_pid=$!
+ql_fifo_waited=0
+while kill -0 "$ql_fifo_pid" 2>/dev/null && [[ "$ql_fifo_waited" -lt 120 ]]; do
+  sleep 1
+  ql_fifo_waited=$((ql_fifo_waited + 1))
+done
+if kill -0 "$ql_fifo_pid" 2>/dev/null; then
+  kill_tree "$ql_fifo_pid"
+  wait "$ql_fifo_pid" 2>/dev/null || true
+  fail "test failed: a FIFO in place of ~/.codex/hooks.json hung doctor (killed after 120s)"
+  status=1
+elif wait "$ql_fifo_pid"; then
+  ql_out="$(cat "$fixture_home/ql-fifo.out")"
+  if grep -Fxq "[warn] enableGitHubIsolatedReader=false but $fixture_home/.codex/hooks.json $ql_unchecked safe-gh hook registration there is unchecked" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableQualityLoopHooks=false but $fixture_home/.codex/hooks.json $ql_unchecked quality-loop hook registration there is unchecked" <<< "$ql_out" \
+    && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+    ok "test passed: a FIFO in place of a live hook file is not read and leaves the registrations unchecked (no hang)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: a FIFO in place of a live hook file was not reported as unchecked, or an ok line still showed"
+    status=1
+  fi
+else
+  ql_fifo_rc=$?
+  doctor_exit_fail "a FIFO in place of ~/.codex/hooks.json" "$ql_fifo_rc" "$(cat "$fixture_home/ql-fifo.out")"
+fi
+rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json" "$fixture_home/ql-fifo.out"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && grep -Fxq "[ok] quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "registration lingers" <<< "$ql_out"; then
+    ok "test passed: with no hook registration left, both capabilities off report not wired"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: capabilities off with no lingering registration not reported as not wired"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (hook capabilities off, nothing left)"
   status=1
 fi
 

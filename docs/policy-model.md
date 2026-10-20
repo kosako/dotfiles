@@ -225,10 +225,12 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
 - **doctor**: 両 home の登録 + body presence(contents-blind)、`checks.local.json` の presence
   (**中身は読まない** — hook が実行する command を列挙する file なので)、best-effort の
   但し書きを report する。module 非 active / body 不在は dangling / fail-open として warn。
-  capability=false でも live の settings.json / hooks.json に登録が残っていれば warn する
+  capability=false でも live の settings.json / hooks.json に登録が残っていれば、file ごとに action にする
   (同一 home で personal → 他 profile に切り替えると module 非 active の managed file は
-  prune されず hook が動き続けるため。git-hook-gates の lingering check と同型。残置の
-  cleanup path 自体は #201)。
+  prune されず hook が動き続けるため。git-hook-gates の lingering check と同型)。その profile が
+  file を管理していれば(settings module が active)次の apply で消えると、管理していなければ手で消すと
+  案内する。在るのに通常の file でない、または読めない file は、登録を確かめられないので warn にする。safe-gh の PreToolUse hook
+  (`enableGitHubIsolatedReader`)も同じ検査で見る(#201)。
 - **状態**: personal=true(#199 で両 home に登録)、work=false(agent-tools 未配備・
   claude-settings / codex-settings も非 active)。
 
@@ -447,7 +449,11 @@ file(hook 登録・`core.hooksPath` など)は、module の `requires:` では�
 **テンプレート自己 gate**(gate 条件を満たさなければ空 render → chezmoi が既存 target も削除)で gate する
 (`codex-settings` の `hooks.json` / `default.rules`、`git-hook-gates` が例。#184)。
 自己 gate で target を消せるのは module が active な profile の中だけで、profile 切替で
-module 自体が非 active になった場合の残置は別扱い(#201)。
+module 自体が非 active になった場合の残置は apply では消えない。動き続ける残置(hook 登録・git hook gates の
+配線)と managed-by の見出しを持つ file は doctor が警告し、手で消す手順を出す。見出しを持てない file の
+それ以外の残置(`~/.codex/rules/default.rules`・`~/.config/opencode/opencode.json`・settings.json の permission
+など)は検出しない。残置を自動で片付ける仕組みは作らない(同じ home で profile を切り替える運用を想定しない
+ため。#201)。
 ファイル自体は常に管理し**中身だけ**を capability で分岐させたい場合は、テンプレート内
 分岐を使ってよい(`claude-settings` / `ssh-1password` が例)。その場合は capability true
 かつ module inactive の組み合わせを doctor が dangling として警告する section を必ず併設する。
