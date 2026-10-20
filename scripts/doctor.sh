@@ -1888,6 +1888,37 @@ if module_active_for_profile "$profile" claude-settings; then
   # not a block).
   item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; the real block is server-side branch protection"
 fi
+# report_lingering_hook CAPABILITY LABEL BODY
+# Called while CAPABILITY is off. Disabled is only honest if no registration
+# lingers from before the flip: a home that applied a profile with the
+# capability on keeps its ~/.claude/settings.json / ~/.codex/hooks.json until
+# something rewrites them, so the hook keeps running while the report says
+# "not wired" (Codex review, PR #200 — same shape as the git-hook-gates
+# lingering check). The next apply drops the registration where this profile
+# manages the file (its settings module active); after a profile switch the
+# module is unlisted, chezmoiignore drops the source but never prunes the
+# target, so it is removed by hand (#201). Warn once per such file, probing it
+# for the body path only, by fixed-string match; never echo its contents.
+# Succeeds when at least one file was warned about.
+report_lingering_hook() {
+  local capability="$1" label="$2" body="$3" home module live found=0
+  for home in .claude .codex; do
+    case "$home" in
+      .claude) module=claude-settings live="$HOME/.claude/settings.json" ;;
+      .codex) module=codex-settings live="$HOME/.codex/hooks.json" ;;
+    esac
+    if [[ ! -f "$live" ]] || ! grep -Fq "agent-tools/scripts/$body" "$live"; then
+      continue
+    fi
+    found=1
+    if module_active_for_profile "$profile" "$module"; then
+      warn "$capability=false but a $label registration lingers in $live (this profile manages the file) — run chezmoi apply to remove it"
+    else
+      warn "$capability=false but a $label registration lingers in $live (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
+    fi
+  done
+  [[ "$found" -eq 1 ]]
+}
 # enableGitHubIsolatedReader wires the isolated-reader steering (#137 + #181): one
 # capability registers the PreToolUse hook (matcher Bash) that steers raw `gh`
 # reads of untrusted GitHub content to the safe-gh reader, in BOTH AI homes — the
@@ -1925,7 +1956,7 @@ if [[ "$(capability_value "$profile" enableGitHubIsolatedReader)" == "true" ]]; 
   else
     warn "enableGitHubIsolatedReader=true but the codex-settings module is inactive for this profile; no managed ~/.codex/hooks.json carries the hook registration (dangling capability on the Codex side)"
   fi
-else
+elif ! report_lingering_hook enableGitHubIsolatedReader "safe-gh hook" personal-safe-gh-hook; then
   ok "enableGitHubIsolatedReader not active (false)"
 fi
 # Trust list (#119 PR3): the self trust basis only (GitHub login + numeric id;
@@ -1987,26 +2018,9 @@ if [[ "$(capability_value "$profile" enableQualityLoopHooks)" == "true" ]]; then
     item "check declarations: ~/.config/agent-tools/checks.local.json absent — both hooks are silent no-ops in every repo until a repo is declared there (per-repo opt-in; agent-tools docs/quality-loop-hooks.md)"
   fi
   item "best-effort: fast-edit-check never blocks; changed-scope-qa blocks once per new dirty scope and is bypassable (hook disabled, stop_hook_active) — not an enforcement boundary"
-else
-  # Disabled is only honest if no registration lingers from before the flip:
-  # a home that applied personal and then switched to a profile without the
-  # settings modules keeps its ~/.claude/settings.json / ~/.codex/hooks.json
-  # untouched (chezmoiignore drops the source, it never prunes the target),
-  # so the hooks keep running user-declared checks while this line says
-  # "not wired" (Codex review, PR #200 — same shape as the git-hook-gates
-  # lingering check). Probe the live files for the body path only, by
-  # fixed-string match; never echo their contents.
-  quality_hooks_lingering=()
-  for quality_hooks_live in "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json"; do
-    if [[ -f "$quality_hooks_live" ]] && grep -Fq "agent-tools/scripts/personal-changed-scope-qa" "$quality_hooks_live"; then
-      quality_hooks_lingering+=("$quality_hooks_live")
-    fi
-  done
-  if [[ "${#quality_hooks_lingering[@]}" -eq 0 ]]; then
-    ok "quality loop hooks not wired (enableQualityLoopHooks=false)"
-  else
-    warn "enableQualityLoopHooks=false but a quality-loop hook registration lingers in ${quality_hooks_lingering[*]} (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
-  fi
+# Off: a lingering registration would keep running the user-declared checks.
+elif ! report_lingering_hook enableQualityLoopHooks "quality-loop hook" personal-changed-scope-qa; then
+  ok "quality loop hooks not wired (enableQualityLoopHooks=false)"
 fi
 
 section "herdr integration (report-only)"

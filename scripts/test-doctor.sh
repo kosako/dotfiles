@@ -1544,16 +1544,16 @@ else
   status=1
 fi
 #     QL-d2) capability off but a registration LINGERS in the live files (a
-#            home that applied personal, then switched to a profile without
-#            the settings modules — chezmoiignore never prunes the target):
-#            doctor must warn instead of the not-wired ok, naming the file,
+#            flip not yet applied here; after a profile switch, QL-f):
+#            doctor must warn instead of the not-wired ok, naming the file
+#            and, as codex-settings is active, the apply that removes it,
 #            and must not echo the file's contents (canary). Codex review,
 #            PR #200.
 mkdir -p "$fixture_home/.claude" "$fixture_home/.codex"
 printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/.codex/agent-tools/scripts/personal-changed-scope-qa"}]}]},"CANARY_LINGER_LEAK_9c2d":true}\n' \
   > "$fixture_home/.codex/hooks.json"
 if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json" <<< "$ql_out" \
+  if grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json (this profile manages the file) — run chezmoi apply to remove it" <<< "$ql_out" \
     && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
     && ! grep -Fq "CANARY_LINGER_LEAK_9c2d" <<< "$ql_out"; then
     ok "test passed: enableQualityLoopHooks=false with a lingering registration warns (file named, contents never echoed)"
@@ -1584,6 +1584,56 @@ if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; 
 else
   printf '%s\n' "$ql_out" >&2
   fail "test failed: doctor must stay exit 0 (quality loop hooks dangling)"
+  status=1
+fi
+#     QL-f) after a profile switch (#201): both hook capabilities off and
+#           claude-settings inactive (still removed above), with the safe-gh
+#           and quality-loop registrations left in both live files. Each
+#           file gets one warn per capability: the unmanaged Claude file
+#           says apply will not remove it, the managed Codex file names the
+#           apply; no not-wired / not-active ok, and no file contents
+#           (canary). With the files gone both ok lines come back.
+set_capability_all "$ql_root" enableQualityLoopHooks false
+set_capability_all "$ql_root" enableGitHubIsolatedReader false
+for ql_live in "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json"; do
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-safe-gh-hook"}]}],"Stop":[{"hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-changed-scope-qa"}]}]},"CANARY_SWITCH_LEAK_4e7a":true}\n' \
+    > "$ql_live"
+done
+ql_unmanaged="(applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand"
+ql_managed="(this profile manages the file) — run chezmoi apply to remove it"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_out" \
+    && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "CANARY_SWITCH_LEAK_4e7a" <<< "$ql_out"; then
+    ok "test passed: hook registrations left by a profile switch warn per file and capability, naming apply only where this profile manages the file (contents never echoed)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: hook registrations left by a profile switch not warned per file with the right remedy, or a file was echoed"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (hook registrations left by a profile switch)"
+  status=1
+fi
+rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && grep -Fxq "[ok] quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "registration lingers" <<< "$ql_out"; then
+    ok "test passed: with no hook registration left, both capabilities off report not wired"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: capabilities off with no lingering registration not reported as not wired"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (hook capabilities off, nothing left)"
   status=1
 fi
 
