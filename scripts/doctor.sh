@@ -178,9 +178,10 @@ fi
 # (Codex review, PR #197; the pre-commit stage gained personal-git-identity-
 # gate in agent-tools#281, so the list grew from three to four in #239 —
 # keep it identical to .chezmoitemplates/git-hook-gates-armed and
-# preflight.sh). Best-effort guardrail, NOT an enforcement boundary:
-# --no-verify and a repo-local core.hooksPath (husky etc.) bypass it
-# (docs/git-hook-gates.md).
+# preflight.sh). Best-effort guardrail, NOT an enforcement boundary: a
+# repo-local core.hooksPath (husky etc.) bypasses it, --no-verify skips every
+# gate but the git-identity one in prepare-commit-msg (agent-tools#449), and
+# git am runs none (docs/git-hook-gates.md).
 section "git hook gates (report-only)"
 hook_gates_dir="$HOME/.config/git-hook-gates"
 hook_gates_deploy_dir="$HOME/.claude/agent-tools/scripts"
@@ -248,7 +249,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     else
       warn "agent-tools deploy incomplete (dispatcher and/or a gate missing in $hook_gates_deploy_dir; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
     fi
-    item "best-effort guardrail: git commit --no-verify and a repo-local core.hooksPath (husky etc.) bypass the gates (docs/git-hook-gates.md)"
+    item "best-effort guardrail: a repo-local core.hooksPath (husky etc.) bypasses the gates, --no-verify skips all but the git-identity check in prepare-commit-msg, and git am / an apply-backend rebase run none (docs/git-hook-gates.md)"
   else
     warn "enableGitHookGates=true but the git-hook-gates module is inactive for this profile (shims and hooksPath not managed — dangling capability)"
   fi

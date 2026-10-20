@@ -94,7 +94,8 @@
 # silent no-op until the capability renders
 # ~/.config/git-hook-gates/hooks.gitconfig, which sets core.hooksPath to the
 # managed shim directory. Best-effort guardrail, not an enforcement boundary:
-# --no-verify and a repo-local core.hooksPath (husky etc.) bypass it. See
+# a repo-local core.hooksPath (husky etc.) bypasses it, --no-verify skips every
+# gate but the git-identity one in prepare-commit-msg, and git am runs none. See
 # docs/git-hook-gates.md.
 [include]
 	path = ~/.config/git-hook-gates/hooks.gitconfig

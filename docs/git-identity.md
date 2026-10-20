@@ -120,15 +120,16 @@ context file の状態ごとの config 層の結果(git hook gates を通さな�
 | context file | 結果 |
 | --- | --- |
 | 無い / 空 / email だけ | commit 拒否(`fatal: empty ident name (for <>) not allowed`) — fail-closed。prompt は赤(no-identity) |
-| name だけ | config 層では context の name + **空 email** で commit が通る(Git は空 name は拒否するが空 email は受理する)。personal ではないが壊れた identity。gate が武装したマシンでは pre-commit の `personal-git-identity-gate` が止める(下記)。prompt は赤(no-identity)、`doctor` が partial として action、gate の無い環境では `git log` で `<>` が見える |
+| name だけ | config 層では context の name + **空 email** で commit が通る(Git は空 name は拒否するが空 email は受理する)。personal ではないが壊れた identity。gate が武装したマシンでは `personal-git-identity-gate` が止める(下記)。prompt は赤(no-identity)、`doctor` が partial として action、gate の無い環境では `git log` で `<>` が見える |
 | 完全 | その context の identity |
 
 - **部分設定は config 層では塞げない**。可視化(prompt / doctor / log)で検知し、commit 時は git hook gates の
-  pre-commit gate `personal-git-identity-gate`(agent-tools#281 / #239)が空 email 等の partial identity を
-  止める([git-hook-gates](git-hook-gates.md))。ただしこれは配線が武装した環境(`enableGitHookGates` が true の
-  personal profile で、agent-tools の gate が配備済み)の通常経路だけで効く best-effort guardrail で、
-  `--no-verify` や repo local の `core.hooksPath` で迂回できる。work profile や未武装のマシンでは可視化が
-  残る検知手段になる。
+  `personal-git-identity-gate`(agent-tools#281 / #239)が空 email 等の partial identity を止める
+  ([git-hook-gates](git-hook-gates.md))。gate は pre-commit に加えて pre-merge-commit と prepare-commit-msg でも
+  走るので(agent-tools#449)、merge・cherry-pick・revert・merge backend の rebase と、`--no-verify` を付けた
+  commit でも止める。ただしこれは配線が武装した環境(`enableGitHookGates` が true の personal profile で、
+  agent-tools の gate が配備済み)だけで効く best-effort guardrail で、repo local の `core.hooksPath` で外れ、
+  `git am` と apply backend の rebase では走らない。work profile や未武装のマシンでは可視化が残る検知手段になる。
 - **`~/src/` の外**には reset は当たらない(gitdir 条件)。personal remote なら二次判定で personal、
   それ以外は従来どおり fail-closed。
 - **linked worktree / submodule は主 repo の `.git` の場所で判定される**(includeIf の gitdir は

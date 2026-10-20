@@ -949,8 +949,9 @@ render され、置かない 5 stage(`reference-transaction` / `post-index-chang
 `fsmonitor-watchman`)には無く、どれも stage 名だけが違う exact な内容であること、`hooks.gitconfig`(`core.hooksPath`)が
 exact な内容で render されること、render した `~/.gitconfig` 経由の実 commit で dispatcher が pre-commit →
 prepare-commit-msg → commit-msg → post-commit の順に呼ばれること、失敗する gate(dispatcher)が commit を止めること、
-`--no-verify` が gate のある 2 stage だけを迂回すること(best-effort の既知の限界)、checkout で素通しの post-checkout が
-shim を通ることを確認する。`enableGitHookGates=false` の apply で適用済みの配線が
+`--no-verify` が pre-commit / commit-msg の 2 stage だけを迂回すること(best-effort の既知の限界)と、迂回されない
+prepare-commit-msg の identity の検査が失敗すれば `--no-verify` の commit も止まること(agent-tools#449。#431)、checkout で
+素通しの post-checkout が shim を通ることを確認する。`enableGitHookGates=false` の apply で適用済みの配線が
 **削除される**こと、配備(deploy 4 本)が消えた後の同じ source での再 apply でも配線が削除されること、
 `enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
 `--includes` 付きで読むこと(静的 pin)と、deploy 4 本の一覧が武装の template・doctor・preflight・この test で同じであること

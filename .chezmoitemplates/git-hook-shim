@@ -9,13 +9,14 @@
 
        The dispatcher runs the stage's gates, if it has any (pre-commit:
        public-safety then git-identity — agent-tools#281 / #239; commit-msg:
-       public-safety then ai-trailer), and then chains to the repo's own
-       $GIT_DIR/hooks/<stage>. Every other stage is a pass-through to that
-       repo hook (agent-tools#460, GIT_HOOK_STAGES): global core.hooksPath
-       replaces .git/hooks, so a stage without a shim silently drops the
-       repo's own hook (Git LFS's pre-push / post-checkout / post-commit /
-       post-merge, for one) (#361). Deliberately no shim (docs/
-       git-hook-gates.md): push-to-checkout / proc-receive /
+       public-safety then ai-trailer; pre-merge-commit and
+       prepare-commit-msg: git-identity only — agent-tools#449), and then
+       chains to the repo's own $GIT_DIR/hooks/<stage>. Every other stage is
+       a pass-through to that repo hook (agent-tools#460, GIT_HOOK_STAGES):
+       global core.hooksPath replaces .git/hooks, so a stage without a shim
+       silently drops the repo's own hook (Git LFS's pre-push / post-checkout
+       / post-commit / post-merge, for one) (#361). Deliberately no shim
+       (docs/git-hook-gates.md): push-to-checkout / proc-receive /
        fsmonitor-watchman (a hook there changes git's behaviour or must
        answer in a fixed format; the dispatcher refuses them), and
        reference-transaction / post-index-change (git runs them on every ref
@@ -45,7 +46,8 @@
 #!/bin/sh
 # Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).
 # Thin shim: gate logic lives in agent-tools (contract: docs/git-hook-gates.md
-# there). Best-effort guardrail — --no-verify and a repo-local core.hooksPath
-# bypass it.
+# there). Best-effort guardrail — a repo-local core.hooksPath bypasses it,
+# --no-verify skips every gate but the git-identity one in prepare-commit-msg,
+# and git am / an apply-backend rebase run no gate.
 exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" {{ .stage }} "$@"
 {{ end -}}

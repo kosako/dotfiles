@@ -19,7 +19,8 @@ set -euo pipefail
 #     the dispatcher alone would still block every commit).
 #   - full deploy: shims + hooks.gitconfig render with exact pinned bytes, and
 #     end to end a commit runs BOTH stages, a failing dispatcher blocks the
-#     commit, and --no-verify bypasses it (documented best-effort limit).
+#     commit, and --no-verify bypasses it (documented best-effort limit) but
+#     not the git-identity verdict in prepare-commit-msg (agent-tools#449).
 #   - enableGitHookGates=false: already-applied wiring is REMOVED on the next
 #     apply (template self-gate renders empty -> chezmoi prunes; a `requires:`
 #     gate would leave a fail-closed shim lingering, the #184 lesson).
@@ -189,8 +190,9 @@ shim_body() {
     '#!/bin/sh' \
     '# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).' \
     '# Thin shim: gate logic lives in agent-tools (contract: docs/git-hook-gates.md' \
-    '# there). Best-effort guardrail — --no-verify and a repo-local core.hooksPath' \
-    '# bypass it.' \
+    '# there). Best-effort guardrail — a repo-local core.hooksPath bypasses it,' \
+    '# --no-verify skips every gate but the git-identity one in prepare-commit-msg,' \
+    '# and git am / an apply-backend rebase run no gate.' \
     "exec \"\$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher\" $stage \"\$@\""
 }
 
@@ -279,7 +281,8 @@ section "git hook gates end to end (rendered ~/.gitconfig drives the shims)"
 #    unconditional include pulls hooks.gitconfig, which sets core.hooksPath),
 #    and the planted dispatcher stub is swapped for a logging fake. A passing
 #    dispatcher must see BOTH stages; a failing one must block the commit;
-#    --no-verify must bypass both (the documented best-effort limit).
+#    --no-verify must bypass both (the documented best-effort limit), yet a
+#    failing git-identity verdict in prepare-commit-msg must still block it.
 if ! command -v git >/dev/null 2>&1; then
   warn "git not found, skipping end-to-end checks"
 else
@@ -288,14 +291,21 @@ else
   home="$(cd "$home" && pwd -P)"
   fake_dispatcher="$home/.claude/agent-tools/scripts/personal-git-hook-dispatcher"
   dispatcher_log="$home/dispatcher-invocations.log"
-  # FAKE_DISPATCHER_EXIT stands for a gate's verdict, so it applies to the
-  # gated stages only; every other stage is a pass-through with no repo hook
-  # here, which the real dispatcher ends with 0.
+  # FAKE_DISPATCHER_EXIT stands for the verdict of the diff / message gates
+  # (public-safety, ai-trailer), so it applies to pre-commit and commit-msg;
+  # FAKE_IDENTITY_EXIT stands for git-identity's, which the real dispatcher
+  # also runs in pre-merge-commit and prepare-commit-msg (agent-tools#449).
+  # Every other stage is a pass-through with no repo hook here, which the
+  # real dispatcher ends with 0.
   cat > "$fake_dispatcher" <<EOF
 #!/bin/sh
 printf '%s\n' "\$1" >> "$dispatcher_log"
 case "\$1" in
-  pre-commit | commit-msg) exit "\${FAKE_DISPATCHER_EXIT:-0}" ;;
+  pre-commit)
+    [ "\${FAKE_DISPATCHER_EXIT:-0}" = 0 ] || exit "\$FAKE_DISPATCHER_EXIT"
+    exit "\${FAKE_IDENTITY_EXIT:-0}" ;;
+  commit-msg) exit "\${FAKE_DISPATCHER_EXIT:-0}" ;;
+  pre-merge-commit | prepare-commit-msg) exit "\${FAKE_IDENTITY_EXIT:-0}" ;;
 esac
 exit 0
 EOF
@@ -320,6 +330,7 @@ EOF
       GIT_CONFIG_NOSYSTEM=1 \
       GIT_CONFIG_GLOBAL="$home/.gitconfig" \
       FAKE_DISPATCHER_EXIT="${FAKE_DISPATCHER_EXIT:-0}" \
+      FAKE_IDENTITY_EXIT="${FAKE_IDENTITY_EXIT:-0}" \
       git -C "$repo" "$@"
   }
 
@@ -395,15 +406,28 @@ EOF
   : > "$dispatcher_log"
   if output="$(FAKE_DISPATCHER_EXIT=2 run_git "$repo" commit --no-verify --allow-empty -m test 2>&1)"; then
     if [[ "$(cat "$dispatcher_log" 2>/dev/null)" == $'prepare-commit-msg\npost-commit' ]]; then
-      ok "test passed: --no-verify bypasses the gated shims (pre-commit / commit-msg); the pass-through ones still run (documented best-effort limit)"
+      ok "test passed: --no-verify bypasses the diff / message gates (pre-commit / commit-msg); prepare-commit-msg and the pass-through ones still run (documented best-effort limit)"
     else
-      fail "test failed: --no-verify did not skip exactly the gated stages; log was:"
+      fail "test failed: --no-verify did not skip exactly pre-commit / commit-msg; log was:"
       cat "$dispatcher_log" >&2
       status=1
     fi
   else
     printf '%s\n' "$output" >&2
     fail "test failed: --no-verify commit did not succeed"
+    status=1
+  fi
+
+  # prepare-commit-msg is not skipped by --no-verify, so the git-identity gate
+  # the dispatcher runs there still stops the commit (agent-tools#449).
+  : > "$dispatcher_log"
+  if output="$(FAKE_IDENTITY_EXIT=1 run_git "$repo" commit --no-verify --allow-empty -m test 2>&1)"; then
+    fail "test failed: --no-verify commit succeeded although the git-identity verdict in prepare-commit-msg failed"
+    status=1
+  elif [[ "$(cat "$dispatcher_log" 2>/dev/null)" == "prepare-commit-msg" ]]; then
+    ok "test passed: a failing git-identity verdict in prepare-commit-msg blocks a --no-verify commit"
+  else
+    fail "test failed: a --no-verify commit with a failing git-identity verdict did not stop at prepare-commit-msg; log was: $(tr '\n' ' ' < "$dispatcher_log" 2>/dev/null)"
     status=1
   fi
 
