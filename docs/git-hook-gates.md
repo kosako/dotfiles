@@ -25,6 +25,9 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
                                     agent-tools#281 / #239: 空 email 等の partial identity を止める)
                        commit-msg : personal-public-safety-gate --commit-msg → personal-ai-trailer-gate
                                     (commit message の本文も public-safety で見る。agent-tools#413)
+                       pre-merge-commit / prepare-commit-msg : personal-git-identity-gate だけ
+                                    (pre-commit の走らない merge・cherry-pick・revert・rebase と
+                                    --no-verify の commit でも partial identity を止める。agent-tools#449)
                        ほかの stage: gate なしで repo hook へ chain するだけ(素通し。agent-tools#460)
 ```
 
@@ -125,8 +128,17 @@ on / off に関わらず `.config/git` は通る。つまり「signing off で s
 これは**通常経路(`git commit`)に対する best-effort guardrail** であって、
 enforcement boundary ではない:
 
-- `git commit --no-verify` は pre-commit / commit-msg をどちらも skip する(`prepare-commit-msg` / `post-commit`
-  は skip されず、素通しの shim から repo hook へ chain する)。
+- `git commit --no-verify` は pre-commit / commit-msg をどちらも skip し、`git merge --no-verify` は
+  pre-merge-commit / commit-msg を skip する。差分と message の public-safety と AI trailer の検査は走らない。
+  prepare-commit-msg はどちらでも skip されないので、そこにつないだ identity の検査は走る(`post-commit` /
+  `post-merge` も skip されず、素通しの shim から repo hook へ chain する)。
+- `git commit` 以外で作る commit のうち、競合の無い自動の merge(pull を含む)・cherry-pick・revert と、merge
+  backend(既定)の rebase では pre-commit が走らないので、差分の public-safety の検査は走らない。identity の検査は
+  pre-merge-commit と prepare-commit-msg で走る(agent-tools#449。競合を解いた後の `--continue` を含め、経路ごとに
+  走る hook は正本の強度ラベル)。
+- `git am` と apply backend の rebase(`git rebase --apply` や `rebase.backend=apply`。内部で `git am` を使う)では
+  pre-commit・prepare-commit-msg・pre-merge-commit・commit-msg のどれも走らず、どの gate も走らない(走るのは
+  素通しの applypatch-msg・pre-applypatch・post-applypatch と、rebase の pre-rebase・post-rewrite)。
 - repo local の `core.hooksPath`(husky 等)は global 設定を上書きし、gate は
   黙って外れる。
 - 別 client / 他マシンからの commit・GitHub 上の操作(squash merge 等)は対象外。
