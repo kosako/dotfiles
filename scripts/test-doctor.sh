@@ -1631,6 +1631,7 @@ if ql_only="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal --actio
     && grep -Fq ". enableGitHubIsolatedReader=false but a safe-gh hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_only" \
     && grep -Fq ". enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.codex/hooks.json $ql_managed" <<< "$ql_only" \
     && grep -Fxq "        edit $ql_claude_q and delete the hook entries that run personal-safe-gh-hook, keeping the rest of the file" <<< "$ql_only" \
+    && grep -Fxq "        edit $ql_claude_q and delete the hook entries that run personal-fast-edit-check or personal-changed-scope-qa, keeping the rest of the file" <<< "$ql_only" \
     && grep -Fxq "        or remove the whole file: \$ rm -i $ql_claude_q   # then re-run herdr integration install claude if herdr's hook was registered there" <<< "$ql_only" \
     && grep -Fxq "        \$ chezmoi apply" <<< "$ql_only" \
     && ! grep -q -E '^\[(ok|warn)\]' <<< "$ql_only" \
@@ -1646,15 +1647,36 @@ else
   fail "test failed: doctor must stay exit 0 (lingering hook registrations, --actions-only)"
   status=1
 fi
+#     QL-f4) only the PostToolUse half of the quality loop left (fast-edit-
+#            check, no Stop entry): still a lingering registration (Codex
+#            review R2, #201), and the safe-gh hook is not reported.
+rm -f "$fixture_home/.codex/hooks.json"
+printf '{"hooks":{"PostToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-fast-edit-check"}]}]}}\n' \
+  > "$fixture_home/.claude/settings.json"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableQualityLoopHooks=false but a quality-loop hook registration lingers in $fixture_home/.claude/settings.json $ql_unmanaged" <<< "$ql_out" \
+    && grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+    ok "test passed: a lingering fast-edit-check registration alone counts as a lingering quality-loop hook"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: a lingering fast-edit-check registration alone was not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (lingering fast-edit-check registration)"
+  status=1
+fi
 #     QL-f3) a live file that is there but cannot be read: the registration is
 #            unchecked, so doctor warns that per capability instead of either
 #            ok line. Skipped as root (root reads mode 000).
-rm -f "$fixture_home/.codex/hooks.json"
+ql_unchecked="is not a regular file or could not be read, so a lingering"
 if [[ "$(id -u)" != "0" ]]; then
   chmod 000 "$fixture_home/.claude/settings.json"
   if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
-    if grep -Fxq "[warn] enableGitHubIsolatedReader=false but $fixture_home/.claude/settings.json could not be read, so a lingering safe-gh hook registration there is unchecked" <<< "$ql_out" \
-      && grep -Fxq "[warn] enableQualityLoopHooks=false but $fixture_home/.claude/settings.json could not be read, so a lingering quality-loop hook registration there is unchecked" <<< "$ql_out" \
+    if grep -Fxq "[warn] enableGitHubIsolatedReader=false but $fixture_home/.claude/settings.json $ql_unchecked safe-gh hook registration there is unchecked" <<< "$ql_out" \
+      && grep -Fxq "[warn] enableQualityLoopHooks=false but $fixture_home/.claude/settings.json $ql_unchecked quality-loop hook registration there is unchecked" <<< "$ql_out" \
       && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
       && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
       ok "test passed: an unreadable live file leaves the hook registrations unchecked (warned, no not-wired ok)"
@@ -1670,7 +1692,42 @@ if [[ "$(id -u)" != "0" ]]; then
   fi
   chmod 600 "$fixture_home/.claude/settings.json"
 fi
-rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json"
+#     QL-f5) a FIFO in place of ~/.codex/hooks.json: not a regular file, so it
+#            is never read (a grep on it would block for good) and both
+#            registrations there are unchecked. The run has a deadline, so a
+#            doctor that reads the FIFO fails the case instead of hanging the
+#            suite (same as OP-i10).
+rm -f "$fixture_home/.claude/settings.json"
+mkfifo "$fixture_home/.codex/hooks.json"
+HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal > "$fixture_home/ql-fifo.out" 2>&1 &
+ql_fifo_pid=$!
+ql_fifo_waited=0
+while kill -0 "$ql_fifo_pid" 2>/dev/null && [[ "$ql_fifo_waited" -lt 120 ]]; do
+  sleep 1
+  ql_fifo_waited=$((ql_fifo_waited + 1))
+done
+if kill -0 "$ql_fifo_pid" 2>/dev/null; then
+  kill_tree "$ql_fifo_pid"
+  wait "$ql_fifo_pid" 2>/dev/null || true
+  fail "test failed: a FIFO in place of ~/.codex/hooks.json hung doctor (killed after 120s)"
+  status=1
+elif wait "$ql_fifo_pid"; then
+  ql_out="$(cat "$fixture_home/ql-fifo.out")"
+  if grep -Fxq "[warn] enableGitHubIsolatedReader=false but $fixture_home/.codex/hooks.json $ql_unchecked safe-gh hook registration there is unchecked" <<< "$ql_out" \
+    && grep -Fxq "[warn] enableQualityLoopHooks=false but $fixture_home/.codex/hooks.json $ql_unchecked quality-loop hook registration there is unchecked" <<< "$ql_out" \
+    && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+    ok "test passed: a FIFO in place of a live hook file is not read and leaves the registrations unchecked (no hang)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: a FIFO in place of a live hook file was not reported as unchecked, or an ok line still showed"
+    status=1
+  fi
+else
+  ql_fifo_rc=$?
+  doctor_exit_fail "a FIFO in place of ~/.codex/hooks.json" "$ql_fifo_rc" "$(cat "$fixture_home/ql-fifo.out")"
+fi
+rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json" "$fixture_home/ql-fifo.out"
 if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
     && grep -Fxq "[ok] quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \

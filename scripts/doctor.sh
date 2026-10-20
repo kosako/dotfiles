@@ -1888,8 +1888,8 @@ if module_active_for_profile "$profile" claude-settings; then
   # not a block).
   item "note: the main-push deny is leaky steering — catches 'git push … main', misses bare 'git push' / HEAD / refspec; the real block is server-side branch protection"
 fi
-# report_lingering_hook CAPABILITY LABEL BODY
-# Called while CAPABILITY is off. Disabled is only honest if no registration
+# report_lingering_hook CAPABILITY LABEL BODY...
+# Called while CAPABILITY is off; BODY names each hook body it registers. Disabled is only honest if no registration
 # lingers from before the flip: a home that applied a profile with the
 # capability on keeps its ~/.claude/settings.json / ~/.codex/hooks.json until
 # something rewrites them, so the hook keeps running while the report says
@@ -1898,27 +1898,37 @@ fi
 # manages the file (its settings module active); after a profile switch the
 # module is unlisted, chezmoiignore drops the source but never prunes the
 # target, so it is removed by hand (#201). Report each such file as an action
-# (it must reach --actions-only), probing it for the body path only, by
-# fixed-string match; never echo its contents. A file that is there but
-# cannot be read leaves the registration unchecked: warn that instead of a
-# not-wired ok (Codex review, #201).
+# (it must reach --actions-only), probing it for the body paths only, by
+# fixed-string match; never echo its contents. Only a regular file is read (a
+# FIFO there would block the grep for good); one that is there but not a
+# regular file, or cannot be read, leaves the registration unchecked: warn
+# that instead of a not-wired ok (Codex review, #201).
 # Succeeds when at least one file was reported.
 report_lingering_hook() {
-  local capability="$1" label="$2" body="$3" home agent module live rc found=0
+  local capability="$1" label="$2" home agent module live rc body found=0
+  local patterns=() bodies=""
+  shift 2
+  for body in "$@"; do
+    patterns+=(-e "agent-tools/scripts/$body")
+    bodies+="${bodies:+ or }$body"
+  done
   for home in .claude .codex; do
     case "$home" in
       .claude) agent=claude module=claude-settings live="$HOME/.claude/settings.json" ;;
       .codex) agent=codex module=codex-settings live="$HOME/.codex/hooks.json" ;;
     esac
     [[ -e "$live" || -L "$live" ]] || continue
-    rc=0
-    grep -Fq "agent-tools/scripts/$body" "$live" 2>/dev/null || rc=$?
+    rc=2
+    if [[ -f "$live" ]]; then
+      rc=0
+      grep -Fq "${patterns[@]}" "$live" 2>/dev/null || rc=$?
+    fi
     case "$rc" in
       0) found=1 ;;
       1) continue ;;
       *)
         found=1
-        warn "$capability=false but $live could not be read, so a lingering $label registration there is unchecked"
+        warn "$capability=false but $live is not a regular file or could not be read, so a lingering $label registration there is unchecked"
         continue
         ;;
     esac
@@ -1927,7 +1937,7 @@ report_lingering_hook() {
         "\$ chezmoi apply"
     else
       action "$capability=false but a $label registration lingers in $live (applied by another profile; this profile does not manage the file, so apply will not remove it) — remove the hooks or the file by hand" \
-        "edit $(shell_quote_safe "$live") and delete the hook entries that run $body, keeping the rest of the file" \
+        "edit $(shell_quote_safe "$live") and delete the hook entries that run $bodies, keeping the rest of the file" \
         "or remove the whole file: \$ rm -i $(shell_quote_safe "$live")   # then re-run herdr integration install $agent if herdr's hook was registered there"
     fi
   done
@@ -2033,7 +2043,7 @@ if [[ "$(capability_value "$profile" enableQualityLoopHooks)" == "true" ]]; then
   fi
   item "best-effort: fast-edit-check never blocks; changed-scope-qa blocks once per new dirty scope and is bypassable (hook disabled, stop_hook_active) — not an enforcement boundary"
 # Off: a lingering registration would keep running the user-declared checks.
-elif ! report_lingering_hook enableQualityLoopHooks "quality-loop hook" personal-changed-scope-qa; then
+elif ! report_lingering_hook enableQualityLoopHooks "quality-loop hook" personal-fast-edit-check personal-changed-scope-qa; then
   ok "quality loop hooks not wired (enableQualityLoopHooks=false)"
 fi
 
