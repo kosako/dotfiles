@@ -229,7 +229,7 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   (同一 home で personal → 他 profile に切り替えると module 非 active の managed file は
   prune されず hook が動き続けるため。git-hook-gates の lingering check と同型)。その profile が
   file を管理していれば(settings module が active)次の apply で消えると、管理していなければ手で消すと
-  案内する。在るのに通常の file でない、または読めない file は、登録を確かめられないので warn にする。safe-gh の PreToolUse hook
+  案内する。在るのに通常の file でない、または読めない file は、登録を確かめられないので warn にする。`~/.claude` / `~/.codex` を辿れず(検索の権限が無い、symlink の loop)、file が在るかを確かめられないときも同じく warn にする。不在と扱うのは、親に入れてそこに file が無いときと、親が無い・dir でないと確かめたときだけ(#439)。safe-gh の PreToolUse hook
   (`enableGitHubIsolatedReader`)も同じ検査で見る(#201)。
 - **状態**: personal=true(#199 で両 home に登録)、work=false(agent-tools 未配備・
   claude-settings / codex-settings も非 active)。

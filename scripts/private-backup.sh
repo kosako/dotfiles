@@ -109,42 +109,14 @@ stage_file() {
     yq -i -p=json -o=json '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(SZ) | tonumber), "sha256": strenv(H)}]' "$manifest"
 }
 
-# Whether HOME/REL is absent for certain. [[ -e ]] / [[ -L ]] are false for a
-# path under a directory without search permission too, and that file may
-# exist (#414): backup must not report it as an absent optional file. The
-# reason the parent cannot be entered tells them apart (the kernel resolves
-# every component, symlinks included): ENOENT (a component is missing) and
-# ENOTDIR (a component is not a directory) mean the path cannot exist;
-# EACCES, ELOOP and the rest mean it could not be checked. bash's own cd
-# reports the reason, so no tool on PATH (whose message format varies) is
-# read; under LC_ALL=C the message ends with the strerror text. A parent it
-# can enter leaves only the last component, and the caller saw no entry
-# there. REL is a validated relative path (backup_path_is_safe). Returns 0
-# when absence is confirmed.
+# Whether HOME/REL is absent for certain (absence_confirmed in lib-policy):
+# under a directory without search permission [[ -e ]] is false for a file
+# that may exist (#414), and backup must not report it as an absent optional
+# file. The local supplement, which --local-supplement may name anywhere,
+# calls absence_confirmed directly (#421). REL is a validated relative path
+# (backup_path_is_safe). Returns 0 when absence is confirmed.
 path_absence_confirmed() {
   absence_confirmed "$HOME/$1"
-}
-
-# absence_confirmed PATH — the same check for any PATH, such as the local
-# supplement, which --local-supplement may name anywhere (#421). The parent
-# is PATH up to its last slash: "/" for a top-level absolute path, the
-# current directory for a PATH without a slash. CDPATH is cleared: an
-# inherited one would send a relative parent to a same-named directory
-# elsewhere. cd -P resolves the parent as the kernel does for the file: the
-# default logical cd drops "link/.." as text and would check another
-# directory (Codex review, PR #426). Only the parent is checked, so a caller
-# rules out a symlink at PATH first (one whose target cannot be reached is
-# not absent).
-absence_confirmed() {
-  local parent=. err
-  case "$1" in
-    */*) parent="${1%/*}"; [[ -n "$parent" ]] || parent=/ ;;
-  esac
-  err="$( (LC_ALL=C; CDPATH=; cd -P -- "$parent") 2>&1)" && return 0
-  case "$err" in
-    *": No such file or directory" | *": Not a directory") return 0 ;;
-  esac
-  return 1
 }
 
 # Whether a single tar member NAME is allowed in a private-backup archive.
