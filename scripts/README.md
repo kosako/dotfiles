@@ -51,15 +51,17 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 
 検証内容:
 
-- profile・module・capability の名前(`.chezmoidata` の各 map の key)が、制御文字を含まない文字列であること
-  (名前は 1 行に 1 つで列挙するので、改行を含む key は 2 つの名前として検証されてしまう。読み取りの失敗も fail、#428)。
+- profile・module・capability の名前(`.chezmoidata` の各 map の key)が、制御文字を含まない空でない文字列であること
+  (名前は 1 行に 1 つで列挙するので、改行を含む key は 2 つの名前として検証されてしまう。読み取りの失敗も fail、#428。
+  空の key は空行として読み飛ばされ、空の名前の module は `paths:` と `requires:` の検査を受けないまま `.chezmoiignore` で
+  有効になっていた。#438)。
   `--list-profiles` も profile の名前を検査してから一覧を出す。
 - profile が存在すること。
 - `environmentKind` が許可された値であること。
 - profile の `modules:` が module 名の list であること(省略・null は module なし。文字列・bool・数値・map・
-  文字列でない要素・制御文字(改行など)を含む要素は fail。型の読み取りと列挙の失敗も fail、#412・#422)。profile が参照する
-  module が定義済みであること。
-- profile の `capabilities:` が、capability 名(制御文字を含まない文字列)を key に持つ map で、文字列の値も制御文字を
+  文字列でない要素・制御文字(改行など)を含む要素・空の要素は fail。型の読み取りと列挙の失敗も fail、
+  #412・#422・#438)。profile が参照する module が定義済みであること。
+- profile の `capabilities:` が、capability 名(制御文字を含まない空でない文字列)を key に持つ map で、文字列の値も制御文字を
   含まないこと(値は command substitution で読むので末尾の改行が落ち、`"enforce\n"` が `enforce` として通っていた。#428)。
 - profile が参照する capability が定義済みであること。
 - すべての定義済み capability が profile に存在すること。
@@ -69,7 +71,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
   enum capability が禁止値(work / client / agent の `npmHardeningMode=off`、#45)だと
   hard fail すること。boolean の行は、実行時の拒否(install-packages / private-backup)と共有する
   `lib-policy.sh` の `profile_environment_kind_violations` で判定する(#357)。
-- module の `paths:` が path の list であること(`modules:` と同じ型の検査、#412)。各 path が home 相対の
+- module の `paths:` が path の list であること(`modules:` と同じ型の検査、#412。空の path は `.chezmoiignore` に
+  `!` だけの行を出し、chezmoi が止まる。#438)。各 path が home 相対の
   リテラル path であること(glob / pattern 文字・空白・
   先頭 `~` / `./`・末尾 `/` は fail。`.chezmoiignore` allowlist の `!<path>` 行になるため、#207)。
   同一 path を複数 module が宣言していないこと。
@@ -79,7 +82,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
   検証され、値そのものを比べる `.chezmoiignore` とずれる。#428)。key は空でなく空白を含まず、文字列の値は前後に
   空白を持たないこと(各行は最初の空白で key と値に分かれ、前後の空白は読み取りで落ちるので、
   `"npmHardeningMode enforce": ""`・`"": "npmHardeningMode enforce"`・`"enforce "` が `npmHardeningMode=enforce` として、
-  `"": ""` が条件なしとして通り、`.chezmoiignore` では有効にならない。値の途中の空白はそのまま読める。#430)。
+  `"": ""` が条件なしとして通り、`.chezmoiignore` では有効にならない。値の途中の空白はそのまま読める。#430。空の key は
+  名前の検査(#438)が先に fail にする)。
 - `requires:` に条件があるのに `paths:` がない module は fail(条件が何も駆動しないため)。
 - package catalog(`.chezmoidata/packages.yaml`)の name/source が有効であること。
 - backup path catalog(`.chezmoidata/backup-paths.yaml`)の path が home 相対・glob なし・
@@ -88,8 +92,8 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
   `backup-paths entry invalid` で fail する(#246。local 補足の backup 時読み取りも同じ検査)。
 - capability registry(#151): 全 capability が `implemented: true|false` を持ち、
   `implemented: false` は doctor.sh が言及していること(source-text の静的 proxy)。
-  `values:` は省略・null か、制御文字を含まない文字列の list であること(map は値を、改行を含む値は 2 つの値を
-  許可値として列挙していた。#428)。
+  `values:` は省略・null か、制御文字を含まない空でない文字列の list であること(map は値を、改行を含む値は 2 つの値を
+  許可値として列挙していた。#428。空の値は profile にも `requires:` にも書けない。#438)。
 
 ## preflight.sh
 
@@ -331,8 +335,13 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   list の `capabilities:` を拒否すること。非 ASCII の key と
   値は通し、文字列でない key は拒否すること。各読み取りの失敗も fail にすること。
 - `requires:` の空白(#430): 値の前後の空白、key の前後の空白、空白を含む key に空の値の組み合わせ
-  (`"npmHardeningMode enforce": ""`)、空の key(`"": "npmHardeningMode enforce"` と `"": ""`)を拒否し、値の途中の
-  空白・文字列でない値・無い map は空白の検査を通すこと。読み取りの失敗も fail にすること。
+  (`"npmHardeningMode enforce": ""`)を拒否し、値の途中の空白・文字列でない値・無い map は空白の検査を通すこと。
+  読み取りの失敗も fail にすること。空の key は次の項目。
+- 空の名前・要素・key(#438): 空行として読み飛ばされ、どれも通っていた。`paths: ["**"]` の空の名前の module を profile に
+  足した fixture(名前が `zz` の対照は path の検査で fail)、空の path(単独と、正しい path との組み合わせ)、profile の
+  `modules:` の空の要素、空の profile 名(`--list-profiles` も)、空の capability 名、profile の `capabilities:` の空の key、
+  enum の `values:` の空の値、`requires:` の空の key(`"": "npmHardeningMode enforce"` と `"": ""`)を拒否すること。
+  `yaml_read_safe_entries` は単独でも空の key を拒否すること。
 - software catalog(#53): unknown source / go_install の pkg 欠落 / name 重複 / track_only 不正 / 空 catalog を拒否。
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar

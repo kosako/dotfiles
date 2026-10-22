@@ -38,15 +38,17 @@ fail_duplicates() {
 
 # The profiles, modules and capabilities are listed by their keys, one per
 # line, so a key holding a newline would be validated as two names while
-# chezmoi reads the one real key (#428). Checked before anything is listed.
-# Args: label yq-path file.
+# chezmoi reads the one real key (#428), and an empty key lists as a blank
+# line, which the loops skip, so a module named "" passed without its paths
+# or requires being checked while .chezmoiignore still enabled it (#438).
+# Checked before anything is listed. Args: label yq-path file.
 check_name_map() {
   local rc=0
   yaml_name_map "$2" "$3" || rc=$?
   case "$rc" in
     0) return 0 ;;
     2) fail "cannot read the $1 in $3" ;;
-    *) fail "$1 must be a map keyed by names (strings without control characters): $3" ;;
+    *) fail "$1 must be a map keyed by names (non-empty strings without control characters): $3" ;;
   esac
   return 1
 }
@@ -67,7 +69,9 @@ validate_modules() {
     paths_count=0
     # Same shape check as a profile's modules (#412, #422): a string, bool or
     # number under paths: lists as nothing and passes when the module has no
-    # requires, and a newline in one path lists as two.
+    # requires, and a newline in one path lists as two. An empty path lists
+    # as the blank line skipped below, while .chezmoiignore renders it as a
+    # bare "!" line that chezmoi refuses (#438).
     paths_shape=0
     m="$module" yaml_string_list '.modules[strenv(m)].paths' "$MODULES_FILE" || paths_shape=$?
     # Captured, not read through a process substitution, so a failed listing
@@ -105,7 +109,7 @@ validate_modules() {
         status=1
         ;;
       *)
-        fail "module paths must be a list of paths (strings without control characters): $module"
+        fail "module paths must be a list of paths (non-empty strings without control characters): $module"
         status=1
         ;;
     esac
@@ -119,7 +123,8 @@ validate_modules() {
     fi
     # The listing has one `capability value` line per condition, so a key or
     # a value holding a newline would read as two conditions, each of which
-    # could pass, while .chezmoiignore compares the value itself (#428).
+    # could pass, while .chezmoiignore compares the value itself (#428); an
+    # empty key reads as no condition at all (#438).
     # module_requires has already refused a requires that is not a map.
     requires_shape=0
     m="$module" yaml_name_map '.modules[strenv(m)].requires' "$MODULES_FILE" || requires_shape=$?
@@ -134,7 +139,7 @@ validate_modules() {
         continue
         ;;
       *)
-        fail "module requires must map capability names to values without control characters: $module"
+        fail "module requires must map non-empty capability names to values without control characters: $module"
         status=1
         continue
         ;;
@@ -232,7 +237,8 @@ validate_capability_registry() {
   while IFS= read -r capability; do
     [[ -z "$capability" ]] && continue
     # An enum's values are listed one per line (capability_allowed_values),
-    # so a value holding a newline would allow two values (#428).
+    # so a value holding a newline would allow two values (#428), and an
+    # empty value lists as a blank line and could never be set (#438).
     values_shape=0
     c="$capability" yaml_string_list '.capabilities[strenv(c)].values' "$CAPABILITIES_FILE" || values_shape=$?
     case "$values_shape" in
@@ -242,7 +248,7 @@ validate_capability_registry() {
         status=1
         ;;
       *)
-        fail "capability registry: $capability values must be a list of strings without control characters"
+        fail "capability registry: $capability values must be a list of non-empty strings without control characters"
         status=1
         ;;
     esac
@@ -451,8 +457,9 @@ validate_profile() {
   fi
 
   # A string, bool, number or map under modules: would list as nothing or as
-  # the map's values (#412), and a newline in one name as two names (#422),
-  # so the shape is checked before the names.
+  # the map's values (#412), a newline in one name as two names (#422), and
+  # an empty name as a blank line skipped below (#438), so the shape is
+  # checked before the names.
   modules_shape=0
   p="$profile" yaml_string_list '.profiles[strenv(p)].modules' "$PROFILES_FILE" || modules_shape=$?
   # Captured once (a failed listing is reported too) and reused below.
@@ -476,14 +483,14 @@ validate_profile() {
       status=1
       ;;
     *)
-      fail "profile modules must be a list of module names (strings without control characters): $profile"
+      fail "profile modules must be a list of module names (non-empty strings without control characters): $profile"
       status=1
       ;;
   esac
 
   # The capabilities are listed by key, so a key holding a newline would read
-  # as two names (#428). The value checks below look each known capability
-  # up by name and run either way.
+  # as two names (#428), and an empty key as none (#438). The value checks
+  # below look each known capability up by name and run either way.
   caps_shape=0
   p="$profile" yaml_name_map '.profiles[strenv(p)].capabilities' "$PROFILES_FILE" || caps_shape=$?
   case "$caps_shape" in
@@ -506,7 +513,7 @@ validate_profile() {
       status=1
       ;;
     *)
-      fail "profile capabilities must be a map keyed by capability names (strings without control characters): $profile"
+      fail "profile capabilities must be a map keyed by capability names (non-empty strings without control characters): $profile"
       status=1
       ;;
   esac

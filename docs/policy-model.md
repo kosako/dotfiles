@@ -16,7 +16,7 @@ policy = 何を許可/禁止するかの判断基準
 
 modules は装飾ラベルではなく、管理対象 path を宣言する単位(2026-06-13 決定。それまでは情報ラベルだった)。
 
-- module は `.chezmoidata/modules.yaml` の `paths:` で home 配下の管理対象 **file** を宣言する(home 相対のリテラル path・file 1 つにつき 1 行。glob・空白・末尾 `/` は `validate-policy.sh` が fail)。
+- module は `.chezmoidata/modules.yaml` の `paths:` で home 配下の管理対象 **file** を宣言する(home 相対のリテラル path・file 1 つにつき 1 行。glob・空白・末尾 `/`・空の path は `validate-policy.sh` が fail。module の名前も空にできない。#438)。
 - ある path が chezmoi の管理対象になるのは、profile がその module を列挙し、かつ module の `requires:` にある capability 条件をすべて満たすときだけ。
 - `.chezmoiignore` は **allowlist**(#207): 先頭の `**` で source の全 target を ignore し、活性 module の宣言 path だけを `!<path>` で戻す。宣言されていない source entry(repo 管理 file、`~/.claude/settings.local.json` のような managed file の隣の local file、commit 済み・untracked を問わず宣言し忘れた file)は、どの profile にも apply されない(fail closed)。
 - 宣言 path の祖先 directory(`.config` など)は template が自動で `!` に展開する。これは **通過用**であって所有ではない: 祖先行は directory entry 自身だけを通し、その下の他の file は個別の宣言がなければ落ちる(directory を宣言しても subtree は入らない。exact のみ)。
