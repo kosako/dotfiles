@@ -1728,6 +1728,68 @@ else
   doctor_exit_fail "a FIFO in place of ~/.codex/hooks.json" "$ql_fifo_rc" "$(cat "$fixture_home/ql-fifo.out")"
 fi
 rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex/hooks.json" "$fixture_home/ql-fifo.out"
+#     QL-f6) a live file whose absence cannot be confirmed (#439): ~/.claude
+#            without search permission, holding both registrations
+#            ([[ -e ]] is false for the file there), and ~/.codex a symlink
+#            loop. Each file leaves both registrations unchecked (warned),
+#            with no ok line and no lingering action (nothing was read).
+#            Skipped as root (root searches a directory without x).
+ql_unentered="exists cannot be told (a parent directory could not be entered), so a lingering"
+if [[ "$(id -u)" != "0" ]]; then
+  printf '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-safe-gh-hook"}]}],"Stop":[{"hooks":[{"type":"command","command":"/x/agent-tools/scripts/personal-changed-scope-qa"}]}]}}\n' \
+    > "$fixture_home/.claude/settings.json"
+  chmod u-x "$fixture_home/.claude"
+  mv "$fixture_home/.codex" "$fixture_home/.codex.aside"
+  ln -s "$fixture_home/.codex" "$fixture_home/.codex"
+  if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+    if grep -Fxq "[warn] enableGitHubIsolatedReader=false but whether $fixture_home/.claude/settings.json $ql_unentered safe-gh hook registration there is unchecked" <<< "$ql_out" \
+      && grep -Fxq "[warn] enableQualityLoopHooks=false but whether $fixture_home/.claude/settings.json $ql_unentered quality-loop hook registration there is unchecked" <<< "$ql_out" \
+      && grep -Fxq "[warn] enableGitHubIsolatedReader=false but whether $fixture_home/.codex/hooks.json $ql_unentered safe-gh hook registration there is unchecked" <<< "$ql_out" \
+      && grep -Fxq "[warn] enableQualityLoopHooks=false but whether $fixture_home/.codex/hooks.json $ql_unentered quality-loop hook registration there is unchecked" <<< "$ql_out" \
+      && ! grep -Fq "registration lingers" <<< "$ql_out" \
+      && ! grep -Fq "enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+      && ! grep -Fq "quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out"; then
+      ok "test passed: a live hook file under an unsearchable ~/.claude or a looping ~/.codex leaves the registrations unchecked (warned, no not-wired ok)"
+    else
+      printf '%s\n' "$ql_out" >&2
+      fail "test failed: a live hook file whose absence cannot be confirmed was skipped as absent, or an ok line still showed"
+      status=1
+    fi
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: doctor must stay exit 0 (live hook file under an unsearchable parent)"
+    status=1
+  fi
+  chmod u+x "$fixture_home/.claude"
+  rm -f "$fixture_home/.claude/settings.json" "$fixture_home/.codex"
+  mv "$fixture_home/.codex.aside" "$fixture_home/.codex"
+fi
+#     QL-f7) the contrast: absence confirmed through the parent (#439):
+#            ~/.claude missing (ENOENT) and ~/.codex a regular file
+#            (ENOTDIR). Neither live file can exist, so both capabilities
+#            report not wired and nothing is unchecked.
+mv "$fixture_home/.claude" "$fixture_home/.claude.aside"
+mv "$fixture_home/.codex" "$fixture_home/.codex.aside"
+: > "$fixture_home/.codex"
+if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
+    && grep -Fxq "[ok] quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \
+    && ! grep -Fq "registration there is unchecked" <<< "$ql_out" \
+    && ! grep -Fq "registration lingers" <<< "$ql_out"; then
+    ok "test passed: a live hook file whose parent is missing or not a directory is confirmed absent (not wired)"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: a missing or non-directory parent of a live hook file was not read as absent"
+    status=1
+  fi
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: doctor must stay exit 0 (live hook file with a missing or non-directory parent)"
+  status=1
+fi
+rm -f "$fixture_home/.codex"
+mv "$fixture_home/.claude.aside" "$fixture_home/.claude"
+mv "$fixture_home/.codex.aside" "$fixture_home/.codex"
 if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fxq "[ok] enableGitHubIsolatedReader not active (false)" <<< "$ql_out" \
     && grep -Fxq "[ok] quality loop hooks not wired (enableQualityLoopHooks=false)" <<< "$ql_out" \

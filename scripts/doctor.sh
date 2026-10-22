@@ -1902,7 +1902,10 @@ fi
 # fixed-string match; never echo its contents. Only a regular file is read (a
 # FIFO there would block the grep for good); one that is there but not a
 # regular file, or cannot be read, leaves the registration unchecked: warn
-# that instead of a not-wired ok (Codex review, #201).
+# that instead of a not-wired ok (Codex review, #201). So does a file that
+# cannot be told to be absent: under a ~/.claude or ~/.codex that cannot be
+# searched, [[ -e ]] is false for a file that is there, so seeing nothing
+# skips the file only when absence_confirmed (lib-policy) confirms it (#439).
 # Succeeds when at least one file was reported.
 report_lingering_hook() {
   local capability="$1" label="$2" home agent module live rc body found=0
@@ -1917,7 +1920,12 @@ report_lingering_hook() {
       .claude) agent=claude module=claude-settings live="$HOME/.claude/settings.json" ;;
       .codex) agent=codex module=codex-settings live="$HOME/.codex/hooks.json" ;;
     esac
-    [[ -e "$live" || -L "$live" ]] || continue
+    if [[ ! -e "$live" && ! -L "$live" ]]; then
+      absence_confirmed "$live" && continue
+      found=1
+      warn "$capability=false but whether $live exists cannot be told (a parent directory could not be entered), so a lingering $label registration there is unchecked"
+      continue
+    fi
     rc=2
     if [[ -f "$live" ]]; then
       rc=0

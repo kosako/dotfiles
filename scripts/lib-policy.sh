@@ -365,6 +365,38 @@ file_mode() {
   fi
 }
 
+# absence_confirmed PATH — whether PATH is absent for certain, for a caller
+# that saw nothing there. [[ -e ]] / [[ -L ]] are false for a path under a
+# directory without search permission too, and that file may exist (#414).
+# The reason the parent cannot be entered tells them apart (the kernel
+# resolves every component, symlinks included): ENOENT (a component is
+# missing) and ENOTDIR (a component is not a directory) mean the path cannot
+# exist; EACCES, ELOOP and the rest mean it could not be checked. bash's own
+# cd reports the reason, so no tool on PATH (whose message format varies) is
+# read; under LC_ALL=C the message ends with the strerror text, matched at
+# the end only (the message carries the path, never echoed). A parent it can
+# enter leaves only the last component, where the caller saw nothing. The
+# parent is PATH up to its last slash: "/" for a top-level absolute path,
+# the current directory for a PATH without a slash. CDPATH is cleared: an
+# inherited one would send a relative parent to a same-named directory
+# elsewhere. cd -P resolves the parent as the kernel does for the file: the
+# default logical cd drops "link/.." as text and would check another
+# directory (Codex review, PR #426). Only the parent is checked, so a caller
+# rules out a symlink at PATH first (one whose target cannot be reached is
+# not absent). Shared by private-backup (declared paths, the local
+# supplement, #421) and doctor (lingering hook files, #439).
+absence_confirmed() {
+  local parent=. err
+  case "$1" in
+    */*) parent="${1%/*}"; [[ -n "$parent" ]] || parent=/ ;;
+  esac
+  err="$( (LC_ALL=C; CDPATH=; cd -P -- "$parent") 2>&1)" && return 0
+  case "$err" in
+    *": No such file or directory" | *": Not a directory") return 0 ;;
+  esac
+  return 1
+}
+
 # The policy gate shared by doctor and preflight. Callers print their own
 # section header and keep the exit path (`|| exit 1`) at the call site: it
 # is the only non-zero path in those report-only scripts.
