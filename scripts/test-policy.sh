@@ -346,7 +346,7 @@ for bad_list in '"base"' false 42 '{entry: base}' '[base, 1]' '[base, ~]'; do
   V="$bad_list" yq -i '.profiles.personal.modules = env(V)' "$fixture/.chezmoidata/profiles.yaml"
   run_fail_contains \
     "rejects profile modules=$bad_list" \
-    "profile modules must be a list of module names (strings without control characters): personal" \
+    "profile modules must be a list of module names (non-empty strings without control characters): personal" \
     "$fixture/scripts/validate-policy.sh" personal
 done
 for bad_list in '".claude/settings.json"' true 7 '{p: .claude/settings.json}' '[.claude/settings.json, true]'; do
@@ -354,7 +354,7 @@ for bad_list in '".claude/settings.json"' true 7 '{p: .claude/settings.json}' '[
   V="$bad_list" yq -i '.modules["claude-settings"].paths = env(V)' "$fixture/.chezmoidata/modules.yaml"
   run_fail_contains \
     "rejects module paths=$bad_list" \
-    "module paths must be a list of paths (strings without control characters): claude-settings" \
+    "module paths must be a list of paths (non-empty strings without control characters): claude-settings" \
     "$fixture/scripts/validate-policy.sh" personal
 done
 # An element must not hold a control character (#422): the listing prints one
@@ -369,21 +369,21 @@ V=$'git-profile\nsupply-chain-git' yq -i '
   "$fixture/.chezmoidata/profiles.yaml"
 run_fail_contains \
   "rejects a profile module name holding a newline" \
-  "profile modules must be a list of module names (strings without control characters): personal" \
+  "profile modules must be a list of module names (non-empty strings without control characters): personal" \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 V=$'base\tx' yq -i '(.profiles.personal.modules[] | select(. == "base")) = strenv(V)' \
   "$fixture/.chezmoidata/profiles.yaml"
 run_fail_contains \
   "rejects a profile module name holding a tab" \
-  "profile modules must be a list of module names (strings without control characters): personal" \
+  "profile modules must be a list of module names (non-empty strings without control characters): personal" \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 V=$'.gitconfig\n.config/git-profile/identity-reset.gitconfig' yq -i '.modules["git-profile"].paths = [strenv(V)]' \
   "$fixture/.chezmoidata/modules.yaml"
 run_fail_contains \
   "rejects a module path holding a newline" \
-  "module paths must be a list of paths (strings without control characters): git-profile" \
+  "module paths must be a list of paths (non-empty strings without control characters): git-profile" \
   "$fixture/scripts/validate-policy.sh" personal
 # A C1 control character (U+009B, CSI) passes ASCII's [[:cntrl:]] and the
 # literal path check (Codex review, PR #425); the control is a non-ASCII
@@ -392,7 +392,7 @@ make_fixture
 V='[".config/\u009bfile"]' yq -i '.modules["claude-settings"].paths = env(V)' "$fixture/.chezmoidata/modules.yaml"
 run_fail_contains \
   "rejects a module path holding a C1 control character" \
-  "module paths must be a list of paths (strings without control characters): claude-settings" \
+  "module paths must be a list of paths (non-empty strings without control characters): claude-settings" \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 V='["ü-名前", "base"]' yq -n '.list = env(V)' > "$fixture/non-ascii.yaml"
@@ -438,21 +438,21 @@ V='"enforce\ncorepackMode report"' yq -i '.modules["supply-chain-npm"].requires.
   "$fixture/.chezmoidata/modules.yaml"
 run_fail_contains \
   "rejects a module requires value holding a newline" \
-  "module requires must map capability names to values without control characters: supply-chain-npm" \
+  "module requires must map non-empty capability names to values without control characters: supply-chain-npm" \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 V='"enforce\u009b"' yq -i '.modules["supply-chain-npm"].requires.npmHardeningMode = env(V)' \
   "$fixture/.chezmoidata/modules.yaml"
 run_fail_contains \
   "rejects a module requires value holding a C1 control character" \
-  "module requires must map capability names to values without control characters: supply-chain-npm" \
+  "module requires must map non-empty capability names to values without control characters: supply-chain-npm" \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 V='{"corepackMode report\nnpmHardeningMode": enforce}' yq -i '.modules["supply-chain-npm"].requires = env(V)' \
   "$fixture/.chezmoidata/modules.yaml"
 run_fail_contains \
   "rejects a module requires key holding a newline" \
-  "module requires must map capability names to values without control characters: supply-chain-npm" \
+  "module requires must map non-empty capability names to values without control characters: supply-chain-npm" \
   "$fixture/scripts/validate-policy.sh" personal
 # A map under values: listed its values as the allowed ones, the shape hole
 # #412 closed for modules and paths.
@@ -462,37 +462,37 @@ for bad_values in '[off, "report\nenforce"]' '{a: off, b: report, c: enforce}' '
     "$fixture/.chezmoidata/capabilities.schema.yaml"
   run_fail_contains \
     "rejects capability values=$bad_values" \
-    "capability registry: npmHardeningMode values must be a list of strings without control characters" \
+    "capability registry: npmHardeningMode values must be a list of non-empty strings without control characters" \
     "$fixture/scripts/validate-policy.sh" personal
 done
 make_fixture
 yq -i '.modules["base\nzz-extra"] = .modules.base' "$fixture/.chezmoidata/modules.yaml"
 run_fail_contains \
   "rejects a module name holding a newline" \
-  "modules must be a map keyed by names (strings without control characters): " \
+  "modules must be a map keyed by names (non-empty strings without control characters): " \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 yq -i '.capabilities["corepackMode\nnpmHardeningMode"] = .capabilities.corepackMode' \
   "$fixture/.chezmoidata/capabilities.schema.yaml"
 run_fail_contains \
   "rejects a capability name holding a newline" \
-  "capabilities must be a map keyed by names (strings without control characters): " \
+  "capabilities must be a map keyed by names (non-empty strings without control characters): " \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 yq -i '.profiles["work\npersonal"] = .profiles.work' "$fixture/.chezmoidata/profiles.yaml"
 run_fail_contains \
   "rejects a profile name holding a newline" \
-  "profiles must be a map keyed by names (strings without control characters): " \
+  "profiles must be a map keyed by names (non-empty strings without control characters): " \
   "$fixture/scripts/validate-policy.sh" --all
 run_fail_contains \
   "--list-profiles refuses a profile name holding a newline" \
-  "profiles must be a map keyed by names (strings without control characters): " \
+  "profiles must be a map keyed by names (non-empty strings without control characters): " \
   "$fixture/scripts/validate-policy.sh" --list-profiles
 make_fixture
 V='"corepackMode\tzz"' yq -i '.profiles.personal.capabilities[env(V)] = "report"' "$fixture/.chezmoidata/profiles.yaml"
 run_fail_contains \
   "rejects a profile capability name holding a tab" \
-  "profile capabilities must be a map keyed by capability names (strings without control characters): personal" \
+  "profile capabilities must be a map keyed by capability names (non-empty strings without control characters): personal" \
   "$fixture/scripts/validate-policy.sh" personal
 # A profile value is read through a command substitution, which drops a
 # trailing newline, so "enforce\n" passed as enforce (Codex review, PR #429).
@@ -508,7 +508,7 @@ make_fixture
 yq -i '.profiles.personal.capabilities = ["installPackages"]' "$fixture/.chezmoidata/profiles.yaml"
 run_fail_contains \
   "rejects profile capabilities that are a list" \
-  "profile capabilities must be a map keyed by capability names (strings without control characters): personal" \
+  "profile capabilities must be a map keyed by capability names (non-empty strings without control characters): personal" \
   "$fixture/scripts/validate-policy.sh" personal
 make_fixture
 V='{"ü-名前": "値", "base": true, "n": 1}' yq -n '.map = env(V)' > "$fixture/non-ascii-map.yaml"
@@ -553,13 +553,12 @@ expect_name_read_failure "module names" .modules "cannot read the modules in "
 expect_name_read_failure "capability names" .capabilities "cannot read the capabilities in "
 
 # A requires line also splits at its first run of whitespace, and `read`
-# drops what pads it, so each of these passed as npmHardeningMode=enforce,
-# or as no condition for "": "", while .chezmoiignore, comparing the key and
-# the value themselves, left the module off (#430; the empty keys from Codex
-# review, PR #432).
+# drops what pads it, so each of these passed as npmHardeningMode=enforce
+# while .chezmoiignore, comparing the key and the value themselves, left the
+# module off (#430). The empty keys (Codex review, PR #432) now meet the
+# name check first and are pinned with the other empty names below (#438).
 for bad_requires in '{npmHardeningMode: "enforce "}' '{npmHardeningMode: " enforce"}' \
-  '{"npmHardeningMode ": enforce}' '{" npmHardeningMode": enforce}' '{"npmHardeningMode enforce": ""}' \
-  '{"": "npmHardeningMode enforce"}' '{"": ""}'; do
+  '{"npmHardeningMode ": enforce}' '{" npmHardeningMode": enforce}' '{"npmHardeningMode enforce": ""}'; do
   make_fixture
   V="$bad_requires" yq -i '.modules["supply-chain-npm"].requires = env(V)' "$fixture/.chezmoidata/modules.yaml"
   run_fail_contains \
@@ -577,6 +576,89 @@ run_ok "yaml_read_safe_entries takes inner whitespace, non-string values and an 
   '
 expect_read_failure "module requires entries" '.modules[strenv(m)].requires | (([to_entries' \
   "cannot read the requires of module supply-chain-npm"
+
+# An empty name, element or key lists as a blank line, which every loop skips
+# like the blank line of an empty listing, so each case below passed (#438).
+# A module named "" skipped its paths and requires checks while
+# .chezmoiignore, matching the name itself with `has`, enabled it: with
+# paths ["**"] every file of the repo became managed. Its non-empty twin
+# fails on that path, so the empty name is what let it through. An empty path
+# rendered a bare "!" line that chezmoi refuses; the empty profile,
+# capability, profile capability and enum value checked nothing.
+make_fixture
+yq -i '.modules["zz"] = {"description": "x", "paths": ["**"]}' "$fixture/.chezmoidata/modules.yaml"
+yq -i '.profiles.personal.modules += ["zz"]' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects the non-empty twin of the empty module name on its path" \
+  "module path must be a literal path (no pattern characters, whitespace, or trailing slash): zz: **" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+yq -i '.modules[""] = {"description": "x", "paths": ["**"]}' "$fixture/.chezmoidata/modules.yaml"
+yq -i '.profiles.personal.modules += [""]' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects an empty module name" \
+  "modules must be a map keyed by names (non-empty strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" personal
+for bad_paths in '[""]' '[.claude/settings.json, ""]'; do
+  make_fixture
+  V="$bad_paths" yq -i '.modules["claude-settings"].paths = env(V)' "$fixture/.chezmoidata/modules.yaml"
+  run_fail_contains \
+    "rejects module paths=$bad_paths" \
+    "module paths must be a list of paths (non-empty strings without control characters): claude-settings" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+make_fixture
+yq -i '.profiles.personal.modules += [""]' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects an empty profile module name" \
+  "profile modules must be a list of module names (non-empty strings without control characters): personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+yq -i '.profiles[""] = .profiles.personal' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects an empty profile name" \
+  "profiles must be a map keyed by names (non-empty strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" --all
+run_fail_contains \
+  "--list-profiles refuses an empty profile name" \
+  "profiles must be a map keyed by names (non-empty strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" --list-profiles
+make_fixture
+yq -i '.capabilities[""] = .capabilities.enableDirenv' "$fixture/.chezmoidata/capabilities.schema.yaml"
+run_fail_contains \
+  "rejects an empty capability name" \
+  "capabilities must be a map keyed by names (non-empty strings without control characters): " \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+yq -i '.profiles.personal.capabilities[""] = false' "$fixture/.chezmoidata/profiles.yaml"
+run_fail_contains \
+  "rejects an empty profile capability name" \
+  "profile capabilities must be a map keyed by capability names (non-empty strings without control characters): personal" \
+  "$fixture/scripts/validate-policy.sh" personal
+make_fixture
+yq -i '.capabilities.npmHardeningMode.values += [""]' "$fixture/.chezmoidata/capabilities.schema.yaml"
+run_fail_contains \
+  "rejects an empty capability value" \
+  "capability registry: npmHardeningMode values must be a list of non-empty strings without control characters" \
+  "$fixture/scripts/validate-policy.sh" personal
+for bad_requires in '{"": "npmHardeningMode enforce"}' '{"": ""}'; do
+  make_fixture
+  V="$bad_requires" yq -i '.modules["supply-chain-npm"].requires = env(V)' "$fixture/.chezmoidata/modules.yaml"
+  run_fail_contains \
+    "rejects module requires=$bad_requires" \
+    "module requires must map non-empty capability names to values without control characters: supply-chain-npm" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
+# yaml_read_safe_entries keeps refusing the empty key on its own, now that
+# validate-policy meets it in yaml_name_map first.
+V='{"": x}' yq -n '.map = env(V)' > "$fixture/empty-key-map.yaml"
+run_ok "yaml_read_safe_entries refuses an empty key on its own" \
+  env FIXTURE_LIB="$fixture/scripts/lib-policy.sh" FIXTURE_YAML="$fixture/empty-key-map.yaml" bash -c '
+    source "$FIXTURE_LIB"
+    rc=0
+    yaml_read_safe_entries ".map" "$FIXTURE_YAML" || rc=$?
+    [[ "$rc" -eq 1 ]]
+  '
 
 # Require both the YAML boolean type and canonical lowercase spelling (#206).
 # Quoted "false" is truthy in templates; uppercase booleans bypass lowercase
