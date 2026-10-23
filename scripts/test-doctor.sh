@@ -2265,6 +2265,165 @@ else
 fi
 rm -rf "$op_fakebin"
 
+# KT) kill_tree itself (lib-policy.sh, #440). OP-e and the suite interrupt
+#     check catch a kill_tree that lists a process's children before it
+#     stops the process, but not its wait for the stop: SIGSTOP is delivered
+#     asynchronously, so kill_tree lists the children only once ps shows the
+#     process stopped (or a zombie, or gone). Their pgrep shims hold the
+#     listing until the process is stopped, so they pass without that wait
+#     and without its warns. Here kill_tree runs in a bash of its own with a
+#     PATH-front ps shim that answers for one process, the target (a `sh`
+#     with two `sleep 3000.<digits>` children; any other question goes to the
+#     real ps), and a pgrep shim. Both note each question about the target
+#     in a log, in order.
+#     KT-a) the stop shows late: ps answers "S" (not stopped) three times,
+#           then the real state. The children are listed only after ps
+#           showed the target stopped, with no warn.
+#     KT-b) ps fails every time while the target is there: a failed read,
+#           not an exit. kill_tree asks again (not once), warns that it
+#           could not read the state, and still kills the whole tree.
+#     KT-c) ps answers "S" every time: the "did not stop" warn, and the
+#           whole tree is still killed.
+#     Each run must return 0 (callers are under set -e). KT-b and KT-c wait
+#     out kill_tree's bound (5 s).
+kt_dir="$fixture_home/kill-tree"
+mkdir -p "$kt_dir/shim"
+kt_real_ps="$(command -v ps)"
+kt_real_pgrep="$(command -v pgrep)"
+cat > "$kt_dir/shim/ps" <<'SH'
+#!/bin/sh
+# ps shim of KT (test-doctor.sh): see there.
+if [ "$#" -eq 4 ] && [ "$1" = -o ] && [ "$2" = stat= ] && [ "$3" = -p ] && [ "$4" = "$KT_TARGET" ]; then
+  case "$KT_MODE" in
+    late)
+      if [ "$(grep -c '^ps ' "$KT_LOG")" -lt 3 ]; then
+        printf 'ps S\n' >> "$KT_LOG"
+        printf 'S\n'
+        exit 0
+      fi
+      st="$("$KT_PS" "$@")"
+      rc=$?
+      printf 'ps %s\n' "$(printf '%s' "$st" | tr -d ' ')" >> "$KT_LOG"
+      [ -z "$st" ] || printf '%s\n' "$st"
+      exit "$rc"
+      ;;
+    fail)
+      printf 'ps fail\n' >> "$KT_LOG"
+      exit 1
+      ;;
+    running)
+      printf 'ps S\n' >> "$KT_LOG"
+      printf 'S\n'
+      exit 0
+      ;;
+  esac
+fi
+exec "$KT_PS" "$@"
+SH
+cat > "$kt_dir/shim/pgrep" <<'SH'
+#!/bin/sh
+# pgrep shim of KT (test-doctor.sh): see there.
+if [ "$#" -eq 2 ] && [ "$1" = -P ] && [ "$2" = "$KT_TARGET" ]; then
+  printf 'pgrep\n' >> "$KT_LOG"
+fi
+exec "$KT_PGREP" "$@"
+SH
+chmod +x "$kt_dir/shim/ps" "$kt_dir/shim/pgrep"
+# kt_case MODE — start a target, run kill_tree on it with the ps shim in
+# MODE, and set kt_target, kt_alive (how many of the target and its two
+# children were alive before), kt_rc and kt_out (kill_tree's status and
+# output), kt_seq (the log up to the first listing of the target's
+# children, one line per space) and kt_left (what is still alive after:
+# the target unless a zombie, and any of its sleeps). Whatever is left is
+# killed here, so a failed case leaves nothing for the next one.
+kt_case() {
+  local mode="$1" t pid kids state strays digits="$RANDOM$RANDOM$RANDOM"
+  : > "$kt_dir/log"
+  rm -f "$kt_dir/kids"
+  sh -c 'sleep "$2" & a=$!; sleep "$2" & printf "%s %s\n" "$a" "$!" > "$1.tmp"; mv "$1.tmp" "$1"; wait' \
+    kill-tree "$kt_dir/kids" "3000.$digits" &
+  kt_target=$!
+  for ((t = 0; t < 100; t++)); do
+    [[ -s "$kt_dir/kids" ]] && break
+    sleep 0.05
+  done
+  kids="$(cat "$kt_dir/kids" 2>/dev/null || true)"
+  kt_alive=0
+  for pid in $kt_target $kids; do
+    if kill -0 "$pid" 2>/dev/null; then kt_alive=$((kt_alive + 1)); fi
+  done
+  kt_rc=0
+  kt_left=""
+  # The target is this shell's child: KILLed, it stays a zombie until the
+  # wait below (its sleeps go to init, which reaps them). bash reports a job
+  # that a signal ended ("Killed: 9") on stderr when it reaps it, which may
+  # be while kill_tree still runs; that is the expected end, so it is not
+  # shown.
+  {
+    kt_out="$(KT_MODE="$mode" KT_TARGET="$kt_target" KT_LOG="$kt_dir/log" KT_PS="$kt_real_ps" KT_PGREP="$kt_real_pgrep" \
+      PATH="$kt_dir/shim:$PATH" "$BASH" -c 'set -euo pipefail; source "$1"; kill_tree "$2"' \
+      kill-tree "$SCRIPT_DIR/lib-policy.sh" "$kt_target" 2>&1 < /dev/null)" || kt_rc=$?
+    for ((t = 0; t < 50; t++)); do
+      state="$(LC_ALL=C "$kt_real_ps" -o stat= -p "$kt_target" || true)"
+      state="${state//[[:space:]]/}"
+      [[ -z "$state" || "$state" == Z* ]] && break
+      sleep 0.1
+    done
+    if [[ -n "$state" && "$state" != Z* ]]; then
+      kt_left=" $kt_target($state)"
+      kill -KILL "$kt_target" || true
+    fi
+    wait "$kt_target" || true
+  } 2>/dev/null
+  kt_seq="$(sed '/^pgrep$/q' "$kt_dir/log" | tr '\n' ' ')"
+  for ((t = 0; t < 50; t++)); do
+    strays="$("$kt_real_pgrep" -f "^sleep 3000[.]$digits\$" 2>/dev/null | tr '\n' ' ' || true)"
+    [[ -z "${strays// /}" ]] && break
+    sleep 0.1
+  done
+  if [[ -n "${strays// /}" ]]; then
+    kt_left+=" sleeps: $strays"
+    pkill -KILL -f "^sleep 3000[.]$digits\$" 2>/dev/null || true
+  fi
+}
+# kt_failed LABEL — show what kt_case saw (the log with repeats counted),
+# then fail.
+kt_failed() {
+  printf 'alive before: %s of 3, rc=%s, log to the first listing: %s left:%s\n%s\n' \
+    "$kt_alive" "$kt_rc" "$(sed '/^pgrep$/q' "$kt_dir/log" | uniq -c | sed 's/^ *\([0-9]*\) \(.*\)/\2 x\1;/' | tr '\n' ' ')" \
+    "${kt_left:- none}" "$kt_out" >&2
+  fail "test failed: kill_tree ($1)"
+  status=1
+}
+#     KT-a) the stop shows late.
+kt_case late
+kt_re='^(ps S ){3,}ps T[^ ]* pgrep $'
+if [[ "$kt_alive" -eq 3 && "$kt_rc" -eq 0 && "$kt_seq" =~ $kt_re && -z "$kt_left" ]] \
+  && ! grep -Fq "kill_tree:" <<< "$kt_out"; then
+  ok "test passed: kill_tree lists a process's children only after ps shows it stopped, and kills the whole tree"
+else
+  kt_failed "the children were listed before ps showed the process stopped, or a warn or a process was left"
+fi
+#     KT-b) ps fails while the target is there.
+kt_case fail
+kt_re='^(ps fail ){2,}pgrep $'
+if [[ "$kt_alive" -eq 3 && "$kt_rc" -eq 0 && "$kt_seq" =~ $kt_re && -z "$kt_left" ]] \
+  && grep -Fxq "[warn] kill_tree: could not read the state of process $kt_target; a child it starts now may be missed" <<< "$kt_out"; then
+  ok "test passed: kill_tree does not take a failed ps for a process that is gone: it waits, warns, and still kills the whole tree"
+else
+  kt_failed "a ps that failed while the process was there was taken as gone, the warn was missing, or a process was left"
+fi
+#     KT-c) the target never shows as stopped.
+kt_case running
+kt_re='^(ps S ){2,}pgrep $'
+if [[ "$kt_alive" -eq 3 && "$kt_rc" -eq 0 && "$kt_seq" =~ $kt_re && -z "$kt_left" ]] \
+  && grep -Fxq "[warn] kill_tree: process $kt_target did not stop (state S); a child it starts now may be missed" <<< "$kt_out"; then
+  ok "test passed: kill_tree warns when a process does not show as stopped, and still kills the whole tree"
+else
+  kt_failed "the did-not-stop warn was missing or a process was left"
+fi
+rm -rf "$kt_dir"
+
 # ID) Git identity contexts (#202): an existing identity file is checked for
 #     completeness, presence-only. Fixture: ~/src/work exists and the work
 #     identity file cycles through missing / empty / name-only / email-only /

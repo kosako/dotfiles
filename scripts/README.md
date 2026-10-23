@@ -224,15 +224,18 @@ repo copy)。
 
 process の後始末の helper(#413): `kill_tree`(PID と子孫を KILL。各 process を SIGSTOP で止め、ps で止まったことを確かめてから子を
 列挙するので、辿っている間に新しい子を作れない。確かめられなければ warn して続ける。doctor の期限付き probe の後始末と共有するので
-`lib-policy.sh` に置く、#423)、`stop_child_trees`(この shell が起動して回収していない
+`lib-policy.sh` に置く、#423。停止の待ちと warn は test-doctor.sh の KT が確かめる、#440)、`stop_child_trees`(この shell が起動して回収していない
 process を子孫ごと KILL して回収する。suite の cleanup が、登録した PID ではなく全部の子を止めるので、中断の signal が届かない
 background の case(`set -m` の job や、INT を無視する非対話 shell の background job)の登録漏れが起きない)。
 `check_suite_interrupt` / `suite_interrupt_inner` は、suite を `SUITE_INTERRUPT_CUE` 付きで起動し直し、trap を張った直後に
 background の case と同じ形の process の木を 2 つ起動させてから TERM を送る。1 つは `set -m` の job、もう 1 つは素の background job で、
 最初の子が終わると新しい子を起動する wrapper(辿っている間に増える木)。run の PATH の先頭の `pgrep` の shim が、wrapper の子を決まった
 順で返し、2 つ目の子の列挙の前に「wrapper が止まった」か「新しい子が記録された」まで待つので、止めずに辿る cleanup は timing に依らず
-新しい子を残す。`sleep` はすべて check ごとに一意の時間で起動し、記録されなかった process も `pgrep -f` で見つける。異なる 5 つの
-process が TERM の前に生きていて、suite が TERM で終わり、check の process がどれも残らず、fixture が消えることを確かめる。check の一時 dir と内側の run の fixture(TMPDIR)は呼び出し側の
+新しい子を残す。`sleep` はすべて check ごとに一意の時間で起動し、記録されなかった process も `pgrep -f` で見つける。木の前に、内側の
+run の fixture に、中身のある権限の無い dir を置く(権限を外す case の途中で中断されたときの形。後始末が先に mode を戻さないと
+`rm -rf` では消えない。#440)。中の file が見えないこと(mode が効くこと)を確かめてから cue に記録し、root では mode が効かないので
+その部分は skip する。異なる 5 つの process が TERM の前に生きていて、suite が TERM で終わり、権限の無い dir が記録され(root を除く)、
+check の process がどれも残らず、fixture が消えることを確かめる。check の一時 dir と内側の run の fixture(TMPDIR)は呼び出し側の
 fixture の下に作るので、呼び出し側の suite が check の途中で中断されても残らない(test-private-backup.sh / test-doctor.sh の冒頭で使う)。
 
 ## test-shell-syntax.sh
@@ -431,7 +434,8 @@ query だけを実機で実行する(書き込みはしない)。
 検証内容(section ごと):
 
 - suite 自身が中断されたとき(TERM)、background の case(HI-d3 の doctor、OP-i10 の FIFO の run)の process の木を残さず、
-  fixture を消すこと(#413。test-lib.sh の `check_suite_interrupt`。cleanup は全部の子を止めてから fixture を消す)。
+  fixture を消すこと(#413。test-lib.sh の `check_suite_interrupt`。cleanup は全部の子を止めてから fixture を消す)。fixture に
+  権限の無い dir が在っても消すこと(権限を外す case の途中の中断。cleanup は先に mode を戻す。root では skip。#440)。
 - managed-path orphan: header があり現 profile で管理対象でない file が warning / 管理対象の
   profile では orphan にならない / header 無しは対象外 / 宣言した file の祖先の directory の下に再帰しない(#174 / #207)。
 - managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は、chezmoi の config が無ければ
@@ -497,6 +501,13 @@ query だけを実機で実行する(書き込みはしない)。
   起動の後にしか返らないので、動いている process の子を先に殺す後始末(以前の `kill_process_tree`)は timing に依らず次の
   command を残して落ちる。shim の待ちが「止まった」で終わり(timeout は fail)、doctor の後に次の command が残らず、
   「未確認」の warn が出て、`kill_tree:` の warn が無いこと。
+- kill_tree の停止の待ち(KT、#440): `kill_tree` を単独の bash で、PATH 先頭の `ps` と `pgrep` の shim の下で走らせる。shim は
+  対象の process(`sh` と、一意の `sleep 3000.<数字>` の子 2 つ)についての問い合わせを順に記録し、`ps` は対象についてだけ
+  答えを差し替える。停止が遅れて見える(3 回は止まっていない `S` と答え、その後は本物の状態)とき、子の列挙は `ps` が停止を示した
+  後になり、warn が出ないこと / process が在るのに `ps` が失敗し続けるとき、消えたとは扱わずに問い合わせを続け、「状態を
+  読めない」warn を出し、木を全部 KILL すること / `S` と答え続けるとき、「止まらない」warn を出し、木を全部 KILL すること。
+  どれも 0 で返ること。OP-e と中断の check の `pgrep` の shim は、止まるまで列挙を返さないので、kill_tree の側の待ちを外しても
+  通る(順序だけを見る)。待ちと warn はこの case が見る。
 - Git identity contexts(#202 / #241): identity file の状態(missing / empty / name-only / email-only / complete /
   parse 不能 / 明示的な空値 / 値の無い key(`=` なし))ごとに、missing と partial は action(手順に file path)、
   complete は ok、parse 不能は warn、値の無い key は「git が identity 全体を拒否する」別の action になること
@@ -670,7 +681,8 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
 検証内容:
 
 - suite 自身が中断されたとき(TERM)、background の case の process の木を残さず、fixture を消すこと(#413。test-lib.sh の
-  `check_suite_interrupt`。cleanup は登録した PID ではなく全部の子を止める)。
+  `check_suite_interrupt`。cleanup は登録した PID ではなく全部の子を止める)。fixture に権限の無い dir が在っても消すこと
+  (case 22・39 のような権限を外す case の途中の中断。cleanup は先に mode を戻す。root では skip。#440)。
 - backup がアーカイブと machine-neutral marker(絶対 home path を漏らさない)を書くこと。
 - verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
 - `--identity-command`(op seam)経由でも verify できること。

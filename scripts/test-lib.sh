@@ -215,16 +215,27 @@ stop_child_trees() {
 #   a run that never reached the point, or gave up there, fails the check.
 # Every `sleep` runs for a duration unique to the check (matched whole, the
 # dot literal), so one that was started but never listed is found too
-# (pgrep -f). check_suite_interrupt then sends the run TERM and succeeds when
-# five different listed processes were alive before it, the run ended by
-# TERM, the sync point was passed, no process of the check is left and the
-# fixture dir is gone; otherwise it prints what it saw and fails. Everything
-# it makes, the inner run's fixture included (its TMPDIR),
-# is under DIR, the calling suite's fixture, so an interrupt of the calling
-# suite removes it too.
+# (pgrep -f). Before the trees, the inner run's fixture gets a directory
+# without any permission that holds a file, as a case that takes a
+# permission away (a mode-000 file or directory, a directory without search
+# permission; both suites have such cases) leaves it when the run is
+# interrupted inside that window (#440): rm -rf alone cannot remove it, so
+# the fixture goes only when the cleanup opens the modes first. It is listed
+# ("locked PATH") only where the mode binds (the file cannot be seen through
+# it); as root it does not, and that part is skipped. check_suite_interrupt then sends the run TERM and succeeds
+# when five different listed processes were alive before it, the run ended
+# by TERM, the sync point was passed, the locked directory was listed (unless
+# root), no process of the check is left and the fixture dir is gone;
+# otherwise it prints what it saw and fails. Everything it makes, the inner
+# run's fixture included (its TMPDIR), is under DIR, the calling suite's
+# fixture, so an interrupt of the calling suite removes it too.
 suite_interrupt_inner() {
   local cue="$1" t
   printf 'fixture %s\n' "$2" >> "$cue"
+  mkdir "$2/suite-interrupt-locked"
+  printf 'locked\n' > "$2/suite-interrupt-locked/file"
+  chmod 000 "$2/suite-interrupt-locked"
+  [[ -e "$2/suite-interrupt-locked/file" ]] || printf 'locked %s\n' "$2/suite-interrupt-locked" >> "$cue"
   set -m
   sh -c 'sleep "$2" & printf "pid %s job-sleep\n" "$!" >> "$1"; wait' suite-interrupt "$cue" "$SUITE_INTERRUPT_SLEEP" &
   printf 'pid %s job\n' "$!" >> "$cue"
@@ -250,7 +261,7 @@ suite_interrupt_inner() {
 }
 
 check_suite_interrupt() {
-  local suite="$1" dir pid t rc=0 kind value role fixture="" listed="" distinct=0 dead_before="" left="" ready=0
+  local suite="$1" dir pid t rc=0 kind value role fixture="" listed="" distinct=0 dead_before="" left="" ready=0 locked=""
   local sleep_digits="$RANDOM$RANDOM$RANDOM$RANDOM" sleep_for sleep_match strays line sync=""
   sleep_for="3000.$sleep_digits"
   sleep_match="^sleep 3000[.]$sleep_digits\$"
@@ -321,6 +332,7 @@ SH
         listed+=" $value:$role"
         ;;
       'fixture '*) fixture="${line#fixture }" ;;
+      'locked '*) locked="${line#locked }" ;;
       'sync '*) sync+="${line#sync } " ;;
     esac
   done < <(cat "$dir/cue" 2>/dev/null || true)
@@ -340,13 +352,13 @@ SH
   done
   pkill -KILL -f "$sleep_match" 2>/dev/null || true
   if [[ "$ready" -eq 1 && "$distinct" -eq 5 && -z "$dead_before" && "$rc" -eq 143 && "$sync" == "ok " && -z "$left" \
-    && -z "${strays// /}" && -n "$fixture" && ! -e "$fixture" ]]; then
+    && -z "${strays// /}" && -n "$fixture" && ! -e "$fixture" ]] && [[ -n "$locked" || "$(id -u)" == 0 ]]; then
     rm -rf "$dir"
     return 0
   fi
-  printf 'ready=%s distinct=%s dead before TERM:%s rc=%s sync=%s listed:%s left:%s strays: %s fixture=%s (exists: %s)\n' \
+  printf 'ready=%s distinct=%s dead before TERM:%s rc=%s sync=%s listed:%s left:%s strays: %s fixture=%s (exists: %s) locked=%s\n' \
     "$ready" "$distinct" "${dead_before:- none}" "$rc" "${sync:-<none>}" "$listed" "${left:- none}" "${strays:-none}" "${fixture:-<none>}" \
-    "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" >&2
+    "$([[ -n "$fixture" && -e "$fixture" ]] && echo yes || echo no)" "${locked:-<none>}" >&2
   cat "$dir/log" >&2 2>/dev/null || true
   chmod -R u+rwX "$dir" 2>/dev/null || true
   rm -rf "$dir"
