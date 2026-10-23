@@ -9,7 +9,24 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
 - local override file は chezmoi の管理対象にしない。repo にも commit しない。
 - secret、会社・クライアント固有の値、host 固有の調整は local override file 側にのみ置く。
 - managed file は local override file が存在しなくても壊れないように書く。
-- doctor は local override file の存在を report-only で表示してよいが、中身は読まない。
+- doctor は local override file の存在を report-only で表示してよい。中身は読まないことを原則とし、
+  例外は検査に要る次の項目だけにする(ほかの `~/.zprofile.local`・`~/.ssh/config.local`・
+  `~/.config/dotfiles/*.local`・`~/.config/agent-tools/checks.local.json` などは存在だけを見る)。
+  例外でも読んだ値は表示せず、出すのは判定と file の path、照合に使った名前(doctor が持つ key や
+  probe、配置中の plugin)だけにする。中身を読む検査を足すときは、この一覧も直す。
+  - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`)は、
+    agent-tools の plugin(`~/.config/opencode/plugins/personal-*.js`)が配置されているときだけ JSON として
+    parse し、`plugin` 欄に配置中の plugin と同じ名前があるか(二重読込)を照合する。ほかの欄は使わない
+    (#263。[opencode-settings](opencode-settings.md) の「検査」)。
+  - `~/.zshrc.local` は、`opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が
+    未設定のときだけ、`OPENCODE_CONFIG` という文字列があるかを `grep -q` で見る(export の行かは見ない。
+    #263。[opencode-settings](opencode-settings.md) の「検査」)。
+  - 各 project の `.claude/settings.local.json` は、`enableAiPolicy=true` で `claude-settings` module が
+    active な profile のとき、標準の project root 直下の repo(HOME の下にあればこの repo も)にあるものを読み、
+    permission の allow / deny / ask が外向きの probe を承認なしに通すかを評価する(#334。
+    [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
+  - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
+    `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
 - 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.zprofile.local`、`~/.ssh/config.local`)。
   対応する managed file を持たない local 値(trust list・clone context など)は
   `~/.config/dotfiles/<name>.local` に置く(下記)。
