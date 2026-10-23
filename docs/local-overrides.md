@@ -12,9 +12,11 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
 - doctor は local override file の存在を report-only で表示してよい。中身は読まないことを原則とし、
   例外は検査に要る次の項目だけにする(ほかの `~/.zprofile.local`・`~/.ssh/config.local`・
   `~/.config/dotfiles/*.local`・`~/.config/agent-tools/checks.local.json` などは存在だけを見る)。
-  例外でも読んだ値は表示せず、出すのは判定と file の path、照合に使った名前(doctor が持つ key や
-  probe、配置中の plugin)だけにする。中身を読む検査を足すときは、この一覧も直す。
-  - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`)は、
+  例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)
+  だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
+  中身を読む検査を足すときは、この一覧も直す。
+  - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`。
+    `opencode-settings` module が非 active な profile では managed でない `~/.config/opencode/opencode.json` も)は、
     agent-tools の plugin(`~/.config/opencode/plugins/personal-*.js`)が配置されているときだけ JSON として
     parse し、`plugin` 欄に配置中の plugin と同じ名前があるか(二重読込)を照合する。ほかの欄は使わない
     (#263。[opencode-settings](opencode-settings.md) の「検査」)。
@@ -27,6 +29,12 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
   - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
     `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
+    ただし doctor を `~/src/<context>/` の下の repo の中で実行すると、global の `core.hooksPath` と
+    (`git-ignore` module が active な profile では)`core.excludesFile` を引く照会(`git config --global --includes`)
+    で、git が `~/.gitconfig` の `gitdir` の includeIf を辿り、その context の identity file(そこから include
+    される file も)も読む。`core.hooksPath` の値は出さないが、`core.excludesFile` が managed な
+    `~/.config/git/ignore` と別の file を指すときは、git が読む file としてその path を表示する
+    ([git-ignore](git-ignore.md) の「doctor / preflight」)。
 - 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.zprofile.local`、`~/.ssh/config.local`)。
   対応する managed file を持たない local 値(trust list・clone context など)は
   `~/.config/dotfiles/<name>.local` に置く(下記)。

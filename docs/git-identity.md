@@ -180,6 +180,10 @@ fatal: no email was given and auto-detection is disabled
   - 各 context の identity file が存在するか、意図的に未設定か。存在する file は `user.name` /
     `user.email` の**有無だけ**(値は出さない)を見て、どちらか(または両方)が欠ける partial と、
     `=` 無しの値なし key を action として出す(#202 / #241。git が parse できない file はその旨を warn)。
+  - この検査とは別に、`~/src/<context>/` の下の repo の中で doctor を実行すると、global の `core.hooksPath` と
+    `core.excludesFile` を引く照会(`--includes`)で git が `gitdir` の includeIf を辿り、その context の identity
+    file も読む。`core.excludesFile` が managed な `~/.config/git/ignore` と別の file を指すときは、その path が
+    global gitignore の warn に出る([local-overrides](local-overrides.md) の「共通原則」)。
 - `scripts/preflight.sh` は apply 前に既存の home Git config(`~/.gitconfig`、`~/.config/git/config`)と
   global identity の設定有無を検知する。値そのものは表示しない。同じ `~/.config/git/` 配下の
   global gitignore(`git-ignore` module、#248)の置換 warn もここに出る([git-ignore](git-ignore.md))。
