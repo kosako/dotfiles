@@ -67,7 +67,8 @@ template に取り込む」。`settings.local.json` 行きの permission 承認�
 **project 側の allow の堆積(#334)**: `settings.local.json` は管理外なので、`chezmoi apply` では戻らない。
 承認の「次から聞かない」で外向きの操作(push・PR の作成や merge・外部送信など)の allow が溜まると、その
 project ではそれらが承認なしに走る(managed の deny / ask は allow に勝つが、外向きの操作の多くは ask に
-入れていない)。doctor が標準の project root 直下の repo の allow を外向きの probe で評価し、managed の floor と
+入れていない)。doctor が標準の project root 直下の repo(work と client では、配置の規約どおり org(client)の
+1 段下に置いた repo も。#445)の allow を外向きの probe で評価し、managed の floor と
 project 自身の deny / ask が止めないものを warn する(rule の
 中身は出さない。一致の規則は [scripts/README](../scripts/README.md) の doctor の AI policy)。対処はその file から
 該当の allow を外し、都度承認に戻すこと。
