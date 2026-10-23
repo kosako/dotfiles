@@ -1233,7 +1233,8 @@ report_codex_projects_trust() {
 # can carry them too) — the same erosion #139 found on the Codex side. So,
 # as with the Codex rules probes, the shared outward probe commands are
 # evaluated against the allow rules of those files in the repos directly
-# under the standard project roots (and this repo when it is under HOME),
+# under the standard project roots, the repos one org (client) level down in
+# work and client (#445), and this repo when it is under HOME,
 # matched the way Claude Code classifies a Bash rule (claude_bash_rule_matches
 # below); the bare tool `Bash` allows every command. A probe a deny / ask of
 # the live ~/.claude/settings.json or of the project's own two files covers is
@@ -1437,8 +1438,10 @@ report_claude_project_allows() {
   # (docs/directory-convention.md): there each directory under the root is
   # both read as a repo (one placed off the convention) and listed for the
   # repos under it, each read once. A directory there that cannot be
-  # listed is unreadable too. One level only: a checkout deeper down is not
-  # read, as under the other roots.
+  # listed is unreadable too. Its own .claude and .git (its settings and its
+  # git dir when it is a repo) are not repos, so they are not read as one.
+  # One level only: a checkout deeper down is not read, as under the other
+  # roots.
   listed_dirs=()
   for root in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
     dir_state="$(claude_settings_dir_state "$root")"
@@ -1464,7 +1467,11 @@ report_claude_project_allows() {
       [[ "$dir_state" == open ]] || continue
       for sub in "$dir"/*/ "$dir"/.[!.]*/ "$dir"/..?*/; do
         [[ -d "$sub" ]] || continue
-        listed_dirs+=("${sub%/}")
+        sub="${sub%/}"
+        case "${sub##*/}" in
+          .claude | .git) continue ;;
+        esac
+        listed_dirs+=("$sub")
       done
     done
   done
