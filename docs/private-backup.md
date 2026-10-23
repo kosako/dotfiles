@@ -218,7 +218,9 @@ secret ではないが repo にはコミットしない)。
   続ける。正常終了の後始末の間に届いた signal は捨て、その run は本来の終了状態で終わる(#358)。
 - doctor は report-only。public baseline の解決と、marker 由来の要約(バックアップ有無 / 最終日時 /
   archive の basename / file 数 / 捕捉の完全性 = `capture_incomplete`。扱いは上記 #242 の項)のみ表示し、
-  local 補足は **存在のみ**(中身・件数を出さない。`docs/local-overrides.md` の規約に従う)。
+  local 補足は **存在のみ**(中身・件数を出さない。`docs/local-overrides.md` の規約に従う)。archive は最後の path の
+  要素だけを出し、`-` で始まる名前(`--out ./-name` が記録する形)もそのまま出す。名前が残らない値(`/` で終わる)は
+  unknown にする(#444。以前は basename が option と読んで失敗し、doctor がそこで止まっていた)。
 - marker・manifest に絶対 home path / host 名 / private list path を入れない。
 - 復元チェーンの循環を避ける: 復元に必要な op 設定 / 1Password sign-in 材料を
   アーカイブにだけ置かない。新マシンで最初に手動で用意するものを docs に固定する。

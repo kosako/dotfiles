@@ -816,9 +816,9 @@ fi
 
 # State marker: presence + last success + basename + count, nothing else.
 # The marker is repo-external and could be stale or hand-edited, so treat
-# its fields as untrusted: display_safe them, basename the archive,
-# and require a numeric count — anything odd is shown as "unknown" rather
-# than echoed verbatim to the terminal.
+# its fields as untrusted: display_safe them, keep only the archive's file
+# name, and require a numeric count — anything odd is shown as "unknown"
+# rather than echoed verbatim to the terminal.
 backup_marker="$HOME/.local/state/dotfiles/private-backup.json"
 if [[ -f "$backup_marker" ]]; then
   bm() { display_safe "$(yq -p=json -o=tsv "$1" "$backup_marker" 2>/dev/null || true)"; }
@@ -829,8 +829,13 @@ if [[ -f "$backup_marker" ]]; then
   # into unknown — read it as a string instead. Absent (a marker written
   # before #242) is UNKNOWN, never assumed complete.
   marker_incomplete_raw="$(bm '.capture_incomplete | tostring')"
-  marker_archive="unknown"
-  [[ -n "$marker_archive_raw" ]] && marker_archive="$(basename "$marker_archive_raw")"
+  # The archive's last path component is cut with parameter expansion, not
+  # basename: basename reads a name that starts with "-" (what backup --out
+  # ./-name records) as an option and fails, and as the last command of an
+  # && list that failure ended doctor under set -e (#444). A value that
+  # leaves no component (empty, or ending in "/") is unknown.
+  marker_archive="${marker_archive_raw##*/}"
+  [[ -n "$marker_archive" ]] || marker_archive="unknown"
   [[ "$marker_count" =~ ^[0-9]+$ ]] || marker_count="unknown"
   case "$marker_incomplete_raw" in
     true) marker_capture="INCOMPLETE" ;;

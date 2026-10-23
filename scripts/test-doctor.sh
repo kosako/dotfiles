@@ -522,6 +522,39 @@ else
   fail "test failed: marker capture_incomplete=true not reported as an INCOMPLETE action"
   status=1
 fi
+# I3) An archive name that starts with "-" (#444): `private-backup.sh backup
+#     --out ./-archive.age` records "-archive.age" (test-private-backup pins
+#     that). doctor passed it to basename without "--", which read it as an
+#     option and failed, and the failure ended doctor under set -e: exit 1,
+#     no report after the backup section and no next actions. The name must
+#     be shown as is and doctor must run to the end; the backup.age runs
+#     above are the control. A value that leaves no file name (ending in "/")
+#     is unknown.
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"-archive.age","file_count":2,"capture_incomplete":false}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+pb_rc=0
+pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || pb_rc=$?
+if [[ "$pb_rc" -eq 0 ]] \
+  && grep -Fq "[ok] last backup: 2026-06-19T00:00:00Z (archive: -archive.age, files: 2, capture: complete)" <<< "$pb_out" \
+  && grep -Fq "[info] == next actions (" <<< "$pb_out"; then
+  ok "test passed: a marker archive name that starts with \"-\" is shown as is and doctor runs to the next actions (exit 0, #444)"
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: a marker archive name that starts with \"-\" must not stop doctor (rc=$pb_rc, #444)"
+  status=1
+fi
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"old/","file_count":2,"capture_incomplete":false}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+pb_rc=0
+pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || pb_rc=$?
+if [[ "$pb_rc" -eq 0 ]] \
+  && grep -Fq "[ok] last backup: 2026-06-19T00:00:00Z (archive: unknown, files: 2, capture: complete)" <<< "$pb_out"; then
+  ok "test passed: a marker archive value that leaves no file name is shown as unknown (#444)"
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: a marker archive value ending in \"/\" must be shown as unknown (rc=$pb_rc, #444)"
+  status=1
+fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2}\n' \
   > "$fixture_home/.local/state/dotfiles/private-backup.json"
 

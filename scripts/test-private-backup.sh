@@ -1918,6 +1918,20 @@ else
   printf '%s\n' "$ov_out" >&2
   miss "a dash-led --out value must be refused (rc=$ov_rc)"
 fi
+# Written as ./-name, the same archive is accepted, and the marker records
+# the name as "-archive.age": the form doctor reads back (#444; test-doctor
+# pins that such a marker does not stop doctor).
+dash_cwd="$fixture_home/dash-out-cwd"
+mkdir -p "$dash_cwd"
+dash_rc=0
+dash_out="$(cd "$dash_cwd" && run backup --out ./-archive.age --recipient "$recipient" --yes 2>&1)" || dash_rc=$?
+if [[ "$dash_rc" -eq 0 && -f "$dash_cwd/-archive.age" ]] \
+  && [[ "$(yq -p=json -o=tsv '.archive' "$marker")" == "-archive.age" ]]; then
+  pass "--out ./-archive.age writes the archive and the marker records -archive.age"
+else
+  printf '%s\n' "$dash_out" >&2
+  miss "--out ./-archive.age must write the archive and record -archive.age in the marker (rc=$dash_rc)"
+fi
 
 # 33. A run interrupted after its plaintext exists leaves nothing in its
 #     temp and ends by the signal (#358): backup (staging + self-check dir),
