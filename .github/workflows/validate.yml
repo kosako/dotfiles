@@ -29,6 +29,9 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Recent runs took 24-37 minutes (test-doctor is most of it). The limit
+    # stops a hung test long before the 360-minute default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -253,6 +256,9 @@ jobs:
 
   render:
     runs-on: ubuntu-latest
+    # Recent runs took under a minute; the limit leaves room for slow
+    # downloads but stops a hung test long before the 360-minute default.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
