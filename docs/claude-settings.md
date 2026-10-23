@@ -91,11 +91,17 @@ project 自身の deny / ask が止めないものを warn する(rule の
 - 合成しても live の file と意味が同じなら、live の byte をそのまま返す(初回の apply が書いた 1 行の配列なども
   整形し直さないので、`chezmoi diff` は空のまま)。変わるときは jq が 2 space の indent で出す(Claude Code が
   書く形と同じ)。
-- live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON)ときは、apply は
-  その file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+- live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON・NUL を含む)ときは、
+  apply はその file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+- live の file の中身は一時 file に書かず、shell の変数に保って jq には stdin で渡す(#446)。jq の引数に置くのは
+  template が描く managed の JSON(public)だけで、live にしかない値(`autoMode` など)は process の一覧(`ps`)に
+  出ない。合成と比較は 1 回の jq で行う。live の中身を一時 file に置かないので、`TMPDIR` に書けない環境でも script は
+  止まらず、kill されても live の写しは残らない(chezmoi 自身は script を一時 dir(設定の `scriptTempDir`、既定は
+  `TMPDIR`)に書いてから走らせる)。shell の変数は NUL を持てないので、NUL は `tr` で別の制御文字に置き換えて
+  jq に渡し、上の「壊れた JSON」として止める。
 
-`chezmoi diff` / `status` も同じ script を走らせて比べる。手元の key を保ったまま apply できるので、#341 / #353
-のときのように live の file を手で書き換える必要はない。
+`chezmoi diff` / `status` も同じ script を走らせて比べる(doctor の drift の検査も `chezmoi status` を使う)。手元の
+key を保ったまま apply できるので、#341 / #353 のときのように live の file を手で書き換える必要はない。
 
 ## gate の仕組み
 

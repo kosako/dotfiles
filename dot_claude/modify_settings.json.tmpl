@@ -184,9 +184,9 @@
 # formatting, never show as a diff); otherwise jq prints the result with
 # two-space indentation, which is also how Claude Code writes the file.
 # A live file that is not exactly one JSON object (whitespace only, several
-# values, an array, broken JSON) stops the apply instead of being replaced;
-# only an empty one (0 bytes, also what chezmoi passes when there is none)
-# gets the managed JSON.
+# values, an array, broken JSON, a NUL byte) stops the apply instead of
+# being replaced; only an empty one (0 bytes, also what chezmoi passes when
+# there is none) gets the managed JSON.
 set -eu
 managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 {
@@ -244,13 +244,20 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 }
 CLAUDE_SETTINGS_JSON
 )
-# The live file goes to a temp file, so its bytes come back exactly (a
-# command substitution would drop trailing newlines).
-live=$(mktemp "${TMPDIR:-/tmp}/dotfiles-claude-settings-live.XXXXXX")
-trap 'rm -f "$live"' EXIT
-trap 'rm -f "$live"; exit 1' HUP INT TERM
-cat > "$live"
-if [ ! -s "$live" ]; then
+# The live file stays in this variable (#446). No temp file: one would stop
+# the script where TMPDIR cannot be written and outlive a killed script as a
+# copy of the file (the temp file bash as /bin/sh makes for the heredoc
+# above holds only the public managed JSON, and bash falls back to a system
+# temp dir for it). jq reads it on stdin, never from its arguments, which ps
+# shows to other users (autoMode is not public); printf is a shell builtin,
+# so its arguments never reach a process list. The x keeps the trailing
+# newlines a command substitution would drop, so the bytes come back
+# exactly. A shell variable cannot hold NUL, which JSON never has: tr turns
+# it into SOH, a raw control byte jq rejects anywhere just the same, so a
+# file with NUL still stops the apply instead of losing those bytes.
+live=$(LC_ALL=C tr '\000' '\001' && printf x)
+live=${live%x}
+if [ -z "$live" ]; then
   printf '%s\n' "$managed"
   exit 0
 fi
@@ -258,16 +265,21 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "dotfiles: jq is required to update the existing ~/.claude/settings.json (it keeps the keys the template does not manage)" >&2
   exit 1
 fi
-merged=$(jq -s --argjson managed "$managed" '
+# One jq run checks, merges and compares: it prints the merged JSON, or
+# nothing when that is the live file's JSON again. The managed JSON is the
+# template's (public), so it may stay an argument.
+merged=$(printf '%s' "$live" | jq -s --argjson managed "$managed" '
   if length != 1 or (.[0] | type) != "object"
   then error("~/.claude/settings.json is not exactly one JSON object") else .[0] end
+  | . as $live
   | reduce ($managed | keys_unsorted[]) as $key (.;
       if ($key == "model" and has("model")) or .[$key] == $managed[$key] then .
       else .[$key] = $managed[$key] end)
   | reduce ("sandbox", "hooks") as $key (.;
-      if $managed | has($key) then . else del(.[$key]) end)' "$live")
-if jq -s -e --argjson merged "$merged" '.[0] == $merged' "$live" >/dev/null; then
-  cat "$live"
+      if $managed | has($key) then . else del(.[$key]) end)
+  | if . == $live then empty else . end')
+if [ -z "$merged" ]; then
+  printf '%s' "$live"
 else
   printf '%s\n' "$merged"
 fi

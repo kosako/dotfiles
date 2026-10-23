@@ -149,8 +149,8 @@ CI は fresh checkout で差分が無いため、代わりに commit 済み tree
 `bash32` job は、validate job の test(shellcheck・zsh の構文検査・whitespace check を除く)を macOS の runner で、
 `/bin/bash`(3.2)を PATH の先頭に置いて回す(#333 F06。契約は `scripts/README.md` の「実行環境の契約(bash 3.2)」)。
 render job の test も、同じ job の render group で、macOS 用の chezmoi と codex(render job と同じ version を sha256 で固定)を
-入れて回す(#382。managed file は macOS に apply され、Claude settings の modify script も macOS の `/bin/sh`・`mktemp`・
-`trap`・`jq` で走るため)。
+入れて回す(#382。managed file は macOS に apply され、Claude settings の modify script も macOS の `/bin/sh`・`tr`・
+`jq` で走るため)。
 macOS の runner では `test-doctor.sh` だけで約 40 分かかるので、doctor / private-backup / その他 / render の 4 つの group に分けて
 並列に回す(待ち時間は最も遅い doctor の group で決まる)。
 手元で 3.2 で回すときも同じく、`/bin/bash` への symlink を置いた directory を PATH の先頭に置く

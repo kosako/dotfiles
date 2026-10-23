@@ -865,8 +865,12 @@ managed file は modify script(#360)なので、live の file がある home へ
 `sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
 byte のまま残る、`model` が無ければ template の値が入る、hook の capability が全部 false なら live の `hooks` が消える、
 capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、ちょうど 1 つの JSON の
-object でない live の file(配列・壊れた JSON・空白だけ・object 2 つ・改行だけ)は apply を止めて byte 単位で変えない、
-file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない。chezmoi と jq が必要(render job)。
+object でない live の file(配列・壊れた JSON・空白だけ・object 2 つ・改行だけ・NUL を含む)は apply を止めて byte 単位で変えない、
+file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない。script が live の file を
+一時 file にも process の引数にも置かないこと(#446)も確かめる: `TMPDIR` が無い dir を指しても、live の file への
+`chezmoi diff` は通常の `TMPDIR` のときと同じ差分を出し、apply は同じ file を書き、その後の `chezmoi status` は空(chezmoi
+自身が script を置く `scriptTempDir` は在る dir にする)。PATH の先頭に置いた jq の shim が記録する引数に、live の file の
+`autoMode` だけにある値が diff・apply・2 回目の diff のどこでも出ない。chezmoi と jq が必要(render job)。
 
 ## test-codex-settings.sh
 
