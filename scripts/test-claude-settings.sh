@@ -1075,6 +1075,49 @@ for bad_seed in '[]' '{"model": ' '   ' '{} {}' ''; do
     status=1
   fi
 done
+# A NUL byte (never in JSON) stops the apply as well, both alone (dropped,
+# it would leave 0 bytes: the no-file case) and after the render (dropped,
+# the rest is the render), also as the last byte, which jq reading the file
+# itself lets pass: the script keeps the live file in a shell variable,
+# which cannot hold NUL, so it must not drop the byte (#446). The seeds are
+# written directly, as a bash variable cannot carry NUL either.
+nul_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-nul.XXXXXX")"
+tmp_roots+=("$nul_root")
+mkdir -p "$nul_root/home/.claude"
+nul_file="$nul_root/home/.claude/settings.json"
+for nul_case in 'NUL only' 'the render then NUL' 'the render then a last NUL'; do
+  if [[ "$nul_case" == 'NUL only' ]]; then
+    printf '\000\000' > "$nul_file"
+  elif [[ "$nul_case" == 'the render then NUL' ]]; then
+    { cat "$off_file"; printf '\000\n'; } > "$nul_file"
+  else
+    { cat "$off_file"; printf '\000'; } > "$nul_file"
+  fi
+  cp "$nul_file" "$nul_root/seed.json"
+  nul_rc=0
+  render_personal_into "$DOTFILES_ROOT" "$nul_root" || nul_rc=$?
+  if [[ "$nul_rc" -ne 0 ]] && cmp -s "$nul_root/seed.json" "$nul_file"; then
+    ok "test passed: a live file of $nul_case stops the apply and stays byte-identical"
+  else
+    fail "test failed: a live file of $nul_case was changed or the apply did not fail (rc=$nul_rc)"
+    status=1
+  fi
+done
+# A byte that is not UTF-8 inside a JSON string does not stop the apply: jq
+# reads it, and a file that is otherwise the render comes back byte for
+# byte. The apply runs in a UTF-8 locale, where BSD tr would stop on that
+# byte without the script's LC_ALL=C (#446); GNU tr reads bytes either way.
+{ printf '{"probe": "\377\201",'; tail -c +2 "$off_file"; } > "$nul_file"
+cp "$nul_file" "$nul_root/seed.json"
+u8_rc=0
+LC_ALL=C.UTF-8 chezmoi --config "$nul_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+  --destination "$nul_root/home" apply >/dev/null 2>&1 || u8_rc=$?
+if [[ "$u8_rc" -eq 0 ]] && cmp -s "$nul_root/seed.json" "$nul_file"; then
+  ok "test passed: a live file with a byte that is not UTF-8 in a string applies in a UTF-8 locale and stays byte-identical"
+else
+  fail "test failed: a live file with a byte that is not UTF-8 in a string was changed or did not apply in a UTF-8 locale (rc=$u8_rc)"
+  status=1
+fi
 
 # 9h) The first apply on a home without the file writes the managed JSON as
 #     the template prints it (one-line deny / ask arrays); right after it,
@@ -1094,6 +1137,104 @@ if [[ "$first_rc" -eq 0 && -z "$first_diff" ]] && cmp -s "$off_file" "$first_roo
   ok "test passed: after a first apply chezmoi diff is empty and a second apply changes no byte"
 else
   fail "test failed: right after a first apply chezmoi diff is not empty or a second apply re-printed the file (rc=$first_rc)"
+  status=1
+fi
+
+# 9i) The script makes no temp file of its own for the live file (#446).
+#     With TMPDIR at a directory that does not exist, chezmoi diff
+#     over the 9a seed prints what it prints with a working TMPDIR, apply
+#     writes what 9a wrote, and chezmoi status is empty afterwards (chezmoi
+#     itself writes the script to a temp file before running it, so its
+#     scriptTempDir is a directory that exists). Shims first on PATH for
+#     those three runs log that mktemp never runs (BSD mktemp falls back to
+#     another directory when TMPDIR is missing) and that jq reads the live
+#     file from a pipe (bash as /bin/sh keeps a here-document in a temp
+#     file). A write to a fixed path is not looked for.
+notmp_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-notmp.XXXXXX")"
+tmp_roots+=("$notmp_root")
+mkdir -p "$notmp_root/home/.claude" "$notmp_root/script-tmp" "$notmp_root/bin"
+cat > "$notmp_root/bin/mktemp" <<'MKTEMP_SHIM'
+#!/bin/sh
+printf 'mktemp ran\n' >> "$SHIM_LOG"
+exec "$MKTEMP_REAL" "$@"
+MKTEMP_SHIM
+cat > "$notmp_root/bin/jq" <<'JQ_SHIM'
+#!/bin/sh
+if [ -p /dev/stdin ]; then
+  printf 'jq read a pipe\n' >> "$SHIM_LOG"
+else
+  printf 'jq read no pipe\n' >> "$SHIM_LOG"
+fi
+exec "$JQ_REAL" "$@"
+JQ_SHIM
+chmod +x "$notmp_root/bin/mktemp" "$notmp_root/bin/jq"
+notmp_log="$notmp_root/shim.log"
+: > "$notmp_log"
+notmp_env=(TMPDIR="$notmp_root/missing" SHIM_LOG="$notmp_log" JQ_REAL="$(command -v jq)"
+  MKTEMP_REAL="$(command -v mktemp)" PATH="$notmp_root/bin:$PATH")
+jq -n --arg dir "$notmp_root/script-tmp" '{scriptTempDir: $dir, data: {profile: "personal"}}' \
+  > "$notmp_root/chezmoi.json"
+notmp_file="$notmp_root/home/.claude/settings.json"
+printf '%s\n' "$local_seed" > "$notmp_file"
+notmp_rc=0
+notmp_want_diff="$(chezmoi --config "$notmp_root/chezmoi.json" --source "$DOTFILES_ROOT" \
+  --destination "$notmp_root/home" diff "$notmp_file" 2>/dev/null)" || notmp_rc=1
+notmp_diff="$(env "${notmp_env[@]}" chezmoi --config "$notmp_root/chezmoi.json" \
+  --source "$DOTFILES_ROOT" --destination "$notmp_root/home" diff "$notmp_file" 2>/dev/null)" || notmp_rc=1
+env "${notmp_env[@]}" chezmoi --config "$notmp_root/chezmoi.json" --source "$DOTFILES_ROOT" \
+  --destination "$notmp_root/home" apply >/dev/null 2>&1 || notmp_rc=1
+notmp_status="$(env "${notmp_env[@]}" chezmoi --config "$notmp_root/chezmoi.json" \
+  --source "$DOTFILES_ROOT" --destination "$notmp_root/home" status 2>/dev/null)" || notmp_rc=1
+if [[ "$notmp_rc" -eq 0 && -n "$notmp_want_diff" && "$notmp_diff" == "$notmp_want_diff" \
+  && -z "$notmp_status" && ! -e "$notmp_root/missing" ]] && cmp -s "$local_file" "$notmp_file"; then
+  ok "test passed: with TMPDIR at a missing directory, chezmoi diff, apply and status over a live file work as with a working one"
+else
+  fail "test failed: with TMPDIR at a missing directory, chezmoi diff, apply or status over a live file failed or differed (rc=$notmp_rc status=$notmp_status)"
+  status=1
+fi
+if grep -Fqx 'jq read a pipe' "$notmp_log" && ! grep -Fvqx 'jq read a pipe' "$notmp_log"; then
+  ok "test passed: no mktemp ran and jq read the live file from a pipe (diff, apply and status)"
+else
+  fail "test failed: mktemp ran, jq read the live file from no pipe, or jq did not run: $(sort "$notmp_log" | uniq -c | tr -s ' \n' ' ')"
+  status=1
+fi
+
+# 9j) No live value reaches jq's arguments (#446): a jq shim first on PATH
+#     logs every argument it gets and runs the real jq. A value that only
+#     the live file's autoMode holds is kept by apply and never shows in the
+#     log, while the log shows that jq ran with the managed JSON: chezmoi diff
+#     over a live file with a stale managed key, the apply that merges it,
+#     and chezmoi diff over the merged file (the unchanged case).
+argv_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-argv.XXXXXX")"
+tmp_roots+=("$argv_root")
+mkdir -p "$argv_root/bin" "$argv_root/home/.claude"
+cat > "$argv_root/bin/jq" <<'JQ_SHIM'
+#!/bin/sh
+printf '%s\n' "$@" >> "$JQ_ARGV_LOG"
+exec "$JQ_REAL" "$@"
+JQ_SHIM
+chmod +x "$argv_root/bin/jq"
+printf '[data]\nprofile = "personal"\n' > "$argv_root/chezmoi.toml"
+argv_marker="dotfiles-argv-probe-$$-$RANDOM"
+argv_file="$argv_root/home/.claude/settings.json"
+jq --arg marker "$argv_marker" '{autoMode: {environment: [$marker]}} + . | .tui = "default"' \
+  "$off_file" > "$argv_file"
+argv_log="$argv_root/jq-argv.log"
+: > "$argv_log"
+argv_real_jq="$(command -v jq)"
+argv_rc=0
+for argv_step in diff apply diff; do
+  JQ_ARGV_LOG="$argv_log" JQ_REAL="$argv_real_jq" PATH="$argv_root/bin:$PATH" \
+    chezmoi --config "$argv_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+    --destination "$argv_root/home" "$argv_step" >/dev/null 2>&1 || argv_rc=1
+done
+if [[ "$argv_rc" -eq 0 ]] && grep -Fqx -- '--argjson' "$argv_log" \
+  && grep -Fq '"permissions"' "$argv_log" && ! grep -Fq -- "$argv_marker" "$argv_log" \
+  && [[ "$(yq -p json '.autoMode.environment[0]' "$argv_file")" == "$argv_marker" \
+    && "$(yq -p json '.tui' "$argv_file")" == "$(yq -p json '.tui' "$off_file")" ]]; then
+  ok "test passed: a value only the live file holds never reaches jq's arguments (diff, apply and diff again)"
+else
+  fail "test failed: a live-only value reached jq's arguments, the jq shim did not run, or the apply failed (rc=$argv_rc)"
   status=1
 fi
 

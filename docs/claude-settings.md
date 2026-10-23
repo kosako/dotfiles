@@ -91,11 +91,23 @@ project 自身の deny / ask が止めないものを warn する(rule の
 - 合成しても live の file と意味が同じなら、live の byte をそのまま返す(初回の apply が書いた 1 行の配列なども
   整形し直さないので、`chezmoi diff` は空のまま)。変わるときは jq が 2 space の indent で出す(Claude Code が
   書く形と同じ)。
-- live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON)ときは、apply は
-  その file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+- live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON・NUL を含む)ときは、
+  apply はその file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+- live の file の中身は一時 file に書かず、shell の変数に保って jq には stdin で渡す(#446)。jq の引数に置くのは
+  template が描く managed の JSON(public)だけで、live にしかない値(`autoMode` など)は process の一覧(`ps`)に
+  出ない。合成と比較は 1 回の jq で行う。script は live の中身を一時 file に置かないので、kill されても live の写しは
+  残らない。shell の変数は NUL を持てないので、NUL は `tr` で別の制御文字に置き換えて jq に渡し、上の「壊れた JSON」
+  として止める(末尾の NUL も止める。jq は file を直に読むと末尾の NUL を通すが、ここでは通さない)。
+  `tr` は `LC_ALL=C` で byte として読む(UTF-8 の locale の BSD の `tr` は、UTF-8 でない byte で止まるため。string の
+  中のそうした byte は jq が読み、変わらなければ live の byte のまま返す)。
+- ただし chezmoi 自身は、modify script を一時 dir(chezmoi の設定の `scriptTempDir`、既定は `TMPDIR`)に書いてから
+  走らせる(書くのは template が描いた script で、live の中身は入らない)。そのため `TMPDIR` が書ける dir でない環境では、
+  `scriptTempDir` を書ける dir に向けない限り、`chezmoi diff` / `status` / `apply` も doctor の drift の検査も
+  失敗する。この repo の chezmoi の設定は `scriptTempDir` を決めない。doctor はこのとき、`TMPDIR` が書ける dir で
+  ないことを action に書き、config / template の error とだけは案内しない。
 
-`chezmoi diff` / `status` も同じ script を走らせて比べる。手元の key を保ったまま apply できるので、#341 / #353
-のときのように live の file を手で書き換える必要はない。
+`chezmoi diff` / `status` も同じ script を走らせて比べる(doctor の drift の検査も `chezmoi status` を使う)。手元の
+key を保ったまま apply できるので、#341 / #353 のときのように live の file を手で書き換える必要はない。
 
 ## gate の仕組み
 

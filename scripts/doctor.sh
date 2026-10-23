@@ -908,7 +908,17 @@ elif ! drift_status="$(chezmoi status 2>/dev/null)"; then
   for chezmoi_config_ext in toml yaml yml json jsonc; do
     [[ -f "$chezmoi_config_dir/chezmoi.$chezmoi_config_ext" ]] && chezmoi_config_found=1
   done
-  if [[ "$chezmoi_config_found" -eq 1 ]]; then
+  # chezmoi also writes each modify script (~/.claude/settings.json) to its
+  # scriptTempDir, TMPDIR by default (/tmp when unset or empty, as Go's
+  # os.TempDir), before running it: where TMPDIR is not a writable
+  # directory, status fails with a correct config too, so the action names
+  # it (#446). Only the mode bits are tested; nothing is written.
+  chezmoi_tmp_dir="${TMPDIR:-/tmp}"
+  if [[ "$chezmoi_config_found" -eq 1 ]] \
+    && ! [[ -d "$chezmoi_tmp_dir" && -w "$chezmoi_tmp_dir" && -x "$chezmoi_tmp_dir" ]]; then
+    action "chezmoi status failed although this home has a chezmoi config, and TMPDIR is not a writable directory — chezmoi writes the modify scripts there before running them unless its config sets scriptTempDir, which breaks chezmoi status, diff and apply as a config or template error does; drift is not checked until it is fixed" \
+      "\$ chezmoi status   # if the error names a file under TMPDIR, point TMPDIR (or scriptTempDir) at a writable directory; otherwise fix the config or the template"
+  elif [[ "$chezmoi_config_found" -eq 1 ]]; then
     action "chezmoi status failed although this home has a chezmoi config — a config or template error (e.g. an unknown profile) also breaks chezmoi apply; drift is not checked until it is fixed" \
       "\$ chezmoi status   # read the error, then fix the config or the template"
   else

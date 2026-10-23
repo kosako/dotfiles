@@ -133,7 +133,7 @@ jobs:
   # stat) they run on (#333 F06). The render group runs the render job's
   # suites the same way, with chezmoi and codex pinned for macOS: the managed
   # files are applied on macOS, and the Claude settings modify script runs
-  # there with /bin/sh, mktemp, trap and jq (#382).
+  # there with /bin/sh, tr and jq (#382).
   bash32:
     name: bash32 (${{ matrix.group }})
     runs-on: macos-latest
