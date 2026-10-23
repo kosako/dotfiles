@@ -5037,7 +5037,30 @@ else
   fail "test failed: doctor must stay exit 0 when chezmoi status fails with a config present"
   status=1
 fi
-rm -rf "$dr_home/.config/chezmoi"
+# ... and when TMPDIR is not a writable directory, the action names it too:
+# chezmoi writes the modify script there before running it, so status fails
+# with a correct config as well (#446). TMPDIR is a path under a regular
+# file, so no tool doctor runs can create it on the way.
+printf 'not a directory\n' > "$dr_home/tmp-file"
+if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" TMPDIR="$dr_home/tmp-file/tmp" \
+  FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=1 XDG_CONFIG_HOME='' \
+  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] chezmoi status failed although this home has a chezmoi config, and TMPDIR is not a writable directory — chezmoi writes the modify scripts there before running them unless its config sets scriptTempDir, which breaks chezmoi status, diff and apply as a config or template error does; drift is not checked until it is fixed" <<< "$dr_out" \
+    && grep -Fxq "        \$ chezmoi status   # if the error names a file under TMPDIR, point TMPDIR (or scriptTempDir) at a writable directory; otherwise fix the config or the template" <<< "$dr_out" \
+    && ! grep -Fq "a config or template error (e.g. an unknown profile)" <<< "$dr_out" \
+    && ! grep -Fq "chezmoi not initialized for this home" <<< "$dr_out"; then
+    ok "test passed: a failing chezmoi status with a config present and TMPDIR not a directory names TMPDIR in the action"
+  else
+    printf '%s\n' "$dr_out" >&2
+    fail "test failed: a failing status with a chezmoi config and TMPDIR not a directory must name TMPDIR in the action"
+    status=1
+  fi
+else
+  printf '%s\n' "$dr_out" >&2
+  fail "test failed: doctor must stay exit 0 when chezmoi status fails with TMPDIR not a directory"
+  status=1
+fi
+rm -rf "$dr_home/.config/chezmoi" "$dr_home/tmp-file"
 
 # DS) display_safe (#335): values doctor did not make itself reach a report
 #     line only through display_safe. DS-U checks the helper itself

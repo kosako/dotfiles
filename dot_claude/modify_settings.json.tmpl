@@ -246,15 +246,20 @@ CLAUDE_SETTINGS_JSON
 )
 # The live file stays in this variable (#446). No temp file: one would stop
 # the script where TMPDIR cannot be written and outlive a killed script as a
-# copy of the file (the temp file bash as /bin/sh makes for the heredoc
-# above holds only the public managed JSON, and bash falls back to a system
-# temp dir for it). jq reads it on stdin, never from its arguments, which ps
-# shows to other users (autoMode is not public); printf is a shell builtin,
-# so its arguments never reach a process list. The x keeps the trailing
-# newlines a command substitution would drop, so the bytes come back
-# exactly. A shell variable cannot hold NUL, which JSON never has: tr turns
-# it into SOH, a raw control byte jq rejects anywhere just the same, so a
-# file with NUL still stops the apply instead of losing those bytes.
+# copy of the file (chezmoi itself still writes this script, which holds no
+# live content, to its scriptTempDir, TMPDIR by default, before running it;
+# the temp file bash as /bin/sh makes for the heredoc above holds only the
+# public managed JSON, and bash falls back to a system temp dir for it). jq
+# reads it on stdin, never from its arguments, which ps shows to other
+# users (autoMode is not public); printf is a shell builtin, so its
+# arguments never reach a process list. The x keeps the trailing newlines a
+# command substitution would drop, so the bytes come back exactly. A shell
+# variable cannot hold NUL, which JSON never has: tr turns it into SOH, a
+# raw control byte jq rejects anywhere, so a file with NUL stops the apply
+# instead of losing those bytes, a NUL at the very end too (jq reading the
+# file itself lets that one pass). LC_ALL=C keeps tr to bytes: in a UTF-8
+# locale BSD tr stops on a byte that is not UTF-8, which jq reads in a
+# string.
 live=$(LC_ALL=C tr '\000' '\001' && printf x)
 live=${live%x}
 if [ -z "$live" ]; then
