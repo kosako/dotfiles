@@ -101,7 +101,7 @@ node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 
 - 単位は日数。pnpm の `minimumReleaseAge`(分単位)と混同しないこと。
 - npm 11.10.0 以降でサポートされる。古い npm では unknown config として扱われるだけで、保護は効かない。
-- npm が `min-release-age` をどう持つかは版で違う。今の npm(11.19 で確認)は `min-release-age` を独立した key のまま持ち、待ちの cutoff は内部で計算するだけで `before` には書かない。このため `npm config get min-release-age` は `7`、`npm config get before` は `null` を返す。`before` を設定すると待ちより優先される(同じ source の中では `before` が勝ち、source をまたぐと通常の優先順位 cli > env > project > user > global で上の source が勝つ)。古い npm(#91 の時点)は `min-release-age` を `before`(= 現在 − 指定日数の日付)へ変換して元の key を削除していたので、`min-release-age` は `null`、`before` は約 7 日前の日付を返す。
+- npm が `min-release-age` をどう持つかは版で違う。今の npm(11.19 で確認)は `min-release-age` を独立した key のまま持ち、待ちの cutoff は内部で計算するだけで `before` には書かない。このため `npm config get min-release-age` は `7`、`npm config get before` は `null` を返す。`before` と `min-release-age` の両方があるときは、同じ source の中では `before` が勝ち、source をまたぐと通常の優先順位(cli > env > project > user > global)で上の source の方が効く。`min-release-age=0` は待ちを止める。`npm config get` はどの source の値かを示さない。古い npm(#91 の時点)は `min-release-age` を `before`(= 現在 − 指定日数の日付)へ変換して元の key を削除していたので、`min-release-age` は `null`、`before` は約 7 日前の日付を返す。
 - `min-release-age-exclude`(待ちと `before` から外す package の名前か glob)は managed な `~/.npmrc` では設定しない。
 - `doctor.sh` が npm version と各設定値を report-only で表示する。
 
@@ -110,9 +110,11 @@ node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 - `npmHardeningMode` と npm version、主要 config 値を表示する。
 - `enforce` の場合は、期待値(上記)と現在の `npm config get` の値を比較し、不一致を `[warn]` で報告する。
   apply 前は不一致になるのが正常。report-only で exit code は変えない。
-- 7 日の待ちは、上の 2 つの形のどちらかなら ok とする(#443)。今の形は `min-release-age` が `7` で `before` が `null`、かつ npm が 11.10 以上のとき(それより古い npm は知らない key をそのまま返すだけで、待ちは効かない)。古い形は `before` が現在から約 7 日前(±12h)の cutoff のとき。それ以外は warn にする。日数が 7 でない、待ちを上書きする `before` がある、`before` が手書きの遠い未来の日付、などが当たる(`before` の有無だけを見ると、短い日数や遠い未来の日付も通ってしまう)。
-- `min-release-age-exclude` に項目があれば warn にし、項目の数だけを出す(package の名前は出さない)。数え方は npm と同じで、`,` で区切り、前後の空白を除き、空と重複を除く。
-- 見分けられない形が 1 つ残る。同じ npmrc の `before=null` や環境変数 `npm_config_before=null` のように `before` を明示的に `null` にすると、待ちは止まるが、`npm config get before` は未設定のときと同じ `null` を返すので、doctor は ok と出す。
+- 7 日の待ちは、上の 2 つの形のどちらかなら ok とする(#443)。今の形は `min-release-age` が `7` で `before` が `null`、かつ npm が 11.10 以上のとき(それより古い npm は知らない key をそのまま返すだけで、待ちは効かない)。古い形は `before` が現在から約 7 日前(±12h)の cutoff で、`min-release-age` が `null`(古い npm が key を削除した形)か `7` のとき(今の npm では、約 7 日前の `before` より上の source にある別の日数が待ちを決めるため)。それ以外は warn にする。日数が 7 でない、`before` を読めない、待ちを上書きし得る `before` がある、`before` が手書きの遠い未来の日付、などが当たる(`before` の有無だけを見ると、短い日数や遠い未来の日付も通ってしまう)。source が見えないので、下の source の `before` が上の source の `min-release-age=7` に負けて待ちが効いている場合も warn になる。
+- `min-release-age-exclude` に項目があれば warn にし、項目の数だけを出す(package の名前は出さない)。数え方は npm と同じで、`,` で区切り、前後の空白を除き、空と重複を除く。`undefined` は key を知らない npm の出力として空と扱う。`null` は null という名前の項目として数える。読めない、数えられないときも warn にする。
+- 見分けられない形が残る。
+  - 同じ npmrc の `before=null` や環境変数 `npm_config_before=null` のように `before` を明示的に `null` にすると、待ちは止まるが、`npm config get before` は未設定のときと同じ `null` を返すので、doctor は ok と出す。
+  - npmrc の `min-release-age-exclude[]=null` は null という名前の package を外すが、`npm config get` は未設定のときと同じ空を返す。`undefined` という名前の項目は、key を知らない npm の出力と同じになる。どちらも doctor は空と扱う。
 
 ## 対象外
 

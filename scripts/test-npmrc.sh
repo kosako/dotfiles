@@ -113,7 +113,7 @@ while IFS= read -r line; do
     # The 7-day wait has two forms by npm version (#443), and doctor accepts
     # both. Current npm keeps min-release-age as its own key and leaves
     # `before` null: doctor reads the age and requires `before` null, since a
-    # set `before` replaces the wait. Older npm flattened the age into
+    # set `before` can replace the wait. Older npm flattened the age into
     # `before` (now - <days>) and deleted the key: doctor verifies that cutoff
     # is ~7 days ago through npm_before_within_age_window (exercised below).
     # A mere presence grep would catch neither a loosened age nor a loosened

@@ -598,9 +598,10 @@ query だけを実機で実行する(書き込みはしない)。
   ことと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の rules の file 名は AI policy の
   case で固定する。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
-  7 日の待ちは、今の npm の形(`min-release-age=7`・`before` が null)と古い npm の形(`before` が約 7 日前)を ok に、
-  日数違い・窓の外の `before`・11.10 より古い npm の `min-release-age=7` を warn にし、`min-release-age-exclude` の項目は
-  数だけを出して warn にする(名前は出さない。#443)。
+  7 日の待ちは、今の npm の形(`min-release-age=7`・`before` が null)と古い npm の形(`before` が約 7 日前で
+  `min-release-age` が null か 7)を ok に、日数違い・窓の外の `before`・約 7 日前の `before` の横の別の日数・読めない `before`・
+  11.10 より古い npm の `min-release-age=7` を warn にし、`min-release-age-exclude` の項目は数だけを出して warn にする
+  (名前は出さない。`undefined` は空、`null` は 1 項目と数える。読めない・数えられないときも warn で exit 0。#443)。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 

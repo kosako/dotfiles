@@ -524,17 +524,20 @@ EOF
     # The 7-day wait has two forms, by npm version (#443). Current npm (11.19
     # checked) keeps min-release-age as its own key and computes the cutoff
     # only when flattening, so `npm config get min-release-age` reads 7 and
-    # `before` stays null. A set `before` replaces the wait there (it wins
-    # within one source, and a higher source wins across them), so the age
-    # form is honored only with `before` null, and only on an npm that knows
-    # the key (>= 11.10, checked above): an older one echoes the unknown key
-    # back without enforcing it. Older npm (the #91 era) flattened the age
-    # into `before` (now - <days>) and deleted the key, so there the operative
-    # cutoff must be ~7 days ago: a non-empty `before` alone is not enough (a
-    # shorter age, or a hand-set far-future date, is non-empty too). Anything
-    # else warns. node ships with npm, so it is available to parse npm's Date
-    # string portably; an unparseable/empty value yields no epoch and fails
-    # the window check.
+    # `before` stays null. When both are set, `before` wins within one source
+    # and the higher source wins across them; `npm config get` does not show
+    # which source each came from, so the age form is honored only with
+    # `before` null, and only on an npm that knows the key (>= 11.10, checked
+    # above): an older one echoes the unknown key back without enforcing it.
+    # Older npm (the #91 era) flattened the age into `before` (now - <days>)
+    # and deleted the key, so there the operative cutoff must be ~7 days ago:
+    # a non-empty `before` alone is not enough (a shorter age, or a hand-set
+    # far-future date, is non-empty too). That form also needs
+    # min-release-age null (the deleted key) or 7: on current npm a different
+    # age in a higher source than a ~7-day `before` replaces it (0 turns the
+    # wait off). Anything else warns. node ships with npm, so it is available
+    # to parse npm's Date string portably; an unparseable/empty value yields
+    # no epoch and fails the window check.
     npm_age="$(npm config get min-release-age 2>/dev/null || true)"
     npm_before="$(npm config get before 2>/dev/null || true)"
     npm_before_epoch=""
@@ -543,13 +546,14 @@ EOF
     fi
     if [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true ]]; then
       ok "npm min-release-age=7 honored (before unset)"
-    elif npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
+    elif [[ "$npm_age" == "null" || "$npm_age" == "7" ]] \
+      && npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
       ok "npm min-release-age=7 honored (before=$(display_safe "$npm_before"))"
     else
       if [[ "$npm_age" == "7" && "$npm_before" == "null" ]]; then
         npm_age_hint="npm version not confirmed to enforce it, see above"
       elif [[ "$npm_age" == "7" && -n "$npm_before" ]]; then
-        npm_age_hint="the set before replaces the wait"
+        npm_age_hint="a set before replaces the wait when in the same or a higher config source"
       else
         npm_age_hint="apply pending?"
       fi
@@ -559,11 +563,12 @@ EOF
     # skip; the managed ~/.npmrc sets none, so any entry loosens the wait.
     # npm prints the list comma-joined (empty when unset; an npm that does not
     # know the key prints `undefined`) and itself splits each entry on commas,
-    # trims it and drops empty and repeated names, so count the same way. Only
-    # the count is shown: the names can be private package names.
+    # trims it and drops empty and repeated names, so count the same way. A
+    # printed `null` is an entry named null (npm 11.19 checked), so it counts.
+    # Only the count is shown: the names can be private package names.
     if npm_exclude="$(npm config get min-release-age-exclude 2>/dev/null)"; then
       case "$npm_exclude" in
-        undefined | null) npm_exclude="" ;;
+        undefined) npm_exclude="" ;;
       esac
       npm_exclude_count="$(printf '%s\n' "$npm_exclude" | LC_ALL=C awk -F',' '
         { for (i = 1; i <= NF; i++) { v = $i; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
