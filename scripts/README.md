@@ -501,13 +501,15 @@ query だけを実機で実行する(書き込みはしない)。
   起動の後にしか返らないので、動いている process の子を先に殺す後始末(以前の `kill_process_tree`)は timing に依らず次の
   command を残して落ちる。shim の待ちが「止まった」で終わり(timeout は fail)、doctor の後に次の command が残らず、
   「未確認」の warn が出て、`kill_tree:` の warn が無いこと。
-- kill_tree の停止の待ち(KT、#440): `kill_tree` を単独の bash で、PATH 先頭の `ps` と `pgrep` の shim の下で走らせる。shim は
-  対象の process(`sh` と、一意の `sleep 3000.<数字>` の子 2 つ)についての問い合わせを順に記録し、`ps` は対象についてだけ
-  答えを差し替える。停止が遅れて見える(3 回は止まっていない `S` と答え、その後は本物の状態)とき、子の列挙は `ps` が停止を示した
-  後になり、warn が出ないこと / process が在るのに `ps` が失敗し続けるとき、消えたとは扱わずに問い合わせを続け、「状態を
-  読めない」warn を出し、木を全部 KILL すること / `S` と答え続けるとき、「止まらない」warn を出し、木を全部 KILL すること。
-  どれも 0 で返ること。OP-e と中断の check の `pgrep` の shim は、止まるまで列挙を返さないので、kill_tree の側の待ちを外しても
-  通る(順序だけを見る)。待ちと warn はこの case が見る。
+- kill_tree の停止の待ち(KT、#440): `kill_tree` を単独の bash で、PATH 先頭の `ps` と `pgrep` の shim の下で走らせる。対象は
+  一意の `sleep 3000.<数字>` の子を 2 つ持つ `sh`。shim は対象についての問い合わせだけを順に記録し、`ps` は対象についてだけ
+  答えを差し替える(子の `sleep` についての問い合わせは記録せず本物に渡す)。停止が遅れて見える(20 回は止まっていない `S` と
+  答え、その後は本物の状態)とき、子の列挙は `ps` が停止を示した後になり、warn が出ないこと / process が在るのに `ps` が失敗し
+  続けるとき、消えたとは扱わずに問い合わせを続け(20 回以上)、「状態を読めない」warn を出し、木を全部 KILL すること / `S` と
+  答え続けるとき、20 回以上問い合わせてから「止まらない」warn を出し、木を全部 KILL すること。どれも 0 で返ること。20 回(約 0.4
+  秒)は待ちの上限(約 5 秒)より十分短く、上限そのものは固定しないが、待ちを数回で切ると 3 つとも落ちる。OP-e と中断の check
+  の `pgrep` の shim は、止まるまで列挙を返さないので、kill_tree の側の待ちを外しても通る(順序だけを見る)。待ちと warn は
+  この case が見る。
 - Git identity contexts(#202 / #241): identity file の状態(missing / empty / name-only / email-only / complete /
   parse 不能 / 明示的な空値 / 値の無い key(`=` なし))ごとに、missing と partial は action(手順に file path)、
   complete は ok、parse 不能は warn、値の無い key は「git が identity 全体を拒否する」別の action になること
