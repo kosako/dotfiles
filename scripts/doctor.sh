@@ -814,7 +814,7 @@ else
   item "local supplement absent"
 fi
 
-# State marker: presence + last success + basename + count, nothing else.
+# State marker: presence + last success + archive name + count, nothing else.
 # The marker is repo-external and could be stale or hand-edited, so treat
 # its fields as untrusted: display_safe them, keep only the archive's file
 # name, and require a numeric count — anything odd is shown as "unknown"

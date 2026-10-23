@@ -451,7 +451,8 @@ query だけを実機で実行する(書き込みはしない)。
   `capture_incomplete` が false なら `capture: complete`、true なら再 backup 手順の action、field の無い旧 marker
   なら unknown になること(#242)。marker の archive が `-` で始まる名前(`--out ./-archive.age` が記録する形)でも
   名前をそのまま出し、exit 0 で next actions まで進むこと(#444。basename が option と読んで doctor が exit 1 で止まって
-  いた。`backup.age` の case が対照)。`/` で終わる値は名前が残らないので unknown になること。
+  いた。`backup.age` の case が対照)。directory を含む値(手で書き換えた marker)は最後の要素だけを出して directory を
+  出さないこと。`/` で終わる値は名前が残らないので unknown になること。
 - global gitignore(#248): managed file を git が読んでいれば ok / 不在は `mkdir -p` → `chezmoi apply` の action /
   `core.excludesFile`(global、または system だけの設定)や `XDG_CONFIG_HOME` で別の file に振り替わっていれば
   warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視。`XDG_CONFIG_HOME` が `~/.config//` や `~/.config` への symlink なら同じ

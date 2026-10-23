@@ -528,7 +528,9 @@ fi
 #     option and failed, and the failure ended doctor under set -e: exit 1,
 #     no report after the backup section and no next actions. The name must
 #     be shown as is and doctor must run to the end; the backup.age runs
-#     above are the control. A value that leaves no file name (ending in "/")
+#     above are the control. A value with directories (a hand-edited marker:
+#     backup records the file name only) shows its last component and never
+#     the directories, and a value that leaves no file name (ending in "/")
 #     is unknown.
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"-archive.age","file_count":2,"capture_incomplete":false}\n' \
   > "$fixture_home/.local/state/dotfiles/private-backup.json"
@@ -541,6 +543,19 @@ if [[ "$pb_rc" -eq 0 ]] \
 else
   printf '%s\n' "$pb_out" >&2
   fail "test failed: a marker archive name that starts with \"-\" must not stop doctor (rc=$pb_rc, #444)"
+  status=1
+fi
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"%s","file_count":2,"capture_incomplete":false}\n' \
+  "$fixture_home/backups/2026/backup.age" > "$fixture_home/.local/state/dotfiles/private-backup.json"
+pb_rc=0
+pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || pb_rc=$?
+if [[ "$pb_rc" -eq 0 ]] \
+  && grep -Fq "[ok] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2, capture: complete)" <<< "$pb_out" \
+  && ! grep -Fq "backups/2026" <<< "$pb_out"; then
+  ok "test passed: a marker archive value with directories shows only its file name (#444)"
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: a marker archive value with directories must show only its file name, not the directories (rc=$pb_rc, #444)"
   status=1
 fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"old/","file_count":2,"capture_incomplete":false}\n' \
