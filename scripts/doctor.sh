@@ -488,18 +488,20 @@ elif ! npm_version="$(npm --version 2>/dev/null)" || [[ -z "$npm_version" ]]; th
   warn "npm on PATH but not runnable (shim without a runtime?); skipping npm checks"
 else
   ok "npm: $(display_safe "$npm_version")"
-  for key in before ignore-scripts save-exact fund audit userconfig globalconfig; do
+  for key in min-release-age before ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
     item "npm $key=$(display_safe "$value")"
   done
   npm_major="${npm_version%%.*}"
   npm_minor="$(printf '%s' "$npm_version" | LC_ALL=C cut -d. -f2 2>/dev/null)"
+  npm_age_supported=false
   # Guard before the arithmetic test: [[ -gt ]] evaluates its operands as
   # arithmetic, so a non-numeric component resolves as a variable name and
   # aborts the shell under set -u (the old 2>/dev/null hid even that) (#144).
   if [[ ! "$npm_major" =~ ^[0-9]+$ || ! "$npm_minor" =~ ^[0-9]+$ ]]; then
     warn "npm version '$(display_safe "$npm_version")' not recognized; cannot check min-release-age support"
   elif [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]]; then
+    npm_age_supported=true
     ok "npm supports min-release-age (>= 11.10)"
   else
     warn "npm older than 11.10, min-release-age is not enforced"
@@ -519,23 +521,63 @@ save-exact=true
 fund=false
 audit=true
 EOF
-    # npm consumes min-release-age and flattens it into `before` (now - <days>),
-    # deleting the original key, so `npm config get min-release-age` is always
-    # null even when honored. Verify the operative `before` cutoff is ~7 days
-    # ago instead: a non-empty `before` alone is not enough (a shorter age, or a
-    # hand-set far-future date, would also be non-empty but not enforce the
-    # 7-day cooldown). node ships with npm, so it is available to parse npm's
-    # Date string portably; an unparseable/empty value yields no epoch and fails
-    # the window check below.
+    # The 7-day wait has two forms, by npm version (#443). Current npm (11.19
+    # checked) keeps min-release-age as its own key and computes the cutoff
+    # only when flattening, so `npm config get min-release-age` reads 7 and
+    # `before` stays null. A set `before` replaces the wait there (it wins
+    # within one source, and a higher source wins across them), so the age
+    # form is honored only with `before` null, and only on an npm that knows
+    # the key (>= 11.10, checked above): an older one echoes the unknown key
+    # back without enforcing it. Older npm (the #91 era) flattened the age
+    # into `before` (now - <days>) and deleted the key, so there the operative
+    # cutoff must be ~7 days ago: a non-empty `before` alone is not enough (a
+    # shorter age, or a hand-set far-future date, is non-empty too). Anything
+    # else warns. node ships with npm, so it is available to parse npm's Date
+    # string portably; an unparseable/empty value yields no epoch and fails
+    # the window check.
+    npm_age="$(npm config get min-release-age 2>/dev/null || true)"
     npm_before="$(npm config get before 2>/dev/null || true)"
     npm_before_epoch=""
     if [[ -n "$npm_before" && "$npm_before" != "null" ]]; then
       npm_before_epoch="$(node -e 'const t=Date.parse(process.argv[1]||"");process.stdout.write(Number.isNaN(t)?"":String(Math.floor(t/1000)))' "$npm_before" 2>/dev/null || true)"
     fi
-    if npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
+    if [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true ]]; then
+      ok "npm min-release-age=7 honored (before unset)"
+    elif npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
       ok "npm min-release-age=7 honored (before=$(display_safe "$npm_before"))"
     else
-      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=$(display_safe "${npm_before:-unset}") (apply pending?)"
+      if [[ "$npm_age" == "7" && "$npm_before" == "null" ]]; then
+        npm_age_hint="npm version not confirmed to enforce it, see above"
+      elif [[ "$npm_age" == "7" && -n "$npm_before" ]]; then
+        npm_age_hint="the set before replaces the wait"
+      else
+        npm_age_hint="apply pending?"
+      fi
+      warn "enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=$(display_safe "${npm_age:-(no value)}") before=$(display_safe "${npm_before:-(no value)}") ($npm_age_hint)"
+    fi
+    # min-release-age-exclude names packages (or globs) the wait and `before`
+    # skip; the managed ~/.npmrc sets none, so any entry loosens the wait.
+    # npm prints the list comma-joined (empty when unset; an npm that does not
+    # know the key prints `undefined`) and itself splits each entry on commas,
+    # trims it and drops empty and repeated names, so count the same way. Only
+    # the count is shown: the names can be private package names.
+    if npm_exclude="$(npm config get min-release-age-exclude 2>/dev/null)"; then
+      case "$npm_exclude" in
+        undefined | null) npm_exclude="" ;;
+      esac
+      npm_exclude_count="$(printf '%s\n' "$npm_exclude" | LC_ALL=C awk -F',' '
+        { for (i = 1; i <= NF; i++) { v = $i; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+            if (v != "" && !(v in seen)) { seen[v] = 1; n++ } } }
+        END { print n + 0 }' 2>/dev/null || true)"
+      if [[ ! "$npm_exclude_count" =~ ^[0-9]+$ ]]; then
+        warn "npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
+      elif [[ "$npm_exclude_count" -eq 0 ]]; then
+        ok "npm min-release-age-exclude empty"
+      else
+        warn "enforce expects npm min-release-age-exclude empty, current: $npm_exclude_count entry(ies) skip the 7-day wait (names not shown)"
+      fi
+    else
+      warn "npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait"
     fi
   fi
 fi

@@ -5014,10 +5014,12 @@ fi
 # PATH (#150): a mismatched config value is warned; the min-release-age
 # before-cutoff is honored/warned based on the parsed epoch. The fakes are
 # env-driven so each case pins one branch; doctor stays exit 0 throughout.
+# By default the fake answers as the older npm form (11.10, min-release-age
+# null as npm dropped the key); the #443 cases below set the current form.
 cat > "$npm_fakebin/npm" <<'SH'
 #!/bin/sh
 case "$1" in
-  --version) printf '11.10.0\n' ;;
+  --version) printf '%s\n' "${FAKE_NPM_VERSION:-11.10.0}" ;;
   config)
     case "$3" in
       ignore-scripts) printf '%s\n' "${FAKE_NPM_IGNORE_SCRIPTS:-true}" ;;
@@ -5025,6 +5027,8 @@ case "$1" in
       fund) printf 'false\n' ;;
       audit) printf 'true\n' ;;
       before) printf '%s\n' "${FAKE_NPM_BEFORE:-null}" ;;
+      min-release-age) printf '%s\n' "${FAKE_NPM_MIN_RELEASE_AGE:-null}" ;;
+      min-release-age-exclude) printf '%s\n' "${FAKE_NPM_EXCLUDE-}" ;;
       *) printf 'null\n' ;;
     esac ;;
 esac
@@ -5043,7 +5047,7 @@ if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
   FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
   "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "enforce expects npm ignore-scripts=true, current: false" <<< "$np_out" \
-    && grep -Fq "npm min-release-age=7 honored" <<< "$np_out"; then
+    && grep -Fq "[ok] npm min-release-age=7 honored (before=fake-date)" <<< "$np_out"; then
     ok "test passed: enforce mismatch warned while a good before-cutoff is honored"
   else
     printf '%s\n' "$np_out" >&2
@@ -5059,7 +5063,8 @@ fi
 if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
   FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 86400 ))" \
   "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "enforce expects npm min-release-age=7 (before ~= now-7d)" <<< "$np_out"; then
+  if grep -Fq "[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=null before=fake-date (apply pending?)" <<< "$np_out" \
+    && ! grep -Fq "npm min-release-age=7 honored" <<< "$np_out"; then
     ok "test passed: a too-recent before cutoff is warned (cooldown not enforced)"
   else
     printf '%s\n' "$np_out" >&2
@@ -5071,6 +5076,59 @@ else
   fail "test failed: doctor must stay exit 0 on a too-recent cutoff"
   status=1
 fi
+
+# NPM-E..I) The 7-day wait on current npm (#443): npm 11.19 keeps
+# min-release-age as its own key and leaves `before` null, so that form is
+# honored besides the older before-cutoff one (NPM-C); a different age, a set
+# `before` outside the window (it replaces the wait), an npm older than 11.10
+# (it does not know the key) and any min-release-age-exclude entry warn. The
+# exclude warn carries the count only, never the names, counted as npm does
+# (comma-split, trimmed, empty and repeated names dropped).
+# npm_wait_case LABEL WANT DONT_WANT [VAR=VALUE ...] — one personal (enforce)
+# doctor run with the fakes above and the given env: every line of WANT must
+# be in the report, DONT_WANT must not.
+npm_wait_case() {
+  local label="$1" want="$2" dont_want="$3" out rc=0 line missing=""
+  shift 3
+  out="$(env HOME="$fixture_home" PATH="$npm_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "$label" "$rc" "$out"
+    return 0
+  fi
+  while IFS= read -r line; do
+    grep -Fq -- "$line" <<< "$out" || missing+="  $line"$'\n'
+  done <<< "$want"
+  if [[ -z "$missing" ]] && ! grep -Fq -- "$dont_want" <<< "$out"; then
+    ok "test passed: $label"
+  else
+    printf '%s\n' "$out" >&2
+    printf 'missing:\n%s' "$missing" >&2
+    fail "test failed: $label"
+    status=1
+  fi
+}
+npm_wait_case "current npm form (min-release-age=7, before null, no exclude) is honored (#443)" \
+  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "enforce expects npm min-release-age" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7
+npm_wait_case "a loosened age on current npm (min-release-age=1, before null) is warned (#443)" \
+  "[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=1 before=null (apply pending?)" \
+  "npm min-release-age=7 honored" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1
+npm_wait_case "a set before outside the window on current npm replaces the wait and is warned (#443)" \
+  "[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=7 before=fake-date (the set before replaces the wait)" \
+  "npm min-release-age=7 honored" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE=fake-date \
+  FAKE_NODE_EPOCH="$(( now_epoch - 400*86400 ))"
+npm_wait_case "min-release-age=7 on an npm older than 11.10 (unknown key) is not honored (#443)" \
+  "[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=7 before=null (npm version not confirmed to enforce it, see above)" \
+  "npm min-release-age=7 honored" \
+  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=7
+npm_wait_case "a non-empty min-release-age-exclude is warned by count, names not shown (#443)" \
+  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] enforce expects npm min-release-age-exclude empty, current: 2 entry(ies) skip the 7-day wait (names not shown)" \
+  "npmx-canary" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 \
+  FAKE_NPM_EXCLUDE="@npmx-canary-scope/*, ,npmx-canary-pkg,@npmx-canary-scope/*"
 
 # COREPACK-A) corepackMode=off says intentionally unmanaged; B) report mode
 # with a corepack on PATH reports its version line (fake for determinism —

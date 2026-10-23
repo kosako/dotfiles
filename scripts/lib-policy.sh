@@ -1380,14 +1380,18 @@ command_status() {
 }
 
 # Pure check that an npm `before` cutoff reflects the configured min-release-age
-# (no npm/node dependency, so it is unit-testable). npm flattens
-# `min-release-age=<days>` into `before = now - days` and deletes the original
-# key, so the only way to confirm the configured age is honored is that the
-# resulting cutoff is ~`days` ago. A mere non-empty `before` is insufficient: a
-# shorter age, or a hand-set far-future `before`, would also be non-empty while
-# not enforcing the intended cooldown. Returns 0 only when before_epoch is
-# within +/-tolerance seconds of (now_epoch - days*86400); a non-numeric
-# before_epoch (unset / unparseable) returns 1.
+# (no npm/node dependency, so it is unit-testable). This is the older npm form
+# of the wait: npm flattened `min-release-age=<days>` into `before = now - days`
+# and deleted the original key, so the only way to confirm the configured age
+# was honored is that the resulting cutoff is ~`days` ago. Current npm (11.19
+# checked) keeps min-release-age as its own key and leaves `before` null, a
+# form doctor checks directly (#443); there a set `before` replaces the wait,
+# and this check still decides whether it is ~`days` ago. A mere non-empty
+# `before` is insufficient: a shorter age, or a hand-set far-future `before`,
+# would also be non-empty while not enforcing the intended cooldown. Returns 0
+# only when before_epoch is within +/-tolerance seconds of
+# (now_epoch - days*86400); a non-numeric before_epoch (unset / unparseable)
+# returns 1.
 npm_before_within_age_window() {
   local before_epoch="$1" now_epoch="$2" days="$3" tolerance="$4"
   # Every argument must be a non-negative integer; a non-numeric value (unset
