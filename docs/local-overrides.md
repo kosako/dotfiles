@@ -29,10 +29,14 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
   - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
     `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
-    ただし doctor を `~/src/<context>/` の下の repo の中で実行すると、global の `core.hooksPath` と
-    (`git-ignore` module が active な profile では)`core.excludesFile` を引く照会(`git config --global --includes`)
-    で、git が `~/.gitconfig` の `gitdir` の includeIf を辿り、その context の identity file(そこから include
-    される file も)も読む。`core.hooksPath` の値は出さないが、`core.excludesFile` が managed な
+    ただし doctor を repo の中で実行すると、global の `core.hooksPath` と(`git-ignore` module が active な
+    profile では)`core.excludesFile` を引く照会(`git config --global --includes`)で、git は `~/.gitconfig` の
+    includeIf のうち `gitdir` の条件がその repo の git directory(`.git` の実体)に合うものを辿り、その
+    identity file(そこから include される file も)も読む。どの file かは doctor を起動した directory の path
+    ではなく git directory の場所で決まる(linked worktree では主 repo の `.git` の場所。
+    [git-identity](git-identity.md) の「非 personal context の identity reset」)。remote URL による二次判定
+    (`hasconfig`)は、`--global` の照会では repo の remote が見えないので当たらない。
+    `core.hooksPath` の値は出さないが、`core.excludesFile` が managed な
     `~/.config/git/ignore` と別の file を指すときは、git が読む file としてその path を表示する
     ([git-ignore](git-ignore.md) の「doctor / preflight」)。
 - 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.zprofile.local`、`~/.ssh/config.local`)。
