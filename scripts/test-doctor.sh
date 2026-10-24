@@ -5016,35 +5016,90 @@ fi
 # env-driven so each case pins one branch; doctor stays exit 0 throughout.
 # By default the fake answers as the older npm form (11.10, min-release-age
 # null as npm dropped the key); the #443 cases below set the current form.
-# FAKE_NPM_FAIL_KEY makes `npm config get` of that one key exit 1 with no
-# output, as a failing read.
+# `config get`, `config list --long=false` (the keys a source sets, as npm
+# prints them) and `config list --json` (the merged config with typed values)
+# read the same FAKE_NPM_* env. FAKE_NPM_EXCLUDE_JSON is the JSON value of
+# min-release-age-exclude (`[]` by default, `absent` for an npm that does not
+# know the key); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
+# as an explicit null does; FAKE_NPM_LONG sets long=true in the user source,
+# which makes a listing without --long=false add npm's defaults (`before =
+# null` among them); FAKE_NPM_LIST_EXTRA adds one line to the listing;
+# FAKE_NPM_LIST_JSON replaces the whole JSON listing. FAKE_NPM_FAIL makes the
+# one call whose arguments it spells (e.g. `config get before`) exit 1 with
+# no output, as a failing read.
 cat > "$npm_fakebin/npm" <<'SH'
 #!/bin/sh
+if [ -n "${FAKE_NPM_FAIL:-}" ] && [ "$*" = "$FAKE_NPM_FAIL" ]; then
+  exit 1
+fi
+age="${FAKE_NPM_MIN_RELEASE_AGE:-null}"
+before="${FAKE_NPM_BEFORE:-null}"
+exclude="${FAKE_NPM_EXCLUDE_JSON:-[]}"
 case "$1" in
   --version) printf '%s\n' "${FAKE_NPM_VERSION:-11.10.0}" ;;
   config)
-    if [ -n "${FAKE_NPM_FAIL_KEY:-}" ] && [ "$3" = "$FAKE_NPM_FAIL_KEY" ]; then
-      exit 1
-    fi
-    case "$3" in
-      ignore-scripts) printf '%s\n' "${FAKE_NPM_IGNORE_SCRIPTS:-true}" ;;
-      save-exact) printf 'true\n' ;;
-      fund) printf 'false\n' ;;
-      audit) printf 'true\n' ;;
-      before) printf '%s\n' "${FAKE_NPM_BEFORE:-null}" ;;
-      min-release-age) printf '%s\n' "${FAKE_NPM_MIN_RELEASE_AGE:-null}" ;;
-      min-release-age-exclude) printf '%s\n' "${FAKE_NPM_EXCLUDE-}" ;;
-      *) printf 'null\n' ;;
+    case "$2" in
+      get)
+        case "$3" in
+          ignore-scripts) printf '%s\n' "${FAKE_NPM_IGNORE_SCRIPTS:-true}" ;;
+          save-exact) printf 'true\n' ;;
+          fund) printf 'false\n' ;;
+          audit) printf 'true\n' ;;
+          before) printf '%s\n' "$before" ;;
+          min-release-age) printf '%s\n' "$age" ;;
+          *) printf 'null\n' ;;
+        esac ;;
+      list)
+        if [ "${3:-}" = "--json" ]; then
+          if [ -n "${FAKE_NPM_LIST_JSON:-}" ]; then
+            printf '%s\n' "$FAKE_NPM_LIST_JSON"
+            exit 0
+          fi
+          printf '{\n  "audit": true,\n'
+          if [ "$before" = null ]; then printf '  "before": null,\n'; else printf '  "before": "%s",\n' "$before"; fi
+          printf '  "ignore-scripts": %s,\n' "${FAKE_NPM_IGNORE_SCRIPTS:-true}"
+          [ "$exclude" = absent ] || printf '  "min-release-age-exclude": %s,\n' "$exclude"
+          printf '  "registry": "https://registry.npmjs.org/"\n}\n'
+        else
+          if [ -n "${FAKE_NPM_LONG:-}" ] && [ "${3:-}" != "--long=false" ]; then
+            printf '; "default" config from default values\n\nbefore = null\n; long = false ; overridden by user\n\n'
+          fi
+          printf '; "user" config from %s/.npmrc\n\n' "$HOME"
+          [ -z "${FAKE_NPM_LONG:-}" ] || printf 'long = true\n'
+          [ "$age" = null ] || printf 'min-release-age = %s\n' "$age"
+          [ "$before" = null ] || printf 'before = "%s"\n' "$before"
+          printf '\n; "env" config from environment\n\n'
+          [ -z "${FAKE_NPM_BEFORE_SET:-}" ] || printf 'before = null\n'
+          [ "$exclude" = "[]" ] || [ "$exclude" = absent ] || printf 'min-release-age-exclude = %s\n' "$exclude"
+          [ -z "${FAKE_NPM_LIST_EXTRA:-}" ] || printf '%s\n' "$FAKE_NPM_LIST_EXTRA"
+          printf '\n; npm version = %s\n; Run `npm config ls -l` to show all defaults.\n' "${FAKE_NPM_VERSION:-11.10.0}"
+        fi ;;
     esac ;;
 esac
 exit 0
 SH
+# doctor counts min-release-age-exclude with a node script, which is the code
+# under test, so that one call runs on the real node (linked as node-real;
+# FAKE_NODE_FAIL_COUNT makes it fail instead). Every other node call is the
+# Date.parse of `before` and prints FAKE_NODE_EPOCH.
 cat > "$npm_fakebin/node" <<'SH'
 #!/bin/sh
+case "${2:-}" in
+  *min-release-age-exclude*)
+    [ -z "${FAKE_NODE_FAIL_COUNT:-}" ] || exit 1
+    exec "${0%/*}/node-real" "$@" ;;
+esac
 printf '%s' "${FAKE_NODE_EPOCH:-}"
 exit 0
 SH
 chmod +x "$npm_fakebin/npm" "$npm_fakebin/node"
+npm_real_node="$(node -e 'process.stdout.write(process.execPath)' 2>/dev/null || true)"
+if [[ -n "$npm_real_node" && -x "$npm_real_node" ]]; then
+  ln -s "$npm_real_node" "$npm_fakebin/node-real"
+else
+  fail "test failed: the npm cases need a real node on PATH to run doctor's min-release-age-exclude count (#443)"
+  status=1
+fi
 now_epoch="$(date +%s)"
 
 if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
@@ -5082,18 +5137,26 @@ else
   status=1
 fi
 
-# NPM-E..P) The 7-day wait on current npm (#443): npm 11.19 keeps
+# NPM-E..Y) The 7-day wait on current npm (#443): npm 11.19 keeps
 # min-release-age as its own key and leaves `before` null, so that form is
 # honored besides the older before-cutoff one (NPM-C, and with
 # min-release-age=7 beside it); a different age, a set `before` outside the
 # window (it can replace the wait), a ~7-day `before` beside a different age
 # (that age in a higher source replaces it), a `before` that cannot be read,
-# an npm older than 11.10 (it does not know the key) and any
-# min-release-age-exclude entry warn. The exclude warn carries the count only,
-# never the names, counted as npm does (comma-split, trimmed, empty and
-# repeated names dropped); `undefined` (an npm without the key) counts as
-# empty, a printed `null` (an entry named null) does not, and a read or count
-# that fails warns with doctor still exit 0.
+# a `before` a source sets to null (it replaces the wait, yet reads null like
+# an unset one), an `npm config list` that cannot be read (an explicit null
+# cannot be ruled out), an npm older than 11.10 (it does not know the key)
+# and any min-release-age-exclude entry warn. A `before = ` that is not at
+# the start of a listing line (another key's value) is not a set `before`,
+# nor is the `before = null` npm lists among its defaults when a source sets
+# long=true (doctor lists with --long=false).
+# The exclude warn carries the count only, never the names, counted from the
+# JSON listing as npm flattens the key (comma-split, JavaScript-trimmed, so
+# CR and NBSP too, empty and repeated names dropped). Entries named undefined
+# or null count; a key absent from the listing (an npm without it) counts as
+# empty; a value that is not a list, a listing that does not parse, an npm
+# error object, a failing count and a failing listing warn with doctor still
+# exit 0.
 # npm_wait_case LABEL WANT DONT_WANT [VAR=VALUE ...] — one personal (enforce)
 # doctor run with the fakes above and the given env: every line of WANT must
 # be in the report, DONT_WANT must not.
@@ -5148,34 +5211,61 @@ npm_wait_case "a ~7-day before beside a different age (it can replace the before
 npm_wait_case "a before that cannot be read is not taken as unset (#443)" \
   "$npm_wait_warn min-release-age=7 before=(no value) (apply pending?)" \
   "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL_KEY=before
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before"
+npm_wait_case "a before a source sets to null (it replaces the wait, yet reads null) is warned (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)" \
+  "npm min-release-age=7 honored" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE_SET=1
+npm_wait_case "an npm config list that cannot be read leaves an explicit null before open, warned with doctor exit 0 (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (npm config list could not be read, so a before set explicitly to null cannot be ruled out)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "npm min-release-age=7 honored" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config list --long=false"
+npm_wait_case "a long=true in a config source does not make npm's listed defaults a set before (#443)" \
+  "[ok] npm min-release-age=7 honored (before unset)" \
+  "enforce expects npm min-release-age" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LONG=1
+npm_wait_case "a 'before = ' inside another key's listed value is not a set before (#443)" \
+  "[ok] npm min-release-age=7 honored (before unset)" \
+  "enforce expects npm min-release-age" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_EXTRA='init-author-name = "before = x"'
 npm_wait_case "a non-empty min-release-age-exclude is warned by count, names not shown (#443)" \
   "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] enforce expects npm min-release-age-exclude empty, current: 3 entry(ies) skip the 7-day wait (names not shown)" \
   "npmx-canary" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 \
-  FAKE_NPM_EXCLUDE="@npmx-canary-scope/*, ,npmx-canary-pkg,@npmx-canary-scope/*,npmx-canary-other"
-npm_wait_case "min-release-age-exclude read as undefined (an npm without the key) counts as empty (#443)" \
+  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other"," npmx-canary-pkg\r"]'
+npm_wait_case "whitespace-only min-release-age-exclude entries (CR, NBSP, tab) are empty as JavaScript trims them (#443)" \
+  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "enforce expects npm min-release-age-exclude" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='[",\r,   ,\t"," ",""]'
+npm_wait_case "min-release-age-exclude absent from the listing (an npm without the key) counts as empty (#443)" \
   "[ok] npm min-release-age-exclude empty" \
   "enforce expects npm min-release-age-exclude" \
-  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=undefined FAKE_NPM_EXCLUDE=undefined
-npm_wait_case "min-release-age-exclude read as null (an entry named null) is counted (#443)" \
+  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=undefined FAKE_NPM_EXCLUDE_JSON=absent
+npm_wait_case "a min-release-age-exclude entry named undefined is counted on an npm with the key (#443)" \
   "[warn] enforce expects npm min-release-age-exclude empty, current: 1 entry(ies) skip the 7-day wait (names not shown)" \
   "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE=null
-npm_wait_case "a min-release-age-exclude that cannot be read is warned, doctor stays exit 0 (#443)" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='["undefined"]'
+npm_wait_case "a min-release-age-exclude entry of null (an npmrc []=null) is counted (#443)" \
+  "[warn] enforce expects npm min-release-age-exclude empty, current: 1 entry(ies) skip the 7-day wait (names not shown)" \
+  "[ok] npm min-release-age-exclude empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='[null]'
+npm_exclude_uncounted="[warn] npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
+npm_wait_case "a min-release-age-exclude that is not a list cannot be counted (#443)" \
+  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='"npmx-canary-pkg"'
+npm_wait_case "a JSON listing that does not parse cannot be counted (#443)" \
+  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"min-release-age-exclude": ['
+npm_wait_case "an npm error object as the JSON listing cannot be counted (#443)" \
+  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"error": {"summary": "x", "detail": ""}}'
+npm_wait_case "a count that fails to run is warned (#443)" \
+  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NODE_FAIL_COUNT=1
+npm_wait_case "a JSON listing that cannot be read is warned, doctor stays exit 0 (#443)" \
   "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait" \
   "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL_KEY=min-release-age-exclude
-# The count runs `awk -F,`; an awk that fails only that call (every other awk
-# call runs the real one) leaves no count.
-npm_awkfail_bin="$fixture_home/npmawkfail"
-mkdir -p "$npm_awkfail_bin"
-printf '#!/bin/sh\n[ "$1" = "-F," ] && exit 2\nexec %q "$@"\n' "$(command -v awk)" > "$npm_awkfail_bin/awk"
-chmod +x "$npm_awkfail_bin/awk"
-npm_wait_case "a min-release-age-exclude that cannot be counted is warned (#443)" \
-  "[warn] npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 PATH="$npm_awkfail_bin:$npm_fakebin:$PATH"
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config list --json"
 
 # COREPACK-A) corepackMode=off says intentionally unmanaged; B) report mode
 # with a corepack on PATH reports its version line (fake for determinism —

@@ -112,8 +112,9 @@ while IFS= read -r line; do
   if [[ "$key" == "min-release-age" ]]; then
     # The 7-day wait has two forms by npm version (#443), and doctor accepts
     # both. Current npm keeps min-release-age as its own key and leaves
-    # `before` null: doctor reads the age and requires `before` null, since a
-    # set `before` can replace the wait. Older npm flattened the age into
+    # `before` null: doctor reads the age and requires `before` unset (null
+    # and no source listing it in `npm config list`), since a set `before`,
+    # even null, can replace the wait. Older npm flattened the age into
     # `before` (now - <days>) and deleted the key: doctor verifies that cutoff
     # is ~7 days ago through npm_before_within_age_window (exercised below).
     # A mere presence grep would catch neither a loosened age nor a loosened
@@ -121,10 +122,10 @@ while IFS= read -r line; do
     # call args (days=7, tolerance=43200) of the window. A wrong age (e.g.
     # `== "1"` or `1 43200`) or a loosened window (e.g. `7 90000`) must break
     # this test, locking the 7-day (+/-12h) contract.
-    if grep -Fq '[[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true ]]' "$SCRIPT_DIR/doctor.sh"; then
+    if grep -Fq '[[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true && "$npm_before_listed" == false ]]' "$SCRIPT_DIR/doctor.sh"; then
       ok "test passed: doctor verifies min-release-age=7 with before unset (current npm)"
     else
-      fail "test failed: doctor.sh must require npm min-release-age=7 with before null on npm >= 11.10"
+      fail "test failed: doctor.sh must require npm min-release-age=7 with before null and not listed on npm >= 11.10"
       status=1
     fi
     if grep -Eq 'npm_before_within_age_window .* 7 43200([[:space:]]|;|$)' "$SCRIPT_DIR/doctor.sh"; then
@@ -144,8 +145,10 @@ while IFS= read -r line; do
 done < <(grep -E '^[a-z-]+=' "$NPMRC_TEMPLATE")
 
 # The template sets no min-release-age-exclude (above), and doctor must warn
-# when one appears (#443).
-if grep -Fq 'npm config get min-release-age-exclude' "$SCRIPT_DIR/doctor.sh"; then
+# when one appears (#443): it counts the key in `npm config list --json`
+# (the behavior is pinned in test-doctor.sh).
+if grep -Fq 'npm_list_json="$(npm config list --json 2>/dev/null)"' "$SCRIPT_DIR/doctor.sh" \
+  && grep -Fq 'has("min-release-age-exclude")' "$SCRIPT_DIR/doctor.sh"; then
   ok "test passed: doctor checks min-release-age-exclude is empty"
 else
   fail "test failed: doctor.sh does not check npm min-release-age-exclude"
