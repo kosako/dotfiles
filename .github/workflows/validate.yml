@@ -137,16 +137,25 @@ jobs:
   bash32:
     name: bash32 (${{ matrix.group }})
     runs-on: macos-latest
-    # test-doctor alone takes about 40 minutes here (each case is a full
+    # test-doctor alone took about 56 minutes here (each case is a full
     # doctor run, and process start-up is slow on the macOS runner), so the
-    # tests run as parallel groups and the wait is the slowest group's.
+    # tests run as parallel groups, test-doctor as its three parts
+    # (TEST_DOCTOR_PART, about 20 minutes each, #456), and the wait is the
+    # slowest group's.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - group: doctor
+          - group: doctor-1
             suites: test-doctor.sh
+            part: 1
+          - group: doctor-2
+            suites: test-doctor.sh
+            part: 2
+          - group: doctor-3
+            suites: test-doctor.sh
+            part: 3
           - group: private-backup
             suites: test-secrets-gate.sh test-private-backup.sh
           - group: others
@@ -242,6 +251,8 @@ jobs:
       - name: tests (${{ matrix.group }})
         env:
           SUITES: ${{ matrix.suites }}
+          # Empty for the groups without a part: test-doctor runs whole.
+          TEST_DOCTOR_PART: ${{ matrix.part }}
         run: |
           failed=""
           for suite in $SUITES; do
