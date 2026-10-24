@@ -433,7 +433,14 @@ query だけを実機で実行する(書き込みはしない)。
 
 ```sh
 ./scripts/test-doctor.sh
+TEST_DOCTOR_PART=2 ./scripts/test-doctor.sh   # part 2 だけ(共通の setup と、その part の case)
 ```
+
+case は、続いた範囲ごとに 3 つの part(part 1: 冒頭の orphan の check から herdr integration の手前まで、
+part 2: herdr integration から AI policy の手前まで、part 3: AI policy から最後まで)に分かれる(#456)。CI の macOS の
+bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DOCTOR_PART` が空か未設定なら全部の part を回し、
+1〜3 以外の値は case を 1 つも走らせずに exit 2 で止まる(打ち間違いで何も確かめずに通らないため)。part を
+またいで使う helper・fixture の HOME・host の stub は、part 1 の前の共通の setup に置く。
 
 検証内容(section ごと):
 

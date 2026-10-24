@@ -151,8 +151,9 @@ CI は fresh checkout で差分が無いため、代わりに commit 済み tree
 render job の test も、同じ job の render group で、macOS 用の chezmoi と codex(render job と同じ version を sha256 で固定)を
 入れて回す(#382。managed file は macOS に apply され、Claude settings の modify script も macOS の `/bin/sh`・`tr`・
 `jq` で走るため)。
-macOS の runner では `test-doctor.sh` だけで約 40 分かかるので、doctor / private-backup / その他 / render の 4 つの group に分けて
-並列に回す(待ち時間は最も遅い doctor の group で決まる)。
+macOS の runner では `test-doctor.sh` だけで約 56 分かかったので、test-doctor は `TEST_DOCTOR_PART` で 3 つの part
+(doctor-1〜3、それぞれ約 20 分)に分け、private-backup / その他 / render と合わせて 6 つの group を並列に回す
+(#456。待ち時間は最も遅い group で決まる)。validate job と手元では、`TEST_DOCTOR_PART` を付けずに全部の part を回す。
 手元で 3.2 で回すときも同じく、`/bin/bash` への symlink を置いた directory を PATH の先頭に置く
 (`#!/usr/bin/env bash` が 3.2 に解決される):
 

@@ -17,6 +17,24 @@ source "$SCRIPT_DIR/test-lib.sh"
 # here; the AT-override case re-sets it explicitly for its own invocation.
 unset AGENT_TOOLS
 
+# The suite runs in parts on CI's macOS runner, where it is slowest (#456):
+# TEST_DOCTOR_PART=N runs the shared setup below and part N only; unset or
+# empty runs every part, as locally and on the Linux validate job. Each part
+# is one contiguous range of cases inside `if doctor_part N; then` ... `fi`,
+# so a case added inside a range joins that part, and what more than one
+# part uses (helpers, the fixture HOME, the host-tool stubs) belongs to the
+# setup before part 1. Any other value stops the suite before it runs a
+# case, so a typo cannot pass with nothing tested.
+doctor_parts=3
+if [[ -n "${TEST_DOCTOR_PART-}" ]] \
+  && ! [[ "$TEST_DOCTOR_PART" =~ ^[1-9]$ && "$TEST_DOCTOR_PART" -le "$doctor_parts" ]]; then
+  printf 'TEST_DOCTOR_PART must be empty or 1 to %s, got: %s\n' "$doctor_parts" "$(display_safe "$TEST_DOCTOR_PART")" >&2
+  exit 2
+fi
+doctor_part() {
+  [[ -z "${TEST_DOCTOR_PART-}" || "$TEST_DOCTOR_PART" == "$1" ]]
+}
+
 # write_root_pinned_status_sh DEST JSON_PAYLOAD
 # Write a fake agent-tools status.sh at DEST that models the status
 # contract: accept `--root DIR` and `--json` in any order, and assert the
@@ -103,12 +121,15 @@ trap 'cleanup_fixtures; trap - INT; kill -INT $$' INT
 trap 'cleanup_fixtures; trap - TERM; kill -TERM $$' TERM
 [[ -z "${SUITE_INTERRUPT_CUE:-}" ]] || suite_interrupt_inner "$SUITE_INTERRUPT_CUE" "$fixture_home"
 # The traps above, checked by interrupting a run of this suite (#413; the
-# inner run stops at the line above).
+# inner run stops at the line above). Part 1's, like the cases from the
+# orphan check on.
+if doctor_part 1; then
 if check_suite_interrupt "${BASH_SOURCE[0]}" "$fixture_home"; then
   ok "test passed: a suite interrupted while background cases run stops their whole trees and removes its fixture"
 else
   fail "test failed: an interrupted suite left processes behind or kept its fixture"
   status=1
+fi
 fi
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
@@ -130,6 +151,10 @@ for host_tool in op herdr codex opencode; do
     exit 1
   fi
 done
+
+# ---- part 1 of 3 (TEST_DOCTOR_PART=1): from here to the herdr integration
+# cases (HI) ----
+if doctor_part 1; then
 
 # A leftover enforce-mode .npmrc, as after switching personal -> work.
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n' \
@@ -1853,6 +1878,12 @@ else
   fail "test failed: doctor must stay exit 0 (hook capabilities off, nothing left)"
   status=1
 fi
+
+fi # end of part 1
+
+# ---- part 2 of 3 (TEST_DOCTOR_PART=2): from the herdr integration cases
+# (HI) to the AI policy cases (AIP) ----
+if doctor_part 2; then
 
 # HI) herdr integration (#225): enableHerdrIntegration is ON for committed
 #     personal, so doctor reports the SessionStart registration in BOTH AI
@@ -3808,6 +3839,12 @@ else
   status=1
 fi
 rm -rf "$na_home" "$hi_fakebin"
+
+fi # end of part 2
+
+# ---- part 3 of 3 (TEST_DOCTOR_PART=3): from the AI policy cases (AIP) to
+# the end ----
+if doctor_part 3; then
 
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/
@@ -5978,7 +6015,9 @@ else
 fi
 rm -rf "${nt_home:?}" "${nt_fakebin:?}" "${nt_sysbin:?}" "$nt_calls"
 
+fi # end of part 3
+
 if [[ "$status" -eq 0 ]]; then
-  ok "doctor tests passed"
+  ok "doctor tests passed${TEST_DOCTOR_PART:+ (part $TEST_DOCTOR_PART of $doctor_parts)}"
 fi
 exit "$status"
