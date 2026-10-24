@@ -24,8 +24,8 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     未設定のときだけ、`OPENCODE_CONFIG` という文字列があるかを `grep -q` で見る(export の行かは見ない。
     #263。[opencode-settings](opencode-settings.md) の「検査」)。
   - 各 project の `.claude/settings.local.json` は、`enableAiPolicy=true` で `claude-settings` module が
-    active な profile のとき、標準の project root 直下の repo(HOME の下にあればこの repo も)にあるものを読み、
-    permission の allow / deny / ask が外向きの probe を承認なしに通すかを評価する(#334。
+    active な profile のとき、標準の project root の下の repo(HOME の下にあればこの repo も)にあるものを読み、
+    permission の allow / deny / ask が外向きの probe を承認なしに通すかを評価する(#334。読む repo の範囲は
     [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
   - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
     `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
