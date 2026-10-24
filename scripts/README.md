@@ -576,8 +576,8 @@ query だけを実機で実行する(書き込みはしない)。
   旧式の `:*` の前の `*` は展開されない(`gh *:*` は何にも一致しない)、`/**/` は 0 個以上の dir、旧式の prefix は空白の連続を
   1 つに詰める、wildcard でも rule と command の空白と tab の連続を 1 つに読む、同じ file の deny も allow に勝つ、改行を含む rule は 1 つのまま(floor の複数行の ask が `Bash` 単体に読めない、
   allow の末尾の改行は落とす)、JSON でない file は item(中身を出さない)、深い checkout は読まない、work と client では
-  org(client)の 1 段下の repo を読み(#445。直下の repo も対照として読む。`.` で始まる名前の repo も読む)、repo でもある org の dir も
-  その下の repo も、symlink で 2 回辿る org の下の repo も 1 回だけ読み、その repo より深い checkout は読まない、file の中の canary を出さない。
+  org(client)の 1 段下の repo を読み(#445。直下の repo も対照として読む。`.` で始まる名前の repo も読む)、
+  repo でもある org の dir(自身の `.git` と `.claude` を持つ)もその下の repo も、symlink で 2 回辿る org の下の repo も 1 回だけ読み、その repo より深い checkout は読まない、file の中の canary を出さない。
   floor が止める allow だけなら ok(読んだ file の数)、読めない file があれば ok を出さず「clean ではない」の item、HOME の下の
   標準の root と work の org の下に置いたこの repo の写しは 1 回だけ読む、標準の root の外(`~/dotfiles`)の写しも `//` を含む HOME で読む、floor の file が無ければ全部 warn、floor が読めなければ(JSON の文書が 2 つ、key が重なる、`~/.claude` が開けない floor を含む)not checked、開けない `.claude`・通常の file でない設定の path・一覧できない project root(`~/src` が開けない場合を含む)と一覧できない work と client の org の dir は読めない扱い(直下の repo の `.claude` と `.git` は repo として読まないので、開けなくても item は `.claude` の 1 つだけ。root では chmod の case を飛ばす)、`.` で始まる名前の repo も読む、work は
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の

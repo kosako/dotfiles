@@ -4517,6 +4517,8 @@ cl_write "$cl_h" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
 cl_write "$cl_w" '{"permissions":{"allow":["Bash(git push:*)"]}}'
 cl_write "$cl_x" '{"permissions":{"allow":["Bash(git push:*)"]}}'
 cl_write "$cl_o" '{"permissions":{"allow":["Bash(gh pr create)"]}}'
+env -i PATH="$PATH" HOME="$cl_home" GIT_CONFIG_NOSYSTEM=1 \
+  git init -q --template= "$cl_home/src/client/cli"
 cl_write "$cl_y" '{"permissions":{"allow":["Bash(git push:*)"]}}'
 ln -s cli "$cl_home/src/client/mirror"
 cl_write "$cl_deep_w" '{"permissions":{"allow":["Bash"]}}'
@@ -4542,7 +4544,8 @@ cl_write "$cl_f" '{"permissions":{"allow":["Bash(\u00a0gh pr close *)","Bash(gh 
 #       level down in work and client read as the convention places them
 #       (#445; the repos directly under those roots stay read as before),
 #       a dot-named repo there read too, an org directory that is itself a
-#       project read once like the repo under it, the repos of an org
+#       git repo with its own .claude (client/cli) read once and still
+#       listed, so the repos under it are read once too, the repos of an org
 #       reached twice (client/mirror, a symlink to client/cli) read once,
 #       and a checkout below such a repo not read.
 if cl_out="$(LC_ALL=C cl_run)"; then
