@@ -9,7 +9,38 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
 - local override file は chezmoi の管理対象にしない。repo にも commit しない。
 - secret、会社・クライアント固有の値、host 固有の調整は local override file 側にのみ置く。
 - managed file は local override file が存在しなくても壊れないように書く。
-- doctor は local override file の存在を report-only で表示してよいが、中身は読まない。
+- doctor は local override file の存在を report-only で表示してよい。中身は読まないことを原則とし、
+  例外は検査に要る次の項目だけにする(ほかの `~/.zprofile.local`・`~/.ssh/config.local`・
+  `~/.config/dotfiles/*.local`・`~/.config/agent-tools/checks.local.json` などは存在だけを見る)。
+  例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)
+  だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
+  中身を読む検査を足すときは、この一覧も直す。
+  - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`。
+    `opencode-settings` module が非 active な profile では managed でない `~/.config/opencode/opencode.json` も)は、
+    agent-tools の plugin(`~/.config/opencode/plugins/personal-*.js`)が配置されているときだけ JSON として
+    parse し、`plugin` 欄に配置中の plugin と同じ名前があるか(二重読込)を照合する。ほかの欄は使わない
+    (#263。[opencode-settings](opencode-settings.md) の「検査」)。
+  - `~/.zshrc.local` は、`opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が
+    未設定のときだけ、`OPENCODE_CONFIG` という文字列があるかを `grep -q` で見る(export の行かは見ない。
+    #263。[opencode-settings](opencode-settings.md) の「検査」)。
+  - 各 project の `.claude/settings.local.json` は、`enableAiPolicy=true` で `claude-settings` module が
+    active な profile のとき、標準の project root の下の repo(HOME の下にあればこの repo も)にあるものを読み、
+    permission の allow / deny / ask が外向きの probe を承認なしに通すかを評価する(#334。読む repo の範囲は
+    [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
+  - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
+    `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
+    ただし doctor を repo の中で実行すると、global の `core.hooksPath` と(`git-ignore` module が active な
+    profile では)`core.excludesFile` を引く照会(`git config --global --includes`)で、git は `~/.gitconfig` の
+    includeIf のうち `gitdir` の条件がその repo の git directory の path に合うものを辿り、その identity file
+    (そこから include される file も)も読む。linked worktree では起動した場所でなく主 repo の `.git` の場所で
+    決まる([git-identity](git-identity.md) の「非 personal context の identity reset」)。git はこの path を
+    symlink を解いた形と解く前の形の両方で照合し、どちらかが合えば読むので、symlink から入った checkout では
+    同じ repo でも起動した path で読む file が変わりうる(実体が `~/src` の外にある repo に `~/src/work/` の下の
+    symlink から入り、work tree の top で起動すると work の identity file を読み、実体の path からでは読まない)。
+    remote URL による二次判定(`hasconfig`)は、`--global` の照会では repo の remote が見えないので当たらない。
+    `core.hooksPath` の値は出さないが、managed な `~/.config/git/ignore` が在り、`core.excludesFile` が
+    それと別の file を指すときは、git が読む file としてその path を表示する
+    ([git-ignore](git-ignore.md) の「doctor / preflight」)。
 - 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.zprofile.local`、`~/.ssh/config.local`)。
   対応する managed file を持たない local 値(trust list・clone context など)は
   `~/.config/dotfiles/<name>.local` に置く(下記)。

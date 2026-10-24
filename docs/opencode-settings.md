@@ -146,7 +146,8 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   **限界**: 行は「この build で init が return まで到達した起動が過去にあった」証拠で、直近の起動が成功した証拠では
   ない(同じ build の古い行が残っていれば、その後の起動が init に失敗しても「確認できた」になる)。
   `opencode.local.json` があるのに doctor を実行した shell で `OPENCODE_CONFIG` が未設定 / 別 file を指す場合も
-  報告する(`~/.zshrc.local` に export があれば、非対話 shell 由来として中立表示)。
+  報告する(未設定のときは `~/.zshrc.local` に `OPENCODE_CONFIG` という文字列があるかだけを `grep -q` で見て、
+  あれば非対話 shell 由来として中立表示する。export の行かは見ず、中身は表示しない)。
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash / edit の rule map を順序込みで、
   `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
