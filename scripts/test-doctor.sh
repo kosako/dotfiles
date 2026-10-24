@@ -4477,7 +4477,8 @@ rm -rf "$fixture_home/.codex/rules" "$fixture_home/.codex/config.toml" \
 #     "don't ask again" saves an allow rule into the project's
 #     .claude/settings.local.json; doctor evaluates the outward probes against
 #     the allow rules of the repos directly under the standard project roots
-#     and reports the ones no deny / ask stops (the live floor
+#     (and one org / client level down in work and client, #445) and
+#     reports the ones no deny / ask stops (the live floor
 #     ~/.claude/settings.json, or the project's own two files). Rules are read
 #     one per JSON string, so a rule holding a line break stays one rule.
 #     Report-only, contents-blind (a saved rule can carry a token: only the
@@ -4502,12 +4503,25 @@ cl_d="$cl_home/src/client/repo-d/.claude/settings.local.json"
 cl_deep="$cl_home/src/personal/group/nested/.claude/settings.local.json"
 cl_f="$cl_home/src/sandbox/repo-f/.claude/settings.local.json"
 cl_h="$cl_home/src/client/.repo-h/.claude/settings.local.json"
+cl_w="$cl_home/src/work/acme/repo-w/.claude/settings.local.json"
+cl_x="$cl_home/src/client/cli/repo-x/.claude/settings.local.json"
+cl_o="$cl_home/src/client/cli/.claude/settings.local.json"
+cl_y="$cl_home/src/client/cli/.repo-y/.claude/settings.local.json"
+cl_deep_w="$cl_home/src/work/acme/repo-w/nested/.claude/settings.local.json"
 cl_write "$cl_a" "{\"permissions\":{\"allow\":[\"Bash(git push:*)\",\"Bash(npm test:*)\",\"Bash(gh * create)\",\"Bash(sudo.*)\",\"Bash(gh *:*)\",\"Bash(git clone https://example.invalid/**/repo)\",\"Bash(curl -H \\\"x: $cl_canary\\\" *)\",\"Read(~/notes/**)\",42]}}"
 cl_write "$cl_b" '{"permissions":{"allow":["Bash(gh auth token)","Bash(gh pr merge:*)","Bash(wget:*)"]}}'
 cl_write "$cl_c" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_d" "{\"permissions\":{\"allow\":[\"Bash($cl_canary)\""
 cl_write "$cl_deep" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_h" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
+cl_write "$cl_w" '{"permissions":{"allow":["Bash(git push:*)"]}}'
+cl_write "$cl_x" '{"permissions":{"allow":["Bash(git push:*)"]}}'
+cl_write "$cl_o" '{"permissions":{"allow":["Bash(gh pr create)"]}}'
+env -i PATH="$PATH" HOME="$cl_home" GIT_CONFIG_NOSYSTEM=1 \
+  git init -q --template= "$cl_home/src/client/cli"
+cl_write "$cl_y" '{"permissions":{"allow":["Bash(git push:*)"]}}'
+ln -s cli "$cl_home/src/client/mirror"
+cl_write "$cl_deep_w" '{"permissions":{"allow":["Bash"]}}'
 cl_write "$cl_home/src/personal/repo-a/.claude/settings.json" '{"permissions":{"ask":["Bash(gh release *)"]}}'
 cl_write "$cl_f" '{"permissions":{"allow":["Bash(\u00a0gh pr close *)","Bash(gh  repo\t*)","Bash(sudo -v *\n)","Bash(echo x\nBash\n)"],"deny":["Bash(gh repo delete)"]}}'
 
@@ -4526,7 +4540,14 @@ cl_write "$cl_f" '{"permissions":{"allow":["Bash(\u00a0gh pr close *)","Bash(gh 
 #       non-string entry ignored, runs of spaces / tabs in a wildcard read as
 #       one space (the floor's `gh  pr merge *` ask, repo-f's `gh  repo\t*`),
 #       a wildcard trimmed as JavaScript does whatever the locale (repo-f's
-#       NBSP-led allow; this run uses LC_ALL=C).
+#       NBSP-led allow; this run uses LC_ALL=C), the repos one org / client
+#       level down in work and client read as the convention places them
+#       (#445; the repos directly under those roots stay read as before),
+#       a dot-named repo there read too, an org directory that is itself a
+#       git repo with its own .claude (client/cli) read once and still
+#       listed, so the repos under it are read once too, the repos of an org
+#       reached twice (client/mirror, a symlink to client/cli) read once,
+#       and a checkout below such a repo not read.
 if cl_out="$(LC_ALL=C cl_run)"; then
   if grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_a: 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh issue create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "        edit $cl_a: remove the allow rules covering those commands (approve them per use instead)" <<< "$cl_out" \
@@ -4535,6 +4556,16 @@ if cl_out="$(LC_ALL=C cl_run)"; then
     && grep -Fxq "[warn] 5 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_f: 'gh pr close', 'gh repo edit', 'gh repo archive', 'gh repo rename', 'sudo -v' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_h: 'sudo -v' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "[info] - the permission rules of $cl_d could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
+    && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_w: 'git push' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
+    && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_x: 'git push' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
+    && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_o: 'gh pr create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
+    && [[ "$(grep -F "[warn] " <<< "$cl_out" | grep -Fc "project-level allow rules in $cl_w: ")" -eq 1 ]] \
+    && [[ "$(grep -F "[warn] " <<< "$cl_out" | grep -Fc "project-level allow rules in $cl_x: ")" -eq 1 ]] \
+    && [[ "$(grep -F "[warn] " <<< "$cl_out" | grep -Fc "project-level allow rules in $cl_o: ")" -eq 1 ]] \
+    && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_y: 'git push' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
+    && [[ "$(grep -F "[warn] " <<< "$cl_out" | grep -Fc "project-level allow rules in $cl_y: ")" -eq 1 ]] \
+    && ! grep -Fq "$cl_home/src/client/mirror/" <<< "$cl_out" \
+    && ! grep -Fq "$cl_deep_w" <<< "$cl_out" \
     && ! grep -Fq "$cl_deep" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out" \
     && ! grep -Fq "$cl_canary" <<< "$cl_out"; then
@@ -4556,7 +4587,7 @@ rm -rf "$cl_home/src"
 cl_write "$cl_b" '{"permissions":{"allow":["Bash(gh auth token)","Bash(gh  pr merge:*)","Bash(npm test *)"]}}'
 cl_write "$cl_home/src/sandbox/repo-e/.claude/settings.local.json" '{"permissions":{"deny":["Bash"]}}'
 if cl_out="$(cl_run)" \
-  && grep -Fxq "[ok] no project-level Claude allow rule covers an outward probe (30 probes over 2 settings file(s) in this repo and the repos directly under the standard project roots)" <<< "$cl_out" \
+  && grep -Fxq "[ok] no project-level Claude allow rule covers an outward probe (30 probes over 2 settings file(s) in this repo, the repos directly under the standard project roots and those one org (client) level down in work and client)" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: allows the floor stops are not reported; the ok line counts the files read"
 else
@@ -4585,19 +4616,23 @@ rm -rf "$cl_home/src/client"
 #       ~/src/personal/dotfiles runs doctor from there, so it is both "this
 #       repo" and a repo under the root -> one action, not two (counted
 #       whatever the path spelling: the fixture HOME may hold a doubled
-#       slash from TMPDIR, which `pwd` drops from the repo's own path).
-copy_repo_fixture "$cl_home/src/personal/dotfiles"
-cl_self="$cl_home/src/personal/dotfiles/.claude/settings.local.json"
-cl_write "$cl_self" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
-if cl_out="$(HOME="$cl_home" "$cl_home/src/personal/dotfiles/scripts/doctor.sh" personal 2>&1)" \
-  && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/src/personal/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
-  ok "test passed: this repo under a standard project root is read once (one action)"
-else
-  printf '%s\n' "$cl_out" >&2
-  fail "test failed: this repo under a standard project root must be read once"
-  status=1
-fi
-rm -rf "$cl_home/src/personal/dotfiles"
+#       slash from TMPDIR, which `pwd` drops from the repo's own path). The
+#       same for a copy one org level down in work (~/src/work/org-s/dotfiles,
+#       #445).
+for cl_self_rel in src/personal/dotfiles src/work/org-s/dotfiles; do
+  copy_repo_fixture "$cl_home/$cl_self_rel"
+  cl_write "$cl_home/$cl_self_rel/.claude/settings.local.json" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
+  if cl_out="$(HOME="$cl_home" "$cl_home/$cl_self_rel/scripts/doctor.sh" personal 2>&1)" \
+    && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/$cl_self_rel/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+    ok "test passed: this repo at ~/$cl_self_rel is read once (one action)"
+  else
+    printf '%s\n' "$cl_out" >&2
+    fail "test failed: this repo at ~/$cl_self_rel must be read once"
+    status=1
+  fi
+  rm -rf "${cl_home:?}/$cl_self_rel"
+done
+rm -rf "$cl_home/src/work"
 
 # CL-7) this repo under HOME but outside the standard roots is read only as
 #       "this repo", and HOME is compared in normalized form: the copy at
@@ -4793,9 +4828,12 @@ fi
 # CL-8) only a confirmed absence counts as "no settings" (Codex review R7,
 #       PR #340): a .claude dir that cannot be searched, or a settings path
 #       that is not a regular file, is unreadable (an item, no clean ok), and
-#       so is a floor dir that cannot be searched. The rest of the HOME is
-#       clean here (repo-b's allows are all stopped by the floor). Skipped as
-#       root (root searches the dir).
+#       so is a floor dir that cannot be searched, a project root or an org
+#       directory of work or client that cannot be listed (the .claude and
+#       .git of a repo directly under work are not repos, so they add no
+#       item of their own). The rest of the HOME is clean here (repo-b's
+#       allows are all stopped by the floor). Skipped as root (root searches
+#       the dir).
 rm -rf "$cl_home/src/work" "$cl_home/src/sandbox"
 cl_g="$cl_home/src/personal/repo-g/.claude"
 cl_write "$cl_g/settings.local.json" '{"permissions":{"allow":["Bash(npm test)"]}}'
@@ -4849,6 +4887,43 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$cl_home/src"
+  # ... and so is an org (client) directory of work or client that cannot
+  # be listed (#445): the repos one level down there are where the
+  # convention puts them.
+  for cl_root in work client; do
+    mkdir -p "$cl_home/src/$cl_root/org-l/repo-l"
+    for cl_mode in 000 111; do
+      chmod "$cl_mode" "$cl_home/src/$cl_root/org-l"
+      if cl_out="$(cl_run)" \
+        && grep -Fxq "[info] - the directory $cl_home/src/$cl_root/org-l under the project root could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
+        && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+        ok "test passed: an org directory of $cl_root that cannot be listed (mode $cl_mode) is unreadable, not empty"
+      else
+        printf '%s\n' "$cl_out" >&2
+        fail "test failed: an org directory of $cl_root that cannot be listed (mode $cl_mode) must not read as empty"
+        status=1
+      fi
+      chmod 755 "$cl_home/src/$cl_root/org-l"
+    done
+    rm -rf "${cl_home:?}/src/$cl_root"
+  done
+  # A repo placed directly under work is listed as an org too, but its own
+  # .claude and .git are not read as repos (#445): with both unopenable,
+  # only its .claude is reported, once.
+  mkdir -p "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  chmod 000 "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  if cl_out="$(cl_run)" \
+    && grep -Fxq "[info] - the .claude directory of $cl_home/src/work/repo-k could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
+    && grep -Fq "but 1 could not be read — not a clean result" <<< "$cl_out" \
+    && ! grep -Fq "the .claude directory of $cl_home/src/work/repo-k/." <<< "$cl_out"; then
+    ok "test passed: the .claude and .git of a repo directly under work are not read as repos"
+  else
+    printf '%s\n' "$cl_out" >&2
+    fail "test failed: the .claude and .git of a repo directly under work must not be read as repos"
+    status=1
+  fi
+  chmod 755 "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  rm -rf "$cl_home/src/work"
 fi
 rm -f "$cl_g/settings.local.json"
 mkdir -p "$cl_g/settings.local.json"

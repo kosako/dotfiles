@@ -1233,7 +1233,8 @@ report_codex_projects_trust() {
 # can carry them too) — the same erosion #139 found on the Codex side. So,
 # as with the Codex rules probes, the shared outward probe commands are
 # evaluated against the allow rules of those files in the repos directly
-# under the standard project roots (and this repo when it is under HOME),
+# under the standard project roots, the repos one org (client) level down in
+# work and client (#445), and this repo when it is under HOME,
 # matched the way Claude Code classifies a Bash rule (claude_bash_rule_matches
 # below); the bare tool `Bash` allows every command. A probe a deny / ask of
 # the live ~/.claude/settings.json or of the project's own two files covers is
@@ -1409,7 +1410,7 @@ claude_settings_file_state() {
   fi
 }
 report_claude_project_allows() {
-  local floor_file="$HOME/.claude/settings.json" floor_stops=() stop_rules dirs root dir seen dup file kind allows probe hits hit_count shown
+  local floor_file="$HOME/.claude/settings.json" floor_stops=() stop_rules dirs listed_dirs root dir sub seen dup file kind allows probe hits hit_count shown
   local home_dir dir_state file_state local_allows shared_allows local_read shared_read files_read=0 files_unreadable=0 files_flagged=0
   # The floor: absent (confirmed) means no deny / ask; anything that cannot
   # be read decides nothing, so the check stops there.
@@ -1432,7 +1433,16 @@ report_claude_project_allows() {
   home_dir="$(CDPATH='' cd -- "$HOME" 2>/dev/null && pwd)" || home_dir="$HOME"
   [[ "$DOTFILES_ROOT" == "${home_dir%/}"/* ]] && dirs+=("$DOTFILES_ROOT")
   # A root that cannot be searched or listed would yield no repos at all, so
-  # it is unreadable, not empty; dot-named repos are listed too.
+  # it is unreadable, not empty; dot-named repos are listed too. work and
+  # client keep their repos one level down, under an org (client) directory
+  # (docs/directory-convention.md): there each directory under the root is
+  # both read as a repo (one placed off the convention) and listed for the
+  # repos under it, each read once. A directory there that cannot be
+  # listed is unreadable too. Its own .claude and .git (its settings and its
+  # git dir when it is a repo) are not repos, so they are not read as one.
+  # One level only: a checkout deeper down is not read, as under the other
+  # roots.
+  listed_dirs=()
   for root in "$HOME/src/personal" "$HOME/src/work" "$HOME/src/client" "$HOME/src/sandbox" "$HOME/src/agent"; do
     dir_state="$(claude_settings_dir_state "$root")"
     [[ "$dir_state" == open && ! -r "$root" ]] && dir_state=error
@@ -1445,15 +1455,35 @@ report_claude_project_allows() {
     for dir in "$root"/*/ "$root"/.[!.]*/ "$root"/..?*/; do
       [[ -d "$dir" ]] || continue
       dir="${dir%/}"
-      dup=0
-      for seen in ${dirs[@]+"${dirs[@]}"}; do
-        if [[ "$dir" -ef "$seen" ]]; then
-          dup=1
-          break
-        fi
+      listed_dirs+=("$dir")
+      [[ "$root" == "$HOME/src/work" || "$root" == "$HOME/src/client" ]] || continue
+      dir_state="$(claude_settings_dir_state "$dir")"
+      [[ "$dir_state" == open && ! -r "$dir" ]] && dir_state=error
+      if [[ "$dir_state" == error ]]; then
+        item "the directory $(shell_quote_safe "$dir") under the project root could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked"
+        files_unreadable=$((files_unreadable + 1))
+        continue
+      fi
+      [[ "$dir_state" == open ]] || continue
+      for sub in "$dir"/*/ "$dir"/.[!.]*/ "$dir"/..?*/; do
+        [[ -d "$sub" ]] || continue
+        sub="${sub%/}"
+        case "${sub##*/}" in
+          .claude | .git) continue ;;
+        esac
+        listed_dirs+=("$sub")
       done
-      [[ "$dup" -eq 1 ]] || dirs+=("$dir")
     done
+  done
+  for dir in ${listed_dirs[@]+"${listed_dirs[@]}"}; do
+    dup=0
+    for seen in ${dirs[@]+"${dirs[@]}"}; do
+      if [[ "$dir" -ef "$seen" ]]; then
+        dup=1
+        break
+      fi
+    done
+    [[ "$dup" -eq 1 ]] || dirs+=("$dir")
   done
   for dir in ${dirs[@]+"${dirs[@]}"}; do
     # The deny / ask of either project file beat the allows of both.
@@ -1516,7 +1546,7 @@ report_claude_project_allows() {
     done
   done
   if [[ "$files_flagged" -eq 0 && "$files_unreadable" -eq 0 ]]; then
-    ok "no project-level Claude allow rule covers an outward probe (${#outward_probe_commands[@]} probes over $files_read settings file(s) in this repo and the repos directly under the standard project roots)"
+    ok "no project-level Claude allow rule covers an outward probe (${#outward_probe_commands[@]} probes over $files_read settings file(s) in this repo, the repos directly under the standard project roots and those one org (client) level down in work and client)"
   elif [[ "$files_flagged" -eq 0 ]]; then
     item "Claude project-level allows partly checked: no outward probe auto-allowed in the $files_read file(s) read, but $files_unreadable could not be read — not a clean result"
   fi
