@@ -488,18 +488,20 @@ elif ! npm_version="$(npm --version 2>/dev/null)" || [[ -z "$npm_version" ]]; th
   warn "npm on PATH but not runnable (shim without a runtime?); skipping npm checks"
 else
   ok "npm: $(display_safe "$npm_version")"
-  for key in before ignore-scripts save-exact fund audit userconfig globalconfig; do
+  for key in min-release-age before ignore-scripts save-exact fund audit userconfig globalconfig; do
     value="$(npm config get "$key" 2>/dev/null || true)"
     item "npm $key=$(display_safe "$value")"
   done
   npm_major="${npm_version%%.*}"
   npm_minor="$(printf '%s' "$npm_version" | LC_ALL=C cut -d. -f2 2>/dev/null)"
+  npm_age_supported=false
   # Guard before the arithmetic test: [[ -gt ]] evaluates its operands as
   # arithmetic, so a non-numeric component resolves as a variable name and
   # aborts the shell under set -u (the old 2>/dev/null hid even that) (#144).
   if [[ ! "$npm_major" =~ ^[0-9]+$ || ! "$npm_minor" =~ ^[0-9]+$ ]]; then
     warn "npm version '$(display_safe "$npm_version")' not recognized; cannot check min-release-age support"
   elif [[ "$npm_major" -gt 11 || ( "$npm_major" -eq 11 && "$npm_minor" -ge 10 ) ]]; then
+    npm_age_supported=true
     ok "npm supports min-release-age (>= 11.10)"
   else
     warn "npm older than 11.10, min-release-age is not enforced"
@@ -519,23 +521,116 @@ save-exact=true
 fund=false
 audit=true
 EOF
-    # npm consumes min-release-age and flattens it into `before` (now - <days>),
-    # deleting the original key, so `npm config get min-release-age` is always
-    # null even when honored. Verify the operative `before` cutoff is ~7 days
-    # ago instead: a non-empty `before` alone is not enough (a shorter age, or a
-    # hand-set far-future date, would also be non-empty but not enforce the
-    # 7-day cooldown). node ships with npm, so it is available to parse npm's
-    # Date string portably; an unparseable/empty value yields no epoch and fails
-    # the window check below.
+    # The 7-day wait has two forms, by npm version (#443). Current npm (11.19
+    # checked) keeps min-release-age as its own key and computes the cutoff
+    # only when flattening, so `npm config get min-release-age` reads 7 and
+    # `before` stays null. When both are set, `before` wins within one source
+    # and the higher source wins across them; `npm config get` does not show
+    # which source each came from, so the age form is honored only with
+    # `before` unset, and only on an npm that knows the key (>= 11.10, checked
+    # above): an older one echoes the unknown key back without enforcing it.
+    # `npm config get before` prints null both for an unset `before` and for
+    # one a source sets to null, and that null replaces the wait like any set
+    # `before`. `npm config list` prints only the keys a source sets, a
+    # `key = value` line each (one a higher source overrides is commented out
+    # with `;`), so unset means the listing reads and has no uncommented
+    # `before = ` line in any source. `--long=false` keeps a `long=true` in
+    # some source from adding npm's defaults, `before = null` among them, and
+    # `--json=false` keeps a `json=true` from turning the listing into the
+    # merged JSON config, which has no such line even for a set `before`.
+    # Inside a package npm also lists its package.json publishConfig (used at
+    # publish time only) without `;`, so a publishConfig `before` warns too,
+    # as does a null `before` in a source below the age's, which leaves the
+    # wait on: the sources are not compared here. The match runs on the shell
+    # variable: a here-string needs a temp file on bash 3.2 (doctor must not
+    # need TMPDIR, #446), and `printf | grep -q` under pipefail reads a match
+    # as a miss when grep exits early and printf dies of SIGPIPE.
+    # Older npm (the #91 era) flattened the age into `before` (now - <days>)
+    # and deleted the key, so there the operative cutoff must be ~7 days ago:
+    # a non-empty `before` alone is not enough (a shorter age, or a hand-set
+    # far-future date, is non-empty too). That form also needs
+    # min-release-age null (the deleted key) or 7: on current npm a different
+    # age in a higher source than a ~7-day `before` replaces it (0 turns the
+    # wait off). Anything else warns. node ships with npm, so it is available
+    # to parse npm's Date string portably; an unparseable/empty value yields
+    # no epoch and fails the window check.
+    npm_age="$(npm config get min-release-age 2>/dev/null || true)"
     npm_before="$(npm config get before 2>/dev/null || true)"
+    npm_before_listed=unknown
+    if [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true ]] \
+      && npm_listing="$(npm config list --long=false --json=false 2>/dev/null)"; then
+      case $'\n'"$npm_listing" in
+        *$'\n''before = '*) npm_before_listed=true ;;
+        *) npm_before_listed=false ;;
+      esac
+    fi
     npm_before_epoch=""
     if [[ -n "$npm_before" && "$npm_before" != "null" ]]; then
       npm_before_epoch="$(node -e 'const t=Date.parse(process.argv[1]||"");process.stdout.write(Number.isNaN(t)?"":String(Math.floor(t/1000)))' "$npm_before" 2>/dev/null || true)"
     fi
-    if npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
+    if [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true && "$npm_before_listed" == false ]]; then
+      ok "npm min-release-age=7 honored (before unset)"
+    elif [[ "$npm_age" == "null" || "$npm_age" == "7" ]] \
+      && npm_before_within_age_window "$npm_before_epoch" "$(date +%s)" 7 43200; then
       ok "npm min-release-age=7 honored (before=$(display_safe "$npm_before"))"
     else
-      warn "enforce expects npm min-release-age=7 (before ~= now-7d), current before=$(display_safe "${npm_before:-unset}") (apply pending?)"
+      if [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" != true ]]; then
+        npm_age_hint="npm version not confirmed to enforce it, see above"
+      elif [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_before_listed" == true ]]; then
+        npm_age_hint="a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null"
+      elif [[ "$npm_age" == "7" && "$npm_before" == "null" ]]; then
+        npm_age_hint="npm config list could not be read, so a before set explicitly to null cannot be ruled out"
+      elif [[ "$npm_age" == "7" && -n "$npm_before" ]]; then
+        npm_age_hint="a set before replaces the wait when in the same or a higher config source"
+      else
+        npm_age_hint="apply pending?"
+      fi
+      warn "enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=$(display_safe "${npm_age:-(no value)}") before=$(display_safe "${npm_before:-(no value)}") ($npm_age_hint)"
+    fi
+    # min-release-age-exclude names packages (or globs) the wait and `before`
+    # skip; the managed ~/.npmrc sets none, so any entry loosens the wait.
+    # `npm config get` prints the list comma-joined, where an entry named
+    # undefined or null reads the same as a key the npm does not know or one
+    # left unset. `npm config list --json` prints the merged config with typed
+    # values instead (a key this npm does not know is absent), and node counts
+    # the entries the way npm flattens the key (11.19 checked): each entry as a
+    # string, split on commas, trimmed with JavaScript's trim (CR and NBSP
+    # too), empty and repeated names dropped. An absent key counts as empty,
+    # as that npm excludes nothing. A value that is not a list, a listing that
+    # is not a JSON object or an npm error object (an `error` key holding an
+    # object; a config key named error holds a string and is no error) cannot
+    # be counted, and an npm that fails cannot be read (it still prints an
+    # error object, so its status is checked before node runs): both warn.
+    # The listing reaches node on stdin, never in argv (it holds the whole
+    # config); node reads it to the end before it writes the count, so the
+    # pipe cannot cut a count short. Only the count is shown: the names can
+    # be private package names.
+    if npm_list_json="$(npm config list --json 2>/dev/null)"; then
+      npm_exclude_count="$(printf '%s' "$npm_list_json" | node -e '
+        let s = ""
+        process.stdin.setEncoding("utf8")
+        process.stdin.on("data", d => { s += d })
+        process.stdin.on("end", () => {
+          let c
+          try { c = JSON.parse(s) } catch (e) { process.exit(1) }
+          const has = k => Object.prototype.hasOwnProperty.call(c, k)
+          if (c === null || typeof c !== "object" || Array.isArray(c)) process.exit(1)
+          if (has("error") && c.error !== null && typeof c.error === "object") process.exit(1)
+          if (!has("min-release-age-exclude")) { process.stdout.write("0"); return }
+          const v = c["min-release-age-exclude"]
+          if (!Array.isArray(v)) process.exit(1)
+          const names = v.flatMap(e => String(e).split(",")).map(e => e.trim()).filter(Boolean)
+          process.stdout.write(String(new Set(names).size))
+        })' 2>/dev/null || true)"
+      if [[ ! "$npm_exclude_count" =~ ^[0-9]+$ ]]; then
+        warn "npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
+      elif [[ "$npm_exclude_count" -eq 0 ]]; then
+        ok "npm min-release-age-exclude empty"
+      else
+        warn "enforce expects npm min-release-age-exclude empty, current: $npm_exclude_count entry(ies) skip the 7-day wait (names not shown)"
+      fi
+    else
+      warn "npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait"
     fi
   fi
 fi

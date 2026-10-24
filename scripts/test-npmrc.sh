@@ -59,6 +59,15 @@ else
   ok "test passed: no token or registry configuration in template"
 fi
 
+# min-release-age-exclude names packages the 7-day wait skips: the managed
+# npmrc sets none, and doctor warns on any entry (#443).
+if grep -Eq '^[[:space:]]*min-release-age-exclude' "$NPMRC_TEMPLATE"; then
+  fail "test failed: template sets min-release-age-exclude (packages skipping the 7-day wait)"
+  status=1
+else
+  ok "test passed: template sets no min-release-age-exclude"
+fi
+
 section "static checks: .chezmoiignore"
 
 if [[ ! -f "$CHEZMOIIGNORE" ]]; then
@@ -101,16 +110,26 @@ section "consistency: doctor enforce expectations"
 while IFS= read -r line; do
   key="${line%%=*}"
   if [[ "$key" == "min-release-age" ]]; then
-    # npm flattens min-release-age into `before` (now - <days>) and deletes the
-    # original key, so doctor cannot assert `min-release-age=<n>` via
-    # `npm config get`. It verifies the operative `before` cutoff is ~7 days ago
-    # through npm_before_within_age_window (exercised below); a mere presence
-    # grep would not catch a loosened window.
-    # Require the exact call args (days=7, tolerance=43200), not just the
-    # function name: a loosened window (e.g. `7 90000`) or wrong age
-    # (e.g. `1 43200`) must break this test, locking the 7-day +/-12h contract.
+    # The 7-day wait has two forms by npm version (#443), and doctor accepts
+    # both. Current npm keeps min-release-age as its own key and leaves
+    # `before` null: doctor reads the age and requires `before` unset (null
+    # and no source listing it in `npm config list`), since a set `before`,
+    # even null, can replace the wait. Older npm flattened the age into
+    # `before` (now - <days>) and deleted the key: doctor verifies that cutoff
+    # is ~7 days ago through npm_before_within_age_window (exercised below).
+    # A mere presence grep would catch neither a loosened age nor a loosened
+    # window, so require the exact tests: the age form as written, and the
+    # call args (days=7, tolerance=43200) of the window. A wrong age (e.g.
+    # `== "1"` or `1 43200`) or a loosened window (e.g. `7 90000`) must break
+    # this test, locking the 7-day (+/-12h) contract.
+    if grep -Fq '[[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true && "$npm_before_listed" == false ]]' "$SCRIPT_DIR/doctor.sh"; then
+      ok "test passed: doctor verifies min-release-age=7 with before unset (current npm)"
+    else
+      fail "test failed: doctor.sh must require npm min-release-age=7 with before null and not listed on npm >= 11.10"
+      status=1
+    fi
     if grep -Eq 'npm_before_within_age_window .* 7 43200([[:space:]]|;|$)' "$SCRIPT_DIR/doctor.sh"; then
-      ok "test passed: doctor verifies min-release-age via before cutoff (7d +/-12h)"
+      ok "test passed: doctor verifies min-release-age via before cutoff (7d +/-12h, older npm)"
     else
       fail "test failed: doctor.sh must call npm_before_within_age_window with '7 43200'"
       status=1
@@ -125,7 +144,18 @@ while IFS= read -r line; do
   fi
 done < <(grep -E '^[a-z-]+=' "$NPMRC_TEMPLATE")
 
-section "unit: npm before cutoff window (min-release-age=7)"
+# The template sets no min-release-age-exclude (above), and doctor must warn
+# when one appears (#443): it counts the key in `npm config list --json`
+# (the behavior is pinned in test-doctor.sh).
+if grep -Fq 'npm_list_json="$(npm config list --json 2>/dev/null)"' "$SCRIPT_DIR/doctor.sh" \
+  && grep -Fq 'has("min-release-age-exclude")' "$SCRIPT_DIR/doctor.sh"; then
+  ok "test passed: doctor checks min-release-age-exclude is empty"
+else
+  fail "test failed: doctor.sh does not check npm min-release-age-exclude"
+  status=1
+fi
+
+section "unit: npm before cutoff window (min-release-age=7, older npm form)"
 
 check_window() {
   local name="$1" expected_rc="$2"; shift 2
@@ -152,7 +182,8 @@ check_window "6 days ago is rejected (off by 1d)"   1 $(( now - 6*day ))       "
 check_window "8 days ago is rejected (off by 1d)"   1 $(( now - 8*day ))       "$now" 7 "$tol"
 # Rejected: a hand-set far-future before disables the cooldown.
 check_window "far-future before is rejected"        1 $(( now + 1000*day ))    "$now" 7 "$tol"
-# Rejected: unset / non-numeric before (npm older than 11.10, parse failure).
+# Rejected: unset / non-numeric before (current npm leaves it null and doctor
+# checks that form on its own, #443; parse failure).
 check_window "empty before is rejected"             1 ""                       "$now" 7 "$tol"
 check_window "non-numeric before is rejected"       1 "abc"                    "$now" 7 "$tol"
 # Rejected: non-numeric now / days / tolerance fail closed (no coercion to 0).

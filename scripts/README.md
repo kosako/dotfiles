@@ -412,7 +412,11 @@ fixture は一時 directory に作り、実際の home や global Git config に
 - `.chezmoiignore` が allowlist の root `**` を持つこと(repo 管理用 file(README、docs、scripts など)は
   宣言されないので apply されない。managed set の pin と未宣言 source の検知は `test-render.sh`、#207)。
 - modules.yaml の宣言で `.npmrc` が `npmHardeningMode=enforce` のみ、mise config が `enableRuntimeManagement=true` のみで管理されること。
-- template の設定値と `doctor.sh` の enforce 期待値が一致していること。
+- template が `min-release-age-exclude`(7 日の待ちから外す package)を設定しないこと(#443)。
+- template の設定値と `doctor.sh` の enforce 期待値が一致していること。`min-release-age=7` は、今の npm の形
+  (`min-release-age` が 7 で `before` が null、かつ `npm config list` のどの source にも `before` が無い)と
+  古い npm の形(`before` が約 7 日前の cutoff、`npm_before_within_age_window`)の両方の検査が 7 日に固定されていることと、
+  doctor が `min-release-age-exclude` を `npm config list --json` で検査することを確かめる(#443)。
 
 静的検査は chezmoi 無しで実行できる(CI の validate job)。chezmoi がある環境では加えて personal を
 throwaway destination に実 render し、生成された `~/.npmrc` の内容(hardening 値・token / registry の
@@ -597,6 +601,15 @@ query だけを実機で実行する(書き込みはしない)。
   ことと、report のどこにも生の byte が無いことを確かめる。usage reader の理由は UR-3b、Codex の rules の file 名は AI policy の
   case で固定する。
 - npm(#150): shim だけの npm / 壊れた npm でも doctor を落とさない、enforce の期待値検査は fake npm / node で決定的。
+  7 日の待ちは、今の npm の形(`min-release-age=7`・`before` が null で `npm config list` に無い)と古い npm の形
+  (`before` が約 7 日前で `min-release-age` が null か 7)を ok に、日数違い・窓の外の `before`・約 7 日前の `before` の横の
+  別の日数・読めない `before`・source が明示的に `null` にした `before`・読めない `npm config list`・11.10 より古い npm の
+  `min-release-age=7` を warn にする。listing の行の途中の `before = `(別の key の値)と、`long=true` の source があるときに
+  npm が並べる既定値の `before = null`(doctor は `--long=false` で読む)は、設定された `before` と扱わない。source の `json=true` があっても(doctor は `--json=false` で読む)、設定された `before` を見落とさない。
+  `min-release-age-exclude` は fake の `npm config list --json` の値を doctor の node script で数え(この呼び出しだけ PATH の
+  実際の node で走らせるので、node が無いと test は失敗する)、項目は数だけを出して warn にする(名前は出さない。
+  `undefined`・`null` という名前の項目は 1 項目、CR・NBSP・tab だけの項目は空、key が無ければ空と数える。list でない値・
+  JSON として読めない listing・npm の error の object・失敗する count・読めない listing は warn で exit 0。#443)。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
