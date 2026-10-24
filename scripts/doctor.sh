@@ -531,17 +531,20 @@ EOF
     # above): an older one echoes the unknown key back without enforcing it.
     # `npm config get before` prints null both for an unset `before` and for
     # one a source sets to null, and that null replaces the wait like any set
-    # `before`. `npm config list --long=false` prints only the keys a source
-    # sets, a `key = value` line each (one a higher source overrides is
-    # commented out with `;`), so unset means the listing reads and has no
-    # uncommented `before = ` line in any source. `--long=false` keeps a
-    # `long=true` in some source from adding npm's defaults, `before = null`
-    # among them. A null `before` in a source below the age's leaves the wait
-    # on, but the sources are not compared here, so it warns too. The match
-    # runs on the shell variable: a
-    # here-string needs a temp file on bash 3.2 (doctor must not need TMPDIR,
-    # #446), and `printf | grep -q` under pipefail reads a match as a miss
-    # when grep exits early and printf dies of SIGPIPE.
+    # `before`. `npm config list` prints only the keys a source sets, a
+    # `key = value` line each (one a higher source overrides is commented out
+    # with `;`), so unset means the listing reads and has no uncommented
+    # `before = ` line in any source. `--long=false` keeps a `long=true` in
+    # some source from adding npm's defaults, `before = null` among them, and
+    # `--json=false` keeps a `json=true` from turning the listing into the
+    # merged JSON config, which has no such line even for a set `before`.
+    # Inside a package npm also lists its package.json publishConfig (used at
+    # publish time only) without `;`, so a publishConfig `before` warns too,
+    # as does a null `before` in a source below the age's, which leaves the
+    # wait on: the sources are not compared here. The match runs on the shell
+    # variable: a here-string needs a temp file on bash 3.2 (doctor must not
+    # need TMPDIR, #446), and `printf | grep -q` under pipefail reads a match
+    # as a miss when grep exits early and printf dies of SIGPIPE.
     # Older npm (the #91 era) flattened the age into `before` (now - <days>)
     # and deleted the key, so there the operative cutoff must be ~7 days ago:
     # a non-empty `before` alone is not enough (a shorter age, or a hand-set
@@ -555,7 +558,7 @@ EOF
     npm_before="$(npm config get before 2>/dev/null || true)"
     npm_before_listed=unknown
     if [[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true ]] \
-      && npm_listing="$(npm config list --long=false 2>/dev/null)"; then
+      && npm_listing="$(npm config list --long=false --json=false 2>/dev/null)"; then
       case $'\n'"$npm_listing" in
         *$'\n''before = '*) npm_before_listed=true ;;
         *) npm_before_listed=false ;;
@@ -594,12 +597,14 @@ EOF
     # string, split on commas, trimmed with JavaScript's trim (CR and NBSP
     # too), empty and repeated names dropped. An absent key counts as empty,
     # as that npm excludes nothing. A value that is not a list, a listing that
-    # does not parse or an npm error object cannot be counted, and an npm that
-    # fails cannot be read (it still prints an error object, so its status is
-    # checked before node runs): both warn. The listing reaches node on stdin,
-    # never in argv (it holds the whole config); node reads it to the end
-    # before it writes the count, so the pipe cannot cut a count short. Only
-    # the count is shown: the names can be private package names.
+    # is not a JSON object or an npm error object (an `error` key holding an
+    # object; a config key named error holds a string and is no error) cannot
+    # be counted, and an npm that fails cannot be read (it still prints an
+    # error object, so its status is checked before node runs): both warn.
+    # The listing reaches node on stdin, never in argv (it holds the whole
+    # config); node reads it to the end before it writes the count, so the
+    # pipe cannot cut a count short. Only the count is shown: the names can
+    # be private package names.
     if npm_list_json="$(npm config list --json 2>/dev/null)"; then
       npm_exclude_count="$(printf '%s' "$npm_list_json" | node -e '
         let s = ""
@@ -609,7 +614,8 @@ EOF
           let c
           try { c = JSON.parse(s) } catch (e) { process.exit(1) }
           const has = k => Object.prototype.hasOwnProperty.call(c, k)
-          if (c === null || typeof c !== "object" || Array.isArray(c) || has("error")) process.exit(1)
+          if (c === null || typeof c !== "object" || Array.isArray(c)) process.exit(1)
+          if (has("error") && c.error !== null && typeof c.error === "object") process.exit(1)
           if (!has("min-release-age-exclude")) { process.stdout.write("0"); return }
           const v = c["min-release-age-exclude"]
           if (!Array.isArray(v)) process.exit(1)

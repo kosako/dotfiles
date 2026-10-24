@@ -603,7 +603,7 @@ query だけを実機で実行する(書き込みはしない)。
   (`before` が約 7 日前で `min-release-age` が null か 7)を ok に、日数違い・窓の外の `before`・約 7 日前の `before` の横の
   別の日数・読めない `before`・source が明示的に `null` にした `before`・読めない `npm config list`・11.10 より古い npm の
   `min-release-age=7` を warn にする。listing の行の途中の `before = `(別の key の値)と、`long=true` の source があるときに
-  npm が並べる既定値の `before = null`(doctor は `--long=false` で読む)は、設定された `before` と扱わない。
+  npm が並べる既定値の `before = null`(doctor は `--long=false` で読む)は、設定された `before` と扱わない。source の `json=true` があっても(doctor は `--json=false` で読む)、設定された `before` を見落とさない。
   `min-release-age-exclude` は fake の `npm config list --json` の値を doctor の node script で数え(この呼び出しだけ PATH の
   実際の node で走らせるので、node が無いと test は失敗する)、項目は数だけを出して warn にする(名前は出さない。
   `undefined`・`null` という名前の項目は 1 項目、CR・NBSP・tab だけの項目は空、key が無ければ空と数える。list でない値・
