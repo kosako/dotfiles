@@ -449,7 +449,10 @@ query だけを実機で実行する(書き込みはしない)。
 - private-backup: marker 不在は allowSecretsAccess=true の profile だけ warn(false は中立)、marker
   ありで最終成功時刻 / archive / 件数、不正 marker は unreadable、local 補足は**存在のみ**(#174)。marker の
   `capture_incomplete` が false なら `capture: complete`、true なら再 backup 手順の action、field の無い旧 marker
-  なら unknown になること(#242)。
+  なら unknown になること(#242)。marker の archive が `-` で始まる名前(`--out ./-archive.age` が記録する形)でも
+  名前をそのまま出し、exit 0 で next actions まで進むこと(#444。basename が option と読んで doctor が exit 1 で止まって
+  いた。`backup.age` の case が対照)。directory を含む値(手で書き換えた marker)は最後の要素だけを出して directory を
+  出さないこと。`/` で終わる値は名前が残らないので unknown になること。
 - global gitignore(#248): managed file を git が読んでいれば ok / 不在は `mkdir -p` → `chezmoi apply` の action /
   `core.excludesFile`(global、または system だけの設定)や `XDG_CONFIG_HOME` で別の file に振り替わっていれば
   warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視。`XDG_CONFIG_HOME` が `~/.config//` や `~/.config` への symlink なら同じ
@@ -687,6 +690,8 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `check_suite_interrupt`。cleanup は登録した PID ではなく全部の子を止める)。fixture に権限の無い dir が在っても消すこと
   (case 22・39 のような権限を外す case の途中の中断。cleanup は先に mode を戻す。root では skip。#440)。
 - backup がアーカイブと machine-neutral marker(絶対 home path を漏らさない)を書くこと。
+- `-` で始まる `--out` の値は拒否し(#330)、`./-archive.age` と書けば archive を書いて、marker の archive が
+  `-archive.age` になること(doctor が読む形。#444)。
 - verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
 - `--identity-command`(op seam)経由でも verify できること。
 - manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
