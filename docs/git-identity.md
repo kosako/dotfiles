@@ -183,9 +183,10 @@ fatal: no email was given and auto-detection is disabled
   - この検査とは別に、doctor を repo の中で実行すると、global の `core.hooksPath` と(`git-ignore` module が
     active な profile では)`core.excludesFile` を引く照会(`--includes`)で、git は `gitdir` の条件がその repo の
     git directory に合う includeIf を辿り、その identity file も読む(linked worktree では上の
-    「非 personal context の identity reset」のとおり主 repo の `.git` の場所で決まる)。
-    `core.excludesFile` が managed な `~/.config/git/ignore` と別の file を指すときは、その path が
-    global gitignore の warn に出る([local-overrides](local-overrides.md) の「共通原則」)。
+    「非 personal context の identity reset」のとおり主 repo の `.git` の場所で決まる。symlink から入った
+    checkout では起動した path によっても変わりうる)。managed な `~/.config/git/ignore` が在り、
+    `core.excludesFile` がそれと別の file を指すときは、その path が global gitignore の warn に出る
+    ([local-overrides](local-overrides.md) の「共通原則」)。
 - `scripts/preflight.sh` は apply 前に既存の home Git config(`~/.gitconfig`、`~/.config/git/config`)と
   global identity の設定有無を検知する。値そのものは表示しない。同じ `~/.config/git/` 配下の
   global gitignore(`git-ignore` module、#248)の置換 warn もここに出る([git-ignore](git-ignore.md))。
