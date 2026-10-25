@@ -453,7 +453,7 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
 - managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は、chezmoi の config が無ければ
   「not initialized」の item で skip、あれば `chezmoi status` を示す action(#309)、config があり `TMPDIR` が dir でなければ
   `TMPDIR` を挙げる action(#446。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
-  managed-by header の欠落も warn(#148)。
+  line 1 の managed-by header は ok、欠落は warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
   warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ(不正 JSON は
   contract_version unknown として field を解釈しないことを、contract version 不一致と同じ sentinel の不在で pin、#332)/
@@ -619,7 +619,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   `min-release-age-exclude` は fake の `npm config list --json` の値を doctor の node script で数え(この呼び出しだけ PATH の
   実際の node で走らせるので、node が無いと test は失敗する)、項目は数だけを出して warn にする(名前は出さない。
   `undefined`・`null` という名前の項目は 1 項目、CR・NBSP・tab だけの項目は空、key が無ければ空と数える。list でない値・
-  JSON として読めない listing・npm の error の object・失敗する count・読めない listing は warn で exit 0。#443)。
+  JSON として読めない listing・npm の error の object・失敗する count・読めない listing は warn で exit 0。#443)。7 日の待ちと
+  exclude の数は fake の別の応答を読むので、1 回の run でそれぞれの状態を 1 つずつ確かめる。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 

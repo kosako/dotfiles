@@ -4973,14 +4973,13 @@ case "$2" in
 esac
 SH
 chmod +x "$go_fakebin/go"
-for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query-fails-no-path trailing-slash-home gobin-trailing-slash gobin-double-slash gobin-symlink; do
+for go_case in default-gopath elsewhere no-path query-fails query-fails-no-path trailing-slash-home gobin-trailing-slash gobin-double-slash gobin-symlink; do
   go_gobin=""
   go_gopath="$fixture_home/go"
   go_path="$go_fakebin:$fixture_home/go/bin:$PATH"
   go_fail=""
   go_home="$fixture_home"
   case "$go_case" in
-    explicit-gobin) go_gobin="$fixture_home/go/bin" ;;
     elsewhere) go_gobin="$fixture_home/toolchain/bin" ;;
     no-path) go_path="$go_fakebin:$PATH" ;;
     query-fails) go_fail=1 ;;
@@ -5002,7 +5001,7 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
       FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     go_ok=0
     case "$go_case" in
-      default-gopath|explicit-gobin|trailing-slash-home|gobin-trailing-slash|gobin-double-slash|gobin-symlink)
+      default-gopath|trailing-slash-home|gobin-trailing-slash|gobin-double-slash|gobin-symlink)
         grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
           && ! grep -Fq "go install target is" <<< "$go_out" \
           && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
@@ -5104,14 +5103,16 @@ fi
 # NPM-C/D) The enforce expectation checks, deterministic via fake npm/node on
 # PATH (#150): a mismatched config value is warned; the min-release-age
 # before-cutoff is honored/warned based on the parsed epoch. The fakes are
-# env-driven so each case pins one branch; doctor stays exit 0 throughout.
+# env-driven so each run pins one state of each check (the 7-day wait and
+# the exclude count, see npm_wait_case); doctor stays exit 0 throughout.
 # By default the fake answers as the older npm form (11.10, min-release-age
 # null as npm dropped the key); the #443 cases below set the current form.
 # `config get`, `config list --long=false` (the keys a source sets, as npm
 # prints them) and `config list --json` (the merged config with typed values)
 # read the same FAKE_NPM_* env. FAKE_NPM_EXCLUDE_JSON is the JSON value of
 # min-release-age-exclude (`[]` by default, `absent` for an npm that does not
-# know the key); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
+# know the key; an NBSP in it is written as the JSON escape \u00a0, so
+# it stays visible); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
 # as an explicit null does; FAKE_NPM_LONG sets long=true in the user source,
 # which makes a listing without --long=false add npm's defaults (`before =
 # null` among them); FAKE_NPM_JSON sets json=true there, which makes a
@@ -5214,41 +5215,6 @@ else
 fi
 now_epoch="$(date +%s)"
 
-if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
-  FAKE_NPM_IGNORE_SCRIPTS=false FAKE_NPM_BEFORE="fake-date" \
-  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
-  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "enforce expects npm ignore-scripts=true, current: false" <<< "$np_out" \
-    && grep -Fq "[ok] npm min-release-age=7 honored (before=fake-date)" <<< "$np_out"; then
-    ok "test passed: enforce mismatch warned while a good before-cutoff is honored"
-  else
-    printf '%s\n' "$np_out" >&2
-    fail "test failed: enforce mismatch warn or honored cutoff missing"
-    status=1
-  fi
-else
-  printf '%s\n' "$np_out" >&2
-  fail "test failed: doctor must stay exit 0 on an enforce mismatch"
-  status=1
-fi
-
-if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
-  FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 86400 ))" \
-  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=null before=fake-date (apply pending?)" <<< "$np_out" \
-    && ! grep -Fq "npm min-release-age=7 honored" <<< "$np_out"; then
-    ok "test passed: a too-recent before cutoff is warned (cooldown not enforced)"
-  else
-    printf '%s\n' "$np_out" >&2
-    fail "test failed: too-recent before cutoff not warned"
-    status=1
-  fi
-else
-  printf '%s\n' "$np_out" >&2
-  fail "test failed: doctor must stay exit 0 on a too-recent cutoff"
-  status=1
-fi
-
 # NPM-E..Y) The 7-day wait on current npm (#443): npm 11.19 keeps
 # min-release-age as its own key and leaves `before` null, so that form is
 # honored besides the older before-cutoff one (NPM-C, and with
@@ -5274,9 +5240,12 @@ fi
 # arguments fails it.
 # npm_wait_case LABEL WANT DONT_WANT [VAR=VALUE ...] — one personal (enforce)
 # doctor run with the fakes above and the given env: every line of WANT must
-# be in the report, DONT_WANT must not.
+# be in the report, no line of DONT_WANT may be. The 7-day wait (`before` /
+# min-release-age, from `npm config get` and the source listing) and the
+# min-release-age-exclude count (from `npm config list --json`) read separate
+# fake answers, so one run pins one state of each.
 npm_wait_case() {
-  local label="$1" want="$2" dont_want="$3" out rc=0 line missing=""
+  local label="$1" want="$2" dont_want="$3" out rc=0 line missing="" unexpected=""
   shift 3
   out="$(env HOME="$fixture_home" PATH="$npm_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
@@ -5286,118 +5255,86 @@ npm_wait_case() {
   while IFS= read -r line; do
     grep -Fq -- "$line" <<< "$out" || missing+="  $line"$'\n'
   done <<< "$want"
-  if [[ -z "$missing" ]] && ! grep -Fq -- "$dont_want" <<< "$out"; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ! grep -Fq -- "$line" <<< "$out" || unexpected+="  $line"$'\n'
+  done <<< "$dont_want"
+  if [[ -z "$missing" && -z "$unexpected" ]]; then
     ok "test passed: $label"
   else
     printf '%s\n' "$out" >&2
-    printf 'missing:\n%s' "$missing" >&2
+    printf 'missing:\n%sunexpected:\n%s' "$missing" "$unexpected" >&2
     fail "test failed: $label"
     status=1
   fi
 }
 npm_wait_warn="[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current:"
+npm_honored_unset="[ok] npm min-release-age=7 honored (before unset)"
+npm_exclude_empty="[ok] npm min-release-age-exclude empty"
+npm_exclude_warn="[warn] enforce expects npm min-release-age-exclude empty, current:"
+npm_exclude_uncounted="[warn] npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
+npm_wait_case "enforce mismatch warned while a good before-cutoff is honored; a count that fails to run is warned (#150, #443)" \
+  "enforce expects npm ignore-scripts=true, current: false"$'\n'"[ok] npm min-release-age=7 honored (before=fake-date)"$'\n'"$npm_exclude_uncounted" \
+  "$npm_wait_warn"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_IGNORE_SCRIPTS=false FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" FAKE_NODE_FAIL_COUNT=1
+npm_wait_case "a too-recent before cutoff is warned; a JSON listing that cannot be read is warned (#150, #443)" \
+  "$npm_wait_warn min-release-age=null before=fake-date (apply pending?)"$'\n'"[warn] npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 86400 ))" FAKE_NPM_FAIL="config list --json"
 npm_wait_case "current npm form (min-release-age=7, before null, no exclude) is honored (#443)" \
-  "[info] - npm min-release-age=7"$'\n'"[ok] npm min-release-age=7 honored (before unset)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "[info] - npm min-release-age=7"$'\n'"$npm_honored_unset"$'\n'"$npm_exclude_empty" \
   "enforce expects npm min-release-age" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7
-npm_wait_case "a loosened age on current npm (min-release-age=1, before null) is warned (#443)" \
-  "$npm_wait_warn min-release-age=1 before=null (apply pending?)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1
-npm_wait_case "a set before outside the window on current npm (it can replace the wait) is warned (#443)" \
-  "$npm_wait_warn min-release-age=7 before=fake-date (a set before replaces the wait when in the same or a higher config source)" \
-  "npm min-release-age=7 honored" \
+npm_wait_case "a loosened age (min-release-age=1, before null) is warned; an exclude that is not a list cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=1 before=null (apply pending?)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1 FAKE_NPM_EXCLUDE_JSON='"npmx-canary-pkg"'
+npm_wait_case "a set before outside the window (it can replace the wait) is warned; a JSON listing that does not parse cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=7 before=fake-date (a set before replaces the wait when in the same or a higher config source)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE=fake-date \
-  FAKE_NODE_EPOCH="$(( now_epoch - 400*86400 ))"
-npm_wait_case "min-release-age=7 on an npm older than 11.10 (unknown key) is not honored (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (npm version not confirmed to enforce it, see above)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=7
-npm_wait_case "a ~7-day before beside min-release-age=7 is honored (#443)" \
-  "[ok] npm min-release-age=7 honored (before=fake-date)" \
-  "enforce expects npm min-release-age" \
+  FAKE_NODE_EPOCH="$(( now_epoch - 400*86400 ))" FAKE_NPM_LIST_JSON='{"min-release-age-exclude": ['
+npm_wait_case "min-release-age=7 on an npm older than 11.10 is not honored; an exclude key absent from the listing counts as empty (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (npm version not confirmed to enforce it, see above)"$'\n'"$npm_exclude_empty" \
+  "npm min-release-age=7 honored"$'\n'"enforce expects npm min-release-age-exclude" \
+  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON=absent
+npm_wait_case "a ~7-day before beside min-release-age=7 is honored; a non-empty exclude is warned by count, names not shown (#443)" \
+  "[ok] npm min-release-age=7 honored (before=fake-date)"$'\n'"$npm_exclude_warn 3 entry(ies) skip the 7-day wait (names not shown)" \
+  "$npm_wait_warn"$'\n'"npmx-canary" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE=fake-date \
-  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))"
-npm_wait_case "a ~7-day before beside a different age (it can replace the before) is warned (#443)" \
-  "$npm_wait_warn min-release-age=1 before=fake-date (apply pending?)" \
-  "npm min-release-age=7 honored" \
+  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
+  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other","\u00a0npmx-canary-pkg\r"]'
+npm_wait_case "a ~7-day before beside a different age is warned; exclude entries named undefined and null are counted (#443)" \
+  "$npm_wait_warn min-release-age=1 before=fake-date (apply pending?)"$'\n'"$npm_exclude_warn 2 entry(ies) skip the 7-day wait (names not shown)" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1 FAKE_NPM_BEFORE=fake-date \
-  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))"
-npm_wait_case "a before that cannot be read is not taken as unset (#443)" \
-  "$npm_wait_warn min-release-age=7 before=(no value) (apply pending?)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before"
-npm_wait_case "a before a source sets to null (it replaces the wait, yet reads null) is warned (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE_SET=1
+  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" FAKE_NPM_EXCLUDE_JSON='["undefined",null]'
+npm_wait_case "a before that cannot be read is not taken as unset; whitespace-only exclude entries (CR, NBSP, tab) are empty as JavaScript trims them (#443)" \
+  "$npm_wait_warn min-release-age=7 before=(no value) (apply pending?)"$'\n'"$npm_exclude_empty" \
+  "npm min-release-age=7 honored"$'\n'"enforce expects npm min-release-age-exclude" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before" FAKE_NPM_EXCLUDE_JSON='[",\r, \u00a0 ,\t"," ",""]'
+npm_wait_case "a before a source sets to null is warned; an npm error object as the JSON listing cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE_SET=1 FAKE_NPM_LIST_JSON='{"error": {"summary": "x", "detail": ""}}'
 npm_wait_case "an npm config list that cannot be read leaves an explicit null before open, warned with doctor exit 0 (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (npm config list could not be read, so a before set explicitly to null cannot be ruled out)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "$npm_wait_warn min-release-age=7 before=null (npm config list could not be read, so a before set explicitly to null cannot be ruled out)"$'\n'"$npm_exclude_empty" \
   "npm min-release-age=7 honored" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config list --long=false --json=false"
-npm_wait_case "a long=true in a config source does not make npm's listed defaults a set before (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)" \
-  "enforce expects npm min-release-age" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LONG=1
-npm_wait_case "a json=true in a config source does not hide a before a source sets to null (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_JSON=1 FAKE_NPM_BEFORE_SET=1
-npm_wait_case "a 'before = ' inside another key's listed value is not a set before (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)" \
-  "enforce expects npm min-release-age" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_EXTRA='init-author-name = "before = x"'
-npm_wait_case "a non-empty min-release-age-exclude is warned by count, names not shown (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] enforce expects npm min-release-age-exclude empty, current: 3 entry(ies) skip the 7-day wait (names not shown)" \
-  "npmx-canary" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 \
-  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other"," npmx-canary-pkg\r"]'
-npm_wait_case "whitespace-only min-release-age-exclude entries (CR, NBSP, tab) are empty as JavaScript trims them (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[ok] npm min-release-age-exclude empty" \
-  "enforce expects npm min-release-age-exclude" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='[",\r,   ,\t"," ",""]'
-npm_wait_case "min-release-age-exclude absent from the listing (an npm without the key) counts as empty (#443)" \
-  "[ok] npm min-release-age-exclude empty" \
-  "enforce expects npm min-release-age-exclude" \
-  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=undefined FAKE_NPM_EXCLUDE_JSON=absent
-npm_wait_case "a min-release-age-exclude entry named undefined is counted on an npm with the key (#443)" \
-  "[warn] enforce expects npm min-release-age-exclude empty, current: 1 entry(ies) skip the 7-day wait (names not shown)" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='["undefined"]'
-npm_wait_case "a min-release-age-exclude entry of null (an npmrc []=null) is counted (#443)" \
-  "[warn] enforce expects npm min-release-age-exclude empty, current: 1 entry(ies) skip the 7-day wait (names not shown)" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='[null]'
-npm_exclude_uncounted="[warn] npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
-npm_wait_case "a min-release-age-exclude that is not a list cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='"npmx-canary-pkg"'
-npm_wait_case "a JSON listing that does not parse cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"min-release-age-exclude": ['
-npm_wait_case "an npm error object as the JSON listing cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"error": {"summary": "x", "detail": ""}}'
-npm_wait_case "a config key named error (a string) is no npm error object (#443)" \
-  "[ok] npm min-release-age-exclude empty" "$npm_exclude_uncounted" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"error": "x", "min-release-age-exclude": []}'
-npm_wait_case "a JSON listing that is an array cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='[]'
-npm_wait_case "a JSON listing that is a number cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='5'
-npm_wait_case "the JSON listing reaches the count on stdin, not as an argument (#443)" \
-  "[ok] npm min-release-age-exclude empty" "$npm_exclude_uncounted" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NODE_ARGV_CANARY=npmx-canary-listing \
-  FAKE_NPM_LIST_JSON='{"init-author-name": "npmx-canary-listing", "min-release-age-exclude": []}'
-npm_wait_case "a count that fails to run is warned (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NODE_FAIL_COUNT=1
-npm_wait_case "a JSON listing that cannot be read is warned, doctor stays exit 0 (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config list --json"
+npm_wait_case "a long=true in a config source does not make npm's listed defaults a set before; a JSON listing that is an array cannot be counted (#443)" \
+  "$npm_honored_unset"$'\n'"$npm_exclude_uncounted" \
+  "enforce expects npm min-release-age"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LONG=1 FAKE_NPM_LIST_JSON='[]'
+npm_wait_case "a json=true in a config source does not hide a before a source sets to null; a JSON listing that is a number cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_JSON=1 FAKE_NPM_BEFORE_SET=1 FAKE_NPM_LIST_JSON='5'
+npm_wait_case "a 'before = ' inside another key's listed value is not a set before; a config key named error (a string) is no npm error object, and the listing reaches the count on stdin, not as an argument (#443)" \
+  "$npm_honored_unset"$'\n'"$npm_exclude_empty" \
+  "enforce expects npm min-release-age"$'\n'"$npm_exclude_uncounted" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_EXTRA='init-author-name = "before = x"' \
+  FAKE_NODE_ARGV_CANARY=npmx-canary-listing \
+  FAKE_NPM_LIST_JSON='{"error": "x", "init-author-name": "npmx-canary-listing", "min-release-age-exclude": []}'
 
 # COREPACK-A) corepackMode=off says intentionally unmanaged; B) report mode
 # with a corepack on PATH reports its version line (fake for determinism —
@@ -5441,18 +5378,29 @@ else
 fi
 
 # DRIFT-A) A token-shaped line in ~/.npmrc is warned by name only (the value
-# never appears in the output), doctor stays exit 0 (#148).
+# never appears in the output), doctor stays exit 0 (#148); the managed-by
+# header on its line 1 is ok'd. The status check itself must skip — as
+# not-initialized when chezmoi exists (fixture homes carry no chezmoi
+# state), as not-found where it does not (the CI validate job has no
+# chezmoi).
+if command -v chezmoi >/dev/null 2>&1; then
+  drift_skip="chezmoi not initialized for this home; skipping drift check"
+else
+  drift_skip="chezmoi not found; skipping drift check"
+fi
 dr_home="$fixture_home/drift"
 mkdir -p "$dr_home"
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n//registry.npmjs.org/:_authToken=secret-placeholder-value\n' \
   > "$dr_home/.npmrc"
 if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "npmrc contains 1 _authToken line" <<< "$dr_out" \
-    && ! grep -Fq "secret-placeholder-value" <<< "$dr_out"; then
-    ok "test passed: npmrc token line warned by count, value never echoed"
+    && ! grep -Fq "secret-placeholder-value" <<< "$dr_out" \
+    && grep -Fxq "[ok] npmrc managed-by header present" <<< "$dr_out" \
+    && grep -Fq "$drift_skip" <<< "$dr_out"; then
+    ok "test passed: npmrc token line warned by count, value never echoed; header ok; uninitialized home skips the status check"
   else
     printf '%s\n' "$dr_out" >&2
-    fail "test failed: token line not warned, or the value leaked into output"
+    fail "test failed: token line not warned, the value leaked into output, the header ok or the skip line missing"
     status=1
   fi
 else
@@ -5461,30 +5409,10 @@ else
   status=1
 fi
 
-# DRIFT-B) A managed .npmrc missing the managed-by header is warned; the
-# status check itself must skip — as not-initialized when chezmoi exists
-# (fixture homes carry no chezmoi state), as not-found where it does not
-# (the CI validate job has no chezmoi).
-if command -v chezmoi >/dev/null 2>&1; then
-  drift_skip="chezmoi not initialized for this home; skipping drift check"
-else
-  drift_skip="chezmoi not found; skipping drift check"
-fi
+# DRIFT-B) A managed .npmrc missing the managed-by header is warned: the
+# headerless file is planted here and checked by DRIFT-C's clean-status run
+# below (same home), which needs no doctor run of its own.
 printf 'ignore-scripts=true\n' > "$dr_home/.npmrc"
-if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
-    && grep -Fq "$drift_skip" <<< "$dr_out"; then
-    ok "test passed: missing managed-by header warned; uninitialized home skips the status check"
-  else
-    printf '%s\n' "$dr_out" >&2
-    fail "test failed: header warn or the not-initialized skip line missing"
-    status=1
-  fi
-else
-  printf '%s\n' "$dr_out" >&2
-  fail "test failed: doctor must stay exit 0 with a headerless npmrc"
-  status=1
-fi
 
 # DRIFT-C) The chezmoi-status branches, deterministic via a fake chezmoi on
 # PATH (the CI validate job has no chezmoi and the render job does not run
@@ -5525,16 +5453,18 @@ fi
 if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
   FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=0 \
   "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "no drift: managed files match the source state" <<< "$dr_out"; then
-    ok "test passed: an empty chezmoi status reports no drift"
+  if grep -Fq "no drift: managed files match the source state" <<< "$dr_out" \
+    && grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
+    && grep -Fxq "[ok] npmrc carries no _authToken line" <<< "$dr_out"; then
+    ok "test passed: an empty chezmoi status reports no drift; the headerless npmrc is warned"
   else
     printf '%s\n' "$dr_out" >&2
-    fail "test failed: empty status should report no drift"
+    fail "test failed: empty status should report no drift, and the headerless npmrc must be warned"
     status=1
   fi
 else
   printf '%s\n' "$dr_out" >&2
-  fail "test failed: doctor must stay exit 0 with a clean status"
+  fail "test failed: doctor must stay exit 0 with a clean status and a headerless npmrc"
   status=1
 fi
 
