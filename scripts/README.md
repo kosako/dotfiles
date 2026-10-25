@@ -445,7 +445,7 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
 
 検証内容(section ごと):
 
-- suite 自身が中断されたとき(TERM)、background の case(HI-d3 の doctor、OP-i10 の FIFO の run)の process の木を残さず、
+- suite 自身が中断されたとき(TERM)、background の case(HI-d3 の doctor、QL-f5 の doctor と OCP-i10 の init の reporter の FIFO の run)の process の木を残さず、
   fixture を消すこと(#413。test-lib.sh の `check_suite_interrupt`。cleanup は全部の子を止めてから fixture を消す)。fixture に
   権限の無い dir が在っても消すこと(権限を外す case の途中の中断。cleanup は先に mode を戻す。root では skip。#440)。
 - managed-path orphan: header があり現 profile で管理対象でない file が warning / 管理対象の
@@ -538,14 +538,16 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   非表示を pin)。
 - OpenCode の plugin(#263): 静的な検査だけで、PATH 先頭の fake opencode が一度も起動されないこと(実行の記録で pin)。
   plugin の発見・二重読込・`OPENCODE_CONFIG` の状態・herdr から見た OpenCode を report し、config の canary を出さないこと。
-  init の目印(#311): fixture の log で、quoted の一致 → ok、1 行目がこの plugin の marker でない(marker なし・
-  build_id を含むだけの comment・別の plugin 名・別の target)・log なし・FIFO の log(期限 120 秒の実行で、超えたら
+  init の目印(#311): doctor を通す e2e の 2 run(既定の log と、doctor の `XDG_DATA_HOME` の下の log の一致 → ok。init の
+  行は 1 run に 1 行)の他は、doctor.sh から取り出した reporter の関数を単体で走らせ、出力の全体が期待の 1 行に一致すること。
+  fixture の log で、quoted の一致 → ok、1 行目がこの plugin の marker でない(marker なし・
+  build_id を含むだけの comment・別の plugin 名・別の target)・log なし・FIFO の log(期限 30 秒の単体の run で、超えたら
   process tree を回収して fail)・行なし・不一致(両方の build_id を表示)・`unknown`・v=1 の形でない(v=2・余分な
   token・65 桁・大文字)・囲まれていない message や message の途中(`"` つきの引用を含む)や別の plugin 名の行(目印と
   みなさない)・読めない log → それぞれの理由の「未確認」。本物の目印の後に目印を引用しただけの行があっても
   「確認できた」のまま。いちばん新しい行だけを見ること(古い
   一致 + 新しい不一致、その逆)、`XDG_DATA_HOME` の絶対 path / 空 / 相対の扱い。log の行に canary を入れ、行が
-  出力に出ないこと。init の行は 1 run に 1 行。
+  出力に出ないこと。
 - Codex review / worker profile(#264 / #299): personal で file 欠損 → apply の action / present → ok(fixture の canary で
   中身の非表示を pin)/ capability が off なのに file が残る → action / work では手置き・欠損を中立に表示し、off 以外の値を
   dangling として warn / `CODEX_HOME` が `~/.codex` 以外(末尾 `/` は同じ扱い)→ warn。

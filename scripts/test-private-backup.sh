@@ -1119,7 +1119,7 @@ printf 'backup_paths:\n  - { path: "locked", type: file }\n  - { path: "box", ty
   > "$unr_home/.config/dotfiles/backup-paths.local"
 # Mode 000 makes the files unreadable only where permissions bind (not as
 # root): there the case would fail on a correct implementation, so it is
-# skipped instead (#330; the same guard as test-doctor's OP-i10).
+# skipped instead (#330; the same guard as test-doctor's OCP-i10).
 if [[ ! -r "$unr_home/locked" && ! -r "$unr_home/box/locked-in-dir" ]]; then
   unr_rc=0
   unr_out="$(HOME="$unr_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
