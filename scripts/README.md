@@ -507,16 +507,18 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   「wrapper が読む」「読み取り口なし」と断定せず、ずれた先を示す)。設定の canary が出力に出ないこと。fixture の
   reader は実行されると、wrapper は `--help` / `--check` 以外で呼ばれるか `--check` が `XDG_CONFIG_HOME` を見ると
   marker を残し、全 run の後に marker が無いこと。どの run も `env -i` で hermetic。
-- 1Password(#231): fake op の signed in(ok 1 行だけ)/ signed out(既存 warn)/ hang(期限で process tree
-  ごと回収し「未確認」の warn で次の section へ進む。signed in / out とは断定しない)/ stdin 隔離(doctor の
-  stdin に行を流し、fake は自分の stdin が `/dev/null` のときだけ signed in を返す)。fake op は ok・fail・
-  hang・stdin の mode を持つ。
+- 1Password(#231): fake op の signed in(ok 1 行だけ。doctor の stdin に行を流し、fake は自分の stdin が
+  `/dev/null` でないと印を残す — 印が無いこと = stdin 隔離)/ signed out(既存 warn)。fake op は ok・fail の mode を
+  持つ。応答の無い `op whoami`(期限で回収し「未確認」の warn だけを出して次の section へ進む。signed in / out とは
+  断定しない)は次の respawn の case が見る。期限の時点で既に動いている孫の回収は、共有の `bounded_probe` の側で
+  HI-d2 / HI-d3 が見る。
 - 1Password の respawn(#423): fake op は、自分の子の列挙が取られるまで待ってから次の command(一意の
   `sleep 3000.<数字>`)を起動する。PATH 先頭の `pgrep` の shim が fake op の子の本物の列挙を取り、取った印を置いてから、
   「fake op が止まった」か「次の command が起動した」まで答えを返さない。次の command は列挙より前には起動できず、列挙は
   起動の後にしか返らないので、動いている process の子を先に殺す後始末(以前の `kill_process_tree`)は timing に依らず次の
   command を残して落ちる。shim の待ちが「止まった」で終わり(timeout は fail)、doctor の後に次の command が残らず、
-  「未確認」の warn が出て、`kill_tree:` の warn が無いこと。
+  「未確認」の warn だけが出て(signed in / out は出ない)次の section へ進み、`kill_tree:` の warn が無いこと。落ちたときは
+  fake op の木も止める(後始末が fake op に届かないと、印を待って回り続けるため)。
 - kill_tree の停止の待ち(KT、#440): `kill_tree` を単独の bash で、PATH 先頭の `ps` と `pgrep` の shim の下で走らせる。対象は
   一意の `sleep 3000.<数字>` の子を 2 つ持つ `sh`。shim は対象についての問い合わせだけを順に記録し、`ps` は対象についてだけ
   答えを差し替える(子の `sleep` についての問い合わせは記録せず本物に渡す)。停止が遅れて見える(20 回は止まっていない `S` と
@@ -532,7 +534,9 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   (4 万行の file の末尾にあっても検出する)。managed な identity reset の presence も見て、無ければ `mkdir -p` →
   `chezmoi apply` の連続 2 step の action になること(空白を含む home でも `%q` で一致)。その場合、非 personal
   context の文言は「remote が personal pattern に一致する repo で personal identity を継承」に変わる(継承するのは
-  未指定の key だけで、明示的な空値は空のまま)。値は出力に現れない(canary の email / name で pin)。
+  未指定の key だけで、明示的な空値は空のまま)。personal は fallback そのものなので、reset が無くても空の ident の文言の
+  まま。値は出力に現れない(canary の email / name で pin)。doctor は毎回すべての context を報告するので、状態は 4 回の
+  run の各 context に振り分ける(1 回の run に複数の context の状態が載るので、loop の回の間で状態が漏れても落ちる)。
 - OpenCode(#234): fake opencode を PATH 先頭に置き、personal で床 missing → apply 手順の action / 床 present → ok /
   work → not managed(action なし)。credential store は存在のみ(fake auth.json の provider 名と key を canary にして
   非表示を pin)。
@@ -549,9 +553,9 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
 - Codex review / worker profile(#264 / #299): personal で file 欠損 → apply の action / present → ok(fixture の canary で
   中身の非表示を pin)/ capability が off なのに file が残る → action / work では手置き・欠損を中立に表示し、off 以外の値を
   dangling として warn / `CODEX_HOME` が `~/.codex` 以外(末尾 `/` は同じ扱い)→ warn。
-- Git の節(#307): global の `user.useConfigOnly=true` / `transfer.credentialsInUrl=die` でなければ warn、そうなら ok。remote URL の
-  scan が `~/src` の personal / work / client / sandbox / agent のすべてを巡り、credential らしい userinfo の remote を URL を
-  出さずに warn すること(canary で pin)。
+- Git の節(#307): global の `user.useConfigOnly=true` / `transfer.credentialsInUrl=die` でなければ warn、そうなら ok(ok の側は
+  次の INCOMPLETE の case の run で見るので、root では skip)。remote URL の scan が `~/src` の personal / work / client /
+  sandbox / agent のすべてを巡り、credential らしい userinfo の remote を URL を出さずに warn すること(canary で pin)。
 - remote URL scan の INCOMPLETE(#359): `.git/config` が読めない repo、配下に開けない dir がある root、root 自身が開けないとき、
   親 dir(`~/src`)を通過できず root を存在しないと確かめられないとき、それぞれを名指しで warn し(URL は canary で非表示を
   pin)、読めた repo の flag と件数はそのまま、`scanned repositories` は読めた repo だけを数え、clean の ok を出さず exit 0。

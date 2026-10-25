@@ -2052,7 +2052,12 @@ fi
 #            report the same unchecked state (a stuck herdr must not stall
 #            the whole diagnosis). The fake's grandchild sleeps 60s; the run
 #            must return well before that AND the grandchild must be dead
-#            afterwards (tree reap, not just the wrapper).
+#            afterwards (tree reap, not just the wrapper). With HI-d3 this is
+#            also the op probe's check that a grandchild already running at
+#            the deadline is reaped (the same bounded_probe): OP has no hang
+#            case of its own and OP-e does not catch a kill_tree that skips
+#            grandchildren, so changing HI-d2 or HI-d3 means bringing such a
+#            case back to OP.
 write_fake_herdr_status "current (v9)" "current (v8)" hang
 rm -f "$hi_fakebin/sleep.pid"
 hi_started=$SECONDS
@@ -2179,12 +2184,12 @@ rm -rf "$hi_fakebin" "$hi_claude_body" "$hi_codex_body"
 # OP) 1Password sign-in probe (#231): `op whoami` runs through the shared
 #     bounded_probe, so a signed-out op blocking on the app's unlock prompt
 #     cannot stall doctor. PATH-front fake op (same pattern as the fake herdr
-#     above). MODE `ok` answers exit 0; `fail` exits 1 (signed out); `hang`
-#     forks a `sleep 60` GRANDCHILD (pid in sleep.pid) and waits on it, so
-#     the deadline must reap the whole tree; `stdin` exits 0 only when its
-#     stdin IS /dev/null (test -ef), proving the probe reads no terminal
-#     input even though doctor's own stdin carries a line. Committed
-#     personal has allowSecretsAccess=true; doctor stays exit 0 throughout.
+#     above). MODE `ok` answers exit 0; `fail` exits 1 (signed out). Both
+#     leave stdin-leaked when their stdin is NOT /dev/null (test -ef), so
+#     OP-a, whose doctor stdin carries a line, proves the probe reads no
+#     terminal input. The deadline (a probe with no answer) is OP-e's: its
+#     fake op never answers on its own. Committed personal has
+#     allowSecretsAccess=true; doctor stays exit 0 throughout.
 op_fakebin="$fixture_home/opfake"
 mkdir -p "$op_fakebin"
 # write_fake_op MODE
@@ -2192,8 +2197,7 @@ write_fake_op() {
   cat > "$op_fakebin/op" <<SH
 #!/bin/sh
 [ "\$1" = whoami ] || exit 2
-if [ "$1" = hang ]; then sleep 60 & printf '%s\\n' "\$!" > "$op_fakebin/sleep.pid"; wait; fi
-if [ "$1" = stdin ]; then [ /dev/fd/0 -ef /dev/null ]; exit; fi
+[ /dev/fd/0 -ef /dev/null ] || : > "$op_fakebin/stdin-leaked"
 printf 'URL: https://example.1password.com\\n'
 [ "$1" = ok ]
 SH
@@ -2202,12 +2206,19 @@ SH
 op_signed_in="[ok] op signed in"
 op_signed_out="[warn] op available but not signed in"
 op_unchecked="[warn] op sign-in state not checked: op whoami gave no answer within 5s (waiting on an unlock / sign-in prompt, or stuck; the probe was killed) — unlock or sign in to 1Password, then re-run doctor"
-#     OP-a) signed in -> ok, and no other verdict on the same run.
+#     OP-a) signed in -> ok, and no other verdict on the same run. doctor's
+#           stdin is a pipe with a line in it, and the fake records a stdin
+#           that is not /dev/null: the probe must read no terminal input.
 write_fake_op ok
-if op_out="$(HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fxq "$op_signed_in" <<< "$op_out" \
+rm -f "$op_fakebin/stdin-leaked"
+if op_out="$(printf 'typed input\n' | HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if [[ -e "$op_fakebin/stdin-leaked" ]]; then
+    printf '%s\n' "$op_out" >&2
+    fail "test failed: the op probe did not run with stdin from /dev/null"
+    status=1
+  elif grep -Fxq "$op_signed_in" <<< "$op_out" \
     && ! grep -Fq "$op_signed_out" <<< "$op_out" && ! grep -Fq "$op_unchecked" <<< "$op_out"; then
-    ok "test passed: a signed-in op is reported ok"
+    ok "test passed: a signed-in op is reported ok, and the probe reads /dev/null, not doctor's stdin"
   else
     printf '%s\n' "$op_out" >&2
     fail "test failed: signed-in op not reported as the single ok line"
@@ -2235,55 +2246,12 @@ else
   fail "test failed: doctor must stay exit 0 (1Password, op signed out)"
   status=1
 fi
-#     OP-c) op hangs -> killed at the deadline with its grandchild reaped,
-#           the state reported as NOT CHECKED (never as signed in / out),
-#           and doctor goes on to the next section. The grandchild sleeps
-#           60s; the run must return well before that.
-write_fake_op hang
-rm -f "$op_fakebin/sleep.pid"
-op_started=$SECONDS
-if op_out="$(HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  op_elapsed=$((SECONDS - op_started))
-  sleep 0.5
-  op_sleep_pid="$(cat "$op_fakebin/sleep.pid" 2>/dev/null || true)"
-  if (( op_elapsed < 45 )) \
-    && [[ -n "$op_sleep_pid" ]] && ! kill -0 "$op_sleep_pid" 2>/dev/null \
-    && grep -Fxq "$op_unchecked" <<< "$op_out" \
-    && ! grep -Fq "$op_signed_in" <<< "$op_out" && ! grep -Fq "$op_signed_out" <<< "$op_out" \
-    && grep -Fq "== SSH (1Password agent) ==" <<< "$op_out"; then
-    ok "test passed: a hung op whoami is killed at the deadline (${op_elapsed}s) with its grandchild reaped, reported as not checked, and doctor continues"
-  else
-    printf '%s\n' "$op_out" >&2
-    fail "test failed: hung op whoami stalled doctor (${op_elapsed}s), left its grandchild alive (pid ${op_sleep_pid:-none}), or was reported as a definite state"
-    status=1
-    [[ -n "$op_sleep_pid" ]] && kill "$op_sleep_pid" 2>/dev/null || true
-  fi
-else
-  printf '%s\n' "$op_out" >&2
-  fail "test failed: doctor must stay exit 0 (1Password, op hung)"
-  status=1
-fi
-#     OP-d) the probe reads no terminal input: doctor's stdin is a pipe with
-#           a line in it, and the fake answers "signed in" only if its own
-#           stdin is /dev/null — a probe inheriting doctor's stdin would
-#           read as signed out.
-write_fake_op stdin
-if op_out="$(printf 'typed input\n' | HOME="$fixture_home" PATH="$op_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fxq "$op_signed_in" <<< "$op_out"; then
-    ok "test passed: the op probe reads /dev/null, not doctor's stdin"
-  else
-    printf '%s\n' "$op_out" >&2
-    fail "test failed: the op probe did not run with stdin from /dev/null"
-    status=1
-  fi
-else
-  printf '%s\n' "$op_out" >&2
-  fail "test failed: doctor must stay exit 0 (1Password, stdin isolation)"
-  status=1
-fi
-#     OP-e) a probe that starts its next command when the one before ends
-#           (#423). The fake op waits (in its own process) until the listing
-#           of its children has been taken, then starts its next command, a
+#     OP-e) op gives no answer (#231), and is a probe that starts its next
+#           command when the one before ends (#423): killed at the deadline,
+#           reported as NOT CHECKED (never as signed in / out), doctor goes
+#           on to the next section, and nothing is left behind. The fake op
+#           waits (in its own process) until the listing of its children
+#           has been taken, then starts its next command, a
 #           `sleep 3000.<digits>` (C; pid in c.pid). A PATH-front pgrep shim
 #           takes the real listing of the fake op's children, marks it taken
 #           (held), then holds the answer until the fake op is stopped or C
@@ -2336,15 +2304,35 @@ op_elapsed=$((SECONDS - op_started))
 sleep 0.5
 op_left="$("$op_real_pgrep" -f "^sleep $op_respawn_sleep\$" || true)"
 op_sync="$(cat "$op_fakebin/sync" 2>/dev/null || true)"
-if [[ "$op_rc" -eq 0 && -s "$op_fakebin/op.pid" && "$op_sync" == stopped && -z "$op_left" ]] \
-  && (( op_elapsed < 45 )) && grep -Fxq "$op_unchecked" <<< "$op_out" \
-  && ! grep -Fq "kill_tree:" <<< "$op_out"; then
-  ok "test passed: a probe that starts its next command when one ends leaves nothing behind (each process stopped before its children are listed)"
+# Each condition that fails is named in the message, so a failure points at
+# its own cause (an extra verdict, or doctor stopping after the deadline,
+# is not read as a hold that did not end as stopped).
+op_why=""
+[[ "$op_rc" -eq 0 ]] || op_why+="; doctor exited $op_rc"
+[[ -s "$op_fakebin/op.pid" ]] || op_why+="; the fake op never ran"
+[[ "$op_sync" == stopped ]] || op_why+="; the hold ended as '${op_sync:-never asked}' instead of stopped"
+[[ -z "$op_left" ]] || op_why+="; the respawning probe left a process behind ($op_left)"
+(( op_elapsed < 45 )) || op_why+="; doctor took ${op_elapsed}s (45s or more)"
+grep -Fxq "$op_unchecked" <<< "$op_out" || op_why+="; the not-checked verdict is missing"
+grep -Fq "$op_signed_in" <<< "$op_out" && op_why+="; also reported as signed in"
+grep -Fq "$op_signed_out" <<< "$op_out" && op_why+="; also reported as not signed in"
+grep -Fq "== SSH (1Password agent) ==" <<< "$op_out" || op_why+="; doctor did not go on to the SSH section"
+grep -Fq "kill_tree:" <<< "$op_out" && op_why+="; kill_tree warned"
+if [[ -z "$op_why" ]]; then
+  ok "test passed: an op whoami with no answer is killed at the deadline (${op_elapsed}s), reported as not checked, doctor continues, and a probe that starts its next command when one ends leaves nothing behind"
 else
   printf '%s\n' "$op_out" >&2
-  fail "test failed: the respawning probe left a process behind (${op_left:-none}), the hold ended as '${op_sync:-never asked}' instead of stopped, or doctor did not report it as not checked (rc=$op_rc, ${op_elapsed}s)"
+  fail "test failed: an op whoami with no answer (rc=$op_rc, ${op_elapsed}s): ${op_why#; }"
   status=1
   [[ -z "$op_left" ]] || kill $op_left 2>/dev/null || true
+  # A cleanup that never reached the fake op leaves it looping on the
+  # held mark, which the rm -rf below removes for good: stop its tree too,
+  # only while that pid is still the fake op (kill_tree stops and kills a
+  # whole tree, so a reused pid must not be taken for it).
+  op_pid="$(cat "$op_fakebin/op.pid" 2>/dev/null || true)"
+  if [[ -n "$op_pid" ]] && ps -o command= -p "$op_pid" 2>/dev/null | grep -Fq "$op_fakebin/op"; then
+    kill_tree "$op_pid"
+  fi
 fi
 rm -rf "$op_fakebin"
 
@@ -2513,37 +2501,48 @@ fi
 rm -rf "$kt_dir"
 
 # ID) Git identity contexts (#202): an existing identity file is checked for
-#     completeness, presence-only. Fixture: ~/src/work exists and the work
-#     identity file cycles through missing / empty / name-only / email-only /
-#     complete / unparsable. The fixture name and email are canaries that
-#     must never appear in the output (doctor reports key names only).
-#     doctor stays exit 0 throughout.
-id_root="$fixture_home/src/work"
-id_file="$fixture_home/.config/git/work.gitconfig"
+#     completeness, presence-only; a missing one is reported when its project
+#     root exists. doctor reports every context (personal / work / client /
+#     sandbox / agent) on every run and each expected line names that
+#     context's own file and root, so one run carries one state per context:
+#     two runs with the identity reset present here and two without it in
+#     ID-r, not one run per state. Several populated contexts in one run also
+#     catch per-context state leaking from one loop iteration into the next.
+#     The fixture name and email are canaries that must never appear in the
+#     output (doctor reports key names only). doctor stays exit 0 throughout.
 id_canary_email="canary-identity-9f2b@example.invalid"
 id_canary_name="Canary Identity Name"
-mkdir -p "$id_root" "$fixture_home/.config/git"
-# id_check STATE EXPECT_LINE LABEL
-id_check() {
-  local state="$1" expect="$2" label="$3" out
-  case "$state" in
-    missing) rm -f "$id_file" ;;
-    empty) : > "$id_file" ;;
-    name-only) printf '[user]\n\tname = %s\n' "$id_canary_name" > "$id_file" ;;
-    email-only) printf '[user]\n\temail = %s\n' "$id_canary_email" > "$id_file" ;;
-    complete) printf '[user]\n\tname = %s\n\temail = %s\n' "$id_canary_name" "$id_canary_email" > "$id_file" ;;
-    unparsable) printf '[user\n\tname = %s\n' "$id_canary_name" > "$id_file" ;;
+mkdir -p "$fixture_home/.config/git"
+# The project roots this block finds (~/src/agent when part 1 ran, from the
+# agent-tools cases; none under TEST_DOCTOR_PART=2) are kept by the cleanup
+# below, the ones it makes are removed.
+id_roots_before=" "
+for id_ctx in personal work client sandbox agent; do
+  [[ ! -d "$fixture_home/src/$id_ctx" ]] || id_roots_before+="$id_ctx "
+done
+# id_plant CONTEXT STATE — put CONTEXT's identity file in STATE. Its project
+# root exists in every state, so "missing" reads as root-without-file.
+id_plant() {
+  local f="$fixture_home/.config/git/$1.gitconfig"
+  mkdir -p "$fixture_home/src/$1"
+  case "$2" in
+    missing) rm -f "$f" ;;
+    empty) : > "$f" ;;
+    name-only) printf '[user]\n\tname = %s\n' "$id_canary_name" > "$f" ;;
+    email-only) printf '[user]\n\temail = %s\n' "$id_canary_email" > "$f" ;;
+    complete) printf '[user]\n\tname = %s\n\temail = %s\n' "$id_canary_name" "$id_canary_email" > "$f" ;;
+    unparsable) printf '[user\n\tname = %s\n' "$id_canary_name" > "$f" ;;
     # Explicit EMPTY values (keys present, no value) — distinct from unset
     # keys once the identity reset is missing (#241 review F5).
-    empty-values) printf '[user]\n\tname =\n\temail =\n' > "$id_file" ;;
-    name-empty-email-unset) printf '[user]\n\tname =\n' > "$id_file" ;;
+    empty-values) printf '[user]\n\tname =\n\temail =\n' > "$f" ;;
+    name-empty-email-unset) printf '[user]\n\tname =\n' > "$f" ;;
     # Keys with no `=` at all: git's boolean shorthand. `git config --get`
     # (untyped) prints an empty string with exit 0 for them, exactly like an
     # explicit empty value — but git's identity reader rejects them ("missing
     # value for 'user.email'", fatal; measured on git 2.50.1), so doctor must
     # diagnose them as their own state (#241 review F8 / F9).
-    bare-keys) printf '[user]\n\tname\n\temail\n' > "$id_file" ;;
-    email-bare) printf '[user]\n\tname = %s\n\temail\n' "$id_canary_name" > "$id_file" ;;
+    bare-keys) printf '[user]\n\tname\n\temail\n' > "$f" ;;
+    email-bare) printf '[user]\n\tname = %s\n\temail\n' "$id_canary_name" > "$f" ;;
     # A large file with the bare key LAST: a `git config --list | grep -q`
     # pipe would stop reading at the first match and could lose the rest to
     # SIGPIPE under pipefail; doctor must read the whole listing.
@@ -2552,64 +2551,44 @@ id_check() {
         printf '[user]\n\tname = %s\n' "$id_canary_name"
         awk 'BEGIN { for (i = 1; i <= 20000; i++) printf "[alias]\n\tpadding%d = value%d\n", i, i }'
         printf '[user]\n\temail\n'
-      } > "$id_file"
+      } > "$f"
       ;;
   esac
-  if out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-    if grep -Fxq "$expect" <<< "$out" \
-      && ! grep -Fq "$id_canary_email" <<< "$out" && ! grep -Fq "$id_canary_name" <<< "$out"; then
-      ok "test passed: identity file $state -> $label"
-    else
-      printf '%s\n' "$out" >&2
-      fail "test failed: identity file $state: expected the exact line '$expect' and no identity value in the output"
-      status=1
-    fi
+}
+# id_run LABEL — one doctor run into id_out. id_ok=0 (and one failure for the
+# run) when doctor did not exit 0 or an identity value is in the output.
+id_run() {
+  local rc=0
+  id_ok=1
+  id_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "identity files, $1" "$rc" "$id_out"
+    id_ok=0
+  elif grep -Fq "$id_canary_email" <<< "$id_out" || grep -Fq "$id_canary_name" <<< "$id_out"; then
+    printf '%s\n' "$id_out" >&2
+    fail "test failed: identity files, $1: an identity value is in the output"
+    status=1
+    id_ok=0
+  fi
+}
+# id_expect CONTEXT STATE LINE LABEL — LINE is an exact line of the last run,
+# with @F@ / @R@ standing for CONTEXT's identity file / project root. The
+# assignment is unquoted with a quoted replacement: bash 3.2 keeps the quotes
+# of a quoted replacement inside "...", and bash 5.2+ (patsub_replacement)
+# turns an unquoted & of the replacement (a TMPDIR with &) into the match.
+id_expect() {
+  local f="$fixture_home/.config/git/$1.gitconfig" r="$fixture_home/src/$1" line="$3"
+  [[ "$id_ok" -eq 1 ]] || return 0
+  line=${line//@F@/"$f"}
+  line=${line//@R@/"$r"}
+  if grep -Fxq -- "$line" <<< "$id_out"; then
+    ok "test passed: identity file $2 ($1) -> $4"
   else
-    printf '%s\n' "$out" >&2
-    fail "test failed: doctor must stay exit 0 (identity file $state)"
+    printf '%s\n' "$id_out" >&2
+    fail "test failed: identity file $2 ($1): expected the exact line '$line'"
     status=1
   fi
 }
-# The managed identity reset (#202) is present for these cases: it is what
-# makes "identity file missing" mean "commits refused" (its own check is
-# ID-r below).
-id_reset="$fixture_home/.config/git-profile/identity-reset.gitconfig"
-mkdir -p "${id_reset%/*}"
-cp "$DOTFILES_ROOT/private_dot_config/git-profile/identity-reset.gitconfig" "$id_reset"
-id_check missing "[warn] project root exists but identity file missing: $id_file" "missing-file action (unchanged)"
-id_check empty "[warn] identity file is partial: $id_file has no user.name user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming both keys"
-id_check name-only "[warn] identity file is partial: $id_file has no user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming user.email"
-id_check email-only "[warn] identity file is partial: $id_file has no user.name — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "partial action naming user.name"
-id_check complete "[ok] identity file exists: $id_file" "ok"
-id_check unparsable "[warn] identity file exists but git cannot parse it: $id_file (syntax error?) — commits under $id_root fail until it is fixed" "unparsable warn"
-
-# ID-r) The identity reset itself is checked, presence-only (#241): a partial
-#     apply (Quickstart with ~/.gitconfig alone) leaves it missing and Git
-#     silently skips the include, so the personal fallback leaks into
-#     non-personal repos. Present -> ok line; absent -> action naming the
-#     apply, and the missing-identity action for a NON-personal context must
-#     then say the fallback is in use rather than "refused".
-id_check missing "[ok] identity reset file present: $id_reset (non-personal contexts fail closed without a context file)" "reset present -> ok"
-rm -f "$id_reset"
-id_check missing "[warn] identity reset file missing: $id_reset — the fail-closed boundary of #202 is NOT in place: in a non-personal repo without its context file, a remote matching the personal patterns (hasconfig in ~/.gitconfig) inherits the personal identity instead of refusing to commit (other repos are still refused by useConfigOnly)" "reset absent -> action naming the apply"
-id_check missing "[warn] project root exists but identity file missing: $id_file (and the identity reset is missing too: a repo under $id_root whose remote matches the personal patterns inherits the personal identity instead of being refused; other repos are still refused)" "reset absent -> missing-identity action says conditional inheritance"
-# Partial files: without the reset an UNSET key keeps the personal identity
-# (mixed identity) in a personal-remote repo, but an explicitly EMPTY value
-# still overrides it — so the wording depends on which keys are unset.
-id_mixed_tail="inherits the personal identity in a repo under $id_root whose remote matches the personal patterns — a mixed identity that is not refused; an explicitly empty key stays empty)"
-id_check empty "[warn] identity file is partial: $id_file has no user.name user.email (and the identity reset is missing: the unset user.name user.email $id_mixed_tail" "reset absent -> empty file: both keys unset -> mixed identity"
-id_check name-only "[warn] identity file is partial: $id_file has no user.email (and the identity reset is missing: the unset user.email $id_mixed_tail" "reset absent -> name-only: email unset -> mixed identity"
-id_check email-only "[warn] identity file is partial: $id_file has no user.name (and the identity reset is missing: the unset user.name $id_mixed_tail" "reset absent -> email-only: name unset -> mixed identity"
-id_check empty-values "[warn] identity file is partial: $id_file has no user.name user.email — commits under $id_root get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)" "reset absent -> explicit empty values still blank the ident (no inheritance)"
-# Value-less keys are their own state: git refuses to read the identity at
-# all, whatever the reset — the "empty email is accepted as <>" wording would
-# be wrong for them.
-id_check bare-keys "[warn] identity file has a key without a value: $id_file (user.name user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "bare keys (no =) -> own action: git rejects the identity"
-id_check email-bare "[warn] identity file has a key without a value: $id_file (user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "name set + bare email -> action names user.email only, no value shown"
-id_check bare-large "[warn] identity file has a key without a value: $id_file (user.email) — git rejects the whole identity (fatal: missing value), so commits under $id_root fail until it is fixed" "bare key at the end of a 40k-line file is still found (whole listing read)"
-# Inheritance and commit outcome are separate: with the name explicitly
-# empty the email still inherits, but the commit is refused (empty name).
-id_check name-empty-email-unset "[warn] identity file is partial: $id_file has no user.name user.email (and the identity reset is missing: the unset user.email inherits the personal identity in a repo under $id_root whose remote matches the personal patterns — but the commit is still refused because user.name is explicitly empty; an explicitly empty key stays empty)" "reset absent -> empty name + unset email: email inherits, commit still refused"
 # The next-actions steps are printf %q-escaped by doctor, so the expected
 # lines are built the same way (a TMPDIR with a space would otherwise fail a
 # correct output). ORDER is the contract: mkdir must come right before the
@@ -2617,29 +2596,96 @@ id_check name-empty-email-unset "[warn] identity file is partial: $id_file has n
 # immediately follows a mkdir line (steps_consecutive). Other actions start
 # with the same mkdir step (the global gitignore one, #248), so the pair is
 # searched, not the first mkdir match.
-# assert_reset_steps HOME_DIR LABEL
-assert_reset_steps() {
-  local home_dir="$1" label="$2" out rc=0 step_mkdir step_apply
-  out="$(HOME="$home_dir" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || rc=$?
-  step_mkdir="        \$ mkdir -p $(printf '%q' "$home_dir/.config")"
-  step_apply="        \$ chezmoi apply $(printf '%q' "$home_dir/.config/git-profile") $(printf '%q' "$home_dir/.config/git-profile/identity-reset.gitconfig")"
-  if [[ "$rc" -eq 0 ]] \
-    && steps_consecutive "$out" "$step_mkdir" "$step_apply"; then
-    ok "test passed: reset absent -> $label: doctor exit 0, steps are mkdir then apply, consecutive and %q-escaped"
+# reset_steps_in OUTPUT HOME_DIR — OUTPUT has the reset apply steps of HOME_DIR.
+reset_steps_in() {
+  steps_consecutive "$1" "        \$ mkdir -p $(printf '%q' "$2/.config")" \
+    "        \$ chezmoi apply $(printf '%q' "$2/.config/git-profile") $(printf '%q' "$2/.config/git-profile/identity-reset.gitconfig")"
+}
+id_partial_tail="— commits under @R@ get an empty ident (a missing name is refused; a missing email is accepted as <> and shows as no-identity in the prompt)"
+id_bare_tail="— git rejects the whole identity (fatal: missing value), so commits under @R@ fail until it is fixed"
+# The managed identity reset (#202) is present for the first two runs: it is
+# what makes "identity file missing" mean "commits refused".
+id_reset="$fixture_home/.config/git-profile/identity-reset.gitconfig"
+mkdir -p "${id_reset%/*}"
+cp "$DOTFILES_ROOT/private_dot_config/git-profile/identity-reset.gitconfig" "$id_reset"
+id_plant work missing; id_plant client empty; id_plant sandbox name-only; id_plant agent email-only
+id_run "reset present, run 1"
+id_expect work missing "[ok] identity reset file present: $id_reset (non-personal contexts fail closed without a context file)" "reset present -> ok"
+id_expect work missing "[warn] project root exists but identity file missing: @F@" "missing-file action (unchanged)"
+id_expect client empty "[warn] identity file is partial: @F@ has no user.name user.email $id_partial_tail" "partial action naming both keys"
+id_expect sandbox name-only "[warn] identity file is partial: @F@ has no user.email $id_partial_tail" "partial action naming user.email"
+id_expect agent email-only "[warn] identity file is partial: @F@ has no user.name $id_partial_tail" "partial action naming user.name"
+# The bare-key check comes before the reset logic, so bare-large reads the
+# same with the reset present.
+id_plant work complete; id_plant client unparsable; id_plant sandbox bare-large
+id_run "reset present, run 2"
+id_expect work complete "[ok] identity file exists: @F@" "ok"
+id_expect client unparsable "[warn] identity file exists but git cannot parse it: @F@ (syntax error?) — commits under @R@ fail until it is fixed" "unparsable warn"
+id_expect sandbox bare-large "[warn] identity file has a key without a value: @F@ (user.email) $id_bare_tail" "bare key at the end of a 40k-line file is still found (whole listing read)"
+
+# ID-r) The identity reset itself is checked, presence-only (#241): a partial
+#     apply (Quickstart with ~/.gitconfig alone) leaves it missing and Git
+#     silently skips the include, so the personal fallback leaks into
+#     non-personal repos. Present -> ok line (run 1 above); absent -> action
+#     naming the apply, and the actions of a NON-personal context must then
+#     say the fallback is in use rather than "refused". personal is the
+#     fallback itself, so its wording does not change.
+rm -f "$id_reset"
+id_plant work missing; id_plant client empty; id_plant sandbox name-only; id_plant agent email-only
+id_run "reset absent, run 1"
+id_expect work missing "[warn] identity reset file missing: $id_reset — the fail-closed boundary of #202 is NOT in place: in a non-personal repo without its context file, a remote matching the personal patterns (hasconfig in ~/.gitconfig) inherits the personal identity instead of refusing to commit (other repos are still refused by useConfigOnly)" "reset absent -> action naming the apply"
+if [[ "$id_ok" -eq 1 ]]; then
+  if reset_steps_in "$id_out" "$fixture_home"; then
+    ok "test passed: reset absent -> next-actions steps: doctor exit 0, steps are mkdir then apply, consecutive and %q-escaped"
   else
-    printf '%s\n' "$out" >&2
-    fail "test failed: reset absent -> $label: expected exit 0 (got $rc) and the mkdir step immediately followed by the apply step"
+    printf '%s\n' "$id_out" >&2
+    fail "test failed: reset absent -> next-actions steps: expected the mkdir step immediately followed by the apply step"
     status=1
   fi
-}
-assert_reset_steps "$fixture_home" "next-actions steps"
-# The same on a fixture whose path contains a space: %q must make both the
+fi
+id_expect work missing "[warn] project root exists but identity file missing: @F@ (and the identity reset is missing too: a repo under @R@ whose remote matches the personal patterns inherits the personal identity instead of being refused; other repos are still refused)" "reset absent -> missing-identity action says conditional inheritance"
+# Partial files: without the reset an UNSET key keeps the personal identity
+# (mixed identity) in a personal-remote repo, but an explicitly EMPTY value
+# still overrides it — so the wording depends on which keys are unset.
+id_mixed_tail="inherits the personal identity in a repo under @R@ whose remote matches the personal patterns — a mixed identity that is not refused; an explicitly empty key stays empty)"
+id_expect client empty "[warn] identity file is partial: @F@ has no user.name user.email (and the identity reset is missing: the unset user.name user.email $id_mixed_tail" "reset absent -> empty file: both keys unset -> mixed identity"
+id_expect sandbox name-only "[warn] identity file is partial: @F@ has no user.email (and the identity reset is missing: the unset user.email $id_mixed_tail" "reset absent -> name-only: email unset -> mixed identity"
+id_expect agent email-only "[warn] identity file is partial: @F@ has no user.name (and the identity reset is missing: the unset user.name $id_mixed_tail" "reset absent -> email-only: name unset -> mixed identity"
+# Value-less keys are their own state: git refuses to read the identity at
+# all, whatever the reset — the "empty email is accepted as <>" wording would
+# be wrong for them. Inheritance and commit outcome are separate: with the
+# name explicitly empty the email still inherits, but the commit is refused
+# (empty name).
+id_plant work empty-values; id_plant client bare-keys; id_plant sandbox email-bare
+id_plant agent name-empty-email-unset; id_plant personal name-only
+id_run "reset absent, run 2"
+id_expect work empty-values "[warn] identity file is partial: @F@ has no user.name user.email $id_partial_tail" "reset absent -> explicit empty values still blank the ident (no inheritance)"
+id_expect client bare-keys "[warn] identity file has a key without a value: @F@ (user.name user.email) $id_bare_tail" "bare keys (no =) -> own action: git rejects the identity"
+id_expect sandbox email-bare "[warn] identity file has a key without a value: @F@ (user.email) $id_bare_tail" "name set + bare email -> action names user.email only, no value shown"
+id_expect agent name-empty-email-unset "[warn] identity file is partial: @F@ has no user.name user.email (and the identity reset is missing: the unset user.email inherits the personal identity in a repo under @R@ whose remote matches the personal patterns — but the commit is still refused because user.name is explicitly empty; an explicitly empty key stays empty)" "reset absent -> empty name + unset email: email inherits, commit still refused"
+id_expect personal name-only "[warn] identity file is partial: @F@ has no user.email $id_partial_tail" "reset absent -> personal keeps the empty-ident wording (personal is the fallback itself)"
+# The steps on a fixture whose path contains a space: %q must make both the
 # expectation and the output agree.
 id_space_home="$fixture_home/id space home"
 mkdir -p "$id_space_home/src/work" "$id_space_home/.config/git"
-assert_reset_steps "$id_space_home" "home path with a space"
+id_space_rc=0
+id_space_out="$(HOME="$id_space_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || id_space_rc=$?
+if [[ "$id_space_rc" -eq 0 ]] && reset_steps_in "$id_space_out" "$id_space_home"; then
+  ok "test passed: reset absent -> home path with a space: doctor exit 0, steps are mkdir then apply, consecutive and %q-escaped"
+else
+  printf '%s\n' "$id_space_out" >&2
+  fail "test failed: reset absent -> home path with a space: expected exit 0 (got $id_space_rc) and the mkdir step immediately followed by the apply step"
+  status=1
+fi
 rm -rf "$id_space_home"
-rm -rf "$id_root" "$id_file"
+# Every identity file goes, and the roots this block made.
+for id_ctx in personal work client sandbox agent; do
+  rm -f "$fixture_home/.config/git/$id_ctx.gitconfig"
+  case "$id_roots_before" in
+    *" $id_ctx "*) ;;
+    *) rm -rf "$fixture_home/src/$id_ctx" ;;
+  esac
+done
 
 # OC) OpenCode (#234): presence-level report of the third harness. A fake
 #     opencode sits at the front of PATH (the real one may or may not be
@@ -2662,9 +2708,10 @@ rm -f "$oc_floor"
 if oc_out="$(HOME="$fixture_home" PATH="$oc_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fxq "[ok] opencode: $oc_fakebin/opencode" <<< "$oc_out" \
     && grep -Fq "[warn] opencode-settings module active but the managed floor is missing: $oc_floor" <<< "$oc_out" \
+    && grep -Fxq -- "        \$ chezmoi apply $(printf '%q' "${oc_floor%/*}") $(printf '%q' "$oc_floor")" <<< "$oc_out" \
     && grep -Fxq "[info] - opencode credential store present: $oc_auth (existence only; contents never read)" <<< "$oc_out" \
     && ! grep -Fq "$oc_canary_provider" <<< "$oc_out" && ! grep -Fq "$oc_canary_key" <<< "$oc_out"; then
-    ok "test passed: OpenCode floor missing on personal is an action; credential store reported by existence only (canaries absent)"
+    ok "test passed: OpenCode floor missing on personal is an action with the apply step for the directory and the file; credential store reported by existence only (canaries absent)"
   else
     printf '%s\n' "$oc_out" >&2
     fail "test failed: OpenCode section (personal, floor missing) did not report as expected or leaked a canary"
@@ -2716,7 +2763,9 @@ rm -rf "$oc_fakebin" "$fixture_home/.local/share/opencode"
 #     agent-tools profile files codex-settings renders. The fixture files hold
 #     a canary value that must never be printed (config values stay out of
 #     the report). Own fixture copy for the capability flips. CODEX_HOME is
-#     unset for every run except the one that sets it. doctor stays exit 0.
+#     unset except in CX-b (~/.codex spelled with a trailing slash: not
+#     flagged) and CX-c (elsewhere: flagged, as agent-tools would look there
+#     while chezmoi renders into ~/.codex). doctor stays exit 0.
 cx_root="$fixture_home/.dotfiles-codexprofiles"
 copy_repo_fixture "$cx_root"
 cx_review="$fixture_home/.codex/agent-tools-review.config.toml"
@@ -2744,6 +2793,16 @@ cx_expect() {
   fi
   ok "test passed: $label"
 }
+# cx_unflagged LABEL OUTPUT — the run of LABEL did not flag CODEX_HOME.
+cx_unflagged() {
+  if grep -Fq "CODEX_HOME is set to" <<< "$2"; then
+    printf '%s\n' "$2" >&2
+    fail "test failed: $1: CODEX_HOME flagged"
+    status=1
+  else
+    ok "test passed: $1: CODEX_HOME not flagged"
+  fi
+}
 #     CX-a) committed personal (review=xhigh, worker=high), files missing ->
 #           one action per file naming the apply target.
 rm -f "$cx_review" "$cx_worker"
@@ -2751,29 +2810,34 @@ if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
   cx_expect "profile files missing on personal are actions" "$cx_out" \
     "[warn] codexReviewEffort=xhigh but $cx_review is missing — personal-codex-review falls back to the config.toml defaults" \
     "[warn] codexWorkerEffort=high but $cx_worker is missing — personal-codex-worker falls back to the config.toml defaults"
+  cx_unflagged "CODEX_HOME unset" "$cx_out"
 else
   doctor_exit_fail "Codex profiles, missing" "$?" "$cx_out"
 fi
-#     CX-b) files present -> ok, contents never printed.
+#     CX-b) files present -> ok, contents never printed. CODEX_HOME is the
+#           default spelled with a trailing slash -> not flagged.
 mkdir -p "$fixture_home/.codex"
 printf 'model_reasoning_effort = "%s"\n' "$cx_canary" > "$cx_review"
 printf 'model_reasoning_effort = "%s"\n' "$cx_canary" > "$cx_worker"
-if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
+if cx_out="$(cx_run CODEX_HOME="$fixture_home/.codex/" "$cx_root/scripts/doctor.sh" personal)"; then
   cx_expect "profile files present on personal are ok (presence only)" "$cx_out" \
     "[ok] codexReviewEffort=xhigh; $cx_review present (read by personal-codex-review)" \
     "[ok] codexWorkerEffort=high; $cx_worker present (read by personal-codex-worker)"
+  cx_unflagged "CODEX_HOME is ~/.codex with a trailing slash" "$cx_out"
 else
   doctor_exit_fail "Codex profiles, present" "$?" "$cx_out"
 fi
 #     CX-c) codex-settings active but the capability off while a file
 #           lingers -> action (agent-tools still reads it until apply).
+#           CODEX_HOME elsewhere -> flagged.
 set_capability_all "$cx_root" codexReviewEffort off
 rm -f "$cx_worker"
 set_capability_all "$cx_root" codexWorkerEffort off
-if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" personal)"; then
-  cx_expect "capability off with a lingering file is an action; off without a file is ok" "$cx_out" \
+if cx_out="$(cx_run CODEX_HOME="$fixture_home/elsewhere" "$cx_root/scripts/doctor.sh" personal)"; then
+  cx_expect "capability off with a lingering file is an action; off without a file is ok; a diverging CODEX_HOME is flagged" "$cx_out" \
     "[warn] codexReviewEffort=off but $cx_review exists — agent-tools still reads it; chezmoi apply removes it (the managed target renders empty)" \
-    "[ok] codexWorkerEffort=off; no worker profile file (personal-codex-worker uses the config.toml defaults)"
+    "[ok] codexWorkerEffort=off; no worker profile file (personal-codex-worker uses the config.toml defaults)" \
+    "[warn] CODEX_HOME is set to $fixture_home/elsewhere: agent-tools reads the review / worker profile files from there, but chezmoi renders them into ~/.codex"
 else
   doctor_exit_fail "Codex profiles, off" "$?" "$cx_out"
 fi
@@ -2787,25 +2851,6 @@ if cx_out="$(cx_run "$cx_root/scripts/doctor.sh" work)"; then
     "[ok] no worker profile file (not managed for this profile; personal-codex-worker uses the config.toml defaults)"
 else
   doctor_exit_fail "Codex profiles, work" "$?" "$cx_out"
-fi
-#     CX-e) a CODEX_HOME that is not ~/.codex is flagged: agent-tools would
-#           look there, chezmoi renders into ~/.codex. The default spelled
-#           with a trailing slash is not flagged.
-cx_rc=0
-cx_out="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/elsewhere" "$cx_root/scripts/doctor.sh" personal 2>&1)" || cx_rc=$?
-if [[ "$cx_rc" -ne 0 ]]; then
-  doctor_exit_fail "Codex profiles, CODEX_HOME" "$cx_rc" "$cx_out"
-elif cx_default="$(HOME="$fixture_home" CODEX_HOME="$fixture_home/.codex/" "$cx_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fxq "[warn] CODEX_HOME is set to $fixture_home/elsewhere: agent-tools reads the review / worker profile files from there, but chezmoi renders them into ~/.codex" <<< "$cx_out" \
-    && ! grep -Fq "CODEX_HOME is set to" <<< "$cx_default"; then
-    ok "test passed: a diverging CODEX_HOME is flagged; the default (trailing slash) is not"
-  else
-    printf '%s\n' "$cx_out" >&2
-    fail "test failed: CODEX_HOME divergence not reported as expected"
-    status=1
-  fi
-else
-  doctor_exit_fail "Codex profiles, CODEX_HOME default" "$?" "$cx_default"
 fi
 rm -f "$cx_review" "$cx_worker"
 
@@ -2845,7 +2890,10 @@ fi
 #     HL-b) work (module inactive) with the full managed wiring left by
 #           personal: shims + hooks.gitconfig included from ~/.gitconfig, so
 #           core.hooksPath is live -> hand removal of exactly the files that
-#           exist, plus a confirmation step; never the apply action.
+#           exist, plus a confirmation step; never the apply action. The
+#           steps here and in HL-e / HL-f are matched as whole summary lines
+#           (8-space indent included), so the list must be exactly the files
+#           that exist (#258), not a longer list that starts with them.
 printf '#!/bin/sh\n' > "$hl_dir/hooks/commit-msg"
 printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hl_dir/hooks.gitconfig"
 printf '[include]\n\tpath = ~/.config/git-hook-gates/hooks.gitconfig\n' > "$hl_home/.gitconfig"
@@ -2853,7 +2901,7 @@ hl_rm_step="\$ rm -i $(printf '%q' "$hl_dir/hooks.gitconfig") $(printf '%q' "$hl
 hl_verify_step="\$ git config --global --includes --show-origin --get core.hooksPath   # must no longer point at ~/.config/git-hook-gates/hooks; if it still does, remove that line at the origin shown"
 if hl_out="$(hl_run work)"; then
   if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" && ! grep -Fq "$hl_apply_msg" <<< "$hl_out" \
-    && grep -Fq -- "$hl_rm_step" <<< "$hl_out" && grep -Fq -- "$hl_verify_step" <<< "$hl_out"; then
+    && grep -Fxq -- "        $hl_rm_step" <<< "$hl_out" && grep -Fxq -- "        $hl_verify_step" <<< "$hl_out"; then
     ok "test passed: lingering wiring on work (module inactive) names the files to remove, not apply"
   else
     printf '%s\n' "$hl_out" >&2
@@ -2872,8 +2920,8 @@ printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hl_home/.git
 hl_rm_shims="\$ rm -i $(printf '%q' "$hl_dir/hooks/pre-commit") $(printf '%q' "$hl_dir/hooks/commit-msg")"
 if hl_out="$(hl_run work)"; then
   if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" \
-    && grep -Fq -- "$hl_rm_shims" <<< "$hl_out" && ! grep -Fq "hooks.gitconfig" <<< "$(grep -F -- "\$ rm -i" <<< "$hl_out")" \
-    && grep -Fq -- "$hl_verify_step" <<< "$hl_out"; then
+    && grep -Fxq -- "        $hl_rm_shims" <<< "$hl_out" && ! grep -Fq "hooks.gitconfig" <<< "$(grep -F -- "\$ rm -i" <<< "$hl_out")" \
+    && grep -Fxq -- "        $hl_verify_step" <<< "$hl_out"; then
     ok "test passed: shims without hooks.gitconfig list only the shims and keep the hooksPath verification step"
   else
     printf '%s\n' "$hl_out" >&2
@@ -2891,7 +2939,7 @@ printf '#!/bin/sh\n' > "$hl_dir/hooks/pre-push"
 : > "$hl_home/.gitconfig"
 hl_rm_push="\$ rm -i $(printf '%q' "$hl_dir/hooks/pre-push")"
 if hl_out="$(hl_run work)"; then
-  if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" && grep -Fq -- "$hl_rm_push" <<< "$hl_out"; then
+  if grep -Fxq "$hl_foreign_msg" <<< "$hl_out" && grep -Fxq -- "        $hl_rm_push" <<< "$hl_out"; then
     ok "test passed: a lingering pass-through shim alone (pre-push) is reported and named for removal"
   else
     printf '%s\n' "$hl_out" >&2
@@ -2938,7 +2986,8 @@ rm -rf "$hl_home"
 #     scan walks every documented root under ~/src: a repo with credential-like
 #     userinfo in each of personal / work / client / sandbox / agent is
 #     flagged, its URL (a canary) never shown. Hermetic (env -i, own HOME, no
-#     system git config).
+#     system git config). The ok side of the two keys is checked in GS-2a
+#     below (its global config sets both), so it is skipped as root.
 gs_home="$fixture_home/gs-home"
 gs_canary="canary-remote-userinfo-307"
 rm -rf "$gs_home"
@@ -2969,16 +3018,6 @@ if gs_out="$(env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_
 else
   doctor_exit_fail "Git section" "$?" "$gs_out"
 fi
-printf '[user]\n\tuseConfigOnly = true\n[transfer]\n\tcredentialsInUrl = die\n' > "$gs_home/.gitconfig"
-if gs_out="$(env -i PATH="$PATH" HOME="$gs_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
-  && grep -Fxq "[ok] user.useConfigOnly=true" <<< "$gs_out" \
-  && grep -Fxq "[ok] transfer.credentialsInUrl=die" <<< "$gs_out"; then
-  ok "test passed: Git section reports both keys ok once the global config sets them"
-else
-  printf '%s\n' "${gs_out:-<no output>}" >&2
-  fail "test failed: Git section must report both keys ok when set"
-  status=1
-fi
 rm -rf "$gs_home"
 
 # GS-2) remote URL scan INCOMPLETE (#359): a remote config that cannot be
@@ -2988,7 +3027,7 @@ rm -rf "$gs_home"
 #       is withheld, and doctor stays exit 0; a root that is a symlink is
 #       followed, not read as empty. Run from a copy of the checkout so the
 #       scanned count is the fixture's alone. Skipped as root (root reads
-#       mode 000).
+#       mode 000), and with it the ok side of GS's two Git keys (GS-2a).
 if [[ "$(id -u)" != "0" ]]; then
   gs2_home="$fixture_home/gs2-home"
   gs2_copy="$fixture_home/gs2-dotfiles"
@@ -2996,7 +3035,7 @@ if [[ "$(id -u)" != "0" ]]; then
   rm -rf "$gs2_home" "$gs2_copy"
   copy_repo_fixture "$gs2_copy"
   mkdir -p "$gs2_home"
-  : > "$gs2_home/.gitconfig"
+  printf '[user]\n\tuseConfigOnly = true\n[transfer]\n\tcredentialsInUrl = die\n' > "$gs2_home/.gitconfig"
   gs2_git() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 git "$@"; }
   gs2_run() { env -i PATH="$PATH" HOME="$gs2_home" GIT_CONFIG_NOSYSTEM=1 "$gs2_copy/scripts/doctor.sh" personal 2>&1; }
   #     GS-2a) a repo whose .git/config cannot be read, next to a repo with no
@@ -3015,6 +3054,16 @@ if [[ "$(id -u)" != "0" ]]; then
   else
     printf '%s\n' "${gs2_out:-<no output>}" >&2
     fail "test failed: an unreadable remote config was read as clean"
+    status=1
+  fi
+  #     GS-2a also has both Git keys set in the global config (#307): each
+  #     is reported ok (GS above has them unset and warned).
+  if grep -Fxq "[ok] user.useConfigOnly=true" <<< "$gs2_out" \
+    && grep -Fxq "[ok] transfer.credentialsInUrl=die" <<< "$gs2_out"; then
+    ok "test passed: Git section reports both keys ok once the global config sets them"
+  else
+    printf '%s\n' "${gs2_out:-<no output>}" >&2
+    fail "test failed: Git section must report both keys ok when set"
     status=1
   fi
   chmod 644 "$gs2_home/src/personal/locked/.git/config"
