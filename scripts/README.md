@@ -480,7 +480,7 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   safe-gh と quality-loop の登録が file × capability ごとに action になり、管理していない Claude 側は手で消す、
   管理している Codex 側は apply と案内すること(canary で中身を漏らさない)、`--actions-only` にも手順つきで出ること、
   PostToolUse の fast-edit-check だけが残っても品質ループの残置になること、読めない file(root では skip)と FIFO
-  (期限つきで実行し、止まれば kill して fail)は未確認の warn になり ok が出ないこと、file が無ければ両方の not-wired が出ること。
+  (期限つきで実行し、止まれば kill して fail)は未確認の warn になり ok が出ないこと、検索できない ~/.claude や loop する symlink の ~/.codex の下の file は在るかを確かめられないので未確認の warn になり、残置の action も ok も出ないこと(root では skip)、親が無い・dir でないときは不在と確かめて両方の not-wired が出ること(#439)、file が無ければ両方の not-wired が出ること。
 - herdr integration(#225): body 不在 / exec bit なし body / dir body / 末尾改行なしの status 応答 /
   outdated・needs repair / status が非ゼロ exit(出力を採用しない)/ hang(期限で process tree ごと回収)/
   probe 稼働中に doctor を SIGTERM(trap で回収・rc 143)/ cap off の module active・inactive 別の表示 /

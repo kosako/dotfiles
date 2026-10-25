@@ -2173,6 +2173,16 @@ else
   fail "test failed: doctor must stay exit 0 (herdr integration, capability off, modules inactive)"
   status=1
 fi
+#     HI-e2b) the same run, for the isolated reader committed true: with
+#             codex-settings inactive the Codex side is dangling too (the
+#             Claude side is checked in QL-e2).
+if grep -Fxq "[warn] enableGitHubIsolatedReader=true but the codex-settings module is inactive for this profile; no managed ~/.codex/hooks.json carries the hook registration (dangling capability on the Codex side)" <<< "$hi_out"; then
+  ok "test passed: enableGitHubIsolatedReader=true with codex-settings inactive is reported as dangling on the Codex side"
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: dangling enableGitHubIsolatedReader (Codex side) not reported"
+  status=1
+fi
 rm -rf "$hi_fakebin" "$hi_claude_body" "$hi_codex_body"
 
 # OP) 1Password sign-in probe (#231): `op whoami` runs through the shared
