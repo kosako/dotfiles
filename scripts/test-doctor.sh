@@ -91,12 +91,16 @@ doctor_exit_fail() {
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # Host tools doctor would otherwise launch for real on a developer machine
-# (`op whoami`, `herdr integration status`, codex / opencode probes): hundreds
-# of runs below inherit this PATH, and the real tools are credential-bearing or
-# slow to answer. A PATH-front dir of stubs that record the call and exit 1
-# keeps every run hermetic: the tools are present on PATH but fail when run
-# (e.g. op reads as "not signed in", not "not found"). Sections that need a
-# specific answer put their own fake in front of these, as before (#306).
+# (`op whoami`, `herdr integration status`, codex / opencode probes, and the
+# brew / npm queries of the software catalog and npm hardening): hundreds of
+# runs below inherit this PATH, and the real tools are credential-bearing,
+# slow to answer, or write to the fixture HOME (brew fetches its formula API
+# into a fresh HOME's cache, npm writes logs there). A PATH-front dir of stubs
+# that record the call and exit 1 keeps every run hermetic: the tools are
+# present on PATH but fail when run (e.g. op reads as "not signed in", not
+# "not found"; the catalog and npm hardening then only warn). Sections that
+# need a specific answer put their own fake in front of these, as before
+# (#306, #458).
 # Kept outside the fixture HOME so no section's cleanup removes it.
 host_stub_dir=""
 # Sections that plant a mode-000 dir or file under the fixture HOME (GS-2,
@@ -133,7 +137,7 @@ fi
 fi
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
-for host_tool in op herdr codex opencode; do
+for host_tool in op herdr codex opencode brew npm; do
   printf '#!/bin/sh\nprintf "%%s\\n" %q >> %q\nexit 1\n' "$host_tool" "$host_stub_dir/calls" \
     > "$host_stub_dir/bin/$host_tool"
   chmod +x "$host_stub_dir/bin/$host_tool"
@@ -145,7 +149,7 @@ export PATH
 # otherwise turn every fixture run into an extra action. Unset, Go answers
 # for the fixture HOME ($HOME/go); the GO cases below use their own fake go.
 unset GOBIN GOPATH
-for host_tool in op herdr codex opencode; do
+for host_tool in op herdr codex opencode brew npm; do
   if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
     fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
     exit 1
@@ -3813,12 +3817,13 @@ fi
 #           herdr absent: a PATH of the system dirs plus a private bin
 #           holding a yq symlink — the real yq's directory (homebrew bin) is
 #           NOT on it, because that is where a real herdr lives — and the
-#           op / codex / opencode stubs (this PATH replaces the one carrying
-#           them, #306). A herdr in the system dirs would make this case run
-#           the real tool, so it fails up front instead of running doctor.
+#           op / codex / opencode / brew / npm stubs (this PATH replaces the
+#           one carrying them, and a system dir can hold a real npm, #306,
+#           #458). A herdr in the system dirs would make this case run the
+#           real tool, so it fails up front instead of running doctor.
 rm -f "$hi_fakebin/herdr"
 ln -sf "$(command -v yq)" "$hi_fakebin/yq"
-for host_tool in op codex opencode; do
+for host_tool in op codex opencode brew npm; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$hi_fakebin/$host_tool"
 done
 if (PATH="$hi_fakebin:/usr/bin:/bin"; hash -r; command -v herdr >/dev/null 2>&1); then
@@ -5940,7 +5945,8 @@ rm -rf "${ds4_home:?}" "${ds4_bin:?}"
 #     だけで決まる (work = false は warn、personal = true は中立の item)。PATH に
 #     無ければその旨の ok。doctor は tool を探すだけで実行しない: fake は呼び出しを
 #     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は fake dir
-#     (fake の tailscale、yq と op / herdr / codex / opencode の stub の link) と
+#     (fake の tailscale、yq と op / herdr / codex / opencode / brew / npm の stub の
+#     link。system dir には本物の npm が在りうるので、stub を先に置く。#458) と
 #     system dir の写し (/usr/bin と /bin の全 entry への symlink から tunnel tool の
 #     名前だけを除いた dir) に固定する。tunnel tool の有無は fake dir だけで決まり、
 #     開発機や CI の runner に入っている tailscale / cloudflared / ngrok /
@@ -5952,7 +5958,7 @@ nt_sysbin="$fixture_home/nt-sysbin"
 nt_calls="$fixture_home/nt-calls"
 mkdir -p "$nt_home" "$nt_fakebin" "$nt_sysbin"
 ln -sf "$(command -v yq)" "$nt_fakebin/yq"
-for host_tool in op herdr codex opencode; do
+for host_tool in op herdr codex opencode brew npm; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$nt_fakebin/$host_tool"
 done
 # /bin を先に link し /usr/bin を -f で上書きする: 同名は /usr/bin が勝つ (PATH
