@@ -4001,10 +4001,11 @@ aip_trust_case() {
   [[ -n "$aip_trust_fn" ]] || return 0
   printf '%s\n' "$@" '[mcp_servers.fake.env]' 'FAKE_TOKEN = "CANARY_FORM_ENV_309"' \
     > "$fixture_home/.codex/config.toml"
-  local rc=0
-  aip_out="$(HOME="$fixture_home" bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_projects_trust' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_trust_fn" 2>&1)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    doctor_exit_fail "trust form: $label" "$rc" "$aip_out"
+  aip_rc=0
+  aip_out="$(HOME="$fixture_home" \
+    bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_projects_trust' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_trust_fn" 2>&1)" || aip_rc=$?
+  if [[ "$aip_rc" -ne 0 ]]; then
+    doctor_exit_fail "trust form: $label" "$aip_rc" "$aip_out"
   elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
     fail "test failed: trust form $label leaked a config value"
     status=1
@@ -5111,8 +5112,8 @@ fi
 # prints them) and `config list --json` (the merged config with typed values)
 # read the same FAKE_NPM_* env. FAKE_NPM_EXCLUDE_JSON is the JSON value of
 # min-release-age-exclude (`[]` by default, `absent` for an npm that does not
-# know the key; an NBSP in it is written as the JSON escape \u00a0, so
-# it stays visible); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
+# know the key; an NBSP in it is written as the JSON escape \u00a0, so it
+# stays visible); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
 # as an explicit null does; FAKE_NPM_LONG sets long=true in the user source,
 # which makes a listing without --long=false add npm's defaults (`before =
 # null` among them); FAKE_NPM_JSON sets json=true there, which makes a
