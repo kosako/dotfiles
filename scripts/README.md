@@ -473,7 +473,10 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   `env -i` で hermetic。
 - git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling。
 - GitHub injection guard(#119 / #137): secret floor の常時 deny 宣言と managed drift への案内(旧 active 文言は出さない)、`gateGitHubMcp` / `enableGitHubIsolatedReader`
-  の wired 状態、hook body の presence(contents-blind)、`enforceAiSandbox` の human-legit gate 開示。
+  の wired 状態、hook body の presence(contents-blind)、`enforceAiSandbox` の human-legit gate 開示。`gateGitHubMcp=false` は
+  not active で MCP の deny を出さないこと。claude-settings を外した run(QL-e)で `gateGitHubMcp` / `gateUnusedClaudeMcp` /
+  `enableToolCallRecordHook` / `enableGitHubIsolatedReader`(Claude 側)が dangling になり、claude-settings が非 active なら
+  secret floor・human-legit gate・main-push の注記を出さないこと。
 - quality loop hooks(#199): 両 home の登録 + body presence、`checks.local.json` は presence のみ(canary で
   中身を漏らさない)、cap off の not-wired、live file に残置した登録の lingering warn、module 除去の dangling。
   profile 切替の残置(#201): 両 hook の capability が off で claude-settings が非 active のとき、両 file に残った
