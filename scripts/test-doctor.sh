@@ -4478,8 +4478,11 @@ cl_write() {
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "$2" > "$1"
 }
+# cl_run [PROFILE] — one doctor run on the CL HOME: the output in cl_out, the
+# exit status in cl_rc (#378, as aip_run).
 cl_run() {
-  HOME="$cl_home" "$SCRIPT_DIR/doctor.sh" "${1:-personal}" 2>&1
+  cl_rc=0
+  cl_out="$(HOME="$cl_home" "$SCRIPT_DIR/doctor.sh" "${1:-personal}" 2>&1)" || cl_rc=$?
 }
 cl_floor='{"permissions":{"deny":["Bash(gh auth token)",7],"ask":["Bash(gh  pr merge *)","Bash(echo harmless\nBash\n)"]}}'
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
@@ -4535,7 +4538,10 @@ cl_write "$cl_f" '{"permissions":{"allow":["Bash(\u00a0gh pr close *)","Bash(gh 
 #       listed, so the repos under it are read once too, the repos of an org
 #       reached twice (client/mirror, a symlink to client/cli) read once,
 #       and a checkout below such a repo not read.
-if cl_out="$(LC_ALL=C cl_run)"; then
+LC_ALL=C cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "Claude project-level allows" "$cl_rc" "$cl_out"
+else
   if grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_a: 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh issue create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "        edit $cl_a: remove the allow rules covering those commands (approve them per use instead)" <<< "$cl_out" \
     && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'wget https://example.invalid' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
@@ -4562,10 +4568,6 @@ if cl_out="$(LC_ALL=C cl_run)"; then
     fail "test failed: project-level Claude allow report drifted"
     status=1
   fi
-else
-  printf '%s\n' "$cl_out" >&2
-  fail "test failed: doctor must stay exit 0 (Claude project-level allows)"
-  status=1
 fi
 
 # CL-2) files whose allows the floor already stops (or that cover no probe)
@@ -4573,8 +4575,10 @@ fi
 rm -rf "$cl_home/src"
 cl_write "$cl_b" '{"permissions":{"allow":["Bash(gh auth token)","Bash(gh  pr merge:*)","Bash(npm test *)"]}}'
 cl_write "$cl_home/src/sandbox/repo-e/.claude/settings.local.json" '{"permissions":{"deny":["Bash"]}}'
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[ok] no project-level Claude allow rule covers an outward probe (30 probes over 2 settings file(s) in this repo, the repos directly under the standard project roots and those one org (client) level down in work and client)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "floor-stopped project allows" "$cl_rc" "$cl_out"
+elif grep -Fxq "[ok] no project-level Claude allow rule covers an outward probe (30 probes over 2 settings file(s) in this repo, the repos directly under the standard project roots and those one org (client) level down in work and client)" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: allows the floor stops are not reported; the ok line counts the files read"
 else
@@ -4584,20 +4588,26 @@ else
 fi
 
 # CL-2b) a file that cannot be read keeps the result from being clean: no ok
-#        line, an item saying so (here the only other file is clean). An
-#        allow list of the wrong shape counts as unreadable too.
+#        line, an item saying so (here the only other files are clean). An
+#        allow list of the wrong shape counts as unreadable too, and so does
+#        a settings path that is not a regular file (only a confirmed absence
+#        counts as "no settings", Codex review R7, PR #340): each is counted.
 cl_write "$cl_d" '{"permissions":{"allow":"Bash"}}'
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - the permission rules of $cl_d could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
-  && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 2 file(s) read, but 1 could not be read — not a clean result" <<< "$cl_out" \
+mkdir -p "$cl_home/src/personal/repo-g/.claude/settings.local.json"
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "unreadable project files" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - the permission rules of $cl_d could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
+  && grep -Fxq "[info] - the permission rules of $cl_home/src/personal/repo-g/.claude/settings.local.json could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
+  && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 2 file(s) read, but 2 could not be read — not a clean result" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-  ok "test passed: an unreadable project file keeps the Claude allow check from reporting clean"
+  ok "test passed: an unreadable project file and a settings path that is not a regular file keep the Claude allow check from reporting clean"
 else
   printf '%s\n' "$cl_out" >&2
-  fail "test failed: an unreadable project file must not leave the clean ok"
+  fail "test failed: an unreadable project file or a settings path that is not a regular file must not leave the clean ok"
   status=1
 fi
-rm -rf "$cl_home/src/client"
+rm -rf "$cl_home/src/client" "$cl_home/src/personal"
 
 # CL-6) this repo under a standard root is read once: a minimal repo copy at
 #       ~/src/personal/dotfiles runs doctor from there, so it is both "this
@@ -4609,8 +4619,11 @@ rm -rf "$cl_home/src/client"
 for cl_self_rel in src/personal/dotfiles src/work/org-s/dotfiles; do
   copy_repo_fixture "$cl_home/$cl_self_rel"
   cl_write "$cl_home/$cl_self_rel/.claude/settings.local.json" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
-  if cl_out="$(HOME="$cl_home" "$cl_home/$cl_self_rel/scripts/doctor.sh" personal 2>&1)" \
-    && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/$cl_self_rel/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+  cl_rc=0
+  cl_out="$(HOME="$cl_home" "$cl_home/$cl_self_rel/scripts/doctor.sh" personal 2>&1)" || cl_rc=$?
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "this repo at ~/$cl_self_rel" "$cl_rc" "$cl_out"
+  elif [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/$cl_self_rel/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
     ok "test passed: this repo at ~/$cl_self_rel is read once (one action)"
   else
     printf '%s\n' "$cl_out" >&2
@@ -4628,8 +4641,11 @@ rm -rf "$cl_home/src/work"
 copy_repo_fixture "$cl_home/dotfiles"
 cl_write "$cl_home/dotfiles/.claude/settings.local.json" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
 cl_home_dbl="${cl_home%/*}//${cl_home##*/}"
-if cl_out="$(HOME="$cl_home_dbl" "$cl_home/dotfiles/scripts/doctor.sh" personal 2>&1)" \
-  && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/cl-home/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+cl_rc=0
+cl_out="$(HOME="$cl_home_dbl" "$cl_home/dotfiles/scripts/doctor.sh" personal 2>&1)" || cl_rc=$?
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "this repo under HOME outside the standard roots" "$cl_rc" "$cl_out"
+elif [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/cl-home/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
   ok "test passed: this repo under HOME outside the standard roots is read (HOME compared normalized)"
 else
   printf '%s\n' "$cl_out" >&2
@@ -4749,8 +4765,10 @@ fi
 #       is reported (in probe order; the legacy prefix collapses whitespace
 #       runs, so `gh  pr merge:*` covers `gh pr merge`).
 rm -f "$cl_home/.claude/settings.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[warn] 2 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'gh pr merge', 'gh auth token' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out"; then
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "no live floor" "$cl_rc" "$cl_out"
+elif grep -Fxq "[warn] 2 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'gh pr merge', 'gh auth token' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out"; then
   ok "test passed: without a live floor every covered probe is reported"
 else
   printf '%s\n' "$cl_out" >&2
@@ -4761,8 +4779,10 @@ fi
 # CL-4) a live floor that cannot be read decides nothing -> an item, neither
 #       the ok line nor a warn.
 cl_write "$cl_home/.claude/settings.json" '{"permissions":'
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "an unreadable live floor" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: an unreadable live floor leaves the project allows unchecked (no false clean)"
@@ -4776,8 +4796,10 @@ fi
 #        each) is unreadable too, so its first document's deny of the bare
 #        tool cannot hide the project allows (Codex review R6, PR #340).
 printf '%s\n%s\n' '{"permissions":{"deny":["Bash"]}}' '{}' > "$cl_home/.claude/settings.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "a floor of two JSON documents" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
   ok "test passed: a floor of more than one JSON document is not read (no false clean)"
 else
@@ -4788,8 +4810,10 @@ fi
 # ... and so is a floor repeating a key: yq would take the first
 #     `permissions` (a deny of the bare tool), JSON.parse the last (none).
 printf '%s\n' '{"permissions":{"deny":["Bash"]},"permissions":{}}' > "$cl_home/.claude/settings.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "a floor repeating a key" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
   ok "test passed: a floor repeating a key is not read (yq and JSON.parse would disagree)"
 else
@@ -4802,8 +4826,10 @@ fi
 #       not watched, whatever is on disk.
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
 cl_write "$cl_c" '{"permissions":{"allow":["Bash"]}}'
-if cl_out="$(cl_run work)" \
-  && grep -Fxq "[info] - Claude project-level allows not watched for this profile (claude-settings module inactive)" <<< "$cl_out" \
+cl_run work
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "work profile, Claude project-level allows" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not watched for this profile (claude-settings module inactive)" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: work does not watch Claude project-level allows"
 else
@@ -4813,33 +4839,24 @@ else
 fi
 
 # CL-8) only a confirmed absence counts as "no settings" (Codex review R7,
-#       PR #340): a .claude dir that cannot be searched, or a settings path
-#       that is not a regular file, is unreadable (an item, no clean ok), and
-#       so is a floor dir that cannot be searched, a project root or an org
-#       directory of work or client that cannot be listed (the .claude and
-#       .git of a repo directly under work are not repos, so they add no
-#       item of their own). The rest of the HOME is clean here (repo-b's
-#       allows are all stopped by the floor). Skipped as root (root searches
-#       the dir).
+#       PR #340): a .claude dir that cannot be searched is unreadable (an
+#       item, no clean ok), and so is a floor dir that cannot be searched, a
+#       project root or an org directory of work or client that cannot be
+#       listed (the .claude and .git of a repo directly under work are not
+#       repos, so they add no item of their own). Each item names its path,
+#       so dirs whose states do not depend on each other share a run, and
+#       the count of files not read pins each one. The rest of the HOME is
+#       clean here (repo-b's allows are all stopped by the floor, and its
+#       file is the only one read). Skipped as root (root searches the dir).
 rm -rf "$cl_home/src/work" "$cl_home/src/sandbox"
 cl_g="$cl_home/src/personal/repo-g/.claude"
 cl_write "$cl_g/settings.local.json" '{"permissions":{"allow":["Bash(npm test)"]}}'
 if [[ "$(id -u)" != "0" ]]; then
-  chmod 000 "$cl_g"
-  if cl_out="$(cl_run)" \
-    && grep -Fxq "[info] - the .claude directory of $cl_home/src/personal/repo-g could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
-    && grep -Fq "Claude project-level allows partly checked:" <<< "$cl_out" \
-    && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-    ok "test passed: a .claude dir that cannot be searched is unreadable, not absent (no false clean)"
-  else
-    printf '%s\n' "$cl_out" >&2
-    fail "test failed: a .claude dir that cannot be searched must not read as absent"
-    status=1
-  fi
-  chmod 755 "$cl_g"
   chmod 000 "$cl_home/.claude"
-  if cl_out="$(cl_run)" \
-    && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+  cl_run
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "a floor dir that cannot be searched" "$cl_rc" "$cl_out"
+  elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
     ok "test passed: a floor dir that cannot be searched leaves the check not done (no false clean)"
   else
@@ -4848,24 +4865,62 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$cl_home/.claude"
-  for cl_mode in 000 111; do
-    chmod "$cl_mode" "$cl_home/src/personal"
-    if cl_out="$(cl_run)" \
-      && grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
-      && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-      ok "test passed: a project root that cannot be listed (mode $cl_mode) is unreadable, not empty"
+  # The project root and an org (client) directory of work and of client
+  # (#445: the repos one level down there are where the convention puts
+  # them) that cannot be listed, each through mode 000 and mode 111 across
+  # two runs. A 000 org dir also leaves its own .claude unopenable, so each
+  # run counts 4 not read.
+  mkdir -p "$cl_home/src/work/org-l/repo-l" "$cl_home/src/client/org-l/repo-l"
+  for cl_modes in "000 000 111" "111 111 000"; do
+    read -r cl_mode_p cl_mode_w cl_mode_c <<< "$cl_modes"
+    chmod "$cl_mode_p" "$cl_home/src/personal"
+    chmod "$cl_mode_w" "$cl_home/src/work/org-l"
+    chmod "$cl_mode_c" "$cl_home/src/client/org-l"
+    cl_run
+    if [[ "$cl_rc" -ne 0 ]]; then
+      doctor_exit_fail "a project root and org dirs that cannot be listed, modes $cl_modes" "$cl_rc" "$cl_out"
     else
-      printf '%s\n' "$cl_out" >&2
-      fail "test failed: a project root that cannot be listed (mode $cl_mode) must not read as empty"
-      status=1
+      cl_bad=0
+      if grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out"; then
+        ok "test passed: a project root that cannot be listed (mode $cl_mode_p) is unreadable, not empty"
+      else
+        fail "test failed: a project root that cannot be listed (mode $cl_mode_p) must not read as empty"
+        cl_bad=1
+      fi
+      for cl_root in work client; do
+        cl_mode="$cl_mode_w"
+        [[ "$cl_root" == work ]] || cl_mode="$cl_mode_c"
+        if grep -Fxq "[info] - the directory $cl_home/src/$cl_root/org-l under the project root could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out"; then
+          ok "test passed: an org directory of $cl_root that cannot be listed (mode $cl_mode) is unreadable, not empty"
+        else
+          fail "test failed: an org directory of $cl_root that cannot be listed (mode $cl_mode) must not read as empty"
+          cl_bad=1
+        fi
+      done
+      if ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+        ok "test passed: dirs that cannot be listed leave no clean ok (modes $cl_modes)"
+      else
+        fail "test failed: dirs that cannot be listed must not leave the clean ok (modes $cl_modes)"
+        cl_bad=1
+      fi
+      if grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 1 file(s) read, but 4 could not be read — not a clean result" <<< "$cl_out"; then
+        ok "test passed: each dir that cannot be listed is counted as not read (modes $cl_modes)"
+      else
+        fail "test failed: each dir that cannot be listed must be counted as not read (modes $cl_modes)"
+        cl_bad=1
+      fi
+      [[ "$cl_bad" -eq 0 ]] || { printf '%s\n' "$cl_out" >&2; status=1; }
     fi
-    chmod 755 "$cl_home/src/personal"
+    chmod 755 "$cl_home/src/personal" "$cl_home/src/work/org-l" "$cl_home/src/client/org-l"
   done
+  rm -rf "$cl_home/src/work" "$cl_home/src/client"
   # ... and so is a root under a ~/src that cannot be searched (`-d` would
   # read that as no root at all).
   chmod 000 "$cl_home/src"
-  if cl_out="$(cl_run)" \
-    && grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
+  cl_run
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "a ~/src that cannot be searched" "$cl_rc" "$cl_out"
+  elif grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
     ok "test passed: the roots under a ~/src that cannot be searched are unreadable, not absent"
   else
@@ -4874,54 +4929,28 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$cl_home/src"
-  # ... and so is an org (client) directory of work or client that cannot
-  # be listed (#445): the repos one level down there are where the
-  # convention puts them.
-  for cl_root in work client; do
-    mkdir -p "$cl_home/src/$cl_root/org-l/repo-l"
-    for cl_mode in 000 111; do
-      chmod "$cl_mode" "$cl_home/src/$cl_root/org-l"
-      if cl_out="$(cl_run)" \
-        && grep -Fxq "[info] - the directory $cl_home/src/$cl_root/org-l under the project root could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
-        && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-        ok "test passed: an org directory of $cl_root that cannot be listed (mode $cl_mode) is unreadable, not empty"
-      else
-        printf '%s\n' "$cl_out" >&2
-        fail "test failed: an org directory of $cl_root that cannot be listed (mode $cl_mode) must not read as empty"
-        status=1
-      fi
-      chmod 755 "$cl_home/src/$cl_root/org-l"
-    done
-    rm -rf "${cl_home:?}/src/$cl_root"
-  done
-  # A repo placed directly under work is listed as an org too, but its own
-  # .claude and .git are not read as repos (#445): with both unopenable,
-  # only its .claude is reported, once.
+  # repo-g's .claude cannot be searched, nor can the .claude and .git of a
+  # repo placed directly under work. That repo is listed as an org too, but
+  # its own .claude and .git are not read as repos (#445): only its .claude
+  # is reported, once, so 2 are not read in all.
   mkdir -p "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
-  chmod 000 "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
-  if cl_out="$(cl_run)" \
+  chmod 000 "$cl_g" "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  cl_run
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "the .claude dirs of repo-g and repo-k that cannot be searched" "$cl_rc" "$cl_out"
+  elif grep -Fxq "[info] - the .claude directory of $cl_home/src/personal/repo-g could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
     && grep -Fxq "[info] - the .claude directory of $cl_home/src/work/repo-k could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
-    && grep -Fq "but 1 could not be read — not a clean result" <<< "$cl_out" \
-    && ! grep -Fq "the .claude directory of $cl_home/src/work/repo-k/." <<< "$cl_out"; then
-    ok "test passed: the .claude and .git of a repo directly under work are not read as repos"
+    && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 1 file(s) read, but 2 could not be read — not a clean result" <<< "$cl_out" \
+    && ! grep -Fq "the .claude directory of $cl_home/src/work/repo-k/." <<< "$cl_out" \
+    && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+    ok "test passed: a .claude dir that cannot be searched is unreadable, not absent, and the .claude and .git of a repo directly under work are not read as repos"
   else
     printf '%s\n' "$cl_out" >&2
-    fail "test failed: the .claude and .git of a repo directly under work must not be read as repos"
+    fail "test failed: a .claude dir that cannot be searched must not read as absent, and the .claude and .git of a repo directly under work must not be read as repos"
     status=1
   fi
-  chmod 755 "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  chmod 755 "$cl_g" "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
   rm -rf "$cl_home/src/work"
-fi
-rm -f "$cl_g/settings.local.json"
-mkdir -p "$cl_g/settings.local.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - the permission rules of $cl_g/settings.local.json could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
-  && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-  ok "test passed: a settings path that is not a regular file is unreadable, not absent"
-else
-  printf '%s\n' "$cl_out" >&2
-  fail "test failed: a settings path that is not a regular file must not read as absent"
-  status=1
 fi
 rm -rf "${cl_home:?}"
 

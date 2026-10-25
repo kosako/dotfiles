@@ -593,7 +593,7 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   org(client)の 1 段下の repo を読み(#445。直下の repo も対照として読む。`.` で始まる名前の repo も読む)、
   repo でもある org の dir(自身の `.git` と `.claude` を持つ)もその下の repo も、symlink で 2 回辿る org の下の repo も 1 回だけ読み、その repo より深い checkout は読まない、file の中の canary を出さない。
   floor が止める allow だけなら ok(読んだ file の数)、読めない file があれば ok を出さず「clean ではない」の item、HOME の下の
-  標準の root と work の org の下に置いたこの repo の写しは 1 回だけ読む、標準の root の外(`~/dotfiles`)の写しも `//` を含む HOME で読む、floor の file が無ければ全部 warn、floor が読めなければ(JSON の文書が 2 つ、key が重なる、`~/.claude` が開けない floor を含む)not checked、開けない `.claude`・通常の file でない設定の path・一覧できない project root(`~/src` が開けない場合を含む)と一覧できない work と client の org の dir は読めない扱い(直下の repo の `.claude` と `.git` は repo として読まないので、開けなくても item は `.claude` の 1 つだけ。root では chmod の case を飛ばす)、`.` で始まる名前の repo も読む、work は
+  標準の root と work の org の下に置いたこの repo の写しは 1 回だけ読む、標準の root の外(`~/dotfiles`)の写しも `//` を含む HOME で読む、floor の file が無ければ全部 warn、floor が読めなければ(JSON の文書が 2 つ、key が重なる、`~/.claude` が開けない floor を含む)not checked、開けない `.claude`・通常の file でない設定の path・一覧できない project root(`~/src` が開けない場合を含む)と一覧できない work と client の org の dir は読めない扱いで、読めなかった数に数える(直下の repo の `.claude` と `.git` は repo として読まないので、開けなくても item は `.claude` の 1 つだけ。root では chmod の case を飛ばす)、`.` で始まる名前の repo も読む、work は
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。reader も取り出し、
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
