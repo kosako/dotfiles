@@ -279,7 +279,7 @@ fi
 # enable1PasswordSSH committed true -> the managed SSH agent (N).
 doctor_rc=0
 output="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || doctor_rc=$?
-[[ "$doctor_rc" -eq 0 ]] || doctor_exit_fail "opening fixture, personal" "$doctor_rc" "$output"
+[[ "$doctor_rc" -eq 0 ]] || doctor_exit_fail "opening fixture, personal: committed capabilities, enable1PasswordSSH=true with ssh-1password active" "$doctor_rc" "$output"
 if grep -Fq "$orphan_marker" <<< "$output"; then
   printf '%s\n' "$output" >&2
   fail "test failed: personal must not report the fixture .npmrc as orphan"
@@ -571,7 +571,7 @@ if [[ "$pb_rc" -eq 0 ]] \
   ok "test passed: a marker archive name that starts with \"-\" is shown as is and doctor runs to the next actions (exit 0, #444)"
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: a marker archive name that starts with \"-\" must not stop doctor (rc=$pb_rc, #444)"
+  fail "test failed: a marker archive name that starts with \"-\" must be shown as is with capture: complete (capture_incomplete:false), and must not stop doctor before the next actions (rc=$pb_rc, #444)"
   status=1
 fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"%s","file_count":2,"capture_incomplete":false}\n' \
@@ -584,7 +584,7 @@ if [[ "$pb_rc" -eq 0 ]] \
   ok "test passed: a marker archive value with directories shows only its file name (#444)"
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: a marker archive value with directories must show only its file name, not the directories (rc=$pb_rc, #444)"
+  fail "test failed: a marker archive value with directories must show only its file name, not the directories, with capture: complete (capture_incomplete:false) (rc=$pb_rc, #444)"
   status=1
 fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"old/","file_count":2,"capture_incomplete":false}\n' \
@@ -596,7 +596,7 @@ if [[ "$pb_rc" -eq 0 ]] \
   ok "test passed: a marker archive value that leaves no file name is shown as unknown (#444)"
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: a marker archive value ending in \"/\" must be shown as unknown (rc=$pb_rc, #444)"
+  fail "test failed: a marker archive value ending in \"/\" must be shown as unknown, with capture: complete (capture_incomplete:false) (rc=$pb_rc, #444)"
   status=1
 fi
 
@@ -813,10 +813,17 @@ hc_check "accepted -> ok" "[ok] herdr config: managed $hc_managed present and ac
 #       the step line appears only in the next-actions summary, so a plain
 #       warn would fail here (and drop out of --actions-only; Codex review).
 #       The fake prints `__rc=0` before its exit 1 (HC-2b).
+hc_rejected_exit1="[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file"
 write_fake_herdr_config_check 1 "__rc=0"
 hc_expect "rejected (even after printing __rc=0) -> action with the herdr config check step in next actions" personal -- \
-  "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" \
-  "        \$ herdr config check"
+  "$hc_rejected_exit1" "        \$ herdr config check"
+# HC-2a) the same failure with nothing on stdout. bounded_probe drops the
+#        command's stderr, so a check that reports its diagnostics there
+#        reaches doctor as a silent exit 1: still the action, not the "gave
+#        no answer" ok, which is for a check that does not finish in time.
+write_fake_herdr_config_check 1
+hc_expect "rejected with nothing on stdout -> the same action, not \"gave no answer\"" personal -- \
+  "$hc_rejected_exit1" "        \$ herdr config check" ! "gave no answer"
 # HC-2b) the probed command cannot pass for its own exit status (#335): a
 #        line it prints that looks like the probe's old status line is its
 #        output, so `__rc=0` before exit 1 is still a failure (HC-2's fake),

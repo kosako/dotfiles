@@ -467,8 +467,9 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   出さないこと。`/` で終わる値は名前が残らないので unknown になること。
 - global gitignore(#248): managed file を git が読んでいれば ok / 不在は `mkdir -p` → `chezmoi apply` の action /
   `core.excludesFile`(global、または system だけの設定)や `XDG_CONFIG_HOME` で別の file に振り替わっていれば
-  warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視。`XDG_CONFIG_HOME` が `~/.config//` や `~/.config` への symlink なら同じ
-  file として ok、#309)/ 明示的な空値は「global excludes を読まない」warn /
+  warn(`GIT_CONFIG_NOSYSTEM=1` なら system の値は無視。`XDG_CONFIG_HOME` が `~/.config` への symlink なら同じ file として
+  ok。`~/.config//` のような末尾の `/` は全部落として managed の path になること。file がある間は `-ef` がこの綴りも同じ file と
+  見るので、doctor の run ではなく `git_default_excludes_file` を直接確かめる。#309)/ 明示的な空値は「global excludes を読まない」warn /
   config が読めなければ「不明」の warn / pattern 行の欠落は drift の action / work は not managed。どの run も
   `env -i` で hermetic。
 - git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling。
@@ -495,7 +496,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   module 除去の dangling。fake herdr は ok・fail・hang・interrupt・ok-nonl の mode を持つ。
 - herdr config(#261): PATH 先頭の fake herdr で `herdr config check` の exit を決め、`__rc=0` などの行を出してから
   失敗しても終了状態として読まれないこと(#335)、present + exit 0 → ok /
-  exit 1 → action / missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
+  exit 1 → action(stdout に何も出さない失敗も同じ。probe は stderr を捨てるので、診断を stderr に出す check はこの形で届く。
+  「答えが無い」は期限内に終わらない check だけ)/ missing → `mkdir -p` → `chezmoi apply` の連続 2 step の action / `HERDR_CONFIG_PATH`(別 file・
   空値)と `XDG_CONFIG_HOME`(別 dir・空値)の振り替え → warn で、present なら検証しない(fake は exit 1 を返すので、
   走れば action が出る)、missing なら redirect warn と「既定値」と断定しない missing action の両方 /
   `XDG_CONFIG_HOME=~/.config/`(末尾 `/`)と `~/.config` への symlink(`-ef`、#307)は同じ file 扱い / work → not managed。どの run も
