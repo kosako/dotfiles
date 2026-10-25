@@ -2304,15 +2304,25 @@ op_elapsed=$((SECONDS - op_started))
 sleep 0.5
 op_left="$("$op_real_pgrep" -f "^sleep $op_respawn_sleep\$" || true)"
 op_sync="$(cat "$op_fakebin/sync" 2>/dev/null || true)"
-if [[ "$op_rc" -eq 0 && -s "$op_fakebin/op.pid" && "$op_sync" == stopped && -z "$op_left" ]] \
-  && (( op_elapsed < 45 )) && grep -Fxq "$op_unchecked" <<< "$op_out" \
-  && ! grep -Fq "$op_signed_in" <<< "$op_out" && ! grep -Fq "$op_signed_out" <<< "$op_out" \
-  && grep -Fq "== SSH (1Password agent) ==" <<< "$op_out" \
-  && ! grep -Fq "kill_tree:" <<< "$op_out"; then
+# Each condition that fails is named in the message, so a failure points at
+# its own cause (an extra verdict, or doctor stopping after the deadline,
+# is not read as a hold that did not end as stopped).
+op_why=""
+[[ "$op_rc" -eq 0 ]] || op_why+="; doctor exited $op_rc"
+[[ -s "$op_fakebin/op.pid" ]] || op_why+="; the fake op never ran"
+[[ "$op_sync" == stopped ]] || op_why+="; the hold ended as '${op_sync:-never asked}' instead of stopped"
+[[ -z "$op_left" ]] || op_why+="; the respawning probe left a process behind ($op_left)"
+(( op_elapsed < 45 )) || op_why+="; doctor took ${op_elapsed}s (45s or more)"
+grep -Fxq "$op_unchecked" <<< "$op_out" || op_why+="; the not-checked verdict is missing"
+grep -Fq "$op_signed_in" <<< "$op_out" && op_why+="; also reported as signed in"
+grep -Fq "$op_signed_out" <<< "$op_out" && op_why+="; also reported as not signed in"
+grep -Fq "== SSH (1Password agent) ==" <<< "$op_out" || op_why+="; doctor did not go on to the SSH section"
+grep -Fq "kill_tree:" <<< "$op_out" && op_why+="; kill_tree warned"
+if [[ -z "$op_why" ]]; then
   ok "test passed: an op whoami with no answer is killed at the deadline (${op_elapsed}s), reported as not checked, doctor continues, and a probe that starts its next command when one ends leaves nothing behind"
 else
   printf '%s\n' "$op_out" >&2
-  fail "test failed: the respawning probe left a process behind (${op_left:-none}), the hold ended as '${op_sync:-never asked}' instead of stopped, or doctor did not report it as the single not-checked verdict and go on to the next section (rc=$op_rc, ${op_elapsed}s)"
+  fail "test failed: an op whoami with no answer (rc=$op_rc, ${op_elapsed}s): ${op_why#; }"
   status=1
   [[ -z "$op_left" ]] || kill $op_left 2>/dev/null || true
   # A cleanup that never reached the fake op leaves it looping on the
