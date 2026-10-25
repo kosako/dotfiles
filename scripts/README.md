@@ -578,11 +578,13 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   呼び出しを記録し、doctor が tool を実行しないこと(記録の不在)も pin。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
-  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、symlink の `default.rules` は
-  baseline 無効として warn、読めない rules dir は INCOMPLETE(#316)、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
+  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、通常の file の `default.rules` は
+  管理された baseline の ok と、clean の ok の「read-only baseline holding」、symlink の `default.rules` は baseline 無効として warn、読めない rules dir は INCOMPLETE(#316)、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
   取り出す(値は出さない、#309)。正当な書き方(`[projects]` table・inline table・dotted / quote / escape を含む key・
   複数行文字列)は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key が空か制御文字を含む、
-  のときだけ INCOMPLETE(0 件とは言わない)。
+  のときだけ INCOMPLETE(0 件とは言わない)。whole-home と stale の trust は action の手順の行まで確かめる。trust の書き方の case と、
+  codex の結果の形の case は、doctor.sh から取り出した監視の関数を `set -euo pipefail` の別の bash で走らせて確かめ(exit 0 も含めて)、
+  personal の report への配線・probe の集合の pin・engine の失敗は doctor 全体の run で確かめる。
 - Claude の project 級の allow(#334): 専用の fixture HOME で、`:*` が引数なしに一致、floor の deny / ask と project 自身の ask が allow に勝つ、
   `Bash` 単体(先頭 5 本と残りの件数)、rule の途中の `*`、regex の文字は文字どおり(`sudo.*` は `sudo -v` に一致しない)、
   旧式の `:*` の前の `*` は展開されない(`gh *:*` は何にも一致しない)、`/**/` は 0 個以上の dir、旧式の prefix は空白の連続を

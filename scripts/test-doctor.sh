@@ -3909,6 +3909,15 @@ case ",${CODEX_FAKE_ALLOWS:-}," in
 esac
 SH
 chmod +x "$codex_fakebin/codex"
+# aip_run [VAR=VALUE...] — one personal doctor run on the fixture HOME with the
+# fake codex in front of PATH and the given env (a later HOME= / PATH= wins):
+# the output in aip_out, the exit status in aip_rc, so a run that does not
+# exit 0 is reported with its status, not as a line missing (#378).
+aip_run() {
+  aip_rc=0
+  aip_out="$(env HOME="$fixture_home" PATH="$codex_fakebin:$PATH" "$@" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" || aip_rc=$?
+}
 # The rules file content is irrelevant to the fake (doctor must not read it) —
 # plant a canary to pin exactly that: a secret-looking string inside a rule
 # line must never reach doctor output.
@@ -3938,96 +3947,31 @@ trust_level = "untrusted"
 [projects."$fixture_home/real-project"]
 trust_level = "trusted"
 TOML
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token,env,op read op://example/item/field,security -q find-generic-password -s example.invalid -w" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status --show-token'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status -t'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth token'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'env'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'op read op://example/item/field'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'security -q find-generic-password -s example.invalid -w'" <<< "$aip_out" \
-    && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
-    && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
-    && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
-    && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_RULES_LEAK_a71c" <<< "$aip_out"; then
-    ok "test passed: allowed probes warned by name, trusted whole-home (compact TOML) + trusted stale (single-quoted) warned, untrusted entry ignored, contents never echoed"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: Codex permission-surface watch (probes/projects trust) not reported as expected"
-    status=1
-  fi
+aip_run CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token,env,op read op://example/item/field,security -q find-generic-password -s example.invalid -w"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "Codex permission surface" "$aip_rc" "$aip_out"
+elif grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status --show-token'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status -t'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth token'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'env'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'op read op://example/item/field'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'security -q find-generic-password -s example.invalid -w'" <<< "$aip_out" \
+  && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
+  && grep -Fxq "        edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)" <<< "$aip_out" \
+  && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
+  && grep -Fxq "        edit ~/.codex/config.toml: remove the project entry for this path" <<< "$aip_out" \
+  && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
+  && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_RULES_LEAK_a71c" <<< "$aip_out"; then
+  ok "test passed: allowed probes warned by name, trusted whole-home (compact TOML) + trusted stale (single-quoted) warned with their remedy steps, untrusted entry ignored, contents never echoed"
 else
   printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (Codex permission surface)"
+  fail "test failed: Codex permission-surface watch (probes/projects trust) not reported as expected"
   status=1
 fi
-
-# AIP-H) Project headers (#292): both quoted key forms, optional whitespace
-# and trailing comments must preserve the path; unsupported headers make the
-# entire scan INCOMPLETE, even if an earlier entry was parsed successfully.
-cat > "$fixture_home/.codex/config.toml" <<TOML
-[projects.'$fixture_home' ] # whole-home grant
-trust_level = "trusted"
-TOML
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
-  && grep -Fq "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)" <<< "$aip_out" \
-  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
-  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
-  ok "test passed: single-quoted project header reports the whole-home action (exit 0)"
-else
-  fail "test failed: single-quoted project header must report the whole-home action (exit 0)"
-  status=1
-fi
-
-cat > "$fixture_home/.codex/config.toml" <<TOML
-[projects."$fixture_home/real-project"] # CANARY_HEADER_COMMENT_292
-trust_level = "trusted"
-[mcp_servers.fake.env]
-FAKE_TOKEN = "CANARY_HEADER_ENV_292"
-TOML
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
-  && ! grep -Fq "stale Codex projects trust" <<< "$aip_out" \
-  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
-  && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
-  ok "test passed: commented project header counts a real trusted path without stale warnings or value leaks (exit 0)"
-else
-  fail "test failed: commented project header must count the real path without stale warnings or value leaks (exit 0)"
-  status=1
-fi
-
-# Headers that are TOML syntax errors make the whole file unreadable: INCOMPLETE.
-# (Valid spellings such as [projects.bare] are counted — see the trust form
-# cases below.)
-for aip_header in "[projects.'/path' trailing]" '[projects."/path"] trailing'; do
-  cat > "$fixture_home/.codex/config.toml" <<TOML
-[projects."$fixture_home/real-project"]
-trust_level = "trusted"
-$aip_header
-trust_level = "trusted"
-[mcp_servers.fake.env]
-FAKE_TOKEN = "CANARY_HEADER_ENV_292"
-TOML
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
-    && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
-    && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
-    ok "test passed: a header that is a TOML syntax error reports INCOMPLETE without a trusted count (exit 0): $aip_header"
-  else
-    fail "test failed: a header that is a TOML syntax error must report INCOMPLETE without a trusted count (exit 0): $aip_header"
-    status=1
-  fi
-done
 
 # The scan reads config.toml with a TOML parser (yq, #309), so every valid
 # spelling of a project table counts as TOML says — a [projects] table,
@@ -4036,18 +3980,29 @@ done
 # string or an array, a trusted key with a control character) is INCOMPLETE,
 # never "0 trusted". Each case writes the whole config line by line (printf
 # '%s\n', so a TOML escape such as j stays literal), with a real trusted
-# project and an MCP env canary that must never be printed.
+# project and an MCP env canary that must never be printed. The cases run
+# the watch alone: report_codex_projects_trust, taken from doctor.sh, in a
+# bash of its own under set -euo pipefail (doctor runs it under errexit, so
+# it must return 0 there too). The main AIP case and AIP-2 stay full doctor
+# runs, which pin the watch's wiring into the personal report and the exit 0
+# of the whole run.
 aip_real_header="[projects.\"$fixture_home/real-project\"]"
 aip_bs='\'   # one backslash: the escape cases spell TOML escapes (u006a = j) with it
+aip_trust_fn="$(sed -n '/^report_codex_projects_trust() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+if [[ -z "$aip_trust_fn" ]]; then
+  fail "test failed: report_codex_projects_trust not found in doctor.sh"
+  status=1
+fi
 # aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
+# Skipped (after the failure above) when the watch was not found.
 aip_trust_case() {
   local label="$1" expect="$2"
   shift 2
+  [[ -n "$aip_trust_fn" ]] || return 0
   printf '%s\n' "$@" '[mcp_servers.fake.env]' 'FAKE_TOKEN = "CANARY_FORM_ENV_309"' \
     > "$fixture_home/.codex/config.toml"
   local rc=0
-  aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" || rc=$?
+  aip_out="$(HOME="$fixture_home" bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_projects_trust' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_trust_fn" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     doctor_exit_fail "trust form: $label" "$rc" "$aip_out"
   elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
@@ -4120,7 +4075,7 @@ aip_trust_case "multi-line string closed by four quotes inside an array" 1 \
 aip_trust_case "escaped quotes in a multi-line array value" 1 \
   'notify = [' '  "sh",' '  "-c",' "  \"printf '%s' ${aip_bs}\"done${aip_bs}\"\"," ']' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "backslash in a header comment" 1 \
-  "$aip_real_header # C:${aip_bs}work" 'trust_level = "trusted"'
+  "$aip_real_header # C:${aip_bs}work CANARY_FORM_COMMENT" 'trust_level = "trusted"'
 aip_trust_case "escape in another table's name" 1 \
   "[mcp_servers.\"demo${aip_bs}u002dserver\"]" 'command = "x"' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "backslash in a literal header and in a value" 2 \
@@ -4143,9 +4098,11 @@ aip_trust_case "a trusted key with a control character" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/a${aip_bs}nb\"]" 'trust_level = "trusted"'
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
-#        line (with the probe count), no warns from this watch. The shim log
-#        pins the EXACT probe set (policy-derived contract): a probe silently
-#        dropped from doctor.sh fails this test (coverage regression guard).
+#        lines (with the probe count) name the managed baseline and say it is
+#        holding (the counterpart of AIP-6b's NOT-in-effect case), no warns
+#        from this watch. The shim log pins the EXACT probe set
+#        (policy-derived contract): a probe silently dropped from doctor.sh
+#        fails this test (coverage regression guard).
 cat > "$fixture_home/.codex/config.toml" <<TOML
 [projects."$fixture_home/real-project"]
 trust_level = "trusted"
@@ -4153,10 +4110,12 @@ TOML
 aip_probe_log="$fixture_home/.codex-probe-log"
 : > "$aip_probe_log"
 expected_probes=$'curl https://example.invalid\nenv\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nop item get example\nop read op://example/item/field\nprintenv\nsecurity -q find-generic-password -s example.invalid -w\nsecurity dump-keychain\nsecurity export -k login.keychain\nsecurity find-generic-password -s example.invalid -w\nsecurity find-internet-password -s example.invalid -w\nsudo -v\nwget https://example.invalid'
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "Codex permission surface, clean" "$aip_rc" "$aip_out"
+else
+  if grep -Fxq "[ok] Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)" <<< "$aip_out" \
+    && grep -Fxq "[ok] no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (39 probes over 1 rules file(s) via codex execpolicy; read-only baseline holding)" <<< "$aip_out" \
     && grep -Fq "1 path(s) trusted" <<< "$aip_out" \
     && ! grep -Fq "outward/escalation/credential-display probe auto-allowed" <<< "$aip_out" \
     && ! grep -Fq "WHOLE home directory" <<< "$aip_out" \
@@ -4174,36 +4133,42 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     fail "test failed: outward/escalation/credential-display probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"
     status=1
   fi
-else
-  printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (Codex permission surface, clean)"
-  status=1
 fi
 
 # AIP-3) Engine-evaluation failure (codex execpolicy exits 1 — broken rules
 #        file, incompatible codex): the scan must surface INCOMPLETE and must
 #        NOT emit the clean ok (a failure that reads as clean is the fail-open
 #        false-clean the review flagged). doctor stays exit 0 (report-only).
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="" CODEX_FAKE_MODE="fail" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
-    ok "test passed: probe-evaluation failure reports scan INCOMPLETE and suppresses the clean ok (no fail-open false-clean)"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: probe-evaluation failure did not surface as INCOMPLETE (or still claimed clean)"
-    status=1
-  fi
+aip_run CODEX_FAKE_ALLOWS="" CODEX_FAKE_MODE="fail"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "probe-evaluation failure" "$aip_rc" "$aip_out"
+elif grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: probe-evaluation failure reports scan INCOMPLETE and suppresses the clean ok (no fail-open false-clean)"
 else
   printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (probe-evaluation failure)"
+  fail "test failed: probe-evaluation failure did not surface as INCOMPLETE (or still claimed clean)"
   status=1
 fi
 # AIP-4) Interpret the effective decision, not a nested rule match (#210).
 # Invalid JSON and unknown result shapes must remain report-only INCOMPLETE.
+# As with the trust forms, each result shape runs the probe loop alone:
+# report_codex_rules_probes and the two probe lists it reads, taken from
+# doctor.sh, in a bash of its own under set -euo pipefail with the fake codex
+# in front of PATH (it must return 0 there too). AIP-2 keeps the full run
+# that pins the probe set and the wiring. Skipped (after a failure) when one
+# of the three is not found.
+aip_probe_fns="$(sed -n '/^outward_probe_commands=(/,/^)$/p; /^secret_read_probe_commands=(/,/^)$/p; /^report_codex_rules_probes() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+if [[ "$aip_probe_fns" != *"outward_probe_commands=("* \
+  || "$aip_probe_fns" != *"secret_read_probe_commands=("* \
+  || "$aip_probe_fns" != *"report_codex_rules_probes() {"* ]]; then
+  fail "test failed: outward_probe_commands / secret_read_probe_commands / report_codex_rules_probes not found in doctor.sh"
+  status=1
+  aip_probe_fns=""
+fi
 aip_result="$fixture_home/.codex-result"
 for aip_case in forbidden prompt pretty-allow malformed empty unknown missing null-decision non-object; do
+  [[ -n "$aip_probe_fns" ]] || break
   case "$aip_case" in
     forbidden|prompt)
       printf '{"decision":"%s","matchedRules":[{"decision":"allow"}]}\n' "$aip_case" > "$aip_result"
@@ -4225,8 +4190,12 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
       aip_expected="incomplete"
       ;;
   esac
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-      CODEX_FAKE_RESULT="$aip_result" "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  aip_rc=0
+  aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_RESULT="$aip_result" \
+    bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_rules_probes' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_probe_fns" 2>&1)" || aip_rc=$?
+  if [[ "$aip_rc" -ne 0 ]]; then
+    doctor_exit_fail "Codex result $aip_case" "$aip_rc" "$aip_out"
+  else
     aip_actual="unexpected"
     if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out"; then
       aip_actual="incomplete"
@@ -4242,8 +4211,6 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
       fail "test failed: Codex result $aip_case expected $aip_expected, got $aip_actual"
       status=1
     fi
-  else
-    doctor_exit_fail "Codex result $aip_case" "$?" "$aip_out"
   fi
 done
 rm -f "$aip_result"
@@ -4276,10 +4243,11 @@ ln -s "$aip_rules_dir/extra.rules" "$aip_rules_dir/link.rules"
 printf '%s\0' ".hidden.rules" "..rules" "default.rules" "$aip_evil_name" "extra.rules" "$aip_nl_name" \
   | LC_ALL=C sort -z > "$aip_rules_expected"
 : > "$aip_rules_log"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
-    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+aip_run CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+  CODEX_FAKE_RULES_LOG="$aip_rules_log"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "unmanaged Codex rules files" "$aip_rc" "$aip_out"
+else
   aip_unmanaged_prefix="unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/"
   if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
     && grep -Fq "${aip_unmanaged_prefix}extra.rules " <<< "$aip_out" \
@@ -4306,15 +4274,12 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     fail "test failed: rules-file set passed to codex execpolicy differs from what Codex loads"
     status=1
   fi
-else
-  printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (unmanaged Codex rules files)"
-  status=1
 fi
 # Same tree, nothing allowed: the clean ok counts the files it probed.
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "probes over 6 rules file(s) via codex execpolicy" <<< "$aip_out"; then
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "unmanaged Codex rules files, clean" "$aip_rc" "$aip_out"
+elif grep -Fq "probes over 6 rules file(s) via codex execpolicy" <<< "$aip_out"; then
   ok "test passed: the clean ok reports the number of rules files probed"
 else
   printf '%s\n' "$aip_out" >&2
@@ -4330,28 +4295,25 @@ rm -rf "${aip_rules_dir:?}/extra.rules" "${aip_rules_dir:?}/.hidden.rules" "${ai
 #        not in effect: warn, and do not pass it to the engine (no clean ok).
 mv "$aip_rules_dir/default.rules" "$fixture_home/.codex/default.rules.real"
 ln -s "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "Codex approval-rules baseline is a symlink" <<< "$aip_out" \
-    && ! grep -Fq "Codex approval-rules baseline managed" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
-    ok "test passed: a symlinked default.rules is warned as not in effect and is not probed"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: symlinked default.rules not reported as not in effect"
-    status=1
-  fi
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "symlinked default.rules" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex approval-rules baseline is a symlink" <<< "$aip_out" \
+  && ! grep -Fq "Codex approval-rules baseline managed" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: a symlinked default.rules is warned as not in effect and is not probed"
 else
   printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (symlinked default.rules)"
+  fail "test failed: symlinked default.rules not reported as not in effect"
   status=1
 fi
 # Same symlinked baseline beside a (clean) sibling file: the sibling is still
 # probed, and the clean ok must not claim the baseline is holding.
 : > "$aip_rules_dir/extra.rules"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "probes over 1 rules file(s) via codex execpolicy; the managed baseline is NOT in effect)" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "symlinked default.rules beside a sibling" "$aip_rc" "$aip_out"
+elif grep -Fq "probes over 1 rules file(s) via codex execpolicy; the managed baseline is NOT in effect)" <<< "$aip_out" \
   && ! grep -Fq "read-only baseline holding" <<< "$aip_out"; then
   ok "test passed: with the baseline not in effect, the clean ok over a sibling file does not claim the baseline is holding"
 else
@@ -4366,9 +4328,10 @@ mv "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
 #        the scan is INCOMPLETE, never clean. Skipped as root (root reads it).
 if [[ "$(id -u)" != "0" ]]; then
   chmod 000 "$aip_rules_dir"
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+  aip_run CODEX_FAKE_ALLOWS=""
+  if [[ "$aip_rc" -ne 0 ]]; then
+    doctor_exit_fail "unreadable rules dir" "$aip_rc" "$aip_out"
+  elif grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
     && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
     ok "test passed: an unreadable rules dir reports the scan INCOMPLETE (no false clean)"
   else
@@ -4386,11 +4349,11 @@ mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 ln -s "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 printf 'prefix_rule(pattern=["git", "push"], decision="allow")\n' > "$fixture_home/.codex/rules-real/extra.rules"
 : > "$aip_rules_log"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
-    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+  CODEX_FAKE_RULES_LOG="$aip_rules_log"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "symlinked rules dir" "$aip_rc" "$aip_out"
+elif grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
   && grep -Fq "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/extra.rules " <<< "$aip_out" \
   && [[ "$(LC_ALL=C sort -z -u "$aip_rules_log" | tr '\0' '\n')" == $'default.rules\nextra.rules' ]]; then
   ok "test passed: a symlinked rules dir is followed (its files are probed and named)"
@@ -4416,9 +4379,10 @@ esac
 exec "$aip_real_find" "\$@"
 SH
 chmod +x "$aip_findbin/find"
-if aip_out="$(HOME="$fixture_home" PATH="$aip_findbin:$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
+aip_run PATH="$aip_findbin:$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "rules listing failing after partial output" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
   && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
   ok "test passed: a listing that fails after partial output reports the scan INCOMPLETE (no subset read as clean)"
 else
@@ -4432,9 +4396,10 @@ rm -rf "${aip_findbin:?}"
 #         rules dir, so the scan is INCOMPLETE, never "not applied" or clean.
 mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 : > "$aip_rules_dir"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "non-directory rules path" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
   && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
   ok "test passed: a non-directory rules path reports the scan INCOMPLETE"
 else
@@ -4445,50 +4410,29 @@ fi
 rm -f "$aip_rules_dir"
 mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 
-# AIP-11) Only a confirmed absence is "no rules": ~/.codex/rules a symlink into
+# AIP-13) Only a confirmed absence is "no rules": ~/.codex/rules a symlink into
 #         a parent without search permission is a read error for Codex, so it
 #         must be INCOMPLETE — `test -e` alone would call it absent and report
-#         only "not applied yet". Skipped as root.
-if [[ "$(id -u)" != "0" ]]; then
-  mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
-  mkdir -p "$fixture_home/locked-parent"
-  mv "$fixture_home/.codex/rules-real" "$fixture_home/locked-parent/rules"
-  ln -s "$fixture_home/locked-parent/rules" "$aip_rules_dir"
-  chmod 000 "$fixture_home/locked-parent"
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
-    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
-    ok "test passed: a rules dir behind an unsearchable parent is INCOMPLETE, not absent"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: an unresolvable rules dir was read as absent"
-    status=1
-  fi
-  chmod 755 "$fixture_home/locked-parent"
-  rm -f "$aip_rules_dir"
-  mv "$fixture_home/locked-parent/rules" "$aip_rules_dir"
-  rmdir "$fixture_home/locked-parent"
-fi
-
-# AIP-13) The absence test matches the strerror at the END of the message
-#         only: a HOME whose path contains "No such file or directory" must
-#         not turn a permission error into "absent". Skipped as root.
+#         only "not applied yet". The absence test matches the strerror at the
+#         END of the message only, so the HOME here holds "No such file or
+#         directory" in its path: that must not turn the permission error into
+#         "absent" either. Skipped as root.
 if [[ "$(id -u)" != "0" ]]; then
   aip_odd_home="$fixture_home/odd: No such file or directory"
   mkdir -p "$aip_odd_home/.codex" "$aip_odd_home/locked-parent/rules"
   : > "$aip_odd_home/locked-parent/rules/default.rules"
   ln -s "$aip_odd_home/locked-parent/rules" "$aip_odd_home/.codex/rules"
   chmod 000 "$aip_odd_home/locked-parent"
-  if aip_out="$(HOME="$aip_odd_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
-    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out"; then
-    ok "test passed: a HOME containing the strerror words does not turn a permission error into absent"
+  aip_run HOME="$aip_odd_home" CODEX_FAKE_ALLOWS=""
+  if [[ "$aip_rc" -ne 0 ]]; then
+    doctor_exit_fail "rules dir behind an unsearchable parent, HOME holding the strerror words" "$aip_rc" "$aip_out"
+  elif grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: a rules dir behind an unsearchable parent is INCOMPLETE, not absent (also under a HOME containing the strerror words)"
   else
     printf '%s\n' "$aip_out" >&2
-    fail "test failed: a permission error under a HOME containing the strerror words was read as absent"
+    fail "test failed: an unresolvable rules dir was read as absent (HOME containing the strerror words)"
     status=1
   fi
   chmod 755 "$aip_odd_home/locked-parent"
@@ -4499,9 +4443,10 @@ fi
 #         NotFound -> no rules): "not applied yet", not INCOMPLETE.
 mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 ln -s "$fixture_home/.codex/rules-gone" "$aip_rules_dir"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "dangling rules dir symlink" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
   && ! grep -Fq "Codex rules dir could not be" <<< "$aip_out"; then
   ok "test passed: a dangling rules dir symlink is a confirmed absence (not applied, not INCOMPLETE)"
 else
