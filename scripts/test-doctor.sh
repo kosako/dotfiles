@@ -1231,10 +1231,9 @@ else
   status=1
 fi
 
-# CO) the capabilities whose off branch is one report line of its own section,
-#     flipped off together in one copy for one doctor run (none is a module
-#     `requires`, so the flips do not interact; each section reads only its
-#     own capability). doctor stays exit 0 (report-only):
+# CO) the capabilities whose off branch is one report line of its own section
+#     (none is a module `requires`, so the flips do not interact). doctor
+#     stays exit 0 (report-only):
 #     - gateUnusedClaudeMcp (P1) and enableToolCallRecordHook (P1b): the
 #       declared-off state.
 #     - enableDirenv (DR, #401): the report says the check is skipped and that
@@ -1248,37 +1247,81 @@ fi
 #       opening fixture's session data, ~/.codex is made here as QL-d had
 #       it), so the absence is confirmed through the parent in both homes;
 #       QL-f7 is the contrast with the parent missing or not a directory.
+#     Three runs on one copy, each setting all five. Committed personal has
+#     all five true, so one run with all five off could not tell a section
+#     that reads another of them from one that reads its own. Here every
+#     capability is off in some run and no two are on and off in the same
+#     runs, so such a section shows its off line in a run where it must not,
+#     or misses it in one where it must. Each run checks that the off lines
+#     are there exactly for the capabilities it sets off; each capability's
+#     own assertions run on the first run that sets it off.
+#       capability                CO-1  CO-2  CO-3
+#       gateUnusedClaudeMcp       off   on    on
+#       enableToolCallRecordHook  on    off   on
+#       enableDirenv              on    on    off
+#       gateGitHubMcp             off   off   on
+#       enableQualityLoopHooks    off   on    off
 caps_off_root="$fixture_home/.dotfiles-caps-off"
 copy_repo_fixture "$caps_off_root"
-for caps_off_cap in gateUnusedClaudeMcp enableToolCallRecordHook enableDirenv gateGitHubMcp enableQualityLoopHooks; do
-  set_capability_all "$caps_off_root" "$caps_off_cap" false
-done
 mkdir -p "$fixture_home/.codex"
-caps_off_rc=0
-caps_off_out="$(HOME="$fixture_home" "$caps_off_root/scripts/doctor.sh" personal 2>&1)" || caps_off_rc=$?
-if [[ "$caps_off_rc" -ne 0 ]]; then
-  doctor_exit_fail "capabilities flipped off" "$caps_off_rc" "$caps_off_out"
-else
+caps_off_caps=(gateUnusedClaudeMcp enableToolCallRecordHook enableDirenv gateGitHubMcp enableQualityLoopHooks)
+# caps_off_line CAP — the text CAP's section prints only when CAP is false.
+caps_off_line() {
+  case "$1" in
+    enableDirenv) printf '%s' "direnv check skipped for profile (enableDirenv=false" ;;
+    enableQualityLoopHooks) printf '%s' "quality loop hooks not wired (enableQualityLoopHooks=false)" ;;
+    *) printf '%s' "$1 not active (false)" ;;
+  esac
+}
+# caps_off_run RUN OFF_CAP... — set the OFF_CAPs false and the rest of the
+# five true in the copy, run doctor personal into caps_off_out, and check
+# that the off lines are there exactly for the OFF_CAPs. Returns non-zero
+# when doctor did not exit 0, so the caller skips its assertions.
+caps_off_run() {
+  local run="$1" cap value miss=""
+  shift
+  for cap in "${caps_off_caps[@]}"; do
+    value=true
+    case " $* " in *" $cap "*) value=false ;; esac
+    if ! set_capability_all "$caps_off_root" "$cap" "$value"; then
+      fail "test failed: $run: could not set $cap=$value in the copy"
+      status=1
+      return 1
+    fi
+  done
+  caps_off_rc=0
+  caps_off_out="$(HOME="$fixture_home" "$caps_off_root/scripts/doctor.sh" personal 2>&1)" || caps_off_rc=$?
+  if [[ "$caps_off_rc" -ne 0 ]]; then
+    doctor_exit_fail "$run, off: $*" "$caps_off_rc" "$caps_off_out"
+    return 1
+  fi
+  for cap in "${caps_off_caps[@]}"; do
+    case " $* " in
+      *" $cap "*)
+        grep -Fq -- "$(caps_off_line "$cap")" <<< "$caps_off_out" \
+          || miss="${miss}set off, but no off line: $cap"$'\n'
+        ;;
+      *)
+        if grep -Fq -- "$(caps_off_line "$cap")" <<< "$caps_off_out"; then
+          miss="${miss}left on, but its off line is shown: $cap"$'\n'
+        fi
+        ;;
+    esac
+  done
+  if [[ -z "$miss" ]]; then
+    ok "test passed: $run (off: $*): each of the five sections follows its own capability"
+  else
+    printf '%s\n%s' "$caps_off_out" "$miss" >&2
+    fail "test failed: $run (off: $*): a section does not follow its own capability"
+    status=1
+  fi
+}
+if caps_off_run CO-1 gateUnusedClaudeMcp gateGitHubMcp enableQualityLoopHooks; then
   if grep -Fq "gateUnusedClaudeMcp not active (false)" <<< "$caps_off_out"; then
     ok "test passed: gateUnusedClaudeMcp=false reported as not active"
   else
     printf '%s\n' "$caps_off_out" >&2
     fail "test failed: gateUnusedClaudeMcp=false not reported"
-    status=1
-  fi
-  if grep -Fq "enableToolCallRecordHook not active (false)" <<< "$caps_off_out"; then
-    ok "test passed: enableToolCallRecordHook=false reported as not active"
-  else
-    printf '%s\n' "$caps_off_out" >&2
-    fail "test failed: enableToolCallRecordHook=false not reported"
-    status=1
-  fi
-  if grep -Fxq "[info] - direnv check skipped for profile (enableDirenv=false selects the check only; the shell hook still loads an allowed .envrc wherever direnv is installed)" <<< "$caps_off_out" \
-    && ! grep -Fq "direnv disabled" <<< "$caps_off_out"; then
-    ok "test passed: enableDirenv=false reports the skipped check and the hook that still runs, not direnv off"
-  else
-    printf '%s\n' "$caps_off_out" >&2
-    fail "test failed: enableDirenv=false must report the skipped check without saying direnv is off"
     status=1
   fi
   if grep -Fxq "[ok] gateGitHubMcp not active (false)" <<< "$caps_off_out" \
@@ -1295,6 +1338,25 @@ else
   else
     printf '%s\n' "$caps_off_out" >&2
     fail "test failed: enableQualityLoopHooks=false state not reported cleanly"
+    status=1
+  fi
+fi
+if caps_off_run CO-2 enableToolCallRecordHook gateGitHubMcp; then
+  if grep -Fq "enableToolCallRecordHook not active (false)" <<< "$caps_off_out"; then
+    ok "test passed: enableToolCallRecordHook=false reported as not active"
+  else
+    printf '%s\n' "$caps_off_out" >&2
+    fail "test failed: enableToolCallRecordHook=false not reported"
+    status=1
+  fi
+fi
+if caps_off_run CO-3 enableDirenv enableQualityLoopHooks; then
+  if grep -Fxq "[info] - direnv check skipped for profile (enableDirenv=false selects the check only; the shell hook still loads an allowed .envrc wherever direnv is installed)" <<< "$caps_off_out" \
+    && ! grep -Fq "direnv disabled" <<< "$caps_off_out"; then
+    ok "test passed: enableDirenv=false reports the skipped check and the hook that still runs, not direnv off"
+  else
+    printf '%s\n' "$caps_off_out" >&2
+    fail "test failed: enableDirenv=false must report the skipped check without saying direnv is off"
     status=1
   fi
 fi
