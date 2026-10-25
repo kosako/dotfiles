@@ -559,7 +559,9 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   clean の ok になる)。root では skip。
 - git hook gates の readiness(#307): module が active な profile で、配線 + deploy 4 本 → 全部 ok / 配線 + identity gate の
   欠けた旧 deploy、または実行 bit の無い gate → commit が止まる warn / 配線なし + dispatcher だけ → 両方が不完全の warn。
-  deploy script や shim の path が directory なら完了 / 配線済みと数えない(#392)。doctor の一覧が短くなれば落ちる。
+  deploy script や shim の path が directory なら完了 / 配線済みと数えない(#392)。shim が 1 本欠けても、directory や
+  実行 bit の無い shim でも、その shim を名指しで warn し、そろった ok を出さない。global `core.hooksPath` は `~` の形でも
+  絶対 path の形でも managed と数え、別の場所を指せば値を出さずに warn する(canary で pin)。doctor の一覧が短くなれば落ちる。
 - git hook gates の残置(#258): `enableGitHookGates=false` で配管が残るとき、module が active な personal では apply の
   action、非 active な work では実在する file だけを名指しした `rm -i` の手順と core.hooksPath の確認 / 何も無ければ
   not wired で action なし。

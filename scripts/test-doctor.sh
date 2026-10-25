@@ -1931,8 +1931,9 @@ hi_codex_ok="managed ~/.codex/hooks.json registers SessionStart -> herdr-agent-s
 hi_codex_note="(Codex: inert until a one-time /hooks trust; the installer also sets [features] hooks = true in codex-owned ~/.codex/config.toml, which dotfiles does not manage)"
 hi_unchecked="(version currency not checked: herdr integration status unavailable)"
 #     HI-a) no bodies installed -> both homes warn body-absent naming the
-#           install command (fail-open no-op); the scope item shows. Real
-#           PATH: the body-absent branch does not depend on herdr's answer.
+#           install command (fail-open no-op); the scope item shows. The
+#           suite's PATH, whose host-stub herdr exits 1 (#306): the
+#           body-absent branch does not depend on herdr's answer.
 if hi_out="$(HOME="$fixture_home" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body; run: herdr integration install claude) — fail-open no-op until installed" <<< "$hi_out" \
     && grep -Fq "managed ~/.codex/hooks.json registers the SessionStart hook but the body is absent or unreadable ($hi_codex_body; run: herdr integration install codex) — fail-open no-op until installed $hi_codex_note" <<< "$hi_out" \
@@ -1950,21 +1951,24 @@ else
 fi
 #     HI-b) both bodies present WITHOUT an exec bit (the registration runs
 #           them via bash, so a readable regular file is what counts) and
-#           herdr reports current -> both ok lines (Codex with its trust /
-#           config.toml honest-label).
+#           herdr reports current WITHOUT a trailing newline (fake mode
+#           `ok-nonl`: the unterminated last status line must still be seen
+#           and the answer adopted, no "unchecked") -> both ok lines (Codex
+#           with its trust / config.toml honest-label). A newline-terminated
+#           answer (mode `ok`) is adopted in HI-c, HI-e and HI-f.
 mkdir -p "$(dirname "$hi_claude_body")" "$(dirname "$hi_codex_body")"
 printf '#!/bin/sh\nexit 0\n' > "$hi_claude_body"
 printf '#!/bin/sh\nexit 0\n' > "$hi_codex_body"
 chmod 0644 "$hi_claude_body" "$hi_codex_body"
-write_fake_herdr_status "current (v9)" "current (v8)" ok
+write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
     && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out" \
     && ! grep -Fq "re-run: herdr integration install" <<< "$hi_out"; then
-    ok "test passed: herdr integration reported wired and current in both homes with non-executable bodies (Codex line carries the trust + config.toml caveats)"
+    ok "test passed: herdr integration reported wired and current in both homes with non-executable bodies and a status answer without a trailing newline (Codex line carries the trust + config.toml caveats)"
   else
     printf '%s\n' "$hi_out" >&2
-    fail "test failed: current herdr integration not reported as wired in both homes"
+    fail "test failed: current herdr integration (non-executable bodies, answer without a trailing newline) not reported as wired in both homes"
     status=1
   fi
 else
@@ -1972,27 +1976,14 @@ else
   fail "test failed: doctor must stay exit 0 (herdr integration, current)"
   status=1
 fi
-#     HI-b1) herdr answers without a trailing newline -> the status line must
-#            still be seen and the answer adopted (no "unchecked").
-write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
-if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
-    && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out"; then
-    ok "test passed: a herdr answer without a trailing newline is still adopted as current"
-  else
-    printf '%s\n' "$hi_out" >&2
-    fail "test failed: a herdr answer without a trailing newline was not adopted"
-    status=1
-  fi
-else
-  printf '%s\n' "$hi_out" >&2
-  fail "test failed: doctor must stay exit 0 (herdr integration, no trailing newline)"
-  status=1
-fi
-#     HI-b2) a directory at the body path must NOT count as present (a
-#            bare -x/-e probe would pass it).
+#     HI-b2) a directory at the Claude body path must NOT count as present (a
+#            bare -x/-e probe would pass it) although herdr answers current
+#            for it, and the Codex home must stay current (an absent body in
+#            one home must not cost the other its answer). Its own fake, not
+#            HI-b's left in place.
 rm -f "$hi_claude_body"
 mkdir -p "$hi_claude_body"
+write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body;" <<< "$hi_out" \
     && grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
@@ -2030,8 +2021,10 @@ else
 fi
 #     HI-d) herdr prints "current" lines but exits non-zero -> the output
 #           must be discarded: presence-only ok lines saying currency was
-#           not checked, never a "current". herdr absent from PATH (CI)
-#           takes the same branch by construction.
+#           not checked, never a "current". herdr absent from PATH leaves
+#           the status empty the same way, by construction (not run here:
+#           the host stub keeps herdr on PATH, #306; NA's herdr-absent case
+#           covers the work profile's pointer).
 write_fake_herdr_status "current (v9)" "current (v8)" fail
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "$hi_claude_ok $hi_unchecked" <<< "$hi_out" \
@@ -3104,10 +3097,12 @@ fi
 # HG) git hook gates readiness on a module-active profile (#307): the
 #     observer side of the two-key gate. Each case plants the agent-tools
 #     deploy (all four scripts, a subset, or one not executable) and the
-#     wiring (both shims + core.hooksPath at the managed shim directory, or
-#     nothing) in an own HOME and pins doctor's exact readiness lines — a
-#     deploy list cut short in doctor.sh (e.g. the dispatcher alone) would
-#     report a partial deploy as complete and fail here. Hermetic (env -i).
+#     wiring (a shim for every declared stage + core.hooksPath at the
+#     managed shim directory in its tilde or absolute form, with some shims
+#     broken or the hooksPath foreign, or nothing) in an own HOME and pins
+#     doctor's exact readiness lines — a deploy list cut short in doctor.sh
+#     (e.g. the dispatcher alone) would report a partial deploy as complete
+#     and fail here. Hermetic (env -i).
 hg_home="$fixture_home/hg-home"
 hg_deploy="$hg_home/.claude/agent-tools/scripts"
 hg_shims="$hg_home/.config/git-hook-gates/hooks"
@@ -3195,19 +3190,30 @@ hg_setup 1 "${hg_all[@]}"
 chmod 644 "$hg_deploy/personal-public-safety-gate"
 hg_expect "wired + a non-executable gate -> BLOCKED warning" -- \
   "$hg_wired_incomplete" ! "$hg_complete"
-# HG-3b) a searchable directory is not a deployed script, even with -x.
+# HG-3b) a searchable directory is not a deployed script, even with -x;
+#        core.hooksPath in its absolute form is the managed directory too.
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_deploy/personal-public-safety-gate"
 mkdir "$hg_deploy/personal-public-safety-gate"
-hg_expect "wired + a directory gate -> BLOCKED warning" -- \
+printf '[core]\n\thooksPath = %s\n' "$hg_shims" > "$hg_home/.gitconfig"
+hg_expect "wired (absolute hooksPath) + a directory gate -> BLOCKED warning" -- \
+  "[ok] global core.hooksPath -> managed shim directory" \
   "$hg_wired_incomplete" ! "$hg_complete"
-# HG-3c) a directory at a shim path must not count as wired.
+# HG-3c) a directory at a shim path must not count as wired (searchable, so
+#        -x alone would pass it), nor a shim without its execute bit; a
+#        core.hooksPath that points elsewhere is warned, its value never shown.
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_shims/pre-push"
 mkdir "$hg_shims/pre-push"
-hg_expect "a directory shim -> wiring incomplete" -- \
+chmod 644 "$hg_shims/post-merge"
+hg_canary="canary-hookspath-5c2a"
+printf '[core]\n\thooksPath = /elsewhere/%s/hooks\n' "$hg_canary" > "$hg_home/.gitconfig"
+hg_expect "a directory shim, a non-executable shim and a foreign hooksPath -> each named" -- \
   "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
-  ! "shims present and executable: all"
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/post-merge (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  "[warn] global core.hooksPath points somewhere else (value not shown); the managed gates are NOT on the commit path" \
+  "$hg_complete" \
+  ! "shims present and executable: all" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit" "$hg_canary"
 # HG-4) nothing wired + the dispatcher alone -> both halves incomplete.
 hg_setup 0 personal-git-hook-dispatcher
 hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- \
@@ -3590,15 +3596,28 @@ rm -rf "$op_home" "$op_fakebin" "$op_ran"
 #     is repeated once, numbered, at the end of the run with its steps, and
 #     `--actions-only` prints just that list. doctor stays exit 0 (report-
 #     only) and writes no file. Fixture: a fresh empty HOME with the
-#     committed repo (personal) — it always yields a few actions (identity
-#     files, drift is skipped without chezmoi state, ...); the assertions
-#     are structural (count = numbered lines, each with >= 1 step line, the
-#     same list in both modes), so they do not pin which host-side warnings
-#     a given environment produces.
+#     committed repo (personal) and a fake chezmoi on PATH whose status
+#     reports two drifted targets — it always yields a few actions (identity
+#     files, the two drift lines, ...); the assertions are structural
+#     (count = numbered lines, each with >= 1 step line, the same list in
+#     both modes), so they do not pin which host-side warnings a given
+#     environment produces. The fake keeps the drift section the same with
+#     or without a host chezmoi (the not-initialized / not-found skips are
+#     DRIFT-B's).
 na_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na.XXXXXX")"
 mkdir -p "$na_home/src/personal"
+na_fakebin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na-fake.XXXXXX")"
+cat > "$na_fakebin/chezmoi" <<'SH'
+#!/bin/sh
+case "$1" in
+  --version) echo "chezmoi version v0.0.0-fake" ;;
+  status) printf '%s\n' " M .gitconfig" "MM .npmrc" ;;
+  *) exit 0 ;;
+esac
+SH
+chmod +x "$na_fakebin/chezmoi"
 #     NA-a) full run: summary section is last, count matches, steps present.
-if na_out="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if na_out="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   na_count="$(printf '%s\n' "$na_out" | sed -n 's/^\[info\] == next actions (\([0-9][0-9]*\)) ==$/\1/p')"
   na_numbered="$(printf '%s\n' "$na_out" | grep -c -E '^\[info\] [0-9]+\. ')"
   na_steps="$(printf '%s\n' "$na_out" | grep -c -E '^        [^ ]')"
@@ -3641,7 +3660,7 @@ fi
 #           same numbered list as the full run. (doctor itself writes no
 #           file; the tools it probes — npm, brew — keep their own caches
 #           under HOME, so "no file written" is not asserted on a fixture.)
-if na_only="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
+if na_only="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
   na_full_list="$(printf '%s\n' "$na_out" | sed -n '/^\[info\] == next actions (/,$p')"
   if [[ "$na_only" == "$na_full_list" ]] \
     && ! grep -q -E '^\[(ok|warn)\]' <<< "$na_only" \
@@ -3650,6 +3669,18 @@ if na_only="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>
   else
     printf '%s\n' "$na_only" >&2
     fail "test failed: --actions-only output differs from the full run's summary or leaked other lines"
+    status=1
+  fi
+  #     NA-b2) drift step path: a chezmoi status line with a single-column
+  #            status (" M x") must yield "~/x", not "~/M x" (the path
+  #            starts after the fixed two status columns + space).
+  if grep -F -q -- "        \$ chezmoi diff $na_home/.gitconfig   #" <<< "$na_only" \
+    && grep -F -q -- "        \$ chezmoi diff $na_home/.npmrc   #" <<< "$na_only" \
+    && ! grep -F -q -- "/M .gitconfig" <<< "$na_only"; then
+    ok "test passed: drift steps point at the path after the two status columns (' M x' -> ~/x)"
+  else
+    printf '%s\n' "$na_only" >&2
+    fail "test failed: drift step path extraction wrong"
     status=1
   fi
 else
@@ -3742,35 +3773,6 @@ if [[ "$na_nostep_rc" -eq 0 && "$na_nostep" == *$'[info] 2. no step\n[warn] empt
 else
   printf 'rc=%s\n%s\n' "$na_nostep_rc" "$na_nostep" >&2
   fail "test failed: report_actions must return 0 when the last action has no (or an empty last) step"
-  status=1
-fi
-#     NA-d2) drift step path: a chezmoi status line with a single-column
-#            status (" M x") must yield "~/x", not "~/M x" (the path starts
-#            after the fixed two status columns + space). Fake chezmoi on
-#            PATH so the drift section is deterministic.
-na_fakebin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na-fake.XXXXXX")"
-cat > "$na_fakebin/chezmoi" <<'SH'
-#!/bin/sh
-case "$1" in
-  --version) echo "chezmoi version v0.0.0-fake" ;;
-  status) printf '%s\n' " M .gitconfig" "MM .npmrc" ;;
-  *) exit 0 ;;
-esac
-SH
-chmod +x "$na_fakebin/chezmoi"
-if na_drift="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
-  if grep -F -q -- "        \$ chezmoi diff $na_home/.gitconfig   #" <<< "$na_drift" \
-    && grep -F -q -- "        \$ chezmoi diff $na_home/.npmrc   #" <<< "$na_drift" \
-    && ! grep -F -q -- "/M .gitconfig" <<< "$na_drift"; then
-    ok "test passed: drift steps point at the path after the two status columns (' M x' -> ~/x)"
-  else
-    printf '%s\n' "$na_drift" >&2
-    fail "test failed: drift step path extraction wrong"
-    status=1
-  fi
-else
-  printf '%s\n' "$na_drift" >&2
-  fail "test failed: doctor must stay exit 0 (drift steps)"
   status=1
 fi
 rm -rf "$na_fakebin"
