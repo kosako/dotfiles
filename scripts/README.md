@@ -425,11 +425,12 @@ throwaway destination に実 render し、生成された `~/.npmrc` の内容(h
 ## test-doctor.sh
 
 fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で doctor の各 section を
-検証する。実 home には触れない。op / herdr / codex / opencode は、冒頭で PATH の先頭に置く stub が受け、実機の tool は
-起動しない(#306)。stub は PATH 上に在り、実行すると記録して exit 1 になる(在るが使えない側の分岐。たとえば op は
-「not found」ではなく「サインインしていない」)。fake が
-要る section は、その前に自分の fake を置く。package manager(brew / npm など)は、software catalog の section が読み取りの
-query だけを実機で実行する(書き込みはしない)。
+検証する。実 home には触れない。op / herdr / codex / opencode と、package manager の brew / npm は、冒頭で PATH の先頭に
+置く stub が受け、実機の tool は起動しない(#306、#458)。stub は PATH 上に在り、実行すると記録して exit 1 になる(在るが
+使えない側の分岐。たとえば op は「not found」ではなく「サインインしていない」、software catalog と npm hardening は warn に
+なる)。brew と npm を stub にするのは、本物が fixture の HOME に書く(brew は新しい HOME ごとに formula の API を取って cache
+に書き、npm は log を書く)うえ、doctor の 1 回を倍近く遅くするため。fake が要る section(npm の NPM・DS など)は、その前に
+自分の fake を置く。
 
 ```sh
 ./scripts/test-doctor.sh
