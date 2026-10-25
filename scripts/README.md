@@ -452,8 +452,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   profile では orphan にならない / header 無しは対象外 / 宣言した file の祖先の directory の下に再帰しない(#174 / #207)。
 - managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は、chezmoi の config が無ければ
   「not initialized」の item で skip、あれば `chezmoi status` を示す action(#309)、config があり `TMPDIR` が dir でなければ
-  `TMPDIR` を挙げる action(#446。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
-  line 1 の managed-by header は ok、欠落は warn(#148)。
+  `TMPDIR` を挙げる action(#446。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない。
+  行が無ければ ok)し、line 1 の managed-by header は ok、欠落は warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
   warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ(不正 JSON は
   contract_version unknown として field を解釈しないことを、contract version 不一致と同じ sentinel の不在で pin、#332)/

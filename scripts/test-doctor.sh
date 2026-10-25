@@ -3928,7 +3928,9 @@ RULES
 # TOML spelling coverage (Codex review #187, round 2): the whole-home entry is
 # COMPACT (trust_level="trusted", no spaces) and one stale entry is single-
 # quoted — both valid TOML codex may write; missing either would undercount and
-# silently skip the home-trust warn.
+# silently skip the home-trust warn. The real project's header carries a
+# trailing comment with a canary (#292): the whole run must count that path
+# and never echo the comment.
 cat > "$fixture_home/.codex/config.toml" <<TOML
 approval_policy = "on-request"
 
@@ -3944,7 +3946,7 @@ trust_level = 'trusted'
 [projects."$fixture_home/gone-untrusted"]
 trust_level = "untrusted"
 
-[projects."$fixture_home/real-project"]
+[projects."$fixture_home/real-project"] # CANARY_HEADER_COMMENT_292
 trust_level = "trusted"
 TOML
 aip_run CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token,env,op read op://example/item/field,security -q find-generic-password -s example.invalid -w"
@@ -3965,6 +3967,7 @@ elif grep -Fq "outward/escalation/credential-display probe auto-allowed by live 
   && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
   && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
   && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out" \
   && ! grep -Fq "CANARY_RULES_LEAK_a71c" <<< "$aip_out"; then
   ok "test passed: allowed probes warned by name, trusted whole-home (compact TOML) + trusted stale (single-quoted) warned with their remedy steps, untrusted entry ignored, contents never echoed"
 else
@@ -3993,6 +3996,15 @@ if [[ -z "$aip_trust_fn" ]]; then
   fail "test failed: report_codex_projects_trust not found in doctor.sh"
   status=1
 fi
+# aip_fn_exit_fail FUNCTION LABEL RC OUTPUT — a watch function taken from
+# doctor.sh did not return 0 in its own bash: show its output and status, then
+# fail. Like doctor_exit_fail, but it names the function, since no doctor run
+# happens in these cases (the trust forms here, the result shapes in AIP-4).
+aip_fn_exit_fail() {
+  printf '%s\n' "$4" >&2
+  fail "test failed: $1 must return 0 under set -euo pipefail ($2): exited $3"
+  status=1
+}
 # aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
 # Skipped (after the failure above) when the watch was not found.
 aip_trust_case() {
@@ -4005,7 +4017,7 @@ aip_trust_case() {
   aip_out="$(HOME="$fixture_home" \
     bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_projects_trust' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_trust_fn" 2>&1)" || aip_rc=$?
   if [[ "$aip_rc" -ne 0 ]]; then
-    doctor_exit_fail "trust form: $label" "$aip_rc" "$aip_out"
+    aip_fn_exit_fail report_codex_projects_trust "trust form: $label" "$aip_rc" "$aip_out"
   elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
     fail "test failed: trust form $label leaked a config value"
     status=1
@@ -4195,7 +4207,7 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
   aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_RESULT="$aip_result" \
     bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_rules_probes' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_probe_fns" 2>&1)" || aip_rc=$?
   if [[ "$aip_rc" -ne 0 ]]; then
-    doctor_exit_fail "Codex result $aip_case" "$aip_rc" "$aip_out"
+    aip_fn_exit_fail report_codex_rules_probes "Codex result $aip_case" "$aip_rc" "$aip_out"
   else
     aip_actual="unexpected"
     if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out"; then
@@ -5457,10 +5469,10 @@ if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
   if grep -Fq "no drift: managed files match the source state" <<< "$dr_out" \
     && grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
     && grep -Fxq "[ok] npmrc carries no _authToken line" <<< "$dr_out"; then
-    ok "test passed: an empty chezmoi status reports no drift; the headerless npmrc is warned"
+    ok "test passed: an empty chezmoi status reports no drift; the headerless npmrc is warned; no token line is ok"
   else
     printf '%s\n' "$dr_out" >&2
-    fail "test failed: empty status should report no drift, and the headerless npmrc must be warned"
+    fail "test failed: empty status should report no drift, the headerless npmrc must be warned, and the npmrc without a token line must be ok"
     status=1
   fi
 else
