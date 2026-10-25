@@ -3817,12 +3817,13 @@ fi
 #           herdr absent: a PATH of the system dirs plus a private bin
 #           holding a yq symlink — the real yq's directory (homebrew bin) is
 #           NOT on it, because that is where a real herdr lives — and the
-#           op / codex / opencode stubs (this PATH replaces the one carrying
-#           them, #306). A herdr in the system dirs would make this case run
-#           the real tool, so it fails up front instead of running doctor.
+#           op / codex / opencode / brew / npm stubs (this PATH replaces the
+#           one carrying them, and a system dir can hold a real npm, #306,
+#           #458). A herdr in the system dirs would make this case run the
+#           real tool, so it fails up front instead of running doctor.
 rm -f "$hi_fakebin/herdr"
 ln -sf "$(command -v yq)" "$hi_fakebin/yq"
-for host_tool in op codex opencode; do
+for host_tool in op codex opencode brew npm; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$hi_fakebin/$host_tool"
 done
 if (PATH="$hi_fakebin:/usr/bin:/bin"; hash -r; command -v herdr >/dev/null 2>&1); then
@@ -5944,7 +5945,8 @@ rm -rf "${ds4_home:?}" "${ds4_bin:?}"
 #     だけで決まる (work = false は warn、personal = true は中立の item)。PATH に
 #     無ければその旨の ok。doctor は tool を探すだけで実行しない: fake は呼び出しを
 #     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は fake dir
-#     (fake の tailscale、yq と op / herdr / codex / opencode の stub の link) と
+#     (fake の tailscale、yq と op / herdr / codex / opencode / brew / npm の stub の
+#     link。system dir には本物の npm が在りうるので、stub を先に置く。#458) と
 #     system dir の写し (/usr/bin と /bin の全 entry への symlink から tunnel tool の
 #     名前だけを除いた dir) に固定する。tunnel tool の有無は fake dir だけで決まり、
 #     開発機や CI の runner に入っている tailscale / cloudflared / ngrok /
@@ -5956,7 +5958,7 @@ nt_sysbin="$fixture_home/nt-sysbin"
 nt_calls="$fixture_home/nt-calls"
 mkdir -p "$nt_home" "$nt_fakebin" "$nt_sysbin"
 ln -sf "$(command -v yq)" "$nt_fakebin/yq"
-for host_tool in op herdr codex opencode; do
+for host_tool in op herdr codex opencode brew npm; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$nt_fakebin/$host_tool"
 done
 # /bin を先に link し /usr/bin を -f で上書きする: 同名は /usr/bin が勝つ (PATH
