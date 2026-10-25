@@ -1980,18 +1980,24 @@ fi
 #            bare -x/-e probe would pass it) although herdr answers current
 #            for it, and the Codex home must stay current (an absent body in
 #            one home must not cost the other its answer). Its own fake, not
-#            HI-b's left in place.
+#            HI-b's left in place. Each check fails with its own message: the
+#            fake answers without a trailing newline as in HI-b, so a reader
+#            that drops such an answer fails the Codex check here, not the
+#            presence check.
 rm -f "$hi_claude_body"
 mkdir -p "$hi_claude_body"
 write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body;" <<< "$hi_out" \
-    && grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
-    ok "test passed: a directory at the herdr body path is reported absent (regular-file check), Codex home unaffected"
-  else
+  if ! grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body;" <<< "$hi_out"; then
     printf '%s\n' "$hi_out" >&2
     fail "test failed: a directory at the herdr body path passed the presence check"
     status=1
+  elif ! grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: the Codex home did not stay current next to a directory at the Claude body path (its status answer, without a trailing newline as in HI-b, was not adopted)"
+    status=1
+  else
+    ok "test passed: a directory at the herdr body path is reported absent (regular-file check), Codex home unaffected"
   fi
 else
   printf '%s\n' "$hi_out" >&2
@@ -3412,7 +3418,7 @@ fi
 #            build_id equals the deployed file's marker; everything else is a
 #            neutral "not confirmed" with a reason. Log lines carry the canary
 #            in other fields and messages, so a line printed into the report
-#            fails the case. The two end-to-end cases (OCP-i0) are doctor
+#            fails the case. The three end-to-end cases (OCP-i0) are doctor
 #            runs with exactly one init line each; every other case runs the
 #            reporter alone, extracted from doctor.sh: its whole output must
 #            be the expected line (so no log line, no canary) and OpenCode is
@@ -3426,6 +3432,7 @@ op_confirmed="[ok] $op_init confirmed by OpenCode's log (build_id sha256:$op_hex
 op_no_marker="[info] - $op_init not confirmed: no init marker in OpenCode's log (not started since the plugin began logging it, started with --pure or a log level above INFO, a rotated log, or an init that threw; $op_deployed)"
 op_not_v1="[info] - $op_init not confirmed: the newest init marker is not in the v=1 form this doctor reads ($op_deployed)"
 op_no_log="[info] - $op_init not confirmed: no OpenCode log yet (not started here; $op_deployed)"
+op_relative_xdg="[info] - $op_init not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in ($op_deployed)"
 # op_line MESSAGE [quoted|bare] — one OpenCode 1.18.30 log line around MESSAGE.
 op_line() {
   if [[ "${2:-quoted}" == quoted ]]; then
@@ -3476,7 +3483,8 @@ op_marker_line() {
 }
 #     OCP-i0) end to end: doctor hands the deployed file to the reporter and
 #             prints its line, from the default log and from the log under
-#             its own XDG_DATA_HOME.
+#             its own XDG_DATA_HOME, and a relative XDG_DATA_HOME reaches the
+#             reporter as it is.
 op_plugin_file "$(op_marker_line personal-agent-tools opencode)"
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "doctor reports the confirmed init (end to end, the default log)" "$op_confirmed"
@@ -3487,6 +3495,9 @@ mkdir -p "$op_home/xdg-e2e/opencode/log"
 op_line "$(op_marker "sha256:$op_hex_a")" > "$op_home/xdg-e2e/opencode/log/opencode.log"
 op_init_case "doctor reports the confirmed init (end to end, the log under XDG_DATA_HOME)" "$op_confirmed" XDG_DATA_HOME="$op_home/xdg-e2e"
 rm -rf "$op_home/xdg-e2e"
+# Made absolute on the way, the relative value would point at no log; dropped,
+# the default log's other build would show.
+op_init_case "doctor passes a relative XDG_DATA_HOME through (end to end) -> not confirmed" "$op_relative_xdg" XDG_DATA_HOME=rel/data
 printf '// personal-agent-tools\n' > "$op_cfg/plugins/personal-agent-tools.js"
 # From here on the reporter alone, the way CL-U runs the matcher: the
 # function is extracted from doctor.sh, and op_init_case is redefined to
@@ -3587,9 +3598,7 @@ op_init_case "absolute XDG_DATA_HOME -> the log there" "$op_confirmed" XDG_DATA_
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "empty XDG_DATA_HOME -> the default log" "$op_confirmed" XDG_DATA_HOME=
 op_init_case "absolute XDG_DATA_HOME without a log -> not started" "$op_no_log" XDG_DATA_HOME="$op_home/xdg-none"
-op_init_case "relative XDG_DATA_HOME -> not confirmed" \
-  "[info] - $op_init not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in ($op_deployed)" \
-  XDG_DATA_HOME=rel/data
+op_init_case "relative XDG_DATA_HOME -> not confirmed" "$op_relative_xdg" XDG_DATA_HOME=rel/data
 #     OCP-i10) a log that is not a regular file (a FIFO would block a read:
 #              Codex review R1, PR #325) or cannot be read (skipped where
 #              permissions do not bind, e.g. as root).
