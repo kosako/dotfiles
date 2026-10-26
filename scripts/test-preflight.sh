@@ -24,14 +24,12 @@ miss() {
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-preflight-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
 
-# 1. An empty home stays report-only: exit 0, no apply-impact warnings. The
-#    same run carries the absent items of the empty home: the herdr config
-#    (5c, #261) and the usage reader config (5d, #301) are "absent: ...
-#    (apply creates ...)" ok lines, and ~/.config itself is absent (apply
-#    creates it at 0700). 5c / 5d used to check theirs in runs with exactly
-#    this input (the same empty home, personal, the suite's environment, no
-#    env -i), and preflight writes nothing into HOME. 5b's absent line stays
-#    in its own env -i run.
+# 1. An empty home stays report-only: exit 0, no apply-impact warnings, and
+#    ~/.config itself is reported absent (apply creates it at 0700). The
+#    absent lines of 5b / 5c / 5d run on this home later, each in its own run
+#    (5b under env -i; 5c / 5d after the earlier runs on it, so a run that
+#    seeds a config into HOME fails there), and case 7 checks that no run
+#    left anything in it.
 empty_home="$fixture_home/empty"
 mkdir -p "$empty_home"
 if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)"; then
@@ -41,18 +39,6 @@ if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)"; then
   else
     printf '%s\n' "$pf_out" >&2
     miss "empty home should report cleanly without replace warnings"
-  fi
-  if grep -Fq "absent: $empty_home/.config/herdr/config.toml (apply creates the managed herdr config)" <<< "$pf_out"; then
-    pass "herdr-config: absent herdr config is an ok line (apply creates it)"
-  else
-    printf '%s\n' "$pf_out" >&2
-    miss "personal with no herdr config must report the absent/creates ok line"
-  fi
-  if grep -Fq "absent: $empty_home/.config/agent-tools/usage-reader.json (apply creates the managed usage reader config)" <<< "$pf_out"; then
-    pass "agent-tools-usage-reader: absent usage reader config is an ok line (apply creates it)"
-  else
-    printf '%s\n' "$pf_out" >&2
-    miss "personal with no usage reader config must report the absent/creates ok line"
   fi
   if grep -Fxq "[info] - $empty_home/.config absent; apply will create it at 0700" <<< "$pf_out"; then
     pass "empty home: an absent ~/.config is reported as created at 0700"
@@ -233,8 +219,7 @@ fi
 # 5c. herdr-config apply impact (#261): personal manages
 #     ~/.config/herdr/config.toml, so an existing one warns (herdr reads one
 #     file, no .local: fold host-only settings into the managed file); work
-#     does not list the module: left-as-is item; absent: ok line (asserted
-#     in case 1, on the same empty home).
+#     does not list the module: left-as-is item; absent: ok line.
 hc_home="$fixture_home/herdr"
 mkdir -p "$hc_home/.config/herdr"
 printf '[ui]\nagent_panel_sort = "spaces"\n' > "$hc_home/.config/herdr/config.toml"
@@ -253,12 +238,21 @@ else
   printf '%s\n' "${pf_out:-<no output>}" >&2
   miss "work must report the existing herdr config as left-as-is, not replaced"
 fi
+# The absent line on the empty home, in its own run after the earlier runs on
+# that home (so not folded into case 1, which runs on it first: a config
+# seeded into HOME by an earlier run fails here).
+if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+  && grep -Fq "absent: $empty_home/.config/herdr/config.toml (apply creates the managed herdr config)" <<< "$pf_out"; then
+  pass "herdr-config: absent herdr config is an ok line (apply creates it)"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "personal with no herdr config must report the absent/creates ok line"
+fi
 
 # 5d. agent-tools-usage-reader apply impact (#301): personal manages
 #     ~/.config/agent-tools/usage-reader.json, so an existing one warns
 #     (agent-tools reads that one file, no .local: diff first); work does not
-#     list the module: left-as-is item; absent: ok line (asserted in case 1,
-#     on the same empty home).
+#     list the module: left-as-is item; absent: ok line.
 ur_home="$fixture_home/usage-reader"
 mkdir -p "$ur_home/.config/agent-tools"
 printf '{"argv": ["/usr/bin/true"]}\n' > "$ur_home/.config/agent-tools/usage-reader.json"
@@ -276,6 +270,15 @@ if pf_out="$(HOME="$ur_home" "$SCRIPT_DIR/preflight.sh" work 2>&1)" \
 else
   printf '%s\n' "${pf_out:-<no output>}" >&2
   miss "work must report the existing usage reader config as left-as-is, not replaced"
+fi
+# The absent line on the empty home, in its own run after the earlier runs on
+# that home, as in 5c.
+if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
+  && grep -Fq "absent: $empty_home/.config/agent-tools/usage-reader.json (apply creates the managed usage reader config)" <<< "$pf_out"; then
+  pass "agent-tools-usage-reader: absent usage reader config is an ok line (apply creates it)"
+else
+  printf '%s\n' "${pf_out:-<no output>}" >&2
+  miss "personal with no usage reader config must report the absent/creates ok line"
 fi
 
 # 5e. Arguments (#309): a dash-word reaches validate-policy as its own option
@@ -447,6 +450,19 @@ if HOME="$empty_home" "$broken_root/scripts/preflight.sh" personal >/dev/null 2>
   miss "preflight must exit non-zero when policy validation fails"
 else
   pass "broken policy data makes preflight exit non-zero (fail-closed)"
+fi
+
+# 7. report-only writes nothing into HOME: every run above on the empty home
+#    (the reports of case 1 / 5b / 5c / 5d, the arguments rejected in 5e and
+#    the failing policy validation of case 6) left it empty. A file written
+#    after the report escapes that run's own checks, and 5c / 5d look for two
+#    named files only; this sees any file.
+if pf_left="$(find "$empty_home" -mindepth 1 -print 2>&1)" \
+  && [[ -d "$empty_home" && -z "$pf_left" ]]; then
+  pass "report-only: the runs on the empty home left nothing in it"
+else
+  printf '%s\n' "${pf_left:-<no output>}" >&2
+  miss "preflight must not write into HOME (report-only); the empty home is no longer empty"
 fi
 
 # Commands section (#259): every tool preflight checks is declared in the

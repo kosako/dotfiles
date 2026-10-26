@@ -195,7 +195,8 @@ managed-path orphan、managed drift、Codex projects trust の stale / home 全�
 ## test-preflight.sh
 
 `preflight.sh` の report-only 契約と apply-impact 警告を fixture HOME で検証する(#150)。
-空 home の exit 0(`~/.config` も無いときは apply が 0700 で作るという item を出す)/ shell-extra・ssh-1password の replace 警告と override pointer /
+空 home の exit 0(`~/.config` も無いときは apply が 0700 で作るという item を出す)/ 空 home に対する run(report・引数の拒否・policy validation の失敗)が
+その home に何も書かないこと(report-only)/ shell-extra・ssh-1password の replace 警告と override pointer /
 非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
 `-` 始まりの引数(`-h` / `--all` / `--list-profiles` など)と 2 つ目の引数を exit 2 で拒否し report を走らせない(#309)/
 git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
