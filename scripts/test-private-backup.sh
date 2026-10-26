@@ -107,6 +107,49 @@ recipient="$(age-keygen -y "$fixture_home/keys/id.txt")"
 
 # Run private-backup.sh in the fixture environment.
 run() { HOME="$fixture_home" PATH="$fixture_home/fakebin:$PATH" "$PB" "$@"; }
+# run_in HOME_DIR ARGS... — the same, with HOME_DIR as the home.
+run_in() {
+  local home="$1"
+  shift
+  HOME="$home" PATH="$fixture_home/fakebin:$PATH" "$PB" "$@"
+}
+# backup_in HOME_DIR OUT [ARG...] — back up from HOME_DIR to OUT with the
+# fixture recipient and --yes, then ARGs. A case's own env (TMPDIR, REAL_*,
+# a PATH with its fakes in front) goes before the call; the fixture fakebin
+# then comes first on that PATH, which changes nothing: it holds only chezmoi.
+backup_in() {
+  local home="$1" out="$2"
+  shift 2
+  run_in "$home" backup --out "$out" --recipient "$recipient" --yes "$@"
+}
+# seed_home DIR — the two baseline files of a case home (.zshrc.local and
+# .ssh/config.local, contents "a" and "b").
+seed_home() {
+  mkdir -p "$1/.ssh"
+  printf 'a\n' > "$1/.zshrc.local"
+  printf 'b\n' > "$1/.ssh/config.local"
+}
+# extract_archive ARCHIVE DIR — decrypt ARCHIVE with the fixture identity and
+# unpack it into DIR, modes kept (-p). Called as a plain statement, so a
+# failed decrypt or unpack still stops the suite (set -e, pipefail).
+extract_archive() { age -d -i "$fixture_home/keys/id.txt" "$1" | tar -xpf - -C "$2"; }
+# wait_deadline PID SECONDS — wait for PID, a child of this shell, for up to
+# SECONDS; past that, KILL it and its descendants (kill_tree). Sets
+# wd_timed_out (1 when it was killed) and wd_rc (its status). Not inside
+# $(...): the wait must run in the shell that started PID.
+wait_deadline() {
+  local deadline=$((SECONDS + $2))
+  while kill -0 "$1" 2>/dev/null && [[ "$SECONDS" -lt "$deadline" ]]; do
+    sleep 0.2
+  done
+  wd_timed_out=0
+  if kill -0 "$1" 2>/dev/null; then
+    wd_timed_out=1
+    kill_tree "$1"
+  fi
+  wd_rc=0
+  wait "$1" 2>/dev/null || wd_rc=$?
+}
 
 # no_partial OUT — nothing of OUT's partial output is left: neither a run's
 # own "OUT.partial.XXXXXX" dir (#398) nor the fixed "OUT.partial" of older
@@ -224,6 +267,27 @@ make_archive() {
   local stage="$1" out="$2"
   tar -cf - -C "$stage" . | age -r "$recipient" -o "$out"
 }
+# write_manifest STAGE [PATH...] — write STAGE/manifest.json declaring each
+# PATH under STAGE/files with its real sha256, size and mode, so a negative
+# case adds only its own defect (yq -i on the result) whatever the umask.
+# No PATH gives an empty files list (for cases rejected before extraction).
+write_manifest() {
+  local stage="$1" rel f sum size mode
+  shift
+  yq -n -o=json '{
+    "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+    "created_at": "2026-01-01T00:00:00Z", "entries": [], "files": []
+  }' > "$stage/manifest.json"
+  for rel in "$@"; do
+    f="$stage/files/$rel"
+    sum="$(shasum -a 256 < "$f" | awk '{print $1}')"
+    size="$(wc -c < "$f" | tr -d ' ')"
+    mode="$(file_mode "$f")"
+    P="$rel" H="$sum" Z="$size" M="$mode" yq -i -p=json -o=json \
+      '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(Z) | tonumber), "sha256": strenv(H)}]' \
+      "$stage/manifest.json"
+  done
+}
 
 # A trailing pipe is part of the path (#390), even when the truncated name
 # also exists. Check the manifest, payload, verify and restore independently.
@@ -235,9 +299,8 @@ printf 'wanted content\n' > "$pipe_home/cfg|"
 printf 'wrong content\n' > "$pipe_home/cfg"
 printf 'backup_paths:\n  - { path: "cfg|", type: file, category: label }\n' \
   > "$pipe_home/.config/dotfiles/backup-paths.local"
-if HOME="$pipe_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$pipe_home/pipe.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
-  age -d -i "$fixture_home/keys/id.txt" "$pipe_home/pipe.age" | tar -xpf - -C "$pipe_extract"
+if backup_in "$pipe_home" "$pipe_home/pipe.age" >/dev/null 2>&1; then
+  extract_archive "$pipe_home/pipe.age" "$pipe_extract"
   pipe_sum="$(shasum -a 256 "$pipe_home/cfg|" | awk '{print $1}')"
   if SUM="$pipe_sum" yq -e -p=json '
     ([.entries[] | select(.path == "cfg|" and .type == "file" and .category == "label" and .origin == "local")] | length) == 1 and
@@ -266,11 +329,8 @@ fi
 bad="$fixture_home/stage-badsum"
 mkdir -p "$bad/files"
 printf 'real content\n' > "$bad/files/.zshrc.local"
-TS="2026-01-01T00:00:00Z" yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": strenv(TS), "entries": [],
-  "files": [{"path": ".zshrc.local", "mode": "600", "size": 13, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}]
-}' > "$bad/manifest.json"
+write_manifest "$bad" .zshrc.local
+yq -i -p=json -o=json '.files[0].sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' "$bad/manifest.json"
 make_archive "$bad" "$fixture_home/out/badsum.age"
 # Capture the status separately: each negative case must exit 1 as well as
 # report the cause, so a diagnostic alone cannot hide a successful exit.
@@ -287,12 +347,7 @@ extra="$fixture_home/stage-extra"
 mkdir -p "$extra/files"
 printf 'x\n' > "$extra/files/declared"
 printf 'y\n' > "$extra/files/sneaked-in"
-sum="$(shasum -a 256 "$extra/files/declared" | awk '{print $1}')"
-SUM="$sum" yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": "2026-01-01T00:00:00Z", "entries": [],
-  "files": [{"path": "declared", "mode": "644", "size": 2, "sha256": strenv(SUM)}]
-}' > "$extra/manifest.json"
+write_manifest "$extra" declared
 make_archive "$extra" "$fixture_home/out/extra.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/extra.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
@@ -329,10 +384,7 @@ ddir="$fixture_home/stage-disallowed"
 mkdir -p "$ddir/files"
 printf 'x\n' > "$ddir/files/ok"
 printf 'pwn\n' > "$ddir/evil.sh"
-yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": "2026-01-01T00:00:00Z", "entries": [], "files": []
-}' > "$ddir/manifest.json"
+write_manifest "$ddir"
 make_archive "$ddir" "$fixture_home/out/disallowed.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/disallowed.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
@@ -600,13 +652,8 @@ mdir="$fixture_home/stage-mode"
 mkdir -p "$mdir/files"
 printf 'content\n' > "$mdir/files/.zshrc.local"
 chmod 644 "$mdir/files/.zshrc.local"
-msum="$(shasum -a 256 "$mdir/files/.zshrc.local" | awk '{print $1}')"
-msize="$(wc -c < "$mdir/files/.zshrc.local" | tr -d ' ')"
-SUM="$msum" SZ="$msize" yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": "2026-01-01T00:00:00Z", "entries": [],
-  "files": [{"path": ".zshrc.local", "mode": "600", "size": (strenv(SZ) | tonumber), "sha256": strenv(SUM)}]
-}' > "$mdir/manifest.json"
+write_manifest "$mdir" .zshrc.local
+yq -i -p=json -o=json '.files[0].mode = "600"' "$mdir/manifest.json"
 make_archive "$mdir" "$fixture_home/out/mode.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
@@ -692,13 +739,11 @@ set_profile personal
 # 10. Defence in depth: an unsafe path in the (unvalidated) local
 #     supplement is skipped, not captured.
 supp_home="$fixture_home/supp"
-mkdir -p "$supp_home/.ssh" "$supp_home/.config/dotfiles"
-printf 'a\n' > "$supp_home/.zshrc.local"
-printf 'b\n' > "$supp_home/.ssh/config.local"
+seed_home "$supp_home"
+mkdir -p "$supp_home/.config/dotfiles"
 printf 'backup_paths:\n  - { path: "../escape", type: file }\n' \
   > "$supp_home/.config/dotfiles/backup-paths.local"
-supp_out="$(HOME="$supp_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$supp_home/s.age" --recipient "$recipient" --yes 2>&1)" || true
+supp_out="$(backup_in "$supp_home" "$supp_home/s.age" 2>&1)" || true
 if grep -Fq "skip unsafe path" <<< "$supp_out" && [[ -f "$supp_home/s.age" ]]; then
   pass "unsafe supplement path is skipped, baseline still captured"
 else
@@ -708,12 +753,9 @@ fi
 
 # 11. Missing recipient is a usage error (exit 2), not a silent plaintext.
 norec_home="$fixture_home/norec"
-mkdir -p "$norec_home/.ssh"
-printf 'a\n' > "$norec_home/.zshrc.local"
-printf 'b\n' > "$norec_home/.ssh/config.local"
+seed_home "$norec_home"
 rc=0
-HOME="$norec_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$norec_home/x.age" --yes >/dev/null 2>&1 || rc=$?
+run_in "$norec_home" backup --out "$norec_home/x.age" --yes >/dev/null 2>&1 || rc=$?
 if [[ "$rc" -eq 2 ]]; then
   pass "missing recipient is a usage error (exit 2)"
 else
@@ -725,21 +767,19 @@ fi
 #      the matching identity verifies; a missing --recipients-file, and both
 #      flags at once, are usage errors (exit 2) that write nothing.
 rcpt_home="$fixture_home/rcpt"
-mkdir -p "$rcpt_home/.ssh" "$rcpt_home/.config/dotfiles" "$rcpt_home/out"
-printf 'a\n' > "$rcpt_home/.zshrc.local"
-printf 'b\n' > "$rcpt_home/.ssh/config.local"
+seed_home "$rcpt_home"
+mkdir -p "$rcpt_home/.config/dotfiles" "$rcpt_home/out"
 printf '%s\n' "$recipient" > "$rcpt_home/recipients.txt"
-rcpt_run() { HOME="$rcpt_home" PATH="$fixture_home/fakebin:$PATH" "$PB" "$@"; }
 printf '%s\n' "$recipient" > "$rcpt_home/.config/dotfiles/private-backup.recipient"
-if rcpt_run backup --out "$rcpt_home/out/default.age" --yes >/dev/null 2>&1 \
-  && rcpt_run verify --in "$rcpt_home/out/default.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+if run_in "$rcpt_home" backup --out "$rcpt_home/out/default.age" --yes >/dev/null 2>&1 \
+  && run_in "$rcpt_home" verify --in "$rcpt_home/out/default.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
   pass "backup without a recipient flag encrypts to the default recipient file"
 else
   miss "backup with only the default recipient file did not produce a verifiable archive"
 fi
 rm "$rcpt_home/.config/dotfiles/private-backup.recipient"
-if rcpt_run backup --out "$rcpt_home/out/file.age" --recipients-file "$rcpt_home/recipients.txt" --yes >/dev/null 2>&1 \
-  && rcpt_run verify --in "$rcpt_home/out/file.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+if run_in "$rcpt_home" backup --out "$rcpt_home/out/file.age" --recipients-file "$rcpt_home/recipients.txt" --yes >/dev/null 2>&1 \
+  && run_in "$rcpt_home" verify --in "$rcpt_home/out/file.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
   pass "backup --recipients-file encrypts to the listed recipient"
 else
   miss "backup --recipients-file did not produce a verifiable archive"
@@ -749,19 +789,17 @@ fi
 # PR #351).
 for rcpt_err in missing-file both-flags; do
   rcpt_err_home="$fixture_home/rcpt-$rcpt_err"
-  mkdir -p "$rcpt_err_home/.ssh"
-  printf 'a\n' > "$rcpt_err_home/.zshrc.local"
-  printf 'b\n' > "$rcpt_err_home/.ssh/config.local"
+  seed_home "$rcpt_err_home"
   rcpt_rc=0
   case "$rcpt_err" in
     missing-file)
       rcpt_expect="[fail] recipients file not found: $rcpt_err_home/no-such-file"
-      rcpt_out="$(HOME="$rcpt_err_home" PATH="$fixture_home/fakebin:$PATH" "$PB" backup --out "$rcpt_err_home/x.age" \
+      rcpt_out="$(run_in "$rcpt_err_home" backup --out "$rcpt_err_home/x.age" \
         --recipients-file "$rcpt_err_home/no-such-file" --yes 2>&1)" || rcpt_rc=$?
       ;;
     both-flags)
       rcpt_expect="[fail] use only one of --recipient / --recipients-file"
-      rcpt_out="$(HOME="$rcpt_err_home" PATH="$fixture_home/fakebin:$PATH" "$PB" backup --out "$rcpt_err_home/x.age" \
+      rcpt_out="$(run_in "$rcpt_err_home" backup --out "$rcpt_err_home/x.age" \
         --recipient "$recipient" --recipients-file "$rcpt_home/recipients.txt" --yes 2>&1)" || rcpt_rc=$?
       ;;
   esac
@@ -843,12 +881,7 @@ parent_path=".ssh/conf.d/config.local"
 mkdir -p "$parent_stage/files/.ssh/conf.d" "$parent_dst"
 printf 'Host private\n' > "$parent_stage/files/$parent_path"
 chmod 644 "$parent_stage/files/$parent_path"
-sum="$(shasum -a 256 "$parent_stage/files/$parent_path" | awk '{print $1}')"
-SUM="$sum" P="$parent_path" yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": "2026-01-01T00:00:00Z", "entries": [],
-  "files": [{"path": strenv(P), "mode": "644", "size": 13, "sha256": strenv(SUM)}]
-}' > "$parent_stage/manifest.json"
+write_manifest "$parent_stage" "$parent_path"
 make_archive "$parent_stage" "$parent_archive"
 if out="$(umask 022; run restore --in "$parent_archive" --identity "$fixture_home/keys/id.txt" \
   --target-home "$parent_dst" --apply 2>&1)" \
@@ -943,12 +976,7 @@ dash_archive="$fixture_home/out/dash-parent.age"
 mkdir -p "$dash_stage/files/-cfg"
 printf 'Host private\n' > "$dash_stage/files/$dash_path"
 chmod 600 "$dash_stage/files/$dash_path"
-sum="$(shasum -a 256 "$dash_stage/files/$dash_path" | awk '{print $1}')"
-SUM="$sum" P="$dash_path" yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": "2026-01-01T00:00:00Z", "entries": [],
-  "files": [{"path": strenv(P), "mode": "600", "size": 13, "sha256": strenv(SUM)}]
-}' > "$dash_stage/manifest.json"
+write_manifest "$dash_stage" "$dash_path"
 make_archive "$dash_stage" "$dash_archive"
 dash_dst="$fixture_home/restore-dash-dst"
 dash_escape="$fixture_home/dash-escape-target"
@@ -1029,19 +1057,15 @@ set_profile personal
 #     without -p turned 664 into 644 and the manifest mode check rejected
 #     every archive containing such a file (issue #141).
 gw_home="$fixture_home/gw"
-mkdir -p "$gw_home/.ssh"
-printf 'a\n' > "$gw_home/.zshrc.local"
-printf 'b\n' > "$gw_home/.ssh/config.local"
+seed_home "$gw_home"
 chmod 664 "$gw_home/.zshrc.local"
 gw_rc=0
-HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$gw_home/gw.age" --recipient "$recipient" --yes >/dev/null 2>&1 || gw_rc=$?
-if [[ "$gw_rc" -eq 0 ]] && HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  verify --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+backup_in "$gw_home" "$gw_home/gw.age" >/dev/null 2>&1 || gw_rc=$?
+if [[ "$gw_rc" -eq 0 ]] \
+  && run_in "$gw_home" verify --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
   gw_dst="$fixture_home/gw-restore"
   mkdir -p "$gw_dst"
-  if HOME="$gw_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    restore --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" \
+  if run_in "$gw_home" restore --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" \
     --target-home "$gw_dst" --apply >/dev/null 2>&1 \
     && [[ "$(file_mode "$gw_dst/.zshrc.local")" == "664" ]]; then
     pass "group-writable file (664) survives backup/verify/restore with its mode"
@@ -1056,9 +1080,7 @@ fi
 #     reporting success while writing nothing (issue #141: unattended runs
 #     would otherwise silently never back up).
 ntty_home="$fixture_home/ntty"
-mkdir -p "$ntty_home/.ssh"
-printf 'a\n' > "$ntty_home/.zshrc.local"
-printf 'b\n' > "$ntty_home/.ssh/config.local"
+seed_home "$ntty_home"
 ntty_rc=0
 # perl setsid detaches from the controlling terminal so `read < /dev/tty`
 # inside the script fails; macOS ships no setsid(1), perl is on both OSes.
@@ -1076,17 +1098,15 @@ fi
 # 21. Overlapping declarations (a dir and a file inside it) capture the file
 #     once: the manifest lists no duplicate paths (issue #141).
 dup_home="$fixture_home/dup"
-mkdir -p "$dup_home/.ssh" "$dup_home/.config/dotfiles" "$dup_home/nest"
-printf 'a\n' > "$dup_home/.zshrc.local"
-printf 'b\n' > "$dup_home/.ssh/config.local"
+seed_home "$dup_home"
+mkdir -p "$dup_home/.config/dotfiles" "$dup_home/nest"
 printf 'c\n' > "$dup_home/nest/inner"
 printf 'backup_paths:\n  - { path: "nest", type: dir }\n  - { path: "nest/inner", type: file }\n' \
   > "$dup_home/.config/dotfiles/backup-paths.local"
-if HOME="$dup_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$dup_home/d.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
+if backup_in "$dup_home" "$dup_home/d.age" >/dev/null 2>&1; then
   dup_extract="$fixture_home/dup-extract"
   mkdir -p "$dup_extract"
-  age -d -i "$fixture_home/keys/id.txt" "$dup_home/d.age" | tar -xpf - -C "$dup_extract"
+  extract_archive "$dup_home/d.age" "$dup_extract"
   dup_total="$(yq -p=json -o=tsv '.files | length' "$dup_extract/manifest.json")"
   dup_unique="$(yq -p=json -o=tsv '[.files[].path] | unique | length' "$dup_extract/manifest.json")"
   # Exactly once: dedup must not drop the file either (an ordering bug that
@@ -1107,9 +1127,8 @@ fi
 #     file that exists but could not be read is real configuration missing
 #     from the archive, unlike an absent optional file.
 unr_home="$fixture_home/unr"
-mkdir -p "$unr_home/.ssh" "$unr_home/.config/dotfiles" "$unr_home/box"
-printf 'a\n' > "$unr_home/.zshrc.local"
-printf 'b\n' > "$unr_home/.ssh/config.local"
+seed_home "$unr_home"
+mkdir -p "$unr_home/.config/dotfiles" "$unr_home/box"
 printf 'locked\n' > "$unr_home/locked"
 chmod 000 "$unr_home/locked"
 printf 'ok\n' > "$unr_home/box/readable"
@@ -1122,8 +1141,7 @@ printf 'backup_paths:\n  - { path: "locked", type: file }\n  - { path: "box", ty
 # skipped instead (#330; the same guard as test-doctor's OCP-i10).
 if [[ ! -r "$unr_home/locked" && ! -r "$unr_home/box/locked-in-dir" ]]; then
   unr_rc=0
-  unr_out="$(HOME="$unr_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$unr_home/u.age" --recipient "$recipient" --yes 2>&1)" || unr_rc=$?
+  unr_out="$(backup_in "$unr_home" "$unr_home/u.age" 2>&1)" || unr_rc=$?
   if [[ "$unr_rc" -eq 0 && -f "$unr_home/u.age" ]] \
     && grep -Fq "unreadable (skipped): locked" <<< "$unr_out" \
     && grep -Fq "skip unreadable file under box: box/locked-in-dir" <<< "$unr_out" \
@@ -1152,8 +1170,7 @@ backup_paths:
   - { path: .ssh//config.local, type: file }
   - { path: .ssh/, type: dir }
 YAML
-if HOME="$alias_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$alias_home/a.age" --recipient "$recipient" --yes >/dev/null 2>&1 \
+if backup_in "$alias_home" "$alias_home/a.age" >/dev/null 2>&1 \
   && run restore --in "$alias_home/a.age" --identity "$fixture_home/keys/id.txt" \
     --target-home "$alias_dst" --apply >/dev/null 2>&1; then
   displaced="$(find "$alias_dst/.local/state/dotfiles" -name .zshrc.local -type f)"
@@ -1174,8 +1191,7 @@ for odd_name in 'space | back\slash' 'double"quote' ' leading-space'; do
   printf 'odd name\n' > "$alias_home/$odd_name"
   P="$odd_name" yq -n '{"backup_paths": [{"path": strenv(P), "type": "file"}]}' \
     > "$alias_home/.config/dotfiles/backup-paths.local"
-  if HOME="$alias_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$alias_home/odd.age" --recipient "$recipient" --yes >/dev/null 2>&1 \
+  if backup_in "$alias_home" "$alias_home/odd.age" >/dev/null 2>&1 \
     && run verify --in "$alias_home/odd.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
     && run restore --in "$alias_home/odd.age" --identity "$fixture_home/keys/id.txt" \
       --target-home "$alias_dst" --apply >/dev/null 2>&1 \
@@ -1197,15 +1213,7 @@ printf 'restored\n' > "$case_stage/files/LOWER"
 printf 'original\n' > "$case_dst/lower"
 case_folded=0
 [[ -e "$case_dst/LOWER" ]] && case_folded=1
-case_hash="$(shasum -a 256 "$case_stage/files/lower" | awk '{print $1}')"
-H="$case_hash" M="$(file_mode "$case_stage/files/lower")" yq -n -o=json '{
-  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-  "created_at": "2026-01-01T00:00:00Z", "entries": [],
-  "files": [
-    {"path": "lower", "mode": strenv(M), "size": 9, "sha256": strenv(H)},
-    {"path": "LOWER", "mode": strenv(M), "size": 9, "sha256": strenv(H)}
-  ]
-}' > "$case_stage/manifest.json"
+write_manifest "$case_stage" lower LOWER
 make_archive "$case_stage" "$fixture_home/out/case.age"
 case_rc=0
 run restore --in "$fixture_home/out/case.age" --identity "$fixture_home/keys/id.txt" \
@@ -1225,7 +1233,7 @@ manifest_base="$fixture_home/manifest-base"
 manifest_stage="$fixture_home/manifest-stage"
 manifest_dst="$fixture_home/manifest-dst"
 mkdir -p "$manifest_base" "$manifest_stage" "$manifest_dst"
-age -d -i "$fixture_home/keys/id.txt" "$archive" | tar -xpf - -C "$manifest_base"
+extract_archive "$archive" "$manifest_base"
 printf 'original\n' > "$manifest_dst/.zshrc.local"
 
 assert_manifest_rejected() {
@@ -1321,15 +1329,13 @@ done
 sup_rel=".config/dotfiles/backup-paths.local"
 sup_home="$fixture_home/sup-home"
 sup_dst="$fixture_home/sup-dst"
-mkdir -p "$sup_home/.ssh" "$sup_home/.config/dotfiles" "$sup_home/private" "$sup_dst"
-printf 'a\n' > "$sup_home/.zshrc.local"
-printf 'b\n' > "$sup_home/.ssh/config.local"
+seed_home "$sup_home"
+mkdir -p "$sup_home/.config/dotfiles" "$sup_home/private" "$sup_dst"
 printf 'client secret\n' > "$sup_home/private/extra"
 printf 'backup_paths:\n  - { path: "private/extra", type: file }\n' > "$sup_home/$sup_rel"
 chmod 600 "$sup_home/$sup_rel"
 sup_ok=1
-HOME="$sup_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sup_home/s.age" --recipient "$recipient" --yes >/dev/null 2>&1 || sup_ok=0
+backup_in "$sup_home" "$sup_home/s.age" >/dev/null 2>&1 || sup_ok=0
 sup_out="$(run restore --in "$sup_home/s.age" --identity "$fixture_home/keys/id.txt" --target-home "$sup_dst" 2>&1)" || sup_ok=0
 if [[ "$sup_ok" -eq 1 ]] && grep -Fq "would create: $sup_rel" <<< "$sup_out" && [[ -z "$(find "$sup_dst" -mindepth 1 -print)" ]]; then
   pass "restore dry-run plans the supplement at its canonical path and writes nothing"
@@ -1350,9 +1356,8 @@ fi
 # with no pre-#208 top-level copy in the archive.
 sup_extract="$fixture_home/sup-extract"
 mkdir -p "$sup_extract"
-if HOME="$sup_dst" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sup_dst/again.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
-  age -d -i "$fixture_home/keys/id.txt" "$sup_dst/again.age" | tar -xpf - -C "$sup_extract"
+if backup_in "$sup_dst" "$sup_dst/again.age" >/dev/null 2>&1; then
+  extract_archive "$sup_dst/again.age" "$sup_extract"
   sup_files_extra="$(yq -p=json -o=tsv '[.files[].path | select(. == "private/extra")] | length' "$sup_extract/manifest.json")"
   sup_files_list="$(R="$sup_rel" yq -p=json -o=tsv '[.files[].path | select(. == strenv(R))] | length' "$sup_extract/manifest.json")"
   sup_entries_list="$(R="$sup_rel" yq -p=json -o=tsv '[.entries[] | select(.path == strenv(R) and .origin == "supplement")] | length' "$sup_extract/manifest.json")"
@@ -1373,14 +1378,12 @@ cus_home="$fixture_home/cus-home"
 cus_dst="$fixture_home/cus-dst"
 cus_extract="$fixture_home/cus-extract"
 cus_list="$cus_home/lists/custom-name.local"
-mkdir -p "$cus_home/.ssh" "$cus_home/lists" "$cus_dst" "$cus_extract"
-printf 'a\n' > "$cus_home/.zshrc.local"
-printf 'b\n' > "$cus_home/.ssh/config.local"
+seed_home "$cus_home"
+mkdir -p "$cus_home/lists" "$cus_dst" "$cus_extract"
 printf 'note\n' > "$cus_home/lists/note"
 printf 'backup_paths:\n  - { path: "lists/note", type: file }\n' > "$cus_list"
-if HOME="$cus_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$cus_home/c.age" --recipient "$recipient" --yes --local-supplement "$cus_list" >/dev/null 2>&1; then
-  age -d -i "$fixture_home/keys/id.txt" "$cus_home/c.age" | tar -xpf - -C "$cus_extract"
+if backup_in "$cus_home" "$cus_home/c.age" --local-supplement "$cus_list" >/dev/null 2>&1; then
+  extract_archive "$cus_home/c.age" "$cus_extract"
   if cmp -s "$cus_list" "$cus_extract/files/$sup_rel" \
     && ! grep -Fq "custom-name" "$cus_extract/manifest.json" \
     && [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "lists/note")] | length' "$cus_extract/manifest.json")" == "1" ]] \
@@ -1419,13 +1422,11 @@ fi
 # copy staged first wins, and the declaration is deduplicated.
 ded_home="$fixture_home/ded-home"
 ded_extract="$fixture_home/ded-extract"
-mkdir -p "$ded_home/.ssh" "$ded_home/.config/dotfiles" "$ded_extract"
-printf 'a\n' > "$ded_home/.zshrc.local"
-printf 'b\n' > "$ded_home/.ssh/config.local"
+seed_home "$ded_home"
+mkdir -p "$ded_home/.config/dotfiles" "$ded_extract"
 printf 'backup_paths:\n  - { path: "%s", type: file }\n' "$sup_rel" > "$ded_home/$sup_rel"
-if HOME="$ded_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$ded_home/d.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
-  age -d -i "$fixture_home/keys/id.txt" "$ded_home/d.age" | tar -xpf - -C "$ded_extract"
+if backup_in "$ded_home" "$ded_home/d.age" >/dev/null 2>&1; then
+  extract_archive "$ded_home/d.age" "$ded_extract"
   ded_files="$(R="$sup_rel" yq -p=json -o=tsv '[.files[].path | select(. == strenv(R))] | length' "$ded_extract/manifest.json")"
   ded_entries="$(R="$sup_rel" yq -p=json -o=tsv '[.entries[] | select(.path == strenv(R))] | length' "$ded_extract/manifest.json")"
   ded_origin="$(R="$sup_rel" yq -p=json -o=tsv '.entries[] | select(.path == strenv(R)) | .origin' "$ded_extract/manifest.json")"
@@ -1442,7 +1443,7 @@ fi
 # inside the archive is rejected by verify.
 tam_stage="$fixture_home/tam-stage"
 mkdir -p "$tam_stage"
-age -d -i "$fixture_home/keys/id.txt" "$sup_home/s.age" | tar -xpf - -C "$tam_stage"
+extract_archive "$sup_home/s.age" "$tam_stage"
 printf '  - { path: "injected", type: file }\n' >> "$tam_stage/files/$sup_rel"
 make_archive "$tam_stage" "$fixture_home/out/tampered-supplement.age"
 verify_rc=0
@@ -1468,8 +1469,7 @@ for empty_case in nothing supplement-only; do
       > "$empty_home/.config/dotfiles/backup-paths.local"
   fi
   empty_rc=0
-  empty_out="$(HOME="$empty_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$empty_home/e.age" --recipient "$recipient" --yes 2>&1)" || empty_rc=$?
+  empty_out="$(backup_in "$empty_home" "$empty_home/e.age" 2>&1)" || empty_rc=$?
   if [[ "$empty_rc" -ne 0 ]] && grep -Fxq "[fail] no files captured; refusing to write an empty archive" <<< "$empty_out" \
     && [[ ! -e "$empty_home/e.age" && ! -e "$empty_home/.local/state/dotfiles/private-backup.json" ]] \
     && no_partial "$empty_home/e.age"; then
@@ -1486,9 +1486,8 @@ done
 #      under the declared name), a FIFO declared as a file, and a regular
 #      file declared as a directory. The backup itself still succeeds.
 kind_home="$fixture_home/kind"
-mkdir -p "$kind_home/.ssh" "$kind_home/.config/dotfiles" "$kind_home/outside-dir"
-printf 'a\n' > "$kind_home/.zshrc.local"
-printf 'b\n' > "$kind_home/.ssh/config.local"
+seed_home "$kind_home"
+mkdir -p "$kind_home/.config/dotfiles" "$kind_home/outside-dir"
 printf 'link target content\n' > "$kind_home/outside-file"
 printf 'inside the linked dir\n' > "$kind_home/outside-dir/inner"
 ln -s outside-file "$kind_home/link-file"
@@ -1507,26 +1506,16 @@ kind_log="$fixture_home/kind-backup.log"
 # review R3, PR #351).
 kind_tmp="$fixture_home/kind-tmp"
 mkdir -p "$kind_tmp"
-HOME="$kind_home" TMPDIR="$kind_tmp" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$kind_home/k.age" --recipient "$recipient" --yes > "$kind_log" 2>&1 &
+TMPDIR="$kind_tmp" backup_in "$kind_home" "$kind_home/k.age" > "$kind_log" 2>&1 &
 kind_pid=$!
-kind_deadline=$((SECONDS + 60))
-while kill -0 "$kind_pid" 2>/dev/null && [[ "$SECONDS" -lt "$kind_deadline" ]]; do
-  sleep 0.2
-done
-kind_timed_out=0
-if kill -0 "$kind_pid" 2>/dev/null; then
-  kind_timed_out=1
-  kill_tree "$kind_pid"
-fi
-kind_rc=0
-wait "$kind_pid" 2>/dev/null || kind_rc=$?
+wait_deadline "$kind_pid" 60
+kind_timed_out="$wd_timed_out" kind_rc="$wd_rc"
 kind_out="$(cat "$kind_log")"
 kind_extract="$fixture_home/kind-extract"
 mkdir -p "$kind_extract"
 kind_files=""
 if [[ "$kind_rc" -eq 0 && -f "$kind_home/k.age" ]]; then
-  age -d -i "$fixture_home/keys/id.txt" "$kind_home/k.age" | tar -xpf - -C "$kind_extract"
+  extract_archive "$kind_home/k.age" "$kind_extract"
   kind_files="$(yq -p=json -o=tsv '.files[].path' "$kind_extract/manifest.json")"
 fi
 if [[ "$kind_timed_out" -eq 0 && "$kind_rc" -eq 0 && -n "$kind_files" ]] \
@@ -1548,11 +1537,8 @@ fi
 #     before encrypting (issue #224): a good run reports it, and a staging
 #     that no longer matches the manifest is refused before any output.
 sc_home="$fixture_home/sc-home"
-mkdir -p "$sc_home/.ssh"
-printf 'a\n' > "$sc_home/.zshrc.local"
-printf 'b\n' > "$sc_home/.ssh/config.local"
-sc_out="$(HOME="$sc_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sc_home/ok.age" --recipient "$recipient" --yes 2>&1)" || true
+seed_home "$sc_home"
+sc_out="$(backup_in "$sc_home" "$sc_home/ok.age" 2>&1)" || true
 if grep -Fq "self-check manifest" <<< "$sc_out" && grep -Eq '^\[ok\] verified [0-9]+ file\(s\)' <<< "$sc_out" \
   && [[ -f "$sc_home/ok.age" ]]; then
   pass "backup self-checks the staging before writing"
@@ -1579,8 +1565,7 @@ exit "$rc"
 SH
 chmod +x "$sc_fakebin/cp"
 sc_rc=0
-sc_out="$(HOME="$sc_home" REAL_CP="$real_cp" PATH="$sc_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sc_home/bad.age" --recipient "$recipient" --yes 2>&1)" || sc_rc=$?
+sc_out="$(REAL_CP="$real_cp" PATH="$sc_fakebin:$PATH" backup_in "$sc_home" "$sc_home/bad.age" 2>&1)" || sc_rc=$?
 if [[ "$sc_rc" -ne 0 ]] && grep -Fq "checksum mismatch" <<< "$sc_out" \
   && grep -Fq "staging failed self-check; no archive written" <<< "$sc_out" \
   && [[ ! -e "$sc_home/bad.age" ]] && no_partial "$sc_home/bad.age" \
@@ -1602,17 +1587,15 @@ fi
 #     to make the real find fail); every other invocation (the self-check's
 #     `find . -type f`) goes to the real find.
 en_home="$fixture_home/en-home"
-mkdir -p "$en_home/.ssh" "$en_home/.config/dotfiles" "$en_home/box/deep"
-printf 'a\n' > "$en_home/.zshrc.local"
-printf 'b\n' > "$en_home/.ssh/config.local"
+seed_home "$en_home"
+mkdir -p "$en_home/.config/dotfiles" "$en_home/box/deep"
 printf 'listed\n' > "$en_home/box/listed"
 printf 'unlisted\n' > "$en_home/box/deep/unlisted"
 printf 'backup_paths:\n  - { path: "box", type: dir }\n' > "$en_home/.config/dotfiles/backup-paths.local"
 # Clean run first: the marker must say capture_incomplete=false. Its skipped
 # count (absent optional baseline files) is the baseline for the partial run,
 # which must report exactly one more: the directory whose enumeration failed.
-en_clean_out="$(HOME="$en_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$en_home/clean.age" --recipient "$recipient" --yes 2>&1)" || true
+en_clean_out="$(backup_in "$en_home" "$en_home/clean.age" 2>&1)" || true
 en_clean_skipped="$(sed -n 's/^\[warn\] skipped entries: \([0-9][0-9]*\)$/\1/p' <<< "$en_clean_out")"
 en_clean_skipped="${en_clean_skipped:-0}"
 if [[ -f "$en_home/clean.age" ]] \
@@ -1635,8 +1618,8 @@ exec "$REAL_FIND" "$@"
 SH
 chmod +x "$en_fakebin/find"
 en_rc=0
-en_out="$(HOME="$en_home" REAL_FIND="$real_find" FAKE_FIND_DIR="$en_home/box" PATH="$en_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$en_home/partial.age" --recipient "$recipient" --yes 2>&1)" || en_rc=$?
+en_out="$(REAL_FIND="$real_find" FAKE_FIND_DIR="$en_home/box" PATH="$en_fakebin:$PATH" \
+  backup_in "$en_home" "$en_home/partial.age" 2>&1)" || en_rc=$?
 en_extract="$fixture_home/en-extract"
 mkdir -p "$en_extract"
 if [[ "$en_rc" -eq 0 && -f "$en_home/partial.age" ]] \
@@ -1644,7 +1627,7 @@ if [[ "$en_rc" -eq 0 && -f "$en_home/partial.age" ]] \
   && grep -Fq "capture INCOMPLETE: enumeration failed for 1 declared director(y/ies)" <<< "$en_out" \
   && grep -Fxq "[warn] skipped entries: $((en_clean_skipped + 1))" <<< "$en_out" \
   && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$en_home/.local/state/dotfiles/private-backup.json")" == "true" ]]; then
-  age -d -i "$fixture_home/keys/id.txt" "$en_home/partial.age" | tar -xpf - -C "$en_extract"
+  extract_archive "$en_home/partial.age" "$en_extract"
   if [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "box/listed")] | length' "$en_extract/manifest.json")" == "1" ]] \
     && [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "box/deep/unlisted")] | length' "$en_extract/manifest.json")" == "0" ]]; then
     pass "a partial enumeration still captures the listed files, warns, counts the directory as skipped, and marks the marker incomplete"
@@ -1677,8 +1660,8 @@ printf 'backup_paths:\n  - { path: "box", type: dir }\n  - { path: "locked", typ
   > "$en2_home/.config/dotfiles/backup-paths.local"
 if [[ ! -r "$en2_home/locked" ]]; then
   en2_rc=0
-  en2_out="$(HOME="$en2_home" REAL_FIND="$real_find" FAKE_FIND_DIR="$en2_home/box" PATH="$en_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$en2_home/both.age" --recipient "$recipient" --yes 2>&1)" || en2_rc=$?
+  en2_out="$(REAL_FIND="$real_find" FAKE_FIND_DIR="$en2_home/box" PATH="$en_fakebin:$PATH" \
+    backup_in "$en2_home" "$en2_home/both.age" 2>&1)" || en2_rc=$?
   if [[ "$en2_rc" -eq 0 && -f "$en2_home/both.age" ]] \
     && grep -Fq "capture INCOMPLETE: enumeration failed for 1 declared director(y/ies) and 1 existing file(s) could not be read;" <<< "$en2_out" \
     && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$en2_home/.local/state/dotfiles/private-backup.json")" == "true" ]]; then
@@ -1703,12 +1686,10 @@ chmod 600 "$en2_home/locked" # so the EXIT trap can clean up
 sv_case() {
   local label="$1" entry="$2" rc=0 out home
   home="$fixture_home/sv-$label"
-  mkdir -p "$home/.ssh" "$home/.config/dotfiles"
-  printf 'a\n' > "$home/.zshrc.local"
-  printf 'b\n' > "$home/.ssh/config.local"
+  seed_home "$home"
+  mkdir -p "$home/.config/dotfiles"
   printf 'backup_paths:\n%s\n' "$entry" > "$home/.config/dotfiles/backup-paths.local"
-  out="$(HOME="$home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$home/s.age" --recipient "$recipient" --yes 2>&1)" || rc=$?
+  out="$(backup_in "$home" "$home/s.age" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $home/.config/dotfiles/backup-paths.local" <<< "$out" \
     && [[ ! -e "$home/s.age" && ! -e "$home/.local/state/dotfiles/private-backup.json" ]] \
     && no_partial "$home/s.age"; then
@@ -1725,13 +1706,11 @@ sv_case newline-in-path '  - { path: "one\nfile|other|two", type: file }'
 # too — `// []` would have read it as "no entries" and let the baseline-only
 # backup succeed silently (Codex review, PR #254).
 sv_scalar="$fixture_home/sv-scalar-list"
-mkdir -p "$sv_scalar/.ssh" "$sv_scalar/.config/dotfiles"
-printf 'a\n' > "$sv_scalar/.zshrc.local"
-printf 'b\n' > "$sv_scalar/.ssh/config.local"
+seed_home "$sv_scalar"
+mkdir -p "$sv_scalar/.config/dotfiles"
 printf 'backup_paths: false\n' > "$sv_scalar/.config/dotfiles/backup-paths.local"
 sv_scalar_rc=0
-sv_scalar_out="$(HOME="$sv_scalar" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sv_scalar/s.age" --recipient "$recipient" --yes 2>&1)" || sv_scalar_rc=$?
+sv_scalar_out="$(backup_in "$sv_scalar" "$sv_scalar/s.age" 2>&1)" || sv_scalar_rc=$?
 if [[ "$sv_scalar_rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $sv_scalar/.config/dotfiles/backup-paths.local" <<< "$sv_scalar_out" \
   && [[ ! -e "$sv_scalar/s.age" && ! -e "$sv_scalar/.local/state/dotfiles/private-backup.json" ]]; then
   pass "invalid supplement (scalar in place of the list) is rejected before capture: no archive, no marker"
@@ -1742,17 +1721,15 @@ fi
 # Control: a free-form label without the delimiter is fine and the declared
 # file is captured under its own path.
 sv_ok="$fixture_home/sv-ok"
-mkdir -p "$sv_ok/.ssh" "$sv_ok/.config/dotfiles"
-printf 'a\n' > "$sv_ok/.zshrc.local"
-printf 'b\n' > "$sv_ok/.ssh/config.local"
+seed_home "$sv_ok"
+mkdir -p "$sv_ok/.config/dotfiles"
 printf 'labelled\n' > "$sv_ok/only-in-supplement"
 printf 'backup_paths:\n  - { path: only-in-supplement, type: file, category: "shell/override label" }\n' \
   > "$sv_ok/.config/dotfiles/backup-paths.local"
 sv_extract="$fixture_home/sv-extract"
 mkdir -p "$sv_extract"
-if HOME="$sv_ok" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sv_ok/s.age" --recipient "$recipient" --yes >/dev/null 2>&1; then
-  age -d -i "$fixture_home/keys/id.txt" "$sv_ok/s.age" | tar -xpf - -C "$sv_extract"
+if backup_in "$sv_ok" "$sv_ok/s.age" >/dev/null 2>&1; then
+  extract_archive "$sv_ok/s.age" "$sv_extract"
   if [[ "$(yq -p=json -o=tsv '[.files[].path | select(. == "only-in-supplement")] | length' "$sv_extract/manifest.json")" == "1" ]] \
     && [[ "$(yq -p=json -o=tsv '.entries[] | select(.path == "only-in-supplement") | .category' "$sv_extract/manifest.json")" == "shell/override label" ]]; then
     pass "a free-form category label without | is accepted and recorded as declared"
@@ -1768,13 +1745,11 @@ fi
 # stopping the backup at the self-check with "invalid manifest schema"
 # (#330). No archive, no marker.
 sv_type="$fixture_home/sv-unknown-type"
-mkdir -p "$sv_type/.ssh" "$sv_type/.config/dotfiles" "$sv_type/.config/foo"
-printf 'a\n' > "$sv_type/.zshrc.local"
-printf 'b\n' > "$sv_type/.ssh/config.local"
+seed_home "$sv_type"
+mkdir -p "$sv_type/.config/dotfiles" "$sv_type/.config/foo"
 printf 'backup_paths:\n  - { path: .config/foo, type: directory }\n' > "$sv_type/.config/dotfiles/backup-paths.local"
 sv_type_rc=0
-sv_type_out="$(HOME="$sv_type" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$sv_type/s.age" --recipient "$recipient" --yes 2>&1)" || sv_type_rc=$?
+sv_type_out="$(backup_in "$sv_type" "$sv_type/s.age" 2>&1)" || sv_type_rc=$?
 if [[ "$sv_type_rc" -ne 0 ]] \
   && grep -Fxq "[fail] unknown backup path type in $sv_type/.config/dotfiles/backup-paths.local: .config/foo: directory (known: file, dir)" <<< "$sv_type_out" \
   && ! grep -Fq "invalid manifest schema" <<< "$sv_type_out" \
@@ -1814,9 +1789,8 @@ for out_kind in directory symlink; do
       cp "$marker" "$out_marker"
     fi
     out_rc=0
-    out_log="$(HOME="$out_home" REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$out_home/mktemp-calls" \
-      PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-      backup --out "$out_path" --recipient "$recipient" --yes 2>&1)" || out_rc=$?
+    out_log="$(REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$out_home/mktemp-calls" PATH="$out_fakebin:$PATH" \
+      backup_in "$out_home" "$out_path" 2>&1)" || out_rc=$?
     if [[ "$out_rc" -eq 2 ]] && grep -Fq '[fail]' <<< "$out_log" \
       && [[ ! -e "$out_home/mktemp-calls" ]] && no_partial "$out_path" \
       && [[ -z "$(find "$out_home/destination" -mindepth 1 -print)" ]]; then
@@ -1861,10 +1835,9 @@ printf 'fixture\n' > "$race_home/.zshrc.local"
 race_marker="$race_home/.local/state/dotfiles/private-backup.json"
 cp "$marker" "$race_marker"
 race_rc=0
-race_log="$(HOME="$race_home" REAL_MV="$real_mv" RACE_OUT="$race_home/backup.age" \
-  REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$race_home/mktemp-calls" \
-  PATH="$out_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$race_home/backup.age" --recipient "$recipient" --yes 2>&1)" || race_rc=$?
+race_log="$(REAL_MV="$real_mv" RACE_OUT="$race_home/backup.age" \
+  REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$race_home/mktemp-calls" PATH="$out_fakebin:$PATH" \
+  backup_in "$race_home" "$race_home/backup.age" 2>&1)" || race_rc=$?
 # mv itself succeeded: the file age wrote ("archive" in the run's partial
 # dir since #398) landed inside the directory.
 if [[ "$race_rc" -eq 1 && -f "$race_home/backup.age/archive" ]] \
@@ -2011,12 +1984,10 @@ if ! command -v python3 >/dev/null 2>&1; then
   fi
 else
   sig_home="$fixture_home/sig-home"
-  mkdir -p "$sig_home/.ssh" "$sig_home/target"
-  printf 'a\n' > "$sig_home/.zshrc.local"
-  printf 'b\n' > "$sig_home/.ssh/config.local"
+  seed_home "$sig_home"
+  mkdir -p "$sig_home/target"
   sig_archive="$sig_home/sig.age"
-  if ! HOME="$sig_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$sig_archive" --recipient "$recipient" --yes >/dev/null 2>&1; then
+  if ! backup_in "$sig_home" "$sig_archive" >/dev/null 2>&1; then
     miss "the backup the interrupt cases verify and restore could not be made"
   fi
   sig_fakebin="$fixture_home/sigfake"
@@ -2132,17 +2103,8 @@ PY
           python3 "$sig_fakebin/ended.py" "$sig_ended" "$PB" "${sig_args[@]}" > "$sig_log" 2>&1 < /dev/null &
         sig_pid=$!
         set +m
-        sig_deadline=$((SECONDS + 60))
-        while kill -0 "$sig_pid" 2>/dev/null && [[ "$SECONDS" -lt "$sig_deadline" ]]; do
-          sleep 0.2
-        done
-        sig_timed_out=0
-        if kill -0 "$sig_pid" 2>/dev/null; then
-          sig_timed_out=1
-          kill_tree "$sig_pid"
-        fi
-        sig_rc=0
-        wait "$sig_pid" 2>/dev/null || sig_rc=$?
+        wait_deadline "$sig_pid" 60
+        sig_timed_out="$wd_timed_out" sig_rc="$wd_rc"
         sig_out="$(cat "$sig_log")"
         sig_had="$(cat "$sig_snapshot" 2>/dev/null || true)"
         sig_end="$(cat "$sig_ended" 2>/dev/null || true)"
@@ -2250,9 +2212,8 @@ exec "$REAL_MKTEMP" "$@"
 SH
 chmod +x "$tmpl_fakebin/mktemp"
 tmpl_rc=0
-tmpl_out="$(HOME="$tmpl_home" TMPDIR="$tmpl_tmp" REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$tmpl_home/mktemp-calls" \
-  PATH="$tmpl_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$tmpl_home/t.age" --recipient "$recipient" --yes 2>&1)" || tmpl_rc=$?
+tmpl_out="$(TMPDIR="$tmpl_tmp" REAL_MKTEMP="$real_mktemp" MKTEMP_CALLS="$tmpl_home/mktemp-calls" PATH="$tmpl_fakebin:$PATH" \
+  backup_in "$tmpl_home" "$tmpl_home/t.age" 2>&1)" || tmpl_rc=$?
 tmpl_calls="$(cat "$tmpl_home/mktemp-calls" 2>/dev/null || true)"
 tmpl_count=0 tmpl_bad=""
 while IFS= read -r tmpl_call; do
@@ -2287,8 +2248,7 @@ mkdir -p "$pd_home"
 printf 'fixture\n' > "$pd_home/.zshrc.local"
 printf 'another run\n' > "$pd_home/c.age.partial"
 pd_rc=0
-pd_out="$(HOME="$pd_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$pd_home/c.age" --recipient "$recipient" --yes 2>&1)" || pd_rc=$?
+pd_out="$(backup_in "$pd_home" "$pd_home/c.age" 2>&1)" || pd_rc=$?
 pd_left="$(find "$pd_home" -maxdepth 1 -name 'c.age.partial.*' 2>/dev/null)"
 if [[ "$pd_rc" -eq 0 && -z "$pd_left" && "$(cat "$pd_home/c.age.partial")" == "another run" ]] \
   && run verify --in "$pd_home/c.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
@@ -2316,8 +2276,7 @@ SH
 chmod +x "$pd_fakebin/age"
 cp "$pd_home/c.age" "$fixture_home/partial-dir-before.age"
 pd_rc=0
-pd_out="$(HOME="$pd_home" PATH="$pd_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$pd_home/c.age" --recipient "$recipient" --yes 2>&1)" || pd_rc=$?
+pd_out="$(PATH="$pd_fakebin:$PATH" backup_in "$pd_home" "$pd_home/c.age" 2>&1)" || pd_rc=$?
 pd_left="$(find "$pd_home" -maxdepth 1 -name 'c.age.partial.*' 2>/dev/null)"
 if [[ "$pd_rc" -ne 0 && -z "$pd_left" ]] && grep -Fq "failed to create encrypted archive" <<< "$pd_out" \
   && cmp -s "$fixture_home/partial-dir-before.age" "$pd_home/c.age"; then
@@ -2348,14 +2307,12 @@ exec "$REAL_YQ" "$@"
 SH
 chmod +x "$mk_fakebin/yq"
 mk_rc=0
-HOME="$mk_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$mk_home/first.age" --recipient "$recipient" --yes >/dev/null 2>&1 || mk_rc=$?
+backup_in "$mk_home" "$mk_home/first.age" >/dev/null 2>&1 || mk_rc=$?
 cp "$mk_marker" "$fixture_home/marker-keep-before.json" 2>/dev/null || mk_rc=99
 cp "$mk_home/first.age" "$fixture_home/marker-keep-before.age" 2>/dev/null || mk_rc=99
 mk_out=""
 if [[ "$mk_rc" -eq 0 ]]; then
-  mk_out="$(HOME="$mk_home" REAL_YQ="$real_yq" PATH="$mk_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$mk_home/first.age" --recipient "$recipient" --yes 2>&1)" || mk_rc=$?
+  mk_out="$(REAL_YQ="$real_yq" PATH="$mk_fakebin:$PATH" backup_in "$mk_home" "$mk_home/first.age" 2>&1)" || mk_rc=$?
 fi
 mk_left="$(find "$mk_home/.local/state/dotfiles" -maxdepth 1 -name 'private-backup.json.*' 2>/dev/null)"
 if [[ "$mk_rc" -ne 0 && "$mk_rc" -ne 99 && -z "$mk_left" ]] \
@@ -2379,8 +2336,7 @@ mkdir -p "$md_marker"
 printf 'fixture\n' > "$md_home/.zshrc.local"
 printf 'previous archive\n' > "$md_home/keep.age"
 md_rc=0
-md_out="$(HOME="$md_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$md_home/keep.age" --recipient "$recipient" --yes 2>&1)" || md_rc=$?
+md_out="$(backup_in "$md_home" "$md_home/keep.age" 2>&1)" || md_rc=$?
 md_left="$(find "$md_home/.local/state/dotfiles" -mindepth 1 ! -path "$md_marker" 2>/dev/null)"
 if [[ "$md_rc" -ne 0 && -d "$md_marker" && -z "$(find "$md_marker" -mindepth 1)" && -z "$md_left" ]] \
   && grep -Fq "backup marker path is a directory" <<< "$md_out" \
@@ -2407,8 +2363,7 @@ chmod 600 "$ld_home/-cfg/config.local" "$ld_home/-box/-sub/inner"
 printf 'backup_paths:\n  - { path: "-cfg/config.local", type: file }\n  - { path: "-box", type: dir }\n' \
   > "$ld_home/.config/dotfiles/backup-paths.local"
 ld_rc=0
-ld_out="$(HOME="$ld_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$ld_home/d.age" --recipient "$recipient" --yes 2>&1)" || ld_rc=$?
+ld_out="$(backup_in "$ld_home" "$ld_home/d.age" 2>&1)" || ld_rc=$?
 if [[ "$ld_rc" -eq 0 ]] \
   && run verify --in "$ld_home/d.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1 \
   && run restore --in "$ld_home/d.age" --identity "$fixture_home/keys/id.txt" --target-home "$ld_dst" --apply >/dev/null 2>&1 \
@@ -2442,8 +2397,7 @@ ns_marker="$ns_home/.local/state/dotfiles/private-backup.json"
 printf 'backup_paths:\n  - { path: "open-dir/missing", type: file }\n  - { path: "no-dir/missing", type: file }\n  - { path: "dangling-link/config", type: file }\n' \
   > "$ns_home/.config/dotfiles/backup-paths.local"
 ns_rc=0
-ns_out="$(HOME="$ns_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-  backup --out "$ns_home/n.age" --recipient "$recipient" --yes 2>&1)" || ns_rc=$?
+ns_out="$(backup_in "$ns_home" "$ns_home/n.age" 2>&1)" || ns_rc=$?
 if [[ "$ns_rc" -eq 0 ]] && grep -Fq "declared but absent (skipped): open-dir/missing" <<< "$ns_out" \
   && grep -Fq "declared but absent (skipped): no-dir/missing" <<< "$ns_out" \
   && grep -Fq "declared but absent (skipped): dangling-link/config" <<< "$ns_out" \
@@ -2459,8 +2413,7 @@ printf 'backup_paths:\n  - { path: "locked-dir/config", type: file }\n  - { path
 chmod 600 "$ns_home/locked-dir"
 if [[ ! -e "$ns_home/locked-dir/config" && ! -e "$ns_home/link-to-locked/config" ]]; then
   ns_rc=0
-  ns_out="$(HOME="$ns_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$ns_home/n.age" --recipient "$recipient" --yes 2>&1)" || ns_rc=$?
+  ns_out="$(backup_in "$ns_home" "$ns_home/n.age" 2>&1)" || ns_rc=$?
   if [[ "$ns_rc" -eq 0 ]] \
     && grep -Fq "cannot tell whether it exists, a parent directory is not searchable (skipped): locked-dir/config" <<< "$ns_out" \
     && grep -Fq "cannot tell whether it exists, a parent directory is not searchable (skipped): link-to-locked/config" <<< "$ns_out" \
@@ -2516,17 +2469,15 @@ for ar_mode in rmdir marker-mv marker-dir; do
   mkdir -p "$ar_home"
   printf 'fixture\n' > "$ar_home/.zshrc.local"
   ar_rc=0
-  HOME="$ar_home" PATH="$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$ar_home/a.age" --recipient "$recipient" --yes >/dev/null 2>&1 || ar_rc=99
+  backup_in "$ar_home" "$ar_home/a.age" >/dev/null 2>&1 || ar_rc=99
   cp "$ar_home/a.age" "$fixture_home/after-rename-$ar_mode-before.age" 2>/dev/null || ar_rc=99
   cp "$ar_marker" "$fixture_home/after-rename-$ar_mode-before.json" 2>/dev/null || ar_rc=99
   ar_out=""
   ar_tmp="$fixture_home/after-rename-$ar_mode-tmp"
   mkdir -p "$ar_tmp"
   if [[ "$ar_rc" -eq 0 ]]; then
-    ar_out="$(HOME="$ar_home" TMPDIR="$ar_tmp" AR_MODE="$ar_mode" AR_MARKER="$ar_marker" REAL_MV="$real_mv" REAL_RMDIR="$real_rmdir" \
-      PATH="$ar_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-      backup --out "$ar_home/a.age" --recipient "$recipient" --yes 2>&1)" || ar_rc=$?
+    ar_out="$(TMPDIR="$ar_tmp" AR_MODE="$ar_mode" AR_MARKER="$ar_marker" REAL_MV="$real_mv" REAL_RMDIR="$real_rmdir" \
+      PATH="$ar_fakebin:$PATH" backup_in "$ar_home" "$ar_home/a.age" 2>&1)" || ar_rc=$?
   fi
   ar_left="$(find "$ar_home/.local/state/dotfiles" -mindepth 1 ! -path "$ar_marker" 2>/dev/null)"
   ar_state="the new archive and the previous marker"
@@ -2596,9 +2547,9 @@ sx_backup() {
   shift
   sx_marker_before="$(cat "$sx_marker" 2>/dev/null || true)"
   sx_rc=0
-  sx_out="$(cd "$sx_home" && CDPATH="$sx_cdpath" HOME="$sx_home" REAL_MKTEMP="$sx_real_mktemp" \
-    MKTEMP_CALLS="$sx_home/$name.mktemp" PATH="$sx_fakebin:$fixture_home/fakebin:$PATH" "$PB" \
-    backup --out "$sx_home/$name.age" --recipient "$recipient" --yes "$@" 2>&1)" || sx_rc=$?
+  sx_out="$(cd "$sx_home" && CDPATH="$sx_cdpath" REAL_MKTEMP="$sx_real_mktemp" \
+    MKTEMP_CALLS="$sx_home/$name.mktemp" PATH="$sx_fakebin:$PATH" \
+    backup_in "$sx_home" "$sx_home/$name.age" "$@" 2>&1)" || sx_rc=$?
 }
 # sx_captures_private NAME — the archive NAME.age carries private.conf, the
 # file only the supplement declares.
