@@ -5202,9 +5202,11 @@ fi
 # prints them) and `config list --json` (the merged config with typed values)
 # read the same FAKE_NPM_* env. FAKE_NPM_EXCLUDE_JSON is the JSON value of
 # min-release-age-exclude (`[]` by default, `absent` for an npm that does not
-# know the key; an NBSP in it is written as the JSON escape \u00a0, so it
-# stays visible); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
-# as an explicit null does; FAKE_NPM_LONG sets long=true in the user source,
+# know the key; an NBSP in it is sent as the raw UTF-8 bytes, as npm prints
+# U+00A0 unescaped, so the count must decode what it reads; the source
+# writes them $'\xc2\xa0' to keep them visible); FAKE_NPM_BEFORE_SET lists
+# `before = null` in the env source, as an explicit null does;
+# FAKE_NPM_LONG sets long=true in the user source,
 # which makes a listing without --long=false add npm's defaults (`before =
 # null` among them); FAKE_NPM_JSON sets json=true there, which makes a
 # listing without --json=false print the JSON listing instead of the source
@@ -5394,7 +5396,7 @@ npm_wait_case "a ~7-day before beside min-release-age=7 is honored; a non-empty 
   "$npm_wait_warn"$'\n'"npmx-canary" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE=fake-date \
   FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
-  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other","\u00a0npmx-canary-pkg\r"]'
+  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other","'$'\xc2\xa0''npmx-canary-pkg\r"]'
 npm_wait_case "a ~7-day before beside a different age is warned; exclude entries named undefined and null are counted (#443)" \
   "$npm_wait_warn min-release-age=1 before=fake-date (apply pending?)"$'\n'"$npm_exclude_warn 2 entry(ies) skip the 7-day wait (names not shown)" \
   "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
@@ -5403,7 +5405,7 @@ npm_wait_case "a ~7-day before beside a different age is warned; exclude entries
 npm_wait_case "a before that cannot be read is not taken as unset; whitespace-only exclude entries (CR, NBSP, tab) are empty as JavaScript trims them (#443)" \
   "$npm_wait_warn min-release-age=7 before=(no value) (apply pending?)"$'\n'"$npm_exclude_empty" \
   "npm min-release-age=7 honored"$'\n'"enforce expects npm min-release-age-exclude" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before" FAKE_NPM_EXCLUDE_JSON='[",\r, \u00a0 ,\t"," ",""]'
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before" FAKE_NPM_EXCLUDE_JSON='[",\r, '$'\xc2\xa0'' ,\t"," ",""]'
 npm_wait_case "a before a source sets to null is warned; an npm error object as the JSON listing cannot be counted (#443)" \
   "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)"$'\n'"$npm_exclude_uncounted" \
   "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
