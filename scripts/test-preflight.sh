@@ -24,7 +24,12 @@ miss() {
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-preflight-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT
 
-# 1. An empty home stays report-only: exit 0, no apply-impact warnings.
+# 1. An empty home stays report-only: exit 0, no apply-impact warnings, and
+#    ~/.config itself is reported absent (apply creates it at 0700). The
+#    absent lines of 5b / 5c / 5d run on this home later, each in its own run
+#    (5b under env -i; 5c / 5d after the earlier runs on it, so a run that
+#    seeds a config into HOME fails there), and case 7 checks that no run
+#    left anything in it.
 empty_home="$fixture_home/empty"
 mkdir -p "$empty_home"
 if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)"; then
@@ -34,6 +39,12 @@ if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)"; then
   else
     printf '%s\n' "$pf_out" >&2
     miss "empty home should report cleanly without replace warnings"
+  fi
+  if grep -Fxq "[info] - $empty_home/.config absent; apply will create it at 0700" <<< "$pf_out"; then
+    pass "empty home: an absent ~/.config is reported as created at 0700"
+  else
+    printf '%s\n' "$pf_out" >&2
+    miss "empty home must report that apply creates ~/.config at 0700"
   fi
 else
   printf '%s\n' "$pf_out" >&2
@@ -70,7 +81,7 @@ unmanaged_home="$fixture_home/unmanaged"
 mkdir -p "$unmanaged_home/.ssh"
 printf 'Host canary-host\n' > "$unmanaged_home/.ssh/config"
 if pf_out="$(HOME="$unmanaged_home" "$SCRIPT_DIR/preflight.sh" work 2>&1)"; then
-  if grep -Fq "not managed for profile work (left as-is)" <<< "$pf_out" \
+  if grep -Fq "exists: $unmanaged_home/.ssh/config — not managed for profile work (left as-is)" <<< "$pf_out" \
     && ! grep -Fq "apply (ssh-1password) replaces it" <<< "$pf_out"; then
     pass "unmanaged module path: existing ssh config is a left-as-is item"
   else
@@ -195,6 +206,8 @@ else
   printf '%s\n' "$pf_out" >&2
   miss "preflight must exit 0 for work with an existing global gitignore"
 fi
+# The absent line on the empty home, under env -i like the other 5b runs (so
+# not folded into case 1, which runs in the suite's environment).
 if pf_out="$(env -i PATH="$PATH" HOME="$empty_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
   && grep -Fq "absent: $empty_home/.config/git/ignore (apply creates the managed global gitignore)" <<< "$pf_out"; then
   pass "git-ignore: absent global ignore is an ok line (apply creates it)"
@@ -225,6 +238,9 @@ else
   printf '%s\n' "${pf_out:-<no output>}" >&2
   miss "work must report the existing herdr config as left-as-is, not replaced"
 fi
+# The absent line on the empty home, in its own run after the earlier runs on
+# that home (so not folded into case 1, which runs on it first: a config
+# seeded into HOME by an earlier run fails here).
 if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
   && grep -Fq "absent: $empty_home/.config/herdr/config.toml (apply creates the managed herdr config)" <<< "$pf_out"; then
   pass "herdr-config: absent herdr config is an ok line (apply creates it)"
@@ -255,6 +271,8 @@ else
   printf '%s\n' "${pf_out:-<no output>}" >&2
   miss "work must report the existing usage reader config as left-as-is, not replaced"
 fi
+# The absent line on the empty home, in its own run after the earlier runs on
+# that home, as in 5c.
 if pf_out="$(HOME="$empty_home" "$SCRIPT_DIR/preflight.sh" personal 2>&1)" \
   && grep -Fq "absent: $empty_home/.config/agent-tools/usage-reader.json (apply creates the managed usage reader config)" <<< "$pf_out"; then
   pass "agent-tools-usage-reader: absent usage reader config is an ok line (apply creates it)"
@@ -295,8 +313,10 @@ fi
 #     agent-tools scripts. A complete deploy with the managed hooksPath reports
 #     ok for each script, the arming and the path; the pre-#281 deploy (the
 #     identity gate missing) names that script and the "will NOT arm" warning
-#     — a deploy list cut short in preflight.sh would call it complete. env -i:
-#     no developer git config leaks in.
+#     — a deploy list cut short in preflight.sh would call it complete. The
+#     managed hooksPath is read both when set directly in ~/.gitconfig and
+#     when set in the included hooks.gitconfig, as apply wires it (last run
+#     of 5f). env -i: no developer git config leaks in.
 pf_hg_home="$fixture_home/hook-gates"
 pf_hg_deploy="$pf_hg_home/.claude/agent-tools/scripts"
 mkdir -p "$pf_hg_deploy"
@@ -304,16 +324,24 @@ for pf_hg_script in personal-git-hook-dispatcher personal-public-safety-gate per
   printf '#!/bin/sh\nexit 0\n' > "$pf_hg_deploy/$pf_hg_script"
   chmod +x "$pf_hg_deploy/$pf_hg_script"
 done
+# pf_hg_reported_ready: $pf_rc / $pf_out are the report of a complete deploy
+# with the managed hooksPath: rc 0, an [ok] deployed line for each script, the
+# arming line and the managed-path line. Leaves the scripts it missed in
+# $pf_missing for the dump.
+pf_hg_reported_ready() {
+  local script
+  pf_missing=""
+  for script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
+    grep -Fxq "[ok] deployed: $pf_hg_deploy/$script" <<< "$pf_out" || pf_missing="$pf_missing $script"
+  done
+  [[ "$pf_rc" -eq 0 && -z "$pf_missing" ]] \
+    && grep -Fxq "[ok] agent-tools deploy complete: apply arms the commit gates (fail-closed on the normal git commit path)" <<< "$pf_out" \
+    && grep -Fxq "[ok] global core.hooksPath already points at the managed shim directory" <<< "$pf_out"
+}
 printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$pf_hg_home/.gitconfig"
 pf_rc=0
 pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
-pf_missing=""
-for pf_hg_script in personal-git-hook-dispatcher personal-public-safety-gate personal-git-identity-gate personal-ai-trailer-gate; do
-  grep -Fxq "[ok] deployed: $pf_hg_deploy/$pf_hg_script" <<< "$pf_out" || pf_missing="$pf_missing $pf_hg_script"
-done
-if [[ "$pf_rc" -eq 0 && -z "$pf_missing" ]] \
-  && grep -Fxq "[ok] agent-tools deploy complete: apply arms the commit gates (fail-closed on the normal git commit path)" <<< "$pf_out" \
-  && grep -Fxq "[ok] global core.hooksPath already points at the managed shim directory" <<< "$pf_out"; then
+if pf_hg_reported_ready; then
   pass "git hook gates: a complete deploy with the managed hooksPath is reported ready"
 else
   printf 'rc=%s\n%s\nmissing:%s\n' "$pf_rc" "$pf_out" "$pf_missing" >&2
@@ -366,6 +394,25 @@ else
   printf 'rc=%s\n%s\n' "$pf_rc" "$pf_out" >&2
   miss "git hook gates: the capability without the module must be reported as dangling"
 fi
+#     The managed wiring does not set hooksPath in ~/.gitconfig itself: it
+#     sits in ~/.config/git-hook-gates/hooks.gitconfig, which ~/.gitconfig
+#     pulls in through its unconditional [include] (dot_gitconfig). Reading it
+#     needs `git config --includes` (the #196 live smoke: without the flag a
+#     wired machine read as unwired). Same complete deploy as the first 5f
+#     run, now with that include layout; the first run keeps the direct shape,
+#     so both layouts stay covered. Added last so that every earlier 5f run
+#     keeps its input.
+mkdir -p "$pf_hg_home/.config/git-hook-gates"
+printf '[include]\n\tpath = ~/.config/git-hook-gates/hooks.gitconfig\n' > "$pf_hg_home/.gitconfig"
+printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$pf_hg_home/.config/git-hook-gates/hooks.gitconfig"
+pf_rc=0
+pf_out="$(env -i PATH="$PATH" HOME="$pf_hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || pf_rc=$?
+if pf_hg_reported_ready; then
+  pass "git hook gates: the managed hooksPath set in the included hooks.gitconfig is read (--includes) and reported ready"
+else
+  printf 'rc=%s\n%s\nmissing:%s\n' "$pf_rc" "$pf_out" "$pf_missing" >&2
+  miss "git hook gates: a complete deploy with the managed hooksPath in the included hooks.gitconfig must be reported ready (read with --includes)"
+fi
 
 # 5g. Values are never shown (#307): with a global identity, hooksPath and
 #     excludesFile set, and a usage-reader.json / herdr config present, the
@@ -403,6 +450,19 @@ if HOME="$empty_home" "$broken_root/scripts/preflight.sh" personal >/dev/null 2>
   miss "preflight must exit non-zero when policy validation fails"
 else
   pass "broken policy data makes preflight exit non-zero (fail-closed)"
+fi
+
+# 7. report-only writes nothing into HOME: every run above on the empty home
+#    (the reports of case 1 / 5b / 5c / 5d, the arguments rejected in 5e and
+#    the failing policy validation of case 6) left it empty. A file written
+#    after the report escapes that run's own checks, and 5c / 5d look for two
+#    named files only; this sees any file.
+if pf_left="$(find "$empty_home" -mindepth 1 -print 2>&1)" \
+  && [[ -d "$empty_home" && -z "$pf_left" ]]; then
+  pass "report-only: the runs on the empty home left nothing in it"
+else
+  printf '%s\n' "${pf_left:-<no output>}" >&2
+  miss "preflight must not write into HOME (report-only); the empty home is no longer empty"
 fi
 
 # Commands section (#259): every tool preflight checks is declared in the
