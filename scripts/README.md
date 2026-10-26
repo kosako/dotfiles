@@ -364,6 +364,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - capability registry(#151): `implemented:` 欠落は fail、`implemented: false` は doctor.sh がその名前に
   言及していなければ fail(undisclosed dormant)。
 - 単一 dash の option は usage error、非 mikefarah yq / v4 未満は fail closed、空の profiles / schema は fail closed。
+  yq の version の文字列は他の tool の出力なので、端末の escape を `?` にして表示し、fake の yq のどの case でも生の ESC を
+  出さないこと(#335)。
 - software catalog drift(`report_catalog_drift`): fake の brew / npm / go(と yq・coreutils)だけを置いた PATH で、
   drift なし・catalog 外の brew leaf / go binary・未 install の宣言・source 不一致(info)・Go toolchain 自身の
   binary を sprawl にしないこと・manager 不在時の skip を検証し、いずれも exit 0(report-only)であること。

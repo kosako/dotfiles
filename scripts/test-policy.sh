@@ -823,50 +823,34 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 # Private-backup catalog (backup-paths.yaml) validation.
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  "  - { path: /etc/passwd, type: file }"
-run_fail_contains \
-  "rejects an absolute backup path" \
-  "backup path must be home-relative (no leading /): /etc/passwd" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  "  - { path: ../evil, type: file }"
-run_fail_contains \
-  "rejects a backup path with .." \
-  "backup path must not contain ..: ../evil" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  '  - { path: ".config/x*", type: file }'
-run_fail_contains \
-  "rejects a backup path with glob metacharacters" \
-  "backup path must not contain glob metacharacters: .config/x*" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  "  - { path: somefile, type: socket }"
-run_fail_contains \
-  "rejects an unknown backup path type" \
-  "unknown backup path type: somefile: socket" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  "  - { path: .zshrc.local, type: file }"
-run_fail_contains \
-  "rejects a duplicate backup path" \
-  "duplicate backup path: .zshrc.local" \
-  "$fixture/scripts/validate-policy.sh" personal
+# reject_backup_entry NAME ENTRY MESSAGE — in a fresh fixture, ENTRY (one
+# YAML line) is inserted after the .zshrc.local row of backup-paths.yaml, and
+# validate-policy must exit non-zero with MESSAGE. The duplicate case reuses
+# that row's path. ENTRY goes through awk -v (insert_once), which processes
+# backslash escapes, so a YAML escape is written \\n to arrive as the two
+# characters \n — a real newline inside a double-quoted YAML scalar folds
+# into a space and the entry would be valid.
+reject_backup_entry() {
+  make_fixture
+  insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
+    "  - { path: .zshrc.local, type: file, category: shell }" "$2"
+  run_fail_contains "$1" "$3" "$fixture/scripts/validate-policy.sh" personal
+}
+reject_backup_entry "rejects an absolute backup path" \
+  "  - { path: /etc/passwd, type: file }" \
+  "backup path must be home-relative (no leading /): /etc/passwd"
+reject_backup_entry "rejects a backup path with .." \
+  "  - { path: ../evil, type: file }" \
+  "backup path must not contain ..: ../evil"
+reject_backup_entry "rejects a backup path with glob metacharacters" \
+  '  - { path: ".config/x*", type: file }' \
+  "backup path must not contain glob metacharacters: .config/x*"
+reject_backup_entry "rejects an unknown backup path type" \
+  "  - { path: somefile, type: socket }" \
+  "unknown backup path type: somefile: socket"
+reject_backup_entry "rejects a duplicate backup path" \
+  "  - { path: .zshrc.local, type: file }" \
+  "duplicate backup path: .zshrc.local"
 
 # Distinct paths must stay distinct, including a single trailing pipe (#390).
 make_fixture
@@ -888,45 +872,19 @@ run_fail_contains \
 # field (a newline in a path would split into two plausible rows) are all
 # rejected with one message — for the baseline here and, through the same
 # function, for the local supplement at backup time.
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  "  - {}"
-run_fail_contains \
-  "rejects an empty backup path entry (no vacuous pass)" \
-  "backup-paths entry invalid in" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  '  - { path: only-in-supplement, type: file, category: "shell|override" }'
-run_fail_contains \
-  "rejects a backup path category containing the field delimiter |" \
-  "backup-paths entry invalid in" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-# awk -v (insert_once) processes backslash escapes, so the YAML escape must
-# arrive as the two characters \n (hence \\n here), not as a real newline —
-# a real newline inside a double-quoted YAML scalar folds into a space and
-# the entry would be valid.
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  '  - { path: "one\\nfile|other|two", type: file }'
-run_fail_contains \
-  "rejects a backup path containing a newline (would split into two rows)" \
-  "backup-paths entry invalid in" \
-  "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-insert_once "$fixture/.chezmoidata/backup-paths.yaml" \
-  "  - { path: .zshrc.local, type: file, category: shell }" \
-  "  - { path: somefile, type: 1 }"
-run_fail_contains \
-  "rejects a non-string backup path type" \
-  "backup-paths entry invalid in" \
-  "$fixture/scripts/validate-policy.sh" personal
+reject_backup_entry "rejects an empty backup path entry (no vacuous pass)" \
+  "  - {}" \
+  "backup-paths entry invalid in"
+reject_backup_entry "rejects a backup path category containing the field delimiter |" \
+  '  - { path: only-in-supplement, type: file, category: "shell|override" }' \
+  "backup-paths entry invalid in"
+# \\n: see reject_backup_entry.
+reject_backup_entry "rejects a backup path containing a newline (would split into two rows)" \
+  '  - { path: "one\\nfile|other|two", type: file }' \
+  "backup-paths entry invalid in"
+reject_backup_entry "rejects a non-string backup path type" \
+  "  - { path: somefile, type: 1 }" \
+  "backup-paths entry invalid in"
 
 # A scalar in place of the list: yq's `// []` would turn `false` into an
 # empty list and every per-entry rule would pass vacuously, so the sequence
@@ -1202,48 +1160,39 @@ run_fail_contains \
 
 # require_yq must reject a wrong yq, not just a missing one. Shadow yq
 # with a fake earlier in PATH so the test is independent of whatever yq
-# the host has (CI runners ship one in /usr/bin).
-make_fixture
-mkdir -p "$fixture/fakebin"
-printf '#!/bin/sh\necho "yq 3.4.3 (python)"\n' > "$fixture/fakebin/yq"
-chmod +x "$fixture/fakebin/yq"
-run_fail_contains \
-  "fails closed on a non-mikefarah yq" \
-  "wrong yq variant" \
-  env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal
-
-make_fixture
-mkdir -p "$fixture/fakebin"
-printf '#!/bin/sh\necho "yq (https://github.com/mikefarah/yq/) version v3.4.0"\n' > "$fixture/fakebin/yq"
-chmod +x "$fixture/fakebin/yq"
-run_fail_contains \
-  "fails closed on yq older than v4" \
-  "yq v4+ required" \
-  env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal
-
-# The version text is another tool's output: shown through display_safe
-# (#335), so a terminal escape in it is a `?`, never a raw byte.
-for yq_case in variant old; do
+# the host has (CI runners ship one in /usr/bin). The version text is
+# another tool's output: shown through display_safe (#335), so a terminal
+# escape in it is a `?`, never a raw byte.
+# fake_yq_case NAME VERSION_CMD MESSAGE — in a fresh fixture whose fake yq
+# runs the sh command VERSION_CMD, validate-policy must exit non-zero with
+# MESSAGE and no raw ESC in its output.
+fake_yq_case() {
+  local name="$1" version_cmd="$2" expected="$3" output rc=0
   make_fixture
   mkdir -p "$fixture/fakebin"
-  if [[ "$yq_case" == variant ]]; then
-    printf '#!/bin/sh\nprintf "yq 3\\033[2J (python)\\n"\n' > "$fixture/fakebin/yq"
-    yq_want="wrong yq variant: need mikefarah/yq v4, got: yq 3?[2J (python)"
-  else
-    printf '#!/bin/sh\nprintf "yq (https://github.com/mikefarah/yq/) version v3\\033[2J\\n"\n' > "$fixture/fakebin/yq"
-    yq_want="yq v4+ required, got: yq (https://github.com/mikefarah/yq/) version v3?[2J"
-  fi
+  printf '#!/bin/sh\n%s\n' "$version_cmd" > "$fixture/fakebin/yq"
   chmod +x "$fixture/fakebin/yq"
-  yq_rc=0
-  yq_out="$(env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal 2>&1)" || yq_rc=$?
-  if [[ "$yq_rc" -ne 0 ]] && grep -Fq -- "$yq_want" <<< "$yq_out" && ! grep -Fq $'\033' <<< "$yq_out"; then
-    ok "test passed: a yq version with a terminal escape is shown with ? ($yq_case)"
+  output="$(env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/validate-policy.sh" personal 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]] && grep -Fq -- "$expected" <<< "$output" && ! grep -Fq $'\033' <<< "$output"; then
+    ok "test passed: $name"
   else
-    printf '%s\n' "$yq_out" | LC_ALL=C cat -v >&2
-    fail "test failed: a yq version with a terminal escape reached the output raw ($yq_case)"
-    exit 1
+    printf '%s\n' "$output" | LC_ALL=C cat -v >&2
+    fail "test failed: $name (exit $rc; want non-zero, $expected, no raw ESC)"
+    return 1
   fi
-done
+}
+fake_yq_case "fails closed on a non-mikefarah yq" \
+  'echo "yq 3.4.3 (python)"' \
+  "wrong yq variant"
+fake_yq_case "fails closed on yq older than v4" \
+  'echo "yq (https://github.com/mikefarah/yq/) version v3.4.0"' \
+  "yq v4+ required"
+fake_yq_case "a yq version with a terminal escape is shown with ? (variant)" \
+  'printf "yq 3\033[2J (python)\n"' \
+  "wrong yq variant: need mikefarah/yq v4, got: yq 3?[2J (python)"
+fake_yq_case "a yq version with a terminal escape is shown with ? (old)" \
+  'printf "yq (https://github.com/mikefarah/yq/) version v3\033[2J\n"' \
+  "yq v4+ required, got: yq (https://github.com/mikefarah/yq/) version v3?[2J"
 
 # ---- Software catalog drift (report_catalog_drift) ----
 # report_catalog_drift probes real package managers, so tests run it against
