@@ -4016,6 +4016,15 @@ case ",${CODEX_FAKE_ALLOWS:-}," in
 esac
 SH
 chmod +x "$codex_fakebin/codex"
+# aip_run [VAR=VALUE...] — one personal doctor run on the fixture HOME with the
+# fake codex in front of PATH and the given env (a later HOME= / PATH= wins):
+# the output in aip_out, the exit status in aip_rc, so a run that does not
+# exit 0 is reported with its status, not as a line missing (#378).
+aip_run() {
+  aip_rc=0
+  aip_out="$(env HOME="$fixture_home" PATH="$codex_fakebin:$PATH" "$@" \
+    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" || aip_rc=$?
+}
 # The rules file content is irrelevant to the fake (doctor must not read it) —
 # plant a canary to pin exactly that: a secret-looking string inside a rule
 # line must never reach doctor output.
@@ -4026,7 +4035,9 @@ RULES
 # TOML spelling coverage (Codex review #187, round 2): the whole-home entry is
 # COMPACT (trust_level="trusted", no spaces) and one stale entry is single-
 # quoted — both valid TOML codex may write; missing either would undercount and
-# silently skip the home-trust warn.
+# silently skip the home-trust warn. The real project's header carries a
+# trailing comment with a canary (#292): the whole run must count that path
+# and never echo the comment.
 cat > "$fixture_home/.codex/config.toml" <<TOML
 approval_policy = "on-request"
 
@@ -4042,99 +4053,35 @@ trust_level = 'trusted'
 [projects."$fixture_home/gone-untrusted"]
 trust_level = "untrusted"
 
-[projects."$fixture_home/real-project"]
-trust_level = "trusted"
-TOML
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token,env,op read op://example/item/field,security -q find-generic-password -s example.invalid -w" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status --show-token'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status -t'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth token'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'env'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'op read op://example/item/field'" <<< "$aip_out" \
-    && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'security -q find-generic-password -s example.invalid -w'" <<< "$aip_out" \
-    && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
-    && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
-    && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
-    && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_RULES_LEAK_a71c" <<< "$aip_out"; then
-    ok "test passed: allowed probes warned by name, trusted whole-home (compact TOML) + trusted stale (single-quoted) warned, untrusted entry ignored, contents never echoed"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: Codex permission-surface watch (probes/projects trust) not reported as expected"
-    status=1
-  fi
-else
-  printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (Codex permission surface)"
-  status=1
-fi
-
-# AIP-H) Project headers (#292): both quoted key forms, optional whitespace
-# and trailing comments must preserve the path; unsupported headers make the
-# entire scan INCOMPLETE, even if an earlier entry was parsed successfully.
-cat > "$fixture_home/.codex/config.toml" <<TOML
-[projects.'$fixture_home' ] # whole-home grant
-trust_level = "trusted"
-TOML
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
-  && grep -Fq "edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)" <<< "$aip_out" \
-  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
-  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out"; then
-  ok "test passed: single-quoted project header reports the whole-home action (exit 0)"
-else
-  fail "test failed: single-quoted project header must report the whole-home action (exit 0)"
-  status=1
-fi
-
-cat > "$fixture_home/.codex/config.toml" <<TOML
 [projects."$fixture_home/real-project"] # CANARY_HEADER_COMMENT_292
 trust_level = "trusted"
-[mcp_servers.fake.env]
-FAKE_TOKEN = "CANARY_HEADER_ENV_292"
 TOML
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex projects trust: 1 path(s) trusted" <<< "$aip_out" \
-  && ! grep -Fq "stale Codex projects trust" <<< "$aip_out" \
-  && ! grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
-  && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
-  ok "test passed: commented project header counts a real trusted path without stale warnings or value leaks (exit 0)"
+aip_run CODEX_FAKE_ALLOWS="git push,gh pr create,gh auth status --show-token,gh auth status -t,gh auth token,env,op read op://example/item/field,security -q find-generic-password -s example.invalid -w"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "Codex permission surface" "$aip_rc" "$aip_out"
+elif grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh pr create'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status --show-token'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth status -t'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'gh auth token'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'env'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'op read op://example/item/field'" <<< "$aip_out" \
+  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'security -q find-generic-password -s example.invalid -w'" <<< "$aip_out" \
+  && grep -Fq "Codex projects trust covers the WHOLE home directory" <<< "$aip_out" \
+  && grep -Fxq "        edit ~/.codex/config.toml: remove the project entry for this path (or set its trust_level to untrusted)" <<< "$aip_out" \
+  && grep -Fq "stale Codex projects trust (path no longer exists): $fixture_home/gone-project" <<< "$aip_out" \
+  && grep -Fxq "        edit ~/.codex/config.toml: remove the project entry for this path" <<< "$aip_out" \
+  && ! grep -Fq "gone-untrusted" <<< "$aip_out" \
+  && grep -Fq "3 path(s) trusted" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_CODEX_ENV_LEAK_3b9d" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out" \
+  && ! grep -Fq "CANARY_RULES_LEAK_a71c" <<< "$aip_out"; then
+  ok "test passed: allowed probes warned by name, trusted whole-home (compact TOML) + trusted stale (single-quoted) warned with their remedy steps, untrusted entry ignored, contents never echoed"
 else
-  fail "test failed: commented project header must count the real path without stale warnings or value leaks (exit 0)"
+  printf '%s\n' "$aip_out" >&2
+  fail "test failed: Codex permission-surface watch (probes/projects trust) not reported as expected"
   status=1
 fi
-
-# Headers that are TOML syntax errors make the whole file unreadable: INCOMPLETE.
-# (Valid spellings such as [projects.bare] are counted — see the trust form
-# cases below.)
-for aip_header in "[projects.'/path' trailing]" '[projects."/path"] trailing'; do
-  cat > "$fixture_home/.codex/config.toml" <<TOML
-[projects."$fixture_home/real-project"]
-trust_level = "trusted"
-$aip_header
-trust_level = "trusted"
-[mcp_servers.fake.env]
-FAKE_TOKEN = "CANARY_HEADER_ENV_292"
-TOML
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "projects-trust scan INCOMPLETE" <<< "$aip_out" \
-    && grep -Fq "do NOT read this as zero trusted" <<< "$aip_out" \
-    && ! grep -Fq "Codex projects trust:" <<< "$aip_out" \
-    && ! grep -Fq "CANARY_HEADER_" <<< "$aip_out"; then
-    ok "test passed: a header that is a TOML syntax error reports INCOMPLETE without a trusted count (exit 0): $aip_header"
-  else
-    fail "test failed: a header that is a TOML syntax error must report INCOMPLETE without a trusted count (exit 0): $aip_header"
-    status=1
-  fi
-done
 
 # The scan reads config.toml with a TOML parser (yq, #309), so every valid
 # spelling of a project table counts as TOML says — a [projects] table,
@@ -4143,20 +4090,41 @@ done
 # string or an array, a trusted key with a control character) is INCOMPLETE,
 # never "0 trusted". Each case writes the whole config line by line (printf
 # '%s\n', so a TOML escape such as j stays literal), with a real trusted
-# project and an MCP env canary that must never be printed.
+# project and an MCP env canary that must never be printed. The cases run
+# the watch alone: report_codex_projects_trust, taken from doctor.sh, in a
+# bash of its own under set -euo pipefail (doctor runs it under errexit, so
+# it must return 0 there too). The main AIP case and AIP-2 stay full doctor
+# runs, which pin the watch's wiring into the personal report and the exit 0
+# of the whole run.
 aip_real_header="[projects.\"$fixture_home/real-project\"]"
 aip_bs='\'   # one backslash: the escape cases spell TOML escapes (u006a = j) with it
+aip_trust_fn="$(sed -n '/^report_codex_projects_trust() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+if [[ -z "$aip_trust_fn" ]]; then
+  fail "test failed: report_codex_projects_trust not found in doctor.sh"
+  status=1
+fi
+# aip_fn_exit_fail FUNCTION LABEL RC OUTPUT — a watch function taken from
+# doctor.sh did not return 0 in its own bash: show its output and status, then
+# fail. Like doctor_exit_fail, but it names the function, since no doctor run
+# happens in these cases (the trust forms here, the result shapes in AIP-4).
+aip_fn_exit_fail() {
+  printf '%s\n' "$4" >&2
+  fail "test failed: $1 must return 0 under set -euo pipefail ($2): exited $3"
+  status=1
+}
 # aip_trust_case LABEL EXPECT LINE... — EXPECT is "incomplete" or a count.
+# Skipped (after the failure above) when the watch was not found.
 aip_trust_case() {
   local label="$1" expect="$2"
   shift 2
+  [[ -n "$aip_trust_fn" ]] || return 0
   printf '%s\n' "$@" '[mcp_servers.fake.env]' 'FAKE_TOKEN = "CANARY_FORM_ENV_309"' \
     > "$fixture_home/.codex/config.toml"
-  local rc=0
-  aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    doctor_exit_fail "trust form: $label" "$rc" "$aip_out"
+  aip_rc=0
+  aip_out="$(HOME="$fixture_home" \
+    bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_projects_trust' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_trust_fn" 2>&1)" || aip_rc=$?
+  if [[ "$aip_rc" -ne 0 ]]; then
+    aip_fn_exit_fail report_codex_projects_trust "trust form: $label" "$aip_rc" "$aip_out"
   elif grep -Fq "CANARY_FORM_" <<< "$aip_out"; then
     fail "test failed: trust form $label leaked a config value"
     status=1
@@ -4227,7 +4195,7 @@ aip_trust_case "multi-line string closed by four quotes inside an array" 1 \
 aip_trust_case "escaped quotes in a multi-line array value" 1 \
   'notify = [' '  "sh",' '  "-c",' "  \"printf '%s' ${aip_bs}\"done${aip_bs}\"\"," ']' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "backslash in a header comment" 1 \
-  "$aip_real_header # C:${aip_bs}work" 'trust_level = "trusted"'
+  "$aip_real_header # C:${aip_bs}work CANARY_FORM_COMMENT" 'trust_level = "trusted"'
 aip_trust_case "escape in another table's name" 1 \
   "[mcp_servers.\"demo${aip_bs}u002dserver\"]" 'command = "x"' "$aip_real_header" 'trust_level = "trusted"'
 aip_trust_case "backslash in a literal header and in a value" 2 \
@@ -4250,9 +4218,11 @@ aip_trust_case "a trusted key with a control character" incomplete \
   "$aip_real_header" 'trust_level = "trusted"' "[projects.\"/a${aip_bs}nb\"]" 'trust_level = "trusted"'
 
 # AIP-2) Clean state: no probe allowed, only a real trusted project -> the ok
-#        line (with the probe count), no warns from this watch. The shim log
-#        pins the EXACT probe set (policy-derived contract): a probe silently
-#        dropped from doctor.sh fails this test (coverage regression guard).
+#        lines (with the probe count) name the managed baseline and say it is
+#        holding (the counterpart of AIP-6b's NOT-in-effect case), no warns
+#        from this watch. The shim log pins the EXACT probe set
+#        (policy-derived contract): a probe silently dropped from doctor.sh
+#        fails this test (coverage regression guard).
 cat > "$fixture_home/.codex/config.toml" <<TOML
 [projects."$fixture_home/real-project"]
 trust_level = "trusted"
@@ -4260,10 +4230,12 @@ TOML
 aip_probe_log="$fixture_home/.codex-probe-log"
 : > "$aip_probe_log"
 expected_probes=$'curl https://example.invalid\nenv\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nop item get example\nop read op://example/item/field\nprintenv\nsecurity -q find-generic-password -s example.invalid -w\nsecurity dump-keychain\nsecurity export -k login.keychain\nsecurity find-generic-password -s example.invalid -w\nsecurity find-internet-password -s example.invalid -w\nsudo -v\nwget https://example.invalid'
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "no outward/escalation/credential-display probe is auto-allowed by the live Codex rules" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "Codex permission surface, clean" "$aip_rc" "$aip_out"
+else
+  if grep -Fxq "[ok] Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)" <<< "$aip_out" \
+    && grep -Fxq "[ok] no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (39 probes over 1 rules file(s) via codex execpolicy; read-only baseline holding)" <<< "$aip_out" \
     && grep -Fq "1 path(s) trusted" <<< "$aip_out" \
     && ! grep -Fq "outward/escalation/credential-display probe auto-allowed" <<< "$aip_out" \
     && ! grep -Fq "WHOLE home directory" <<< "$aip_out" \
@@ -4281,36 +4253,42 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     fail "test failed: outward/escalation/credential-display probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"
     status=1
   fi
-else
-  printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (Codex permission surface, clean)"
-  status=1
 fi
 
 # AIP-3) Engine-evaluation failure (codex execpolicy exits 1 — broken rules
 #        file, incompatible codex): the scan must surface INCOMPLETE and must
 #        NOT emit the clean ok (a failure that reads as clean is the fail-open
 #        false-clean the review flagged). doctor stays exit 0 (report-only).
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="" CODEX_FAKE_MODE="fail" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
-    ok "test passed: probe-evaluation failure reports scan INCOMPLETE and suppresses the clean ok (no fail-open false-clean)"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: probe-evaluation failure did not surface as INCOMPLETE (or still claimed clean)"
-    status=1
-  fi
+aip_run CODEX_FAKE_ALLOWS="" CODEX_FAKE_MODE="fail"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "probe-evaluation failure" "$aip_rc" "$aip_out"
+elif grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: probe-evaluation failure reports scan INCOMPLETE and suppresses the clean ok (no fail-open false-clean)"
 else
   printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (probe-evaluation failure)"
+  fail "test failed: probe-evaluation failure did not surface as INCOMPLETE (or still claimed clean)"
   status=1
 fi
 # AIP-4) Interpret the effective decision, not a nested rule match (#210).
 # Invalid JSON and unknown result shapes must remain report-only INCOMPLETE.
+# As with the trust forms, each result shape runs the probe loop alone:
+# report_codex_rules_probes and the two probe lists it reads, taken from
+# doctor.sh, in a bash of its own under set -euo pipefail with the fake codex
+# in front of PATH (it must return 0 there too). AIP-2 keeps the full run
+# that pins the probe set and the wiring. Skipped (after a failure) when one
+# of the three is not found.
+aip_probe_fns="$(sed -n '/^outward_probe_commands=(/,/^)$/p; /^secret_read_probe_commands=(/,/^)$/p; /^report_codex_rules_probes() {/,/^}/p' "$SCRIPT_DIR/doctor.sh")"
+if [[ "$aip_probe_fns" != *"outward_probe_commands=("* \
+  || "$aip_probe_fns" != *"secret_read_probe_commands=("* \
+  || "$aip_probe_fns" != *"report_codex_rules_probes() {"* ]]; then
+  fail "test failed: outward_probe_commands / secret_read_probe_commands / report_codex_rules_probes not found in doctor.sh"
+  status=1
+  aip_probe_fns=""
+fi
 aip_result="$fixture_home/.codex-result"
 for aip_case in forbidden prompt pretty-allow malformed empty unknown missing null-decision non-object; do
+  [[ -n "$aip_probe_fns" ]] || break
   case "$aip_case" in
     forbidden|prompt)
       printf '{"decision":"%s","matchedRules":[{"decision":"allow"}]}\n' "$aip_case" > "$aip_result"
@@ -4332,8 +4310,12 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
       aip_expected="incomplete"
       ;;
   esac
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-      CODEX_FAKE_RESULT="$aip_result" "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+  aip_rc=0
+  aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_RESULT="$aip_result" \
+    bash -c 'set -euo pipefail; source "$1"; eval "$2"; report_codex_rules_probes' _ "$SCRIPT_DIR/lib-policy.sh" "$aip_probe_fns" 2>&1)" || aip_rc=$?
+  if [[ "$aip_rc" -ne 0 ]]; then
+    aip_fn_exit_fail report_codex_rules_probes "Codex result $aip_case" "$aip_rc" "$aip_out"
+  else
     aip_actual="unexpected"
     if grep -Fq "rules-semantics scan INCOMPLETE" <<< "$aip_out"; then
       aip_actual="incomplete"
@@ -4349,8 +4331,6 @@ for aip_case in forbidden prompt pretty-allow malformed empty unknown missing nu
       fail "test failed: Codex result $aip_case expected $aip_expected, got $aip_actual"
       status=1
     fi
-  else
-    doctor_exit_fail "Codex result $aip_case" "$?" "$aip_out"
   fi
 done
 rm -f "$aip_result"
@@ -4383,10 +4363,11 @@ ln -s "$aip_rules_dir/extra.rules" "$aip_rules_dir/link.rules"
 printf '%s\0' ".hidden.rules" "..rules" "default.rules" "$aip_evil_name" "extra.rules" "$aip_nl_name" \
   | LC_ALL=C sort -z > "$aip_rules_expected"
 : > "$aip_rules_log"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
-    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
+aip_run CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+  CODEX_FAKE_RULES_LOG="$aip_rules_log"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "unmanaged Codex rules files" "$aip_rc" "$aip_out"
+else
   aip_unmanaged_prefix="unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/"
   if grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
     && grep -Fq "${aip_unmanaged_prefix}extra.rules " <<< "$aip_out" \
@@ -4413,15 +4394,12 @@ if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
     fail "test failed: rules-file set passed to codex execpolicy differs from what Codex loads"
     status=1
   fi
-else
-  printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (unmanaged Codex rules files)"
-  status=1
 fi
 # Same tree, nothing allowed: the clean ok counts the files it probed.
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "probes over 6 rules file(s) via codex execpolicy" <<< "$aip_out"; then
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "unmanaged Codex rules files, clean" "$aip_rc" "$aip_out"
+elif grep -Fq "probes over 6 rules file(s) via codex execpolicy" <<< "$aip_out"; then
   ok "test passed: the clean ok reports the number of rules files probed"
 else
   printf '%s\n' "$aip_out" >&2
@@ -4437,28 +4415,25 @@ rm -rf "${aip_rules_dir:?}/extra.rules" "${aip_rules_dir:?}/.hidden.rules" "${ai
 #        not in effect: warn, and do not pass it to the engine (no clean ok).
 mv "$aip_rules_dir/default.rules" "$fixture_home/.codex/default.rules.real"
 ln -s "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "Codex approval-rules baseline is a symlink" <<< "$aip_out" \
-    && ! grep -Fq "Codex approval-rules baseline managed" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
-    ok "test passed: a symlinked default.rules is warned as not in effect and is not probed"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: symlinked default.rules not reported as not in effect"
-    status=1
-  fi
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "symlinked default.rules" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex approval-rules baseline is a symlink" <<< "$aip_out" \
+  && ! grep -Fq "Codex approval-rules baseline managed" <<< "$aip_out" \
+  && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+  ok "test passed: a symlinked default.rules is warned as not in effect and is not probed"
 else
   printf '%s\n' "$aip_out" >&2
-  fail "test failed: doctor must stay exit 0 (symlinked default.rules)"
+  fail "test failed: symlinked default.rules not reported as not in effect"
   status=1
 fi
 # Same symlinked baseline beside a (clean) sibling file: the sibling is still
 # probed, and the clean ok must not claim the baseline is holding.
 : > "$aip_rules_dir/extra.rules"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "probes over 1 rules file(s) via codex execpolicy; the managed baseline is NOT in effect)" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "symlinked default.rules beside a sibling" "$aip_rc" "$aip_out"
+elif grep -Fq "probes over 1 rules file(s) via codex execpolicy; the managed baseline is NOT in effect)" <<< "$aip_out" \
   && ! grep -Fq "read-only baseline holding" <<< "$aip_out"; then
   ok "test passed: with the baseline not in effect, the clean ok over a sibling file does not claim the baseline is holding"
 else
@@ -4473,9 +4448,10 @@ mv "$fixture_home/.codex/default.rules.real" "$aip_rules_dir/default.rules"
 #        the scan is INCOMPLETE, never clean. Skipped as root (root reads it).
 if [[ "$(id -u)" != "0" ]]; then
   chmod 000 "$aip_rules_dir"
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+  aip_run CODEX_FAKE_ALLOWS=""
+  if [[ "$aip_rc" -ne 0 ]]; then
+    doctor_exit_fail "unreadable rules dir" "$aip_rc" "$aip_out"
+  elif grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
     && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
     ok "test passed: an unreadable rules dir reports the scan INCOMPLETE (no false clean)"
   else
@@ -4493,11 +4469,11 @@ mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 ln -s "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 printf 'prefix_rule(pattern=["git", "push"], decision="allow")\n' > "$fixture_home/.codex/rules-real/extra.rules"
 : > "$aip_rules_log"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" \
-    CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
-    CODEX_FAKE_RULES_LOG="$aip_rules_log" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS="git push" CODEX_FAKE_ALLOWS_IF_RULES="extra.rules" \
+  CODEX_FAKE_RULES_LOG="$aip_rules_log"
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "symlinked rules dir" "$aip_rc" "$aip_out"
+elif grep -Fq "outward/escalation/credential-display probe auto-allowed by live Codex rules: 'git push'" <<< "$aip_out" \
   && grep -Fq "unmanaged Codex rules file, loaded by Codex alongside the baseline: ~/.codex/rules/extra.rules " <<< "$aip_out" \
   && [[ "$(LC_ALL=C sort -z -u "$aip_rules_log" | tr '\0' '\n')" == $'default.rules\nextra.rules' ]]; then
   ok "test passed: a symlinked rules dir is followed (its files are probed and named)"
@@ -4523,9 +4499,10 @@ esac
 exec "$aip_real_find" "\$@"
 SH
 chmod +x "$aip_findbin/find"
-if aip_out="$(HOME="$fixture_home" PATH="$aip_findbin:$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
+aip_run PATH="$aip_findbin:$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "rules listing failing after partial output" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex rules dir could not be listed completely (~/.codex/rules" <<< "$aip_out" \
   && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
   ok "test passed: a listing that fails after partial output reports the scan INCOMPLETE (no subset read as clean)"
 else
@@ -4539,9 +4516,10 @@ rm -rf "${aip_findbin:?}"
 #         rules dir, so the scan is INCOMPLETE, never "not applied" or clean.
 mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 : > "$aip_rules_dir"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "non-directory rules path" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
   && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
   ok "test passed: a non-directory rules path reports the scan INCOMPLETE"
 else
@@ -4552,50 +4530,29 @@ fi
 rm -f "$aip_rules_dir"
 mv "$fixture_home/.codex/rules-real" "$aip_rules_dir"
 
-# AIP-11) Only a confirmed absence is "no rules": ~/.codex/rules a symlink into
+# AIP-13) Only a confirmed absence is "no rules": ~/.codex/rules a symlink into
 #         a parent without search permission is a read error for Codex, so it
 #         must be INCOMPLETE — `test -e` alone would call it absent and report
-#         only "not applied yet". Skipped as root.
-if [[ "$(id -u)" != "0" ]]; then
-  mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
-  mkdir -p "$fixture_home/locked-parent"
-  mv "$fixture_home/.codex/rules-real" "$fixture_home/locked-parent/rules"
-  ln -s "$fixture_home/locked-parent/rules" "$aip_rules_dir"
-  chmod 000 "$fixture_home/locked-parent"
-  if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
-    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
-    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
-    ok "test passed: a rules dir behind an unsearchable parent is INCOMPLETE, not absent"
-  else
-    printf '%s\n' "$aip_out" >&2
-    fail "test failed: an unresolvable rules dir was read as absent"
-    status=1
-  fi
-  chmod 755 "$fixture_home/locked-parent"
-  rm -f "$aip_rules_dir"
-  mv "$fixture_home/locked-parent/rules" "$aip_rules_dir"
-  rmdir "$fixture_home/locked-parent"
-fi
-
-# AIP-13) The absence test matches the strerror at the END of the message
-#         only: a HOME whose path contains "No such file or directory" must
-#         not turn a permission error into "absent". Skipped as root.
+#         only "not applied yet". The absence test matches the strerror at the
+#         END of the message only, so the HOME here holds "No such file or
+#         directory" in its path: that must not turn the permission error into
+#         "absent" either. Skipped as root.
 if [[ "$(id -u)" != "0" ]]; then
   aip_odd_home="$fixture_home/odd: No such file or directory"
   mkdir -p "$aip_odd_home/.codex" "$aip_odd_home/locked-parent/rules"
   : > "$aip_odd_home/locked-parent/rules/default.rules"
   ln -s "$aip_odd_home/locked-parent/rules" "$aip_odd_home/.codex/rules"
   chmod 000 "$aip_odd_home/locked-parent"
-  if aip_out="$(HOME="$aip_odd_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-      "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-    && grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
-    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out"; then
-    ok "test passed: a HOME containing the strerror words does not turn a permission error into absent"
+  aip_run HOME="$aip_odd_home" CODEX_FAKE_ALLOWS=""
+  if [[ "$aip_rc" -ne 0 ]]; then
+    doctor_exit_fail "rules dir behind an unsearchable parent, HOME holding the strerror words" "$aip_rc" "$aip_out"
+  elif grep -Fq "Codex rules dir could not be opened (~/.codex/rules" <<< "$aip_out" \
+    && ! grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+    && ! grep -Fq "no outward/escalation/credential-display probe is auto-allowed" <<< "$aip_out"; then
+    ok "test passed: a rules dir behind an unsearchable parent is INCOMPLETE, not absent (also under a HOME containing the strerror words)"
   else
     printf '%s\n' "$aip_out" >&2
-    fail "test failed: a permission error under a HOME containing the strerror words was read as absent"
+    fail "test failed: an unresolvable rules dir was read as absent (HOME containing the strerror words)"
     status=1
   fi
   chmod 755 "$aip_odd_home/locked-parent"
@@ -4606,9 +4563,10 @@ fi
 #         NotFound -> no rules): "not applied yet", not INCOMPLETE.
 mv "$aip_rules_dir" "$fixture_home/.codex/rules-real"
 ln -s "$fixture_home/.codex/rules-gone" "$aip_rules_dir"
-if aip_out="$(HOME="$fixture_home" PATH="$codex_fakebin:$PATH" CODEX_FAKE_ALLOWS="" \
-    "$DOTFILES_ROOT/scripts/doctor.sh" personal 2>&1)" \
-  && grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
+aip_run CODEX_FAKE_ALLOWS=""
+if [[ "$aip_rc" -ne 0 ]]; then
+  doctor_exit_fail "dangling rules dir symlink" "$aip_rc" "$aip_out"
+elif grep -Fq "Codex approval-rules baseline not applied yet" <<< "$aip_out" \
   && ! grep -Fq "Codex rules dir could not be" <<< "$aip_out"; then
   ok "test passed: a dangling rules dir symlink is a confirmed absence (not applied, not INCOMPLETE)"
 else
@@ -4640,8 +4598,11 @@ cl_write() {
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "$2" > "$1"
 }
+# cl_run [PROFILE] — one doctor run on the CL HOME: the output in cl_out, the
+# exit status in cl_rc (#378, as aip_run).
 cl_run() {
-  HOME="$cl_home" "$SCRIPT_DIR/doctor.sh" "${1:-personal}" 2>&1
+  cl_rc=0
+  cl_out="$(HOME="$cl_home" "$SCRIPT_DIR/doctor.sh" "${1:-personal}" 2>&1)" || cl_rc=$?
 }
 cl_floor='{"permissions":{"deny":["Bash(gh auth token)",7],"ask":["Bash(gh  pr merge *)","Bash(echo harmless\nBash\n)"]}}'
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
@@ -4697,7 +4658,10 @@ cl_write "$cl_f" '{"permissions":{"allow":["Bash(\u00a0gh pr close *)","Bash(gh 
 #       listed, so the repos under it are read once too, the repos of an org
 #       reached twice (client/mirror, a symlink to client/cli) read once,
 #       and a checkout below such a repo not read.
-if cl_out="$(LC_ALL=C cl_run)"; then
+LC_ALL=C cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "Claude project-level allows" "$cl_rc" "$cl_out"
+else
   if grep -Fxq "[warn] 4 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_a: 'git push', 'git clone https://example.invalid/repo', 'gh pr create', 'gh issue create' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
     && grep -Fxq "        edit $cl_a: remove the allow rules covering those commands (approve them per use instead)" <<< "$cl_out" \
     && grep -Fxq "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'wget https://example.invalid' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out" \
@@ -4724,10 +4688,6 @@ if cl_out="$(LC_ALL=C cl_run)"; then
     fail "test failed: project-level Claude allow report drifted"
     status=1
   fi
-else
-  printf '%s\n' "$cl_out" >&2
-  fail "test failed: doctor must stay exit 0 (Claude project-level allows)"
-  status=1
 fi
 
 # CL-2) files whose allows the floor already stops (or that cover no probe)
@@ -4735,8 +4695,10 @@ fi
 rm -rf "$cl_home/src"
 cl_write "$cl_b" '{"permissions":{"allow":["Bash(gh auth token)","Bash(gh  pr merge:*)","Bash(npm test *)"]}}'
 cl_write "$cl_home/src/sandbox/repo-e/.claude/settings.local.json" '{"permissions":{"deny":["Bash"]}}'
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[ok] no project-level Claude allow rule covers an outward probe (30 probes over 2 settings file(s) in this repo, the repos directly under the standard project roots and those one org (client) level down in work and client)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "floor-stopped project allows" "$cl_rc" "$cl_out"
+elif grep -Fxq "[ok] no project-level Claude allow rule covers an outward probe (30 probes over 2 settings file(s) in this repo, the repos directly under the standard project roots and those one org (client) level down in work and client)" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: allows the floor stops are not reported; the ok line counts the files read"
 else
@@ -4746,20 +4708,26 @@ else
 fi
 
 # CL-2b) a file that cannot be read keeps the result from being clean: no ok
-#        line, an item saying so (here the only other file is clean). An
-#        allow list of the wrong shape counts as unreadable too.
+#        line, an item saying so (here the only other files are clean). An
+#        allow list of the wrong shape counts as unreadable too, and so does
+#        a settings path that is not a regular file (only a confirmed absence
+#        counts as "no settings", Codex review R7, PR #340): each is counted.
 cl_write "$cl_d" '{"permissions":{"allow":"Bash"}}'
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - the permission rules of $cl_d could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
-  && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 2 file(s) read, but 1 could not be read — not a clean result" <<< "$cl_out" \
+mkdir -p "$cl_home/src/personal/repo-g/.claude/settings.local.json"
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "unreadable project files" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - the permission rules of $cl_d could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
+  && grep -Fxq "[info] - the permission rules of $cl_home/src/personal/repo-g/.claude/settings.local.json could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
+  && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 2 file(s) read, but 2 could not be read — not a clean result" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-  ok "test passed: an unreadable project file keeps the Claude allow check from reporting clean"
+  ok "test passed: an unreadable project file and a settings path that is not a regular file keep the Claude allow check from reporting clean"
 else
   printf '%s\n' "$cl_out" >&2
-  fail "test failed: an unreadable project file must not leave the clean ok"
+  fail "test failed: an unreadable project file or a settings path that is not a regular file must not leave the clean ok"
   status=1
 fi
-rm -rf "$cl_home/src/client"
+rm -rf "$cl_home/src/client" "$cl_home/src/personal"
 
 # CL-6) this repo under a standard root is read once: a minimal repo copy at
 #       ~/src/personal/dotfiles runs doctor from there, so it is both "this
@@ -4771,8 +4739,11 @@ rm -rf "$cl_home/src/client"
 for cl_self_rel in src/personal/dotfiles src/work/org-s/dotfiles; do
   copy_repo_fixture "$cl_home/$cl_self_rel"
   cl_write "$cl_home/$cl_self_rel/.claude/settings.local.json" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
-  if cl_out="$(HOME="$cl_home" "$cl_home/$cl_self_rel/scripts/doctor.sh" personal 2>&1)" \
-    && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/$cl_self_rel/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+  cl_rc=0
+  cl_out="$(HOME="$cl_home" "$cl_home/$cl_self_rel/scripts/doctor.sh" personal 2>&1)" || cl_rc=$?
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "this repo at ~/$cl_self_rel" "$cl_rc" "$cl_out"
+  elif [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/$cl_self_rel/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
     ok "test passed: this repo at ~/$cl_self_rel is read once (one action)"
   else
     printf '%s\n' "$cl_out" >&2
@@ -4790,8 +4761,11 @@ rm -rf "$cl_home/src/work"
 copy_repo_fixture "$cl_home/dotfiles"
 cl_write "$cl_home/dotfiles/.claude/settings.local.json" '{"permissions":{"allow":["Bash(sudo -v)"]}}'
 cl_home_dbl="${cl_home%/*}//${cl_home##*/}"
-if cl_out="$(HOME="$cl_home_dbl" "$cl_home/dotfiles/scripts/doctor.sh" personal 2>&1)" \
-  && [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/cl-home/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
+cl_rc=0
+cl_out="$(HOME="$cl_home_dbl" "$cl_home/dotfiles/scripts/doctor.sh" personal 2>&1)" || cl_rc=$?
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "this repo under HOME outside the standard roots" "$cl_rc" "$cl_out"
+elif [[ "$(grep -F "[warn] 1 outward probe(s) auto-allowed for Claude by project-level allow rules in " <<< "$cl_out" | grep -Fc "/cl-home/dotfiles/.claude/settings.local.json: 'sudo -v'")" -eq 1 ]]; then
   ok "test passed: this repo under HOME outside the standard roots is read (HOME compared normalized)"
 else
   printf '%s\n' "$cl_out" >&2
@@ -4911,8 +4885,10 @@ fi
 #       is reported (in probe order; the legacy prefix collapses whitespace
 #       runs, so `gh  pr merge:*` covers `gh pr merge`).
 rm -f "$cl_home/.claude/settings.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[warn] 2 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'gh pr merge', 'gh auth token' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out"; then
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "no live floor" "$cl_rc" "$cl_out"
+elif grep -Fxq "[warn] 2 outward probe(s) auto-allowed for Claude by project-level allow rules in $cl_b: 'gh pr merge', 'gh auth token' — no deny / ask of the managed floor or the project stops these, so they run without approval in that project" <<< "$cl_out"; then
   ok "test passed: without a live floor every covered probe is reported"
 else
   printf '%s\n' "$cl_out" >&2
@@ -4923,8 +4899,10 @@ fi
 # CL-4) a live floor that cannot be read decides nothing -> an item, neither
 #       the ok line nor a warn.
 cl_write "$cl_home/.claude/settings.json" '{"permissions":'
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "an unreadable live floor" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: an unreadable live floor leaves the project allows unchecked (no false clean)"
@@ -4938,8 +4916,10 @@ fi
 #        each) is unreadable too, so its first document's deny of the bare
 #        tool cannot hide the project allows (Codex review R6, PR #340).
 printf '%s\n%s\n' '{"permissions":{"deny":["Bash"]}}' '{}' > "$cl_home/.claude/settings.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "a floor of two JSON documents" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
   ok "test passed: a floor of more than one JSON document is not read (no false clean)"
 else
@@ -4950,8 +4930,10 @@ fi
 # ... and so is a floor repeating a key: yq would take the first
 #     `permissions` (a deny of the bare tool), JSON.parse the last (none).
 printf '%s\n' '{"permissions":{"deny":["Bash"]},"permissions":{}}' > "$cl_home/.claude/settings.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+cl_run
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "a floor repeating a key" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
   && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
   ok "test passed: a floor repeating a key is not read (yq and JSON.parse would disagree)"
 else
@@ -4964,8 +4946,10 @@ fi
 #       not watched, whatever is on disk.
 cl_write "$cl_home/.claude/settings.json" "$cl_floor"
 cl_write "$cl_c" '{"permissions":{"allow":["Bash"]}}'
-if cl_out="$(cl_run work)" \
-  && grep -Fxq "[info] - Claude project-level allows not watched for this profile (claude-settings module inactive)" <<< "$cl_out" \
+cl_run work
+if [[ "$cl_rc" -ne 0 ]]; then
+  doctor_exit_fail "work profile, Claude project-level allows" "$cl_rc" "$cl_out"
+elif grep -Fxq "[info] - Claude project-level allows not watched for this profile (claude-settings module inactive)" <<< "$cl_out" \
   && ! grep -Fq "auto-allowed for Claude" <<< "$cl_out"; then
   ok "test passed: work does not watch Claude project-level allows"
 else
@@ -4975,33 +4959,24 @@ else
 fi
 
 # CL-8) only a confirmed absence counts as "no settings" (Codex review R7,
-#       PR #340): a .claude dir that cannot be searched, or a settings path
-#       that is not a regular file, is unreadable (an item, no clean ok), and
-#       so is a floor dir that cannot be searched, a project root or an org
-#       directory of work or client that cannot be listed (the .claude and
-#       .git of a repo directly under work are not repos, so they add no
-#       item of their own). The rest of the HOME is clean here (repo-b's
-#       allows are all stopped by the floor). Skipped as root (root searches
-#       the dir).
+#       PR #340): a .claude dir that cannot be searched is unreadable (an
+#       item, no clean ok), and so is a floor dir that cannot be searched, a
+#       project root or an org directory of work or client that cannot be
+#       listed (the .claude and .git of a repo directly under work are not
+#       repos, so they add no item of their own). Each item names its path,
+#       so dirs whose states do not depend on each other share a run, and
+#       the count of files not read pins each one. The rest of the HOME is
+#       clean here (repo-b's allows are all stopped by the floor, and its
+#       file is the only one read). Skipped as root (root searches the dir).
 rm -rf "$cl_home/src/work" "$cl_home/src/sandbox"
 cl_g="$cl_home/src/personal/repo-g/.claude"
 cl_write "$cl_g/settings.local.json" '{"permissions":{"allow":["Bash(npm test)"]}}'
 if [[ "$(id -u)" != "0" ]]; then
-  chmod 000 "$cl_g"
-  if cl_out="$(cl_run)" \
-    && grep -Fxq "[info] - the .claude directory of $cl_home/src/personal/repo-g could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
-    && grep -Fq "Claude project-level allows partly checked:" <<< "$cl_out" \
-    && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-    ok "test passed: a .claude dir that cannot be searched is unreadable, not absent (no false clean)"
-  else
-    printf '%s\n' "$cl_out" >&2
-    fail "test failed: a .claude dir that cannot be searched must not read as absent"
-    status=1
-  fi
-  chmod 755 "$cl_g"
   chmod 000 "$cl_home/.claude"
-  if cl_out="$(cl_run)" \
-    && grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
+  cl_run
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "a floor dir that cannot be searched" "$cl_rc" "$cl_out"
+  elif grep -Fxq "[info] - Claude project-level allows not checked: the live ~/.claude/settings.json could not be read (its deny / ask decide which allows matter)" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
     ok "test passed: a floor dir that cannot be searched leaves the check not done (no false clean)"
   else
@@ -5010,24 +4985,62 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$cl_home/.claude"
-  for cl_mode in 000 111; do
-    chmod "$cl_mode" "$cl_home/src/personal"
-    if cl_out="$(cl_run)" \
-      && grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
-      && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-      ok "test passed: a project root that cannot be listed (mode $cl_mode) is unreadable, not empty"
+  # The project root and an org (client) directory of work and of client
+  # (#445: the repos one level down there are where the convention puts
+  # them) that cannot be listed, each through mode 000 and mode 111 across
+  # two runs. A 000 org dir also leaves its own .claude unopenable, so each
+  # run counts 4 not read.
+  mkdir -p "$cl_home/src/work/org-l/repo-l" "$cl_home/src/client/org-l/repo-l"
+  for cl_modes in "000 000 111" "111 111 000"; do
+    read -r cl_mode_p cl_mode_w cl_mode_c <<< "$cl_modes"
+    chmod "$cl_mode_p" "$cl_home/src/personal"
+    chmod "$cl_mode_w" "$cl_home/src/work/org-l"
+    chmod "$cl_mode_c" "$cl_home/src/client/org-l"
+    cl_run
+    if [[ "$cl_rc" -ne 0 ]]; then
+      doctor_exit_fail "a project root and org dirs that cannot be listed, modes $cl_modes" "$cl_rc" "$cl_out"
     else
-      printf '%s\n' "$cl_out" >&2
-      fail "test failed: a project root that cannot be listed (mode $cl_mode) must not read as empty"
-      status=1
+      cl_bad=0
+      if grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out"; then
+        ok "test passed: a project root that cannot be listed (mode $cl_mode_p) is unreadable, not empty"
+      else
+        fail "test failed: a project root that cannot be listed (mode $cl_mode_p) must not read as empty"
+        cl_bad=1
+      fi
+      for cl_root in work client; do
+        cl_mode="$cl_mode_w"
+        [[ "$cl_root" == work ]] || cl_mode="$cl_mode_c"
+        if grep -Fxq "[info] - the directory $cl_home/src/$cl_root/org-l under the project root could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out"; then
+          ok "test passed: an org directory of $cl_root that cannot be listed (mode $cl_mode) is unreadable, not empty"
+        else
+          fail "test failed: an org directory of $cl_root that cannot be listed (mode $cl_mode) must not read as empty"
+          cl_bad=1
+        fi
+      done
+      if ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+        ok "test passed: dirs that cannot be listed leave no clean ok (modes $cl_modes)"
+      else
+        fail "test failed: dirs that cannot be listed must not leave the clean ok (modes $cl_modes)"
+        cl_bad=1
+      fi
+      if grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 1 file(s) read, but 4 could not be read — not a clean result" <<< "$cl_out"; then
+        ok "test passed: each dir that cannot be listed is counted as not read (modes $cl_modes)"
+      else
+        fail "test failed: each dir that cannot be listed must be counted as not read (modes $cl_modes)"
+        cl_bad=1
+      fi
+      [[ "$cl_bad" -eq 0 ]] || { printf '%s\n' "$cl_out" >&2; status=1; }
     fi
-    chmod 755 "$cl_home/src/personal"
+    chmod 755 "$cl_home/src/personal" "$cl_home/src/work/org-l" "$cl_home/src/client/org-l"
   done
+  rm -rf "$cl_home/src/work" "$cl_home/src/client"
   # ... and so is a root under a ~/src that cannot be searched (`-d` would
   # read that as no root at all).
   chmod 000 "$cl_home/src"
-  if cl_out="$(cl_run)" \
-    && grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
+  cl_run
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "a ~/src that cannot be searched" "$cl_rc" "$cl_out"
+  elif grep -Fxq "[info] - the project root $cl_home/src/personal could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
     && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
     ok "test passed: the roots under a ~/src that cannot be searched are unreadable, not absent"
   else
@@ -5036,54 +5049,28 @@ if [[ "$(id -u)" != "0" ]]; then
     status=1
   fi
   chmod 755 "$cl_home/src"
-  # ... and so is an org (client) directory of work or client that cannot
-  # be listed (#445): the repos one level down there are where the
-  # convention puts them.
-  for cl_root in work client; do
-    mkdir -p "$cl_home/src/$cl_root/org-l/repo-l"
-    for cl_mode in 000 111; do
-      chmod "$cl_mode" "$cl_home/src/$cl_root/org-l"
-      if cl_out="$(cl_run)" \
-        && grep -Fxq "[info] - the directory $cl_home/src/$cl_root/org-l under the project root could not be listed (permission denied, not a directory or a symlink loop); the repos under it not checked" <<< "$cl_out" \
-        && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-        ok "test passed: an org directory of $cl_root that cannot be listed (mode $cl_mode) is unreadable, not empty"
-      else
-        printf '%s\n' "$cl_out" >&2
-        fail "test failed: an org directory of $cl_root that cannot be listed (mode $cl_mode) must not read as empty"
-        status=1
-      fi
-      chmod 755 "$cl_home/src/$cl_root/org-l"
-    done
-    rm -rf "${cl_home:?}/src/$cl_root"
-  done
-  # A repo placed directly under work is listed as an org too, but its own
-  # .claude and .git are not read as repos (#445): with both unopenable,
-  # only its .claude is reported, once.
+  # repo-g's .claude cannot be searched, nor can the .claude and .git of a
+  # repo placed directly under work. That repo is listed as an org too, but
+  # its own .claude and .git are not read as repos (#445): only its .claude
+  # is reported, once, so 2 are not read in all.
   mkdir -p "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
-  chmod 000 "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
-  if cl_out="$(cl_run)" \
+  chmod 000 "$cl_g" "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  cl_run
+  if [[ "$cl_rc" -ne 0 ]]; then
+    doctor_exit_fail "the .claude dirs of repo-g and repo-k that cannot be searched" "$cl_rc" "$cl_out"
+  elif grep -Fxq "[info] - the .claude directory of $cl_home/src/personal/repo-g could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
     && grep -Fxq "[info] - the .claude directory of $cl_home/src/work/repo-k could not be opened (permission denied, not a directory or a symlink loop); its settings not checked" <<< "$cl_out" \
-    && grep -Fq "but 1 could not be read — not a clean result" <<< "$cl_out" \
-    && ! grep -Fq "the .claude directory of $cl_home/src/work/repo-k/." <<< "$cl_out"; then
-    ok "test passed: the .claude and .git of a repo directly under work are not read as repos"
+    && grep -Fxq "[info] - Claude project-level allows partly checked: no outward probe auto-allowed in the 1 file(s) read, but 2 could not be read — not a clean result" <<< "$cl_out" \
+    && ! grep -Fq "the .claude directory of $cl_home/src/work/repo-k/." <<< "$cl_out" \
+    && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
+    ok "test passed: a .claude dir that cannot be searched is unreadable, not absent, and the .claude and .git of a repo directly under work are not read as repos"
   else
     printf '%s\n' "$cl_out" >&2
-    fail "test failed: the .claude and .git of a repo directly under work must not be read as repos"
+    fail "test failed: a .claude dir that cannot be searched must not read as absent, and the .claude and .git of a repo directly under work must not be read as repos"
     status=1
   fi
-  chmod 755 "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
+  chmod 755 "$cl_g" "$cl_home/src/work/repo-k/.claude" "$cl_home/src/work/repo-k/.git"
   rm -rf "$cl_home/src/work"
-fi
-rm -f "$cl_g/settings.local.json"
-mkdir -p "$cl_g/settings.local.json"
-if cl_out="$(cl_run)" \
-  && grep -Fxq "[info] - the permission rules of $cl_g/settings.local.json could not be read (not a regular file holding JSON of the expected shape?); not checked (contents never shown)" <<< "$cl_out" \
-  && ! grep -Fq "no project-level Claude allow rule covers" <<< "$cl_out"; then
-  ok "test passed: a settings path that is not a regular file is unreadable, not absent"
-else
-  printf '%s\n' "$cl_out" >&2
-  fail "test failed: a settings path that is not a regular file must not read as absent"
-  status=1
 fi
 rm -rf "${cl_home:?}"
 
@@ -5106,14 +5093,13 @@ case "$2" in
 esac
 SH
 chmod +x "$go_fakebin/go"
-for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query-fails-no-path trailing-slash-home gobin-trailing-slash gobin-double-slash gobin-symlink; do
+for go_case in default-gopath elsewhere no-path query-fails query-fails-no-path trailing-slash-home gobin-trailing-slash gobin-double-slash gobin-symlink; do
   go_gobin=""
   go_gopath="$fixture_home/go"
   go_path="$go_fakebin:$fixture_home/go/bin:$PATH"
   go_fail=""
   go_home="$fixture_home"
   case "$go_case" in
-    explicit-gobin) go_gobin="$fixture_home/go/bin" ;;
     elsewhere) go_gobin="$fixture_home/toolchain/bin" ;;
     no-path) go_path="$go_fakebin:$PATH" ;;
     query-fails) go_fail=1 ;;
@@ -5135,7 +5121,7 @@ for go_case in default-gopath explicit-gobin elsewhere no-path query-fails query
       FAKE_GO_FAIL="$go_fail" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     go_ok=0
     case "$go_case" in
-      default-gopath|explicit-gobin|trailing-slash-home|gobin-trailing-slash|gobin-double-slash|gobin-symlink)
+      default-gopath|trailing-slash-home|gobin-trailing-slash|gobin-double-slash|gobin-symlink)
         grep -Fq "[ok] go install target: ~/go/bin" <<< "$go_out" \
           && ! grep -Fq "go install target is" <<< "$go_out" \
           && ! grep -Fq "PATH here lacks ~/go/bin" <<< "$go_out" && go_ok=1
@@ -5237,14 +5223,16 @@ fi
 # NPM-C/D) The enforce expectation checks, deterministic via fake npm/node on
 # PATH (#150): a mismatched config value is warned; the min-release-age
 # before-cutoff is honored/warned based on the parsed epoch. The fakes are
-# env-driven so each case pins one branch; doctor stays exit 0 throughout.
+# env-driven so each run pins one state of each check (the 7-day wait and
+# the exclude count, see npm_wait_case); doctor stays exit 0 throughout.
 # By default the fake answers as the older npm form (11.10, min-release-age
 # null as npm dropped the key); the #443 cases below set the current form.
 # `config get`, `config list --long=false` (the keys a source sets, as npm
 # prints them) and `config list --json` (the merged config with typed values)
 # read the same FAKE_NPM_* env. FAKE_NPM_EXCLUDE_JSON is the JSON value of
 # min-release-age-exclude (`[]` by default, `absent` for an npm that does not
-# know the key); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
+# know the key; an NBSP in it is written as the JSON escape \u00a0, so it
+# stays visible); FAKE_NPM_BEFORE_SET lists `before = null` in the env source,
 # as an explicit null does; FAKE_NPM_LONG sets long=true in the user source,
 # which makes a listing without --long=false add npm's defaults (`before =
 # null` among them); FAKE_NPM_JSON sets json=true there, which makes a
@@ -5347,41 +5335,6 @@ else
 fi
 now_epoch="$(date +%s)"
 
-if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
-  FAKE_NPM_IGNORE_SCRIPTS=false FAKE_NPM_BEFORE="fake-date" \
-  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
-  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "enforce expects npm ignore-scripts=true, current: false" <<< "$np_out" \
-    && grep -Fq "[ok] npm min-release-age=7 honored (before=fake-date)" <<< "$np_out"; then
-    ok "test passed: enforce mismatch warned while a good before-cutoff is honored"
-  else
-    printf '%s\n' "$np_out" >&2
-    fail "test failed: enforce mismatch warn or honored cutoff missing"
-    status=1
-  fi
-else
-  printf '%s\n' "$np_out" >&2
-  fail "test failed: doctor must stay exit 0 on an enforce mismatch"
-  status=1
-fi
-
-if np_out="$(HOME="$fixture_home" PATH="$npm_fakebin:$PATH" \
-  FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 86400 ))" \
-  "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current: min-release-age=null before=fake-date (apply pending?)" <<< "$np_out" \
-    && ! grep -Fq "npm min-release-age=7 honored" <<< "$np_out"; then
-    ok "test passed: a too-recent before cutoff is warned (cooldown not enforced)"
-  else
-    printf '%s\n' "$np_out" >&2
-    fail "test failed: too-recent before cutoff not warned"
-    status=1
-  fi
-else
-  printf '%s\n' "$np_out" >&2
-  fail "test failed: doctor must stay exit 0 on a too-recent cutoff"
-  status=1
-fi
-
 # NPM-E..Y) The 7-day wait on current npm (#443): npm 11.19 keeps
 # min-release-age as its own key and leaves `before` null, so that form is
 # honored besides the older before-cutoff one (NPM-C, and with
@@ -5407,9 +5360,12 @@ fi
 # arguments fails it.
 # npm_wait_case LABEL WANT DONT_WANT [VAR=VALUE ...] — one personal (enforce)
 # doctor run with the fakes above and the given env: every line of WANT must
-# be in the report, DONT_WANT must not.
+# be in the report, no line of DONT_WANT may be. The 7-day wait (`before` /
+# min-release-age, from `npm config get` and the source listing) and the
+# min-release-age-exclude count (from `npm config list --json`) read separate
+# fake answers, so one run pins one state of each.
 npm_wait_case() {
-  local label="$1" want="$2" dont_want="$3" out rc=0 line missing=""
+  local label="$1" want="$2" dont_want="$3" out rc=0 line missing="" unexpected=""
   shift 3
   out="$(env HOME="$fixture_home" PATH="$npm_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
@@ -5419,118 +5375,86 @@ npm_wait_case() {
   while IFS= read -r line; do
     grep -Fq -- "$line" <<< "$out" || missing+="  $line"$'\n'
   done <<< "$want"
-  if [[ -z "$missing" ]] && ! grep -Fq -- "$dont_want" <<< "$out"; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ! grep -Fq -- "$line" <<< "$out" || unexpected+="  $line"$'\n'
+  done <<< "$dont_want"
+  if [[ -z "$missing" && -z "$unexpected" ]]; then
     ok "test passed: $label"
   else
     printf '%s\n' "$out" >&2
-    printf 'missing:\n%s' "$missing" >&2
+    printf 'missing:\n%sunexpected:\n%s' "$missing" "$unexpected" >&2
     fail "test failed: $label"
     status=1
   fi
 }
 npm_wait_warn="[warn] enforce expects npm min-release-age=7 with before unset (or before ~= now-7d), current:"
+npm_honored_unset="[ok] npm min-release-age=7 honored (before unset)"
+npm_exclude_empty="[ok] npm min-release-age-exclude empty"
+npm_exclude_warn="[warn] enforce expects npm min-release-age-exclude empty, current:"
+npm_exclude_uncounted="[warn] npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
+npm_wait_case "enforce mismatch warned while a good before-cutoff is honored; a count that fails to run is warned (#150, #443)" \
+  "enforce expects npm ignore-scripts=true, current: false"$'\n'"[ok] npm min-release-age=7 honored (before=fake-date)"$'\n'"$npm_exclude_uncounted" \
+  "$npm_wait_warn"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_IGNORE_SCRIPTS=false FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" FAKE_NODE_FAIL_COUNT=1
+npm_wait_case "a too-recent before cutoff is warned; a JSON listing that cannot be read is warned (#150, #443)" \
+  "$npm_wait_warn min-release-age=null before=fake-date (apply pending?)"$'\n'"[warn] npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_BEFORE="fake-date" FAKE_NODE_EPOCH="$(( now_epoch - 86400 ))" FAKE_NPM_FAIL="config list --json"
 npm_wait_case "current npm form (min-release-age=7, before null, no exclude) is honored (#443)" \
-  "[info] - npm min-release-age=7"$'\n'"[ok] npm min-release-age=7 honored (before unset)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "[info] - npm min-release-age=7"$'\n'"$npm_honored_unset"$'\n'"$npm_exclude_empty" \
   "enforce expects npm min-release-age" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7
-npm_wait_case "a loosened age on current npm (min-release-age=1, before null) is warned (#443)" \
-  "$npm_wait_warn min-release-age=1 before=null (apply pending?)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1
-npm_wait_case "a set before outside the window on current npm (it can replace the wait) is warned (#443)" \
-  "$npm_wait_warn min-release-age=7 before=fake-date (a set before replaces the wait when in the same or a higher config source)" \
-  "npm min-release-age=7 honored" \
+npm_wait_case "a loosened age (min-release-age=1, before null) is warned; an exclude that is not a list cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=1 before=null (apply pending?)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1 FAKE_NPM_EXCLUDE_JSON='"npmx-canary-pkg"'
+npm_wait_case "a set before outside the window (it can replace the wait) is warned; a JSON listing that does not parse cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=7 before=fake-date (a set before replaces the wait when in the same or a higher config source)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE=fake-date \
-  FAKE_NODE_EPOCH="$(( now_epoch - 400*86400 ))"
-npm_wait_case "min-release-age=7 on an npm older than 11.10 (unknown key) is not honored (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (npm version not confirmed to enforce it, see above)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=7
-npm_wait_case "a ~7-day before beside min-release-age=7 is honored (#443)" \
-  "[ok] npm min-release-age=7 honored (before=fake-date)" \
-  "enforce expects npm min-release-age" \
+  FAKE_NODE_EPOCH="$(( now_epoch - 400*86400 ))" FAKE_NPM_LIST_JSON='{"min-release-age-exclude": ['
+npm_wait_case "min-release-age=7 on an npm older than 11.10 is not honored; an exclude key absent from the listing counts as empty (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (npm version not confirmed to enforce it, see above)"$'\n'"$npm_exclude_empty" \
+  "npm min-release-age=7 honored"$'\n'"enforce expects npm min-release-age-exclude" \
+  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON=absent
+npm_wait_case "a ~7-day before beside min-release-age=7 is honored; a non-empty exclude is warned by count, names not shown (#443)" \
+  "[ok] npm min-release-age=7 honored (before=fake-date)"$'\n'"$npm_exclude_warn 3 entry(ies) skip the 7-day wait (names not shown)" \
+  "$npm_wait_warn"$'\n'"npmx-canary" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE=fake-date \
-  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))"
-npm_wait_case "a ~7-day before beside a different age (it can replace the before) is warned (#443)" \
-  "$npm_wait_warn min-release-age=1 before=fake-date (apply pending?)" \
-  "npm min-release-age=7 honored" \
+  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" \
+  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other","\u00a0npmx-canary-pkg\r"]'
+npm_wait_case "a ~7-day before beside a different age is warned; exclude entries named undefined and null are counted (#443)" \
+  "$npm_wait_warn min-release-age=1 before=fake-date (apply pending?)"$'\n'"$npm_exclude_warn 2 entry(ies) skip the 7-day wait (names not shown)" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=1 FAKE_NPM_BEFORE=fake-date \
-  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))"
-npm_wait_case "a before that cannot be read is not taken as unset (#443)" \
-  "$npm_wait_warn min-release-age=7 before=(no value) (apply pending?)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before"
-npm_wait_case "a before a source sets to null (it replaces the wait, yet reads null) is warned (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE_SET=1
+  FAKE_NODE_EPOCH="$(( now_epoch - 7*86400 ))" FAKE_NPM_EXCLUDE_JSON='["undefined",null]'
+npm_wait_case "a before that cannot be read is not taken as unset; whitespace-only exclude entries (CR, NBSP, tab) are empty as JavaScript trims them (#443)" \
+  "$npm_wait_warn min-release-age=7 before=(no value) (apply pending?)"$'\n'"$npm_exclude_empty" \
+  "npm min-release-age=7 honored"$'\n'"enforce expects npm min-release-age-exclude" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config get before" FAKE_NPM_EXCLUDE_JSON='[",\r, \u00a0 ,\t"," ",""]'
+npm_wait_case "a before a source sets to null is warned; an npm error object as the JSON listing cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_BEFORE_SET=1 FAKE_NPM_LIST_JSON='{"error": {"summary": "x", "detail": ""}}'
 npm_wait_case "an npm config list that cannot be read leaves an explicit null before open, warned with doctor exit 0 (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (npm config list could not be read, so a before set explicitly to null cannot be ruled out)"$'\n'"[ok] npm min-release-age-exclude empty" \
+  "$npm_wait_warn min-release-age=7 before=null (npm config list could not be read, so a before set explicitly to null cannot be ruled out)"$'\n'"$npm_exclude_empty" \
   "npm min-release-age=7 honored" \
   FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config list --long=false --json=false"
-npm_wait_case "a long=true in a config source does not make npm's listed defaults a set before (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)" \
-  "enforce expects npm min-release-age" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LONG=1
-npm_wait_case "a json=true in a config source does not hide a before a source sets to null (#443)" \
-  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)" \
-  "npm min-release-age=7 honored" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_JSON=1 FAKE_NPM_BEFORE_SET=1
-npm_wait_case "a 'before = ' inside another key's listed value is not a set before (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)" \
-  "enforce expects npm min-release-age" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_EXTRA='init-author-name = "before = x"'
-npm_wait_case "a non-empty min-release-age-exclude is warned by count, names not shown (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] enforce expects npm min-release-age-exclude empty, current: 3 entry(ies) skip the 7-day wait (names not shown)" \
-  "npmx-canary" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 \
-  FAKE_NPM_EXCLUDE_JSON='["@npmx-canary-scope/*, ,npmx-canary-pkg","@npmx-canary-scope/*","npmx-canary-other"," npmx-canary-pkg\r"]'
-npm_wait_case "whitespace-only min-release-age-exclude entries (CR, NBSP, tab) are empty as JavaScript trims them (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[ok] npm min-release-age-exclude empty" \
-  "enforce expects npm min-release-age-exclude" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='[",\r,   ,\t"," ",""]'
-npm_wait_case "min-release-age-exclude absent from the listing (an npm without the key) counts as empty (#443)" \
-  "[ok] npm min-release-age-exclude empty" \
-  "enforce expects npm min-release-age-exclude" \
-  FAKE_NPM_VERSION=11.9.0 FAKE_NPM_MIN_RELEASE_AGE=undefined FAKE_NPM_EXCLUDE_JSON=absent
-npm_wait_case "a min-release-age-exclude entry named undefined is counted on an npm with the key (#443)" \
-  "[warn] enforce expects npm min-release-age-exclude empty, current: 1 entry(ies) skip the 7-day wait (names not shown)" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='["undefined"]'
-npm_wait_case "a min-release-age-exclude entry of null (an npmrc []=null) is counted (#443)" \
-  "[warn] enforce expects npm min-release-age-exclude empty, current: 1 entry(ies) skip the 7-day wait (names not shown)" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='[null]'
-npm_exclude_uncounted="[warn] npm min-release-age-exclude could not be counted; cannot confirm no package skips the 7-day wait"
-npm_wait_case "a min-release-age-exclude that is not a list cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_EXCLUDE_JSON='"npmx-canary-pkg"'
-npm_wait_case "a JSON listing that does not parse cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"min-release-age-exclude": ['
-npm_wait_case "an npm error object as the JSON listing cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"error": {"summary": "x", "detail": ""}}'
-npm_wait_case "a config key named error (a string) is no npm error object (#443)" \
-  "[ok] npm min-release-age-exclude empty" "$npm_exclude_uncounted" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='{"error": "x", "min-release-age-exclude": []}'
-npm_wait_case "a JSON listing that is an array cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='[]'
-npm_wait_case "a JSON listing that is a number cannot be counted (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_JSON='5'
-npm_wait_case "the JSON listing reaches the count on stdin, not as an argument (#443)" \
-  "[ok] npm min-release-age-exclude empty" "$npm_exclude_uncounted" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NODE_ARGV_CANARY=npmx-canary-listing \
-  FAKE_NPM_LIST_JSON='{"init-author-name": "npmx-canary-listing", "min-release-age-exclude": []}'
-npm_wait_case "a count that fails to run is warned (#443)" \
-  "$npm_exclude_uncounted" "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NODE_FAIL_COUNT=1
-npm_wait_case "a JSON listing that cannot be read is warned, doctor stays exit 0 (#443)" \
-  "[ok] npm min-release-age=7 honored (before unset)"$'\n'"[warn] npm min-release-age-exclude could not be read; cannot confirm no package skips the 7-day wait" \
-  "[ok] npm min-release-age-exclude empty" \
-  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_FAIL="config list --json"
+npm_wait_case "a long=true in a config source does not make npm's listed defaults a set before; a JSON listing that is an array cannot be counted (#443)" \
+  "$npm_honored_unset"$'\n'"$npm_exclude_uncounted" \
+  "enforce expects npm min-release-age"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LONG=1 FAKE_NPM_LIST_JSON='[]'
+npm_wait_case "a json=true in a config source does not hide a before a source sets to null; a JSON listing that is a number cannot be counted (#443)" \
+  "$npm_wait_warn min-release-age=7 before=null (a config source sets before explicitly, and a set before replaces the wait when in the same or a higher source, even as null)"$'\n'"$npm_exclude_uncounted" \
+  "npm min-release-age=7 honored"$'\n'"$npm_exclude_empty" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_JSON=1 FAKE_NPM_BEFORE_SET=1 FAKE_NPM_LIST_JSON='5'
+npm_wait_case "a 'before = ' inside another key's listed value is not a set before; a config key named error (a string) is no npm error object, and the listing reaches the count on stdin, not as an argument (#443)" \
+  "$npm_honored_unset"$'\n'"$npm_exclude_empty" \
+  "enforce expects npm min-release-age"$'\n'"$npm_exclude_uncounted" \
+  FAKE_NPM_VERSION=11.19.1 FAKE_NPM_MIN_RELEASE_AGE=7 FAKE_NPM_LIST_EXTRA='init-author-name = "before = x"' \
+  FAKE_NODE_ARGV_CANARY=npmx-canary-listing \
+  FAKE_NPM_LIST_JSON='{"error": "x", "init-author-name": "npmx-canary-listing", "min-release-age-exclude": []}'
 
 # COREPACK-A) corepackMode=off says intentionally unmanaged; B) report mode
 # with a corepack on PATH reports its version line (fake for determinism —
@@ -5574,18 +5498,29 @@ else
 fi
 
 # DRIFT-A) A token-shaped line in ~/.npmrc is warned by name only (the value
-# never appears in the output), doctor stays exit 0 (#148).
+# never appears in the output), doctor stays exit 0 (#148); the managed-by
+# header on its line 1 is ok'd. The status check itself must skip — as
+# not-initialized when chezmoi exists (fixture homes carry no chezmoi
+# state), as not-found where it does not (the CI validate job has no
+# chezmoi).
+if command -v chezmoi >/dev/null 2>&1; then
+  drift_skip="chezmoi not initialized for this home; skipping drift check"
+else
+  drift_skip="chezmoi not found; skipping drift check"
+fi
 dr_home="$fixture_home/drift"
 mkdir -p "$dr_home"
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n//registry.npmjs.org/:_authToken=secret-placeholder-value\n' \
   > "$dr_home/.npmrc"
 if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "npmrc contains 1 _authToken line" <<< "$dr_out" \
-    && ! grep -Fq "secret-placeholder-value" <<< "$dr_out"; then
-    ok "test passed: npmrc token line warned by count, value never echoed"
+    && ! grep -Fq "secret-placeholder-value" <<< "$dr_out" \
+    && grep -Fxq "[ok] npmrc managed-by header present" <<< "$dr_out" \
+    && grep -Fq "$drift_skip" <<< "$dr_out"; then
+    ok "test passed: npmrc token line warned by count, value never echoed; header ok; uninitialized home skips the status check"
   else
     printf '%s\n' "$dr_out" >&2
-    fail "test failed: token line not warned, or the value leaked into output"
+    fail "test failed: token line not warned, the value leaked into output, the header ok or the skip line missing"
     status=1
   fi
 else
@@ -5594,30 +5529,10 @@ else
   status=1
 fi
 
-# DRIFT-B) A managed .npmrc missing the managed-by header is warned; the
-# status check itself must skip — as not-initialized when chezmoi exists
-# (fixture homes carry no chezmoi state), as not-found where it does not
-# (the CI validate job has no chezmoi).
-if command -v chezmoi >/dev/null 2>&1; then
-  drift_skip="chezmoi not initialized for this home; skipping drift check"
-else
-  drift_skip="chezmoi not found; skipping drift check"
-fi
+# DRIFT-B) A managed .npmrc missing the managed-by header is warned: the
+# headerless file is planted here and checked by DRIFT-C's clean-status run
+# below (same home), which needs no doctor run of its own.
 printf 'ignore-scripts=true\n' > "$dr_home/.npmrc"
-if dr_out="$(HOME="$dr_home" XDG_CONFIG_HOME='' "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
-    && grep -Fq "$drift_skip" <<< "$dr_out"; then
-    ok "test passed: missing managed-by header warned; uninitialized home skips the status check"
-  else
-    printf '%s\n' "$dr_out" >&2
-    fail "test failed: header warn or the not-initialized skip line missing"
-    status=1
-  fi
-else
-  printf '%s\n' "$dr_out" >&2
-  fail "test failed: doctor must stay exit 0 with a headerless npmrc"
-  status=1
-fi
 
 # DRIFT-C) The chezmoi-status branches, deterministic via a fake chezmoi on
 # PATH (the CI validate job has no chezmoi and the render job does not run
@@ -5658,16 +5573,18 @@ fi
 if dr_out="$(HOME="$dr_home" PATH="$cz_fakebin:$PATH" \
   FAKE_CHEZMOI_STATUS='' FAKE_CHEZMOI_RC=0 \
   "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "no drift: managed files match the source state" <<< "$dr_out"; then
-    ok "test passed: an empty chezmoi status reports no drift"
+  if grep -Fq "no drift: managed files match the source state" <<< "$dr_out" \
+    && grep -Fq "npmrc lacks the managed-by header" <<< "$dr_out" \
+    && grep -Fxq "[ok] npmrc carries no _authToken line" <<< "$dr_out"; then
+    ok "test passed: an empty chezmoi status reports no drift; the headerless npmrc is warned; no token line is ok"
   else
     printf '%s\n' "$dr_out" >&2
-    fail "test failed: empty status should report no drift"
+    fail "test failed: empty status should report no drift, the headerless npmrc must be warned, and the npmrc without a token line must be ok"
     status=1
   fi
 else
   printf '%s\n' "$dr_out" >&2
-  fail "test failed: doctor must stay exit 0 with a clean status"
+  fail "test failed: doctor must stay exit 0 with a clean status and a headerless npmrc"
   status=1
 fi
 

@@ -452,8 +452,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   profile では orphan にならない / header 無しは対象外 / 宣言した file の祖先の directory の下に再帰しない(#174 / #207)。
 - managed drift: fake chezmoi の status 行ごとに warn、空なら ok、`chezmoi status` の失敗は、chezmoi の config が無ければ
   「not initialized」の item で skip、あれば `chezmoi status` を示す action(#309)、config があり `TMPDIR` が dir でなければ
-  `TMPDIR` を挙げる action(#446。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない)し、
-  managed-by header の欠落も warn(#148)。
+  `TMPDIR` を挙げる action(#446。いずれも exit 0)/ enforce の `~/.npmrc` は `_authToken` 行を件数だけで warn(値は出さない。
+  行が無ければ ok)し、line 1 の managed-by header は ok、欠落は warn(#148)。
 - agent-tools: status.sh 実行が opt-in(`enableAgentToolsStatus`)/ opt-in 時は summary + `conflict` を
   warn / contract version 不一致・status.sh 欠如・非ゼロ exit・不正 JSON・不在でも warning のみ(不正 JSON は
   contract_version unknown として field を解釈しないことを、contract version 不一致と同じ sentinel の不在で pin、#332)/
@@ -587,11 +587,13 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   呼び出しを記録し、doctor が tool を実行しないこと(記録の不在)も pin。
 - AI policy(#139 / #210): fake `codex execpolicy check` で probe の実効判定(nested allow を誤判定しない)、
   engine 失敗は INCOMPLETE、probe に渡す rules file の集合が Codex の読む集合と一致すること(隠し file を含み、symlink・dir・
-  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、symlink の `default.rules` は
-  baseline 無効として warn、読めない rules dir は INCOMPLETE(#316)、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
+  `.bak`・bare の `.rules` を含まない)と管理外 file の名前の warn(制御文字などは `display_safe` で `?` に置換)、通常の file の `default.rules` は
+  管理された baseline の ok と、clean の ok の「read-only baseline holding」、symlink の `default.rules` は baseline 無効として warn、読めない rules dir は INCOMPLETE(#316)、`config.toml` の projects trust は yq の TOML parser で読み、trusted な project の key だけを
   取り出す(値は出さない、#309)。正当な書き方(`[projects]` table・inline table・dotted / quote / escape を含む key・
   複数行文字列)は TOML の意味どおりに数え、TOML として読めない・projects が文字列や配列・trusted な key が空か制御文字を含む、
-  のときだけ INCOMPLETE(0 件とは言わない)。
+  のときだけ INCOMPLETE(0 件とは言わない)。whole-home と stale の trust は action の手順の行まで確かめる。trust の書き方の case と、
+  codex の結果の形の case は、doctor.sh から取り出した監視の関数を `set -euo pipefail` の別の bash で走らせて確かめ(exit 0 も含めて)、
+  personal の report への配線・probe の集合の pin・engine の失敗は doctor 全体の run で確かめる。
 - Claude の project 級の allow(#334): 専用の fixture HOME で、`:*` が引数なしに一致、floor の deny / ask と project 自身の ask が allow に勝つ、
   `Bash` 単体(先頭 5 本と残りの件数)、rule の途中の `*`、regex の文字は文字どおり(`sudo.*` は `sudo -v` に一致しない)、
   旧式の `:*` の前の `*` は展開されない(`gh *:*` は何にも一致しない)、`/**/` は 0 個以上の dir、旧式の prefix は空白の連続を
@@ -600,7 +602,7 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   org(client)の 1 段下の repo を読み(#445。直下の repo も対照として読む。`.` で始まる名前の repo も読む)、
   repo でもある org の dir(自身の `.git` と `.claude` を持つ)もその下の repo も、symlink で 2 回辿る org の下の repo も 1 回だけ読み、その repo より深い checkout は読まない、file の中の canary を出さない。
   floor が止める allow だけなら ok(読んだ file の数)、読めない file があれば ok を出さず「clean ではない」の item、HOME の下の
-  標準の root と work の org の下に置いたこの repo の写しは 1 回だけ読む、標準の root の外(`~/dotfiles`)の写しも `//` を含む HOME で読む、floor の file が無ければ全部 warn、floor が読めなければ(JSON の文書が 2 つ、key が重なる、`~/.claude` が開けない floor を含む)not checked、開けない `.claude`・通常の file でない設定の path・一覧できない project root(`~/src` が開けない場合を含む)と一覧できない work と client の org の dir は読めない扱い(直下の repo の `.claude` と `.git` は repo として読まないので、開けなくても item は `.claude` の 1 つだけ。root では chmod の case を飛ばす)、`.` で始まる名前の repo も読む、work は
+  標準の root と work の org の下に置いたこの repo の写しは 1 回だけ読む、標準の root の外(`~/dotfiles`)の写しも `//` を含む HOME で読む、floor の file が無ければ全部 warn、floor が読めなければ(JSON の文書が 2 つ、key が重なる、`~/.claude` が開けない floor を含む)not checked、開けない `.claude`・通常の file でない設定の path・一覧できない project root(`~/src` が開けない場合を含む)と一覧できない work と client の org の dir は読めない扱いで、読めなかった数に数える(直下の repo の `.claude` と `.git` は repo として読まないので、開けなくても item は `.claude` の 1 つだけ。root では chmod の case を飛ばす)、`.` で始まる名前の repo も読む、work は
   not watched。probe が届かない形(`\*`・`\\`・`\(`・`^`・`]`・`Bash()`・escape された閉じ括弧・改行や U+2028 を含む `:*`・NBSP や BOM の
   trim)は、doctor.sh から matcher を取り出して一致と不一致の対で、`LC_ALL=C` と継承した locale の両方で確かめる。reader も取り出し、
   途中で止まる stub の yq では読めなかった扱いになること、完走すれば rule を 1 つずつ持つことを確かめる。
@@ -626,7 +628,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   `min-release-age-exclude` は fake の `npm config list --json` の値を doctor の node script で数え(この呼び出しだけ PATH の
   実際の node で走らせるので、node が無いと test は失敗する)、項目は数だけを出して warn にする(名前は出さない。
   `undefined`・`null` という名前の項目は 1 項目、CR・NBSP・tab だけの項目は空、key が無ければ空と数える。list でない値・
-  JSON として読めない listing・npm の error の object・失敗する count・読めない listing は warn で exit 0。#443)。
+  JSON として読めない listing・npm の error の object・失敗する count・読めない listing は warn で exit 0。#443)。7 日の待ちと
+  exclude の数は fake の別の応答を読むので、1 回の run でそれぞれの状態を 1 つずつ確かめる。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
