@@ -951,15 +951,19 @@ else
   status=1
 fi
 
-# 9b) Right after 9a's apply, chezmoi diff is empty: it runs the modify
-#     script over the merged file as a second apply would, so a second apply
-#     would change no byte.
+# 9b) Applying again changes nothing, and chezmoi diff is empty. Both run:
+#     chezmoi tells the modify script which command runs it
+#     (CHEZMOI_COMMAND), so a diff does not stand for a second apply.
+cp "$local_file" "$local_root/before-second-apply.json"
+second_rc=0
+render_personal_into "$DOTFILES_ROOT" "$local_root" || second_rc=$?
 local_diff="$(chezmoi --config "$local_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
   --destination "$local_root/home" diff 2>/dev/null)" || local_diff="<chezmoi diff failed>"
-if [[ -z "$local_diff" ]]; then
-  ok "test passed: after an apply over a live file chezmoi diff is empty (a second apply would change no byte)"
+if [[ "$second_rc" -eq 0 ]] && cmp -s "$local_root/before-second-apply.json" "$local_file" \
+  && [[ -z "$local_diff" ]]; then
+  ok "test passed: a second apply leaves the file byte-identical and chezmoi diff is empty"
 else
-  fail "test failed: after an apply over a live file chezmoi diff is not empty (a second apply would change the file)"
+  fail "test failed: the second apply changed the file or chezmoi diff is not empty (rc=$second_rc)"
   status=1
 fi
 
@@ -1076,18 +1080,25 @@ else
 fi
 
 # 9h) Section 1's off_root is a first apply on a home without the file
-#     (nothing writes there afterwards): the managed JSON as the template
-#     prints it (one-line deny / ask arrays). chezmoi diff over it is empty:
-#     an unchanged file comes back as it was, not re-printed, so a second
-#     apply would change no byte (Codex review R1, PR #377).
+#     (nothing writes there before this case): the managed JSON as the
+#     template prints it (one-line deny / ask arrays). Right after it,
+#     chezmoi diff is empty and a second apply changes no byte: an unchanged
+#     file comes back as it was, not re-printed (Codex review R1, PR #377).
+#     Both run, as in 9b (CHEZMOI_COMMAND). off_file is put back after the
+#     second apply, as 9j reads it.
+cp "$off_file" "$off_root/after-first-apply.json" 2>/dev/null || true
 first_diff="$(chezmoi --config "$off_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
   --destination "$off_root/home" diff 2>/dev/null)" || first_diff="<chezmoi diff failed>"
-if [[ -z "$first_diff" ]]; then
-  ok "test passed: right after a first apply chezmoi diff is empty (a second apply would change no byte)"
+first_rc=0
+render_personal_into "$DOTFILES_ROOT" "$off_root" || first_rc=$?
+if [[ "$first_rc" -eq 0 && -z "$first_diff" ]] \
+  && cmp -s "$off_root/after-first-apply.json" "$off_file"; then
+  ok "test passed: after a first apply chezmoi diff is empty and a second apply changes no byte"
 else
-  fail "test failed: right after a first apply chezmoi diff is not empty (a second apply would re-print the file)"
+  fail "test failed: right after a first apply chezmoi diff is not empty or a second apply re-printed the file (rc=$first_rc)"
   status=1
 fi
+cp "$off_root/after-first-apply.json" "$off_file" 2>/dev/null || true
 
 # 9i) The script makes no temp file of its own for the live file (#446).
 #     With TMPDIR at a directory that does not exist, chezmoi diff

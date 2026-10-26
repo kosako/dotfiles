@@ -921,12 +921,13 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart / `enableToolCallRecordHook` の記録の hook。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225 / #353)を exact に確認する(personal 既定の render では `hooks` の object 全体を pin するので、entry に足された key(safe-gh の `async` や `timeout` など)も落ちる)。
 managed file は modify script(#360)なので、live の file がある home への apply も確かめる: `autoMode` / `modelSettings` /
 未知の key と `/model` の選択(`model`)が値も位置もそのまま残る、managed の key の古い値は render に戻り要らない
-`sandbox` は消える、apply の直後の `chezmoi diff` が空(2 回目の apply が byte を変えない)、object の key の順だけ違う値は live の
+`sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
 byte のまま残る、`model` が無ければ template の値が入る、hook の capability が全部 false なら live の `hooks` が消える、
 capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、ちょうど 1 つの JSON の
 object でない live の file(配列・壊れた JSON・空白だけ・object 2 つ・改行だけ・NUL を含む。末尾の NUL も)は apply を止めて
 byte 単位で変えない、UTF-8 でない byte を string に含むだけの live の file は UTF-8 の locale でも apply が通り byte 単位で
-変わらない、file の無い home への初回の apply の直後も `chezmoi diff` が空(2 回目の apply が byte を変えない)。script が
+変わらない、file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない(chezmoi は script に
+command を `CHEZMOI_COMMAND` で渡すので、diff と 2 回目の apply の両方を走らせる)。script が
 live の file のために自分で一時 file を作らず、jq の引数にも置かないこと(#446)も確かめる: `TMPDIR` が無い dir を指しても、
 live の file への `chezmoi diff` は通常の `TMPDIR` のときと同じ差分を出し、apply は同じ file を書き、その後の
 `chezmoi status` は空(chezmoi 自身が script を置く `scriptTempDir` は在る dir にする)。その 3 回では PATH の先頭の shim で、
