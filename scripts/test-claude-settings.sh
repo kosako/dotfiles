@@ -66,6 +66,38 @@ trap cleanup EXIT
 # ~/.claude/settings.json out of ROOT/home (caller-creates-root contract;
 # see the #150 leak note in test-lib.sh).
 
+# render_flip LABEL CAP=VALUE...
+# Set every CAP to VALUE for the personal profile (flip_personal_capability,
+# which fails closed on an undeclared CAP) in a throwaway source copy, render
+# personal, and set flip_file to the rendered settings.json and flip_src to
+# the flipped source (9e applies it again with apply_over). Called as a plain
+# statement and returning through variables ON PURPOSE: inside $(...) the
+# function would run in a subshell and its tmp_roots+= registrations would
+# never reach the parent's EXIT trap, leaking every source/render root (the
+# #150 lesson in test-lib.sh; Codex review on PR #200).
+render_flip() {
+  local label="$1" src root arg
+  shift
+  src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-$label.XXXXXX")"
+  tmp_roots+=("$src")
+  make_flipped_source "$src"
+  for arg in "$@"; do
+    if [[ "$arg" != *=* ]]; then
+      fail "test failed: render_flip ($label) takes CAP=VALUE, got '$arg'"
+      exit 1
+    fi
+    flip_personal_capability "$src/src" "${arg%%=*}" "${arg#*=}"
+  done
+  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+  tmp_roots+=("$root")
+  if ! render_personal_into "$src/src" "$root"; then
+    fail "test failed: personal apply ($label) did not render"
+    exit 1
+  fi
+  flip_src="$src/src"
+  flip_file="$root/home/.claude/settings.json"
+}
+
 section "claude settings sandbox content"
 
 # 1) Committed default: enforceAiSandbox=false -> no sandbox block, and the
@@ -77,10 +109,10 @@ if ! render_personal_into "$DOTFILES_ROOT" "$off_root"; then
   exit 1
 fi
 off_file="$off_root/home/.claude/settings.json"
-if ! yq -p json '.' "$off_file" >/dev/null 2>&1; then
+if ! yq -p json -o yaml '.' "$off_file" >/dev/null 2>&1; then
   fail "test failed: default settings.json is not valid JSON"
   status=1
-elif [[ "$(yq -p json '.sandbox // "absent"' "$off_file")" == "absent" ]]; then
+elif [[ "$(yq -p json -o yaml '.sandbox // "absent"' "$off_file")" == "absent" ]]; then
   ok "test passed: default (enforceAiSandbox=false) emits no sandbox block"
 else
   fail "test failed: default settings.json unexpectedly contains a sandbox block"
@@ -90,26 +122,16 @@ fi
 # 2) enforceAiSandbox=true (personal only) -> strict, public-safe sandbox
 #    block. Flip the capability in a throwaway source copy so the committed
 #    default stays false.
-src_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-src.XXXXXX")"
-tmp_roots+=("$src_root")
-make_flipped_source "$src_root"
-flip_personal_capability "$src_root/src" enforceAiSandbox true
-
-on_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-tmp_roots+=("$on_root")
-if ! render_personal_into "$src_root/src" "$on_root"; then
-  fail "test failed: personal apply (enforceAiSandbox=true) did not render"
-  exit 1
-fi
-on_file="$on_root/home/.claude/settings.json"
-if ! yq -p json '.' "$on_file" >/dev/null 2>&1; then
+render_flip sandbox-on enforceAiSandbox=true
+on_file="$flip_file"
+if ! yq -p json -o yaml '.' "$on_file" >/dev/null 2>&1; then
   fail "test failed: enabled settings.json is not valid JSON"
   status=1
 else
-  enabled="$(yq -p json '.sandbox.enabled' "$on_file")"
-  fail_if="$(yq -p json '.sandbox.failIfUnavailable' "$on_file")"
-  unsandboxed="$(yq -p json '.sandbox.allowUnsandboxedCommands' "$on_file")"
-  domains_len="$(yq -p json '.sandbox.network.allowedDomains | length' "$on_file")"
+  enabled="$(yq -p json -o yaml '.sandbox.enabled' "$on_file")"
+  fail_if="$(yq -p json -o yaml '.sandbox.failIfUnavailable' "$on_file")"
+  unsandboxed="$(yq -p json -o yaml '.sandbox.allowUnsandboxedCommands' "$on_file")"
+  domains_len="$(yq -p json -o yaml '.sandbox.network.allowedDomains | length' "$on_file")"
   if [[ "$enabled" == "true" && "$fail_if" == "true" && "$unsandboxed" == "false" && "$domains_len" == "0" ]]; then
     ok "test passed: enforceAiSandbox=true emits enabled, hard-fail, no-escape, empty-allowlist sandbox"
   else
@@ -125,10 +147,10 @@ section "claude settings managed global prefs"
 #    the managed template, so `chezmoi apply` is a no-op for them and the live
 #    file does not drift. off_file is the committed-default personal render from
 #    section 1; lock the two currently-absorbed keys there.
-skip_warn="$(yq -p json '.skipWorkflowUsageWarning // "absent"' "$off_file")"
-tui_mode="$(yq -p json '.tui // "absent"' "$off_file")"
+skip_warn="$(yq -p json -o yaml '.skipWorkflowUsageWarning // "absent"' "$off_file")"
+tui_mode="$(yq -p json -o yaml '.tui // "absent"' "$off_file")"
 # `//` would read false as absent, so presence is asked separately.
-switch_models="$(yq -p json 'select(has("switchModelsOnFlag")) | .switchModelsOnFlag' "$off_file")"
+switch_models="$(yq -p json -o yaml 'select(has("switchModelsOnFlag")) | .switchModelsOnFlag' "$off_file")"
 if [[ "$skip_warn" == "true" && "$tui_mode" == "fullscreen" && "$switch_models" == "false" ]]; then
   ok "test passed: managed template carries skipWorkflowUsageWarning=true, tui=fullscreen and switchModelsOnFlag=false"
 else
@@ -142,8 +164,8 @@ fi
 #     autoUpdate false explicitly (the settings value wins over the /plugin
 #     toggle), so a plugin changes only through a PR that moves the ref
 #     (docs/update-policy.md).
-mkt_count="$(yq -p json '.extraKnownMarketplaces // {} | length' "$off_file")"
-mkt_unpinned="$(yq -p json '.extraKnownMarketplaces // {} | to_entries | .[] | select((.value.source.ref // "") == "" or (.value.source.ref // "" | test("^(main|master|HEAD)$")) or .value.autoUpdate != false) | .key' "$off_file")"
+mkt_count="$(yq -p json -o yaml '.extraKnownMarketplaces // {} | length' "$off_file")"
+mkt_unpinned="$(yq -p json -o yaml '.extraKnownMarketplaces // {} | to_entries | .[] | select((.value.source.ref // "") == "" or (.value.source.ref // "" | test("^(main|master|HEAD)$")) or .value.autoUpdate != false) | .key' "$off_file")"
 if [[ "$mkt_count" -ge 1 && -z "$mkt_unpinned" ]]; then
   ok "test passed: every third-party plugin marketplace ($mkt_count) pins source.ref and sets autoUpdate=false"
 else
@@ -160,9 +182,9 @@ fi
 #     -o json -r because the YAML printer would quote a command that starts
 #     with a quote). test-render.sh pins the command's shell splitting for
 #     homes with special characters and the plain-home string.
-status_type="$(yq -p json '.statusLine.type // "absent"' "$off_file")"
+status_type="$(yq -p json -o yaml '.statusLine.type // "absent"' "$off_file")"
 status_cmd="$(yq -p json -o json -r '.statusLine.command // "absent"' "$off_file")"
-status_pad="$(yq -p json '.statusLine.padding // "absent"' "$off_file")"
+status_pad="$(yq -p json -o yaml '.statusLine.padding // "absent"' "$off_file")"
 if [[ "$status_type" == "command" && "$status_cmd" == "$(shell_word "$HOME/go/bin/tacho") statusline" && "$status_pad" == "0" ]]; then
   ok "test passed: statusLine is a command-type status line running <home>/go/bin/tacho statusline with padding 0"
 else
@@ -190,10 +212,13 @@ section "claude settings GitHub injection guard (#119)"
 #    the core of Phase 2 task B). The ask block is the whole 1Password CLI
 #    (`op *`: global options can sit anywhere, so the program is the unit;
 #    #315: human-directed uses exist, so approval rather than deny) followed
-#    by #334's asks for reading the config files that may hold secrets (3)
+#    by #334's asks for reading the config files that may hold secrets (4)
 #    and the git asks of #304 / #334 (71): the work-discarding git forms,
 #    each option as a word of its own after its subcommand, and the hook
-#    skips in any other position.
+#    skips in any other position. Beside the two lists, permissions holds
+#    only allow, and allow is exactly mcp__pencil (an added "Bash(*)" would
+#    approve every Bash command neither list catches); that pin does not
+#    depend on the key order under permissions (9c reorders it).
 #    We pin the EXACT ordered
 #    arrays, not length + a few representatives: this is a security-boundary
 #    regression test, so it must catch a floor matcher being swapped for
@@ -206,13 +231,14 @@ for notion_tool in notion-create-comment notion-create-attachment notion-create-
   expected_unused_mcp+=$'\nmcp__plugin_Notion_notion__'"$notion_tool"
 done
 expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\nmcp__github\n'"$expected_unused_mcp"
-actual_deny="$(yq -p json '.permissions.deny[]' "$off_file")"
+actual_deny="$(yq -p json -o yaml '.permissions.deny[]' "$off_file")"
 expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
-ask_default="$(yq -p json '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
-if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (76, ordered; enforceAiSandbox off)"
+ask_default="$(yq -p json -o yaml '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
+rest_default="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$off_file" 2>/dev/null || true)"
+if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" && "$rest_default" == '{"allow":["mcp__pencil"]}' ]]; then
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (76, ordered); allow is exactly mcp__pencil and permissions holds nothing else (enforceAiSandbox off)"
 else
-  fail "test failed: committed personal deny/ask unexpected (ask=$ask_default); deny was:"
+  fail "test failed: committed personal permissions unexpected (allow and the rest=$rest_default ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
   status=1
 fi
@@ -250,12 +276,27 @@ fi
 #     and the reason a rule may not mix the two (4e).
 #     This pins the rule TEXT against that reading; it does not prove the
 #     harness — the matchers stay steering.
-# claude_rule_matches BODY CMD — whether a Bash rule body (inside Bash(...))
-# matches CMD. A body with a regex-special character other than `*`, `.`
-# and `+` fails the test instead of being guessed at.
+# claude_rule_regex BODY — sets claude_rule_re to the anchored regex of a
+# wildcard Bash rule body (inside Bash(...)). A body with a regex-special
+# character other than `*`, `.` and `+` returns 2 instead of being guessed at.
+claude_rule_regex() {
+  local body="$1" re="" i c
+  for ((i = 0; i < ${#body}; i++)); do
+    c="${body:i:1}"
+    case "$c" in
+      '*') re+='.*' ;;
+      '.' | '+') re+="\\$c" ;;
+      '[' | ']' | '(' | ')' | '{' | '}' | '|' | '^' | '$' | '?' | '\') return 2 ;;
+      *) re+="$c" ;;
+    esac
+  done
+  claude_rule_re="^${re}\$"
+}
+# claude_rule_matches BODY CMD — whether a Bash rule body matches CMD
+# (2 when claude_rule_regex cannot read it).
 claude_rule_matches() {
-  local body="$1" cmd="$2" re="" i c legacy_re='^(.+):\*$' prefix
-  if [[ "$body" =~ $legacy_re ]]; then
+  local body="$1" cmd="$2" prefix
+  if [[ "$body" =~ $claude_legacy_re ]]; then
     prefix="${BASH_REMATCH[1]//$'\t'/ }"
     while [[ "$prefix" == *"  "* ]]; do prefix="${prefix//  / }"; done
     cmd="${cmd//$'\t'/ }"
@@ -266,36 +307,49 @@ claude_rule_matches() {
   if [[ "$body" == *" *" && "${body%" *"}" != *"*"* && "$cmd" == "${body%" *"}" ]]; then
     return 0
   fi
-  for ((i = 0; i < ${#body}; i++)); do
-    c="${body:i:1}"
-    case "$c" in
-      '*') re+='.*' ;;
-      '.' | '+') re+="\\$c" ;;
-      '[' | ']' | '(' | ')' | '{' | '}' | '|' | '^' | '$' | '?' | '\') return 2 ;;
-      *) re+="$c" ;;
-    esac
-  done
-  re="^${re}\$"
-  [[ "$cmd" =~ $re ]]
+  claude_rule_regex "$body" || return 2
+  [[ "$cmd" =~ $claude_rule_re ]]
 }
+# The committed deny then ask Bash rules, read once: the kind, the body and
+# its regex (empty for a legacy `:*` body, which claude_rule_matches reads;
+# "unsupported" when claude_rule_regex cannot read it — reported only when a
+# command reaches the rule, as before).
+claude_legacy_re='^(.+):\*$'
+claude_bash_kinds=()
+claude_bash_bodies=()
+claude_bash_res=()
+for kind in deny ask; do
+  while IFS= read -r rule; do
+    [[ "$rule" == 'Bash('*')' ]] || continue
+    rule="${rule#Bash(}"
+    rule="${rule%)}"
+    claude_rule_re=""
+    if ! [[ "$rule" =~ $claude_legacy_re ]]; then
+      claude_rule_regex "$rule" || claude_rule_re=unsupported
+    fi
+    claude_bash_kinds+=("$kind")
+    claude_bash_bodies+=("$rule")
+    claude_bash_res+=("$claude_rule_re")
+  done < <(yq -p json -o yaml ".permissions.${kind}[]" "$off_file")
+done
 # claude_decision CMD — deny / ask / none for CMD under the committed rules.
 claude_decision() {
-  local kind rule rc
-  for kind in deny ask; do
-    while IFS= read -r rule; do
-      [[ "$rule" == 'Bash('*')' ]] || continue
-      rule="${rule#Bash(}"
-      rule="${rule%)}"
-      rc=0
-      claude_rule_matches "$rule" "$1" || rc=$?
-      if [[ "$rc" -eq 2 ]]; then
-        printf 'unsupported:%s\n' "$rule"
-        return 0
-      elif [[ "$rc" -eq 0 ]]; then
-        printf '%s\n' "$kind"
-        return 0
-      fi
-    done < <(yq -p json ".permissions.${kind}[]" "$off_file")
+  local i body re
+  for ((i = 0; i < ${#claude_bash_bodies[@]}; i++)); do
+    body="${claude_bash_bodies[i]}"
+    re="${claude_bash_res[i]}"
+    if [[ -z "$re" ]]; then
+      claude_rule_matches "$body" "$1" || continue
+    elif [[ "$body" == *" *" && "${body%" *"}" != *"*"* && "$1" == "${body%" *"}" ]]; then
+      :
+    elif [[ "$re" == unsupported ]]; then
+      printf 'unsupported:%s\n' "$body"
+      return 0
+    elif ! [[ "$1" =~ $re ]]; then
+      continue
+    fi
+    printf '%s\n' "${claude_bash_kinds[i]}"
+    return 0
   done
   printf 'none\n'
 }
@@ -432,28 +486,35 @@ fi
 #     rule fails the test instead of being guessed at. A made-up home keeps
 #     the real one out of it.
 claude_read_home="/fixture-home"
+# The committed deny then ask Read rules, read once (kind and body).
+claude_read_kinds=()
+claude_read_bodies=()
+for kind in deny ask; do
+  while IFS= read -r rule; do
+    [[ "$rule" == 'Read('*')' ]] || continue
+    body="${rule#Read(}"
+    claude_read_kinds+=("$kind")
+    claude_read_bodies+=("${body%)}")
+  done < <(yq -p json -o yaml ".permissions.${kind}[]" "$off_file")
+done
 # claude_read_decision PATH -> deny / ask / none under the committed Read rules.
 claude_read_decision() {
-  local kind rule body base
-  for kind in deny ask; do
-    while IFS= read -r rule; do
-      [[ "$rule" == 'Read('*')' ]] || continue
-      body="${rule#Read(}"
-      body="${body%)}"
-      # Only `~/<path>` and `~/<path>/**` (no other wildcard) are evaluated.
-      if [[ "$body" != \~/* || "${body%/\*\*}" == *"*"* ]]; then
-        printf 'unsupported:%s\n' "$body"
-        return 0
-      fi
-      base="$claude_read_home/${body#\~/}"
-      if [[ "$body" == *"/**" ]]; then
-        base="${base%/\*\*}"
-        [[ "$1" == "$base"/* ]] && { printf '%s\n' "$kind"; return 0; }
-      elif [[ "$1" == "$base" ]]; then
-        printf '%s\n' "$kind"
-        return 0
-      fi
-    done < <(yq -p json ".permissions.${kind}[]" "$off_file")
+  local i body base
+  for ((i = 0; i < ${#claude_read_bodies[@]}; i++)); do
+    body="${claude_read_bodies[i]}"
+    # Only `~/<path>` and `~/<path>/**` (no other wildcard) are evaluated.
+    if [[ "$body" != \~/* || "${body%/\*\*}" == *"*"* ]]; then
+      printf 'unsupported:%s\n' "$body"
+      return 0
+    fi
+    base="$claude_read_home/${body#\~/}"
+    if [[ "$body" == *"/**" ]]; then
+      base="${base%/\*\*}"
+      [[ "$1" == "$base"/* ]] && { printf '%s\n' "${claude_read_kinds[i]}"; return 0; }
+    elif [[ "$1" == "$base" ]]; then
+      printf '%s\n' "${claude_read_kinds[i]}"
+      return 0
+    fi
   done
   printf 'none\n'
 }
@@ -498,7 +559,7 @@ for rendered in "$off_file" "$on_file"; do
     body="${rule#Bash(}"
     body="${body%:\*)}"
     [[ "$body" == *'*'* ]] && dead_rules+="  $rule"$'\n'
-  done < <(yq -p json '(.permissions.deny // []) + (.permissions.ask // []) + (.permissions.allow // []) | .[]' "$rendered")
+  done < <(yq -p json -o yaml '(.permissions.deny // []) + (.permissions.ask // []) + (.permissions.allow // []) | .[]' "$rendered")
 done
 if [[ -z "$dead_rules" ]]; then
   ok "test passed: no Bash rule mixes * with the trailing :* (Claude Code would keep that * literal and never match)"
@@ -544,13 +605,14 @@ fi
 #    ask in this state is caught too, not only in the committed render.
 expected_deny_on="$expected_deny"$'\nBash(cat *.env*)\nRead(//**/.env*)\nBash(git push * main)\nBash(git push * master)'
 expected_ask_on="$expected_ask"$'\nBash(gh release create *)\nBash(gh release delete *)\nBash(gh release edit *)\nBash(gh api *protection*)\nBash(gh api *rulesets*)'
-actual_deny_on="$(yq -p json '.permissions.deny[]' "$on_file")"
-actual_ask_on="$(yq -p json '.permissions.ask[]' "$on_file" 2>/dev/null || true)"
-if [[ "$actual_deny_on" == "$expected_deny_on" && "$actual_ask_on" == "$expected_ask_on" ]]; then
-  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the whole 1Password CLI + release/protection as ask (ordered)"
+actual_deny_on="$(yq -p json -o yaml '.permissions.deny[]' "$on_file")"
+actual_ask_on="$(yq -p json -o yaml '.permissions.ask[]' "$on_file" 2>/dev/null || true)"
+actual_rest_on="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$on_file" 2>/dev/null || true)"
+if [[ "$actual_deny_on" == "$expected_deny_on" && "$actual_ask_on" == "$expected_ask_on" && "$actual_rest_on" == '{"allow":["mcp__pencil"]}' ]]; then
+  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the whole 1Password CLI + release/protection as ask (ordered), and allow is exactly mcp__pencil"
 else
-  fail "test failed: enforceAiSandbox=true deny/ask unexpected; deny / ask were:"
-  printf '%s\n' "$actual_deny_on" "---" "$actual_ask_on" >&2
+  fail "test failed: enforceAiSandbox=true permissions unexpected; deny / ask / allow and the rest were:"
+  printf '%s\n' "$actual_deny_on" "---" "$actual_ask_on" "---" "$actual_rest_on" >&2
   status=1
 fi
 # merge/PR/comment/label must NOT be statically gated in Phase 1 (left to the hook).
@@ -563,25 +625,16 @@ fi
 
 # 6) gateGitHubMcp=false: the gate adds exactly the github MCP deny, so the
 #    render is the committed one (gateGitHubMcp is ON for personal; 4 pins
-#    mcp__github in place) minus that one entry, still valid JSON (comma
-#    regression guard for the conditional deny). The true direction is the
-#    committed render itself (4 / 5 / 6c); flipping true was a no-op (#332).
+#    mcp__github in place) minus that one entry, still valid JSON. The true
+#    direction is the committed render itself (4 / 5 / 6c); flipping true was
+#    a no-op (#332).
 #    Validity is checked first in its own branch: a command substitution in
 #    a plain assignment would abort the suite under set -e on invalid JSON,
 #    and yq prints the first document before failing on trailing garbage, so
 #    a `|| true` would let the comparison pass on it.
-mcp_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-mcp.XXXXXX")"
-tmp_roots+=("$mcp_src")
-make_flipped_source "$mcp_src"
-flip_personal_capability "$mcp_src/src" gateGitHubMcp false
-mcp_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-tmp_roots+=("$mcp_root")
-if ! render_personal_into "$mcp_src/src" "$mcp_root"; then
-  fail "test failed: personal apply (gateGitHubMcp=false) did not render"
-  exit 1
-fi
-mcp_file="$mcp_root/home/.claude/settings.json"
-if ! yq -p json '.' "$mcp_file" >/dev/null 2>&1; then
+render_flip mcp-off gateGitHubMcp=false
+mcp_file="$flip_file"
+if ! yq -p json -o yaml '.' "$mcp_file" >/dev/null 2>&1; then
   fail "test failed: gateGitHubMcp=false settings.json is not valid JSON"
   status=1
 elif [[ "$(yq -p json -o json '.' "$mcp_file")" == "$(yq -p json -o json 'del(.permissions.deny[] | select(. == "mcp__github"))' "$off_file")" ]] \
@@ -592,51 +645,40 @@ else
   status=1
 fi
 
-# 6b) gateGitHubMcp=false with enforceAiSandbox=true: the deny block built from
-#     the floor and the sandbox entries without the MCP entry must still be
-#     valid JSON with the write gate present (comma regression when several
-#     conditional keys are present).
-both_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-both.XXXXXX")"
-tmp_roots+=("$both_src")
-make_flipped_source "$both_src"
-flip_personal_capability "$both_src/src" gateGitHubMcp false
-flip_personal_capability "$both_src/src" enforceAiSandbox true
-both_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-tmp_roots+=("$both_root")
-if ! render_personal_into "$both_src/src" "$both_root"; then
-  fail "test failed: personal apply (gateGitHubMcp=false, enforceAiSandbox=true) did not render"
-  exit 1
-fi
-both_file="$both_root/home/.claude/settings.json"
-if yq -p json '.' "$both_file" >/dev/null 2>&1 \
-  && ! grep -Fq 'mcp__github' "$both_file" \
-  && grep -Fq '"Bash(git push * main)"' "$both_file"; then
-  ok "test passed: gate off + sandbox on -> valid JSON with the write gate and no MCP deny"
+# 6b) gateGitHubMcp=false with enforceAiSandbox=true: the two capabilities
+#     touch separate entries, so this render is exactly the sum of the two
+#     separate differences: the enforceAiSandbox=true render (on_file, pinned
+#     by 5) minus the github MCP deny (6). Compared as the whole JSON, so an
+#     entry dropped or added only in this combination is caught too.
+#     Validity is checked first in its own branch, for the reason given in 6.
+render_flip mcp-off-sandbox-on gateGitHubMcp=false enforceAiSandbox=true
+both_file="$flip_file"
+if ! yq -p json -o yaml '.' "$both_file" >/dev/null 2>&1; then
+  fail "test failed: gate off + sandbox on settings.json is not valid JSON"
+  status=1
+elif [[ "$(yq -p json -o json '.' "$both_file")" == "$(yq -p json -o json 'del(.permissions.deny[] | select(. == "mcp__github"))' "$on_file")" ]] \
+  && ! grep -Fq 'mcp__github' "$both_file"; then
+  ok "test passed: gate off + sandbox on is exactly the enforceAiSandbox=true render minus the github MCP deny (valid JSON, write gate kept)"
 else
-  fail "test failed: gate off + sandbox on produced invalid JSON, kept the MCP deny, or lost the write gate"
+  fail "test failed: gate off + sandbox on is not the enforceAiSandbox=true render minus the github MCP deny (MCP deny kept, write gate lost, or another change leaked)"
   status=1
 fi
 
-# 6c) gateUnusedClaudeMcp=false (#341): none of its 21 denies render, the JSON
-#     stays valid, and the daily Notion writes are never denied either way.
-unused_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-unused.XXXXXX")"
-tmp_roots+=("$unused_src")
-make_flipped_source "$unused_src"
-flip_personal_capability "$unused_src/src" gateUnusedClaudeMcp false
-unused_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-tmp_roots+=("$unused_root")
-if ! render_personal_into "$unused_src/src" "$unused_root"; then
-  fail "test failed: personal apply (gateUnusedClaudeMcp=false) did not render"
-  exit 1
-fi
-unused_file="$unused_root/home/.claude/settings.json"
-if yq -p json '.' "$unused_file" >/dev/null 2>&1 \
+# 6c) gateUnusedClaudeMcp=false (#341): the render is the committed one (4)
+#     minus its 21 denies and nothing else, compared as the whole JSON (an
+#     unrelated entry lost with the flip is caught too); validity first, as
+#     in 6. The daily Notion writes are never denied either way.
+render_flip unused-mcp-off gateUnusedClaudeMcp=false
+unused_file="$flip_file"
+if ! yq -p json -o yaml '.' "$unused_file" >/dev/null 2>&1; then
+  fail "test failed: gateUnusedClaudeMcp=false settings.json is not valid JSON"
+  status=1
+elif [[ "$(yq -p json -o json '.' "$unused_file")" == "$(yq -p json -o json 'del(.permissions.deny[] | select(test("^mcp__(claude_ai_|plugin_Notion_notion__)")))' "$off_file")" ]] \
   && ! grep -Fq 'mcp__claude_ai_' "$unused_file" \
-  && ! grep -Fq 'mcp__plugin_Notion_notion__' "$unused_file" \
-  && grep -Fq '"mcp__github"' "$unused_file"; then
-  ok "test passed: gateUnusedClaudeMcp=false renders none of its denies (valid JSON, github MCP deny kept)"
+  && ! grep -Fq 'mcp__plugin_Notion_notion__' "$unused_file"; then
+  ok "test passed: gateUnusedClaudeMcp=false drops its 21 denies and nothing else (valid JSON, github MCP deny kept)"
 else
-  fail "test failed: gateUnusedClaudeMcp=false still renders its denies (or invalid JSON)"
+  fail "test failed: gateUnusedClaudeMcp=false render is not the committed render minus its 21 denies (one still renders or another change leaked)"
   status=1
 fi
 if grep -Fq 'notion-update-page' "$off_file" || grep -Fq 'notion-create-pages' "$off_file"; then
@@ -685,94 +727,37 @@ section "claude settings hook registration (#137 / #199 / #225 / #353)"
 #     "*") — every record entry "async": true, timeout 10 — so the three
 #     pre-existing entries stay at index 0, byte-identical (8e pins that).
 #     Every agent-tools body is the agent-tools-deployed absolute path
-#     (agent-tools#146 stable-path contract). Pinned as an exact set (event
-#     set, matcher, hook count, type, full command path, timeouts), not just
-#     "a hooks key exists": this is security / gate wiring, so a swapped
-#     matcher or an extra registered event must fail the test (#129 lesson).
+#     (agent-tools#146 stable-path contract). Pinned as the WHOLE hooks
+#     object (key-sorted; entry order kept), not just "a hooks key exists":
+#     this is security / gate wiring, so a swapped matcher, an extra event or
+#     entry, or a key added to an entry (an "async" on safe-gh would take its
+#     steer out of the pre-call path; a "timeout" on it is Codex-only) must
+#     fail the test (#129 lesson).
 expected_hook_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook")"
 expected_edit_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-fast-edit-check")"
 expected_stop_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa")"
 expected_session_cmd="bash $(shell_single_quote "$HOME/.claude/hooks/herdr-agent-state.sh") session"
 expected_record_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-tool-call-record-hook")"
-all_events='["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]'
-hook_events="$(yq -p json -o json '.hooks | keys | sort' "$off_file" | tr -d ' \n')"
-pre_len="$(yq -p json '.hooks.PreToolUse | length' "$off_file")"
-pre_matcher="$(yq -p json '.hooks.PreToolUse[0].matcher' "$off_file")"
-inner_len="$(yq -p json '.hooks.PreToolUse[0].hooks | length' "$off_file")"
-inner_type="$(yq -p json '.hooks.PreToolUse[0].hooks[0].type' "$off_file")"
-inner_cmd="$(yq -p json '.hooks.PreToolUse[0].hooks[0].command' "$off_file")"
-if [[ "$hook_events" == "$all_events" && "$pre_len" == "2" && "$pre_matcher" == "Bash" \
-  && "$inner_len" == "1" && "$inner_type" == "command" \
-  && "$inner_cmd" == "$expected_hook_cmd" ]]; then
-  ok "test passed: committed personal registers exactly {PreToolUse, PostToolUse, Stop, SessionStart, PostToolUseFailure, PermissionDenied}, with the PreToolUse/Bash command hook -> personal-safe-gh-hook first (absolute path)"
+expected_hooks="$(jq -n -S --arg gh "$expected_hook_cmd" --arg edit "$expected_edit_cmd" \
+  --arg stop "$expected_stop_cmd" --arg session "$expected_session_cmd" \
+  --arg record "$expected_record_cmd" '
+  def hook($cmd): {type: "command", command: $cmd};
+  def record: {hooks: [hook($record) + {async: true, timeout: 10}]};
+  {
+    PreToolUse: [{matcher: "Bash", hooks: [hook($gh)]}, record + {matcher: "*"}],
+    PostToolUse: [{matcher: "Edit|Write", hooks: [hook($edit)]}, record + {matcher: "*"}],
+    Stop: [{hooks: [hook($stop)]}],
+    SessionStart: [{matcher: "^(startup|resume|clear|compact|fork)$",
+      hooks: [hook($session) + {timeout: 10}]}, record],
+    PostToolUseFailure: [record + {matcher: "*"}],
+    PermissionDenied: [record + {matcher: "*"}]
+  }')"
+actual_hooks="$(jq -S '.hooks' "$off_file" 2>/dev/null)" || actual_hooks=""
+if [[ -n "$actual_hooks" && "$actual_hooks" == "$expected_hooks" ]]; then
+  ok "test passed: committed personal registers exactly the pinned hooks object (six events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; absolute paths; no other key)"
 else
-  fail "test failed: hook registration wrong (events=$hook_events pre_len=$pre_len matcher=$pre_matcher inner_len=$inner_len type=$inner_type cmd=$inner_cmd)"
-  status=1
-fi
-# check_record_entry EVENT INDEX EXPECTED_MATCHER ("absent" for none)
-# The record hook's entry: one command hook -> personal-tool-call-record-hook,
-# "async": true, timeout 10, and the given matcher (#353).
-check_record_entry() {
-  local event="$1" index="$2" expected_matcher="$3" len matcher type cmd async timeout
-  len="$(yq -p json ".hooks.${event}[${index}].hooks | length" "$off_file")"
-  matcher="$(yq -p json ".hooks.${event}[${index}].matcher // \"absent\"" "$off_file")"
-  type="$(yq -p json ".hooks.${event}[${index}].hooks[0].type" "$off_file")"
-  cmd="$(yq -p json ".hooks.${event}[${index}].hooks[0].command" "$off_file")"
-  async="$(yq -p json ".hooks.${event}[${index}].hooks[0].async // \"absent\"" "$off_file")"
-  timeout="$(yq -p json ".hooks.${event}[${index}].hooks[0].timeout // \"absent\"" "$off_file")"
-  if [[ "$len" == "1" && "$matcher" == "$expected_matcher" && "$type" == "command" \
-    && "$cmd" == "$expected_record_cmd" && "$async" == "true" && "$timeout" == "10" ]]; then
-    ok "test passed: ${event}[${index}] is the record hook entry (matcher $expected_matcher, async, timeout 10, absolute path)"
-  else
-    fail "test failed: ${event}[${index}] record hook entry wrong (len=$len matcher=$matcher type=$type cmd=$cmd async=$async timeout=$timeout)"
-    status=1
-  fi
-}
-check_record_entry PreToolUse 1 '*'
-check_record_entry PostToolUse 1 '*'
-check_record_entry SessionStart 1 absent
-check_record_entry PostToolUseFailure 0 '*'
-check_record_entry PermissionDenied 0 '*'
-for event in PostToolUse SessionStart PostToolUseFailure PermissionDenied; do
-  expected_len=2
-  [[ "$event" == "PostToolUseFailure" || "$event" == "PermissionDenied" ]] && expected_len=1
-  if [[ "$(yq -p json ".hooks.$event | length" "$off_file")" != "$expected_len" ]]; then
-    fail "test failed: $event must have exactly $expected_len entries"
-    status=1
-  fi
-done
-post_len="$(yq -p json '.hooks.PostToolUse | length' "$off_file")"
-post_matcher="$(yq -p json '.hooks.PostToolUse[0].matcher' "$off_file")"
-post_inner_len="$(yq -p json '.hooks.PostToolUse[0].hooks | length' "$off_file")"
-post_type="$(yq -p json '.hooks.PostToolUse[0].hooks[0].type' "$off_file")"
-post_cmd="$(yq -p json '.hooks.PostToolUse[0].hooks[0].command' "$off_file")"
-post_timeout="$(yq -p json '.hooks.PostToolUse[0].hooks[0].timeout // "absent"' "$off_file")"
-stop_len="$(yq -p json '.hooks.Stop | length' "$off_file")"
-stop_matcher="$(yq -p json '.hooks.Stop[0].matcher // "absent"' "$off_file")"
-stop_inner_len="$(yq -p json '.hooks.Stop[0].hooks | length' "$off_file")"
-stop_type="$(yq -p json '.hooks.Stop[0].hooks[0].type' "$off_file")"
-stop_cmd="$(yq -p json '.hooks.Stop[0].hooks[0].command' "$off_file")"
-stop_timeout="$(yq -p json '.hooks.Stop[0].hooks[0].timeout // "absent"' "$off_file")"
-if [[ "$post_len" == "2" && "$post_matcher" == "Edit|Write" && "$post_inner_len" == "1" \
-  && "$post_type" == "command" && "$post_cmd" == "$expected_edit_cmd" && "$post_timeout" == "absent" \
-  && "$stop_len" == "1" && "$stop_matcher" == "absent" && "$stop_inner_len" == "1" \
-  && "$stop_type" == "command" && "$stop_cmd" == "$expected_stop_cmd" && "$stop_timeout" == "absent" ]]; then
-  ok "test passed: committed personal registers the PostToolUse/Edit|Write hook -> personal-fast-edit-check first and one matcher-less Stop hook -> personal-changed-scope-qa (absolute paths, no timeout)"
-else
-  fail "test failed: quality-loop hook registration wrong (post_len=$post_len matcher=$post_matcher inner=$post_inner_len type=$post_type cmd=$post_cmd timeout=$post_timeout | stop_len=$stop_len matcher=$stop_matcher inner=$stop_inner_len type=$stop_type cmd=$stop_cmd timeout=$stop_timeout)"
-  status=1
-fi
-session_len="$(yq -p json '.hooks.SessionStart | length' "$off_file")"
-session_matcher="$(yq -p json '.hooks.SessionStart[0].matcher // "absent"' "$off_file")"
-session_inner_len="$(yq -p json '.hooks.SessionStart[0].hooks | length' "$off_file")"
-session_type="$(yq -p json '.hooks.SessionStart[0].hooks[0].type' "$off_file")"
-session_cmd="$(yq -p json '.hooks.SessionStart[0].hooks[0].command' "$off_file")"
-session_timeout="$(yq -p json '.hooks.SessionStart[0].hooks[0].timeout // "absent"' "$off_file")"
-if [[ "$session_len" == "2" && "$session_matcher" == "^(startup|resume|clear|compact|fork)$" && "$session_inner_len" == "1" \
-  && "$session_type" == "command" && "$session_cmd" == "$expected_session_cmd" && "$session_timeout" == "10" ]]; then
-  ok "test passed: committed personal registers the SessionStart hook in herdr 0.9.3's installer shape first (matcher ^(startup|resume|clear|compact|fork)$, bash '<home>/.claude/hooks/herdr-agent-state.sh' session, timeout 10)"
-else
-  fail "test failed: herdr SessionStart registration wrong (len=$session_len matcher=$session_matcher inner=$session_inner_len type=$session_type cmd=$session_cmd timeout=$session_timeout)"
+  fail "test failed: hook registration differs from the pinned hooks object (diff on stderr: expected, then rendered)"
+  diff <(printf '%s\n' "$expected_hooks") <(printf '%s\n' "$actual_hooks") >&2 || true
   status=1
 fi
 
@@ -806,40 +791,18 @@ fi
 #     false -> no hooks key at all (an empty "hooks": {} must never be
 #     emitted), and the all-off render is the all-on render minus the whole
 #     hooks key.
-# render_hook_flip LABEL CAP...
-# Flip every CAP to false in a throwaway source copy, render personal, and
-# set hook_flip_file to the rendered settings.json. Called as a plain
-# statement and returning through a variable ON PURPOSE: inside $(...) the
-# function would run in a subshell and its tmp_roots+= registrations would
-# never reach the parent's EXIT trap, leaking every source/render root (the
-# #150 lesson in test-lib.sh; Codex review on PR #200).
-render_hook_flip() {
-  local label="$1" src root cap
-  shift
-  src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-$label.XXXXXX")"
-  tmp_roots+=("$src")
-  make_flipped_source "$src"
-  for cap in "$@"; do
-    flip_personal_capability "$src/src" "$cap" false
-  done
-  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-  tmp_roots+=("$root")
-  if ! render_personal_into "$src/src" "$root"; then
-    fail "test failed: personal apply ($label) did not render"
-    exit 1
-  fi
-  hook_flip_file="$root/home/.claude/settings.json"
-}
-render_hook_flip reader-off enableGitHubIsolatedReader
-reader_off_file="$hook_flip_file"
-render_hook_flip quality-off enableQualityLoopHooks
-quality_off_file="$hook_flip_file"
-render_hook_flip herdr-off enableHerdrIntegration
-herdr_off_file="$hook_flip_file"
-render_hook_flip record-off enableToolCallRecordHook
-record_off_file="$hook_flip_file"
-render_hook_flip hooks-off enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration enableToolCallRecordHook
-both_off_file="$hook_flip_file"
+render_flip reader-off enableGitHubIsolatedReader=false
+reader_off_file="$flip_file"
+render_flip quality-off enableQualityLoopHooks=false
+quality_off_file="$flip_file"
+render_flip herdr-off enableHerdrIntegration=false
+herdr_off_file="$flip_file"
+render_flip record-off enableToolCallRecordHook=false
+record_off_file="$flip_file"
+render_flip hooks-off enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
+  enableHerdrIntegration=false enableToolCallRecordHook=false
+both_off_file="$flip_file"
+hooks_off_src="$flip_src"
 # check_hook_flip_off LABEL FILE EXPECTED_EVENTS DEL_FILTER
 # The flipped-off render must keep exactly EXPECTED_EVENTS and equal the
 # on-render with DEL_FILTER applied (that capability's entries removed).
@@ -869,7 +832,7 @@ check_hook_flip_off "enableToolCallRecordHook=false" "$record_off_file" \
   'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse[1]) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
 on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
 both_off_norm="$(yq -p json -o json '.' "$both_off_file")"
-if [[ "$(yq -p json '.hooks // "absent"' "$both_off_file")" == "absent" ]] \
+if [[ "$(yq -p json -o yaml '.hooks // "absent"' "$both_off_file")" == "absent" ]] \
   && [[ -n "$both_off_norm" && "$on_minus_hooks" == "$both_off_norm" ]]; then
   ok "test passed: all four hook capabilities false emits no hooks key (no empty object) and differs from the on-render by exactly the hooks key"
 else
@@ -885,14 +848,14 @@ fi
 #     the path where every record entry is the FIRST (and only) element of
 #     its event and PostToolUseFailure / PermissionDenied are preceded by a
 #     separator from SessionStart (#353).
-render_hook_flip reader-only enableQualityLoopHooks enableHerdrIntegration enableToolCallRecordHook
-reader_only_file="$hook_flip_file"
-render_hook_flip quality-only enableGitHubIsolatedReader enableHerdrIntegration enableToolCallRecordHook
-quality_only_file="$hook_flip_file"
-render_hook_flip herdr-only enableGitHubIsolatedReader enableQualityLoopHooks enableToolCallRecordHook
-herdr_only_file="$hook_flip_file"
-render_hook_flip record-only enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration
-record_only_file="$hook_flip_file"
+render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false
+reader_only_file="$flip_file"
+render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false
+quality_only_file="$flip_file"
+render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false
+herdr_only_file="$flip_file"
+render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false
+record_only_file="$flip_file"
 # check_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
 check_hook_single_on() {
   local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
@@ -919,9 +882,9 @@ check_hook_single_on "only enableToolCallRecordHook" "$record_only_file" '["Perm
 #     on-render after the record entries are deleted (normalized), plus the
 #     exact pins above; the one-time byte diff against the pre-#353 render
 #     was done at the #353 PR.
-if [[ "$(yq -p json '.hooks.PreToolUse | length' "$record_off_file")" == "1" \
-  && "$(yq -p json '.hooks.PostToolUse | length' "$record_off_file")" == "1" \
-  && "$(yq -p json '.hooks.SessionStart | length' "$record_off_file")" == "1" ]]; then
+if [[ "$(yq -p json -o yaml '.hooks.PreToolUse | length' "$record_off_file")" == "1" \
+  && "$(yq -p json -o yaml '.hooks.PostToolUse | length' "$record_off_file")" == "1" \
+  && "$(yq -p json -o yaml '.hooks.SessionStart | length' "$record_off_file")" == "1" ]]; then
   ok "test passed: enableToolCallRecordHook=false leaves one entry in PreToolUse / PostToolUse / SessionStart (the pre-#353 shape)"
 else
   fail "test failed: enableToolCallRecordHook=false render still carries a second entry in PreToolUse / PostToolUse / SessionStart"
@@ -938,7 +901,7 @@ section "claude settings keep the keys the template does not manage (#360)"
 # apply_over LABEL SOURCE SEED — apply SOURCE (personal) onto a fresh home
 # whose ~/.claude/settings.json is SEED; sets over_root, over_file and over_rc
 # (the apply's exit status). Called as a plain statement for the same
-# tmp_roots reason as render_hook_flip.
+# tmp_roots reason as render_flip.
 apply_over() {
   local label="$1" source_dir="$2" seed="$3"
   over_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-$label.XXXXXX")"
@@ -974,7 +937,7 @@ local_root="$over_root"
 kept="$(yq -p json -o json -I0 '[.autoMode, .modelSettings, .futureKey, .model]' "$local_file" 2>/dev/null)"
 want_kept="$(printf '%s\n' "$local_seed" | yq -p json -o json -I0 '[.autoMode, .modelSettings, .futureKey, .model]')"
 if [[ "$over_rc" -eq 0 && -n "$kept" && "$kept" == "$want_kept" \
-  && "$(yq -p json 'keys | .[0]' "$local_file")" == "autoMode" ]]; then
+  && "$(yq -p json -o yaml 'keys | .[0]' "$local_file")" == "autoMode" ]]; then
   ok "test passed: apply keeps autoMode, modelSettings, an unknown key and the /model choice, in place"
 else
   fail "test failed: apply over a live file lost or moved a key the template does not manage (rc=$over_rc kept=$kept)"
@@ -988,17 +951,15 @@ else
   status=1
 fi
 
-# 9b) Applying again changes nothing, and chezmoi diff is empty.
-cp "$local_file" "$local_root/before-second-apply.json"
-second_rc=0
-render_personal_into "$DOTFILES_ROOT" "$local_root" || second_rc=$?
+# 9b) Right after 9a's apply, chezmoi diff is empty: it runs the modify
+#     script over the merged file as a second apply would, so a second apply
+#     would change no byte.
 local_diff="$(chezmoi --config "$local_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
   --destination "$local_root/home" diff 2>/dev/null)" || local_diff="<chezmoi diff failed>"
-if [[ "$second_rc" -eq 0 ]] && cmp -s "$local_root/before-second-apply.json" "$local_file" \
-  && [[ -z "$local_diff" ]]; then
-  ok "test passed: a second apply leaves the file byte-identical and chezmoi diff is empty"
+if [[ -z "$local_diff" ]]; then
+  ok "test passed: after an apply over a live file chezmoi diff is empty (a second apply would change no byte)"
 else
-  fail "test failed: the second apply changed the file or chezmoi diff is not empty (rc=$second_rc)"
+  fail "test failed: after an apply over a live file chezmoi diff is not empty (a second apply would change the file)"
   status=1
 fi
 
@@ -1009,8 +970,8 @@ reordered_seed="$(jq '.permissions = ({allow: .permissions.allow} + .permissions
   | .hooks.PreToolUse[0].hooks[0] |= ({command: .command} + .)' "$off_file")"
 apply_over reordered "$DOTFILES_ROOT" "$reordered_seed"
 if [[ "$over_rc" -eq 0 ]] && [[ "$(cat "$over_file")" == "$reordered_seed" ]] \
-  && [[ "$(yq -p json '.permissions | keys | .[0]' "$over_file")" == "allow" ]] \
-  && [[ "$(yq -p json '.hooks.PreToolUse[0].hooks[0] | keys | .[0]' "$over_file")" == "command" ]]; then
+  && [[ "$(yq -p json -o yaml '.permissions | keys | .[0]' "$over_file")" == "allow" ]] \
+  && [[ "$(yq -p json -o yaml '.hooks.PreToolUse[0].hooks[0] | keys | .[0]' "$over_file")" == "command" ]]; then
   ok "test passed: a managed value equal up to key order keeps its live bytes"
 else
   fail "test failed: a reordering alone rewrote the live file (rc=$over_rc)"
@@ -1020,7 +981,7 @@ fi
 # 9d) No model in the live file: the template's model is the default.
 no_model_seed="$(jq 'del(.model) | .autoMode = {environment: ["x"]}' "$off_file")"
 apply_over no-model "$DOTFILES_ROOT" "$no_model_seed"
-if [[ "$over_rc" -eq 0 && "$(yq -p json '.model' "$over_file")" == "$(yq -p json '.model' "$off_file")" \
+if [[ "$over_rc" -eq 0 && "$(yq -p json -o yaml '.model' "$over_file")" == "$(yq -p json -o yaml '.model' "$off_file")" \
   && "$(yq -p json -o json -I0 '.autoMode' "$over_file")" == '{"environment":["x"]}' ]]; then
   ok "test passed: a live file without model gets the template's model as the default"
 else
@@ -1030,15 +991,10 @@ fi
 
 # 9e) All four hook capabilities false: the live hooks key goes (it would
 #     otherwise keep a hook the capabilities turned off), the rest equals the
-#     all-off render plus the hand-kept key.
-hooks_off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-hooks-off-src.XXXXXX")"
-tmp_roots+=("$hooks_off_src")
-make_flipped_source "$hooks_off_src"
-for cap in enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration enableToolCallRecordHook; do
-  flip_personal_capability "$hooks_off_src/src" "$cap" false
-done
-apply_over hooks-off "$hooks_off_src/src" "$(jq '.autoMode = {environment: ["x"]}' "$off_file")"
-if [[ "$over_rc" -eq 0 && "$(yq -p json '.hooks // "absent"' "$over_file")" == "absent" \
+#     all-off render plus the hand-kept key. The source is 8c's hooks-off
+#     copy (a render leaves its source as it was).
+apply_over hooks-off "$hooks_off_src" "$(jq '.autoMode = {environment: ["x"]}' "$off_file")"
+if [[ "$over_rc" -eq 0 && "$(yq -p json -o yaml '.hooks // "absent"' "$over_file")" == "absent" \
   && -n "$(norm "$both_off_file")" \
   && "$(norm "$over_file" 'del(.autoMode)')" == "$(norm "$both_off_file")" ]]; then
   ok "test passed: with the hook capabilities off, apply removes the live hooks key and keeps the hand-kept key"
@@ -1119,24 +1075,17 @@ else
   status=1
 fi
 
-# 9h) The first apply on a home without the file writes the managed JSON as
-#     the template prints it (one-line deny / ask arrays); right after it,
-#     chezmoi diff is empty and a second apply changes no byte: an unchanged
-#     file comes back as it was, not re-printed (Codex review R1, PR #377).
-first_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-first.XXXXXX")"
-tmp_roots+=("$first_root")
-first_rc=0
-render_personal_into "$DOTFILES_ROOT" "$first_root" || first_rc=$?
-first_file="$first_root/home/.claude/settings.json"
-cp "$first_file" "$first_root/after-first-apply.json" 2>/dev/null || true
-first_diff="$(chezmoi --config "$first_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
-  --destination "$first_root/home" diff 2>/dev/null)" || first_diff="<chezmoi diff failed>"
-render_personal_into "$DOTFILES_ROOT" "$first_root" || first_rc=$?
-if [[ "$first_rc" -eq 0 && -z "$first_diff" ]] && cmp -s "$off_file" "$first_root/after-first-apply.json" \
-  && cmp -s "$first_root/after-first-apply.json" "$first_file"; then
-  ok "test passed: after a first apply chezmoi diff is empty and a second apply changes no byte"
+# 9h) Section 1's off_root is a first apply on a home without the file
+#     (nothing writes there afterwards): the managed JSON as the template
+#     prints it (one-line deny / ask arrays). chezmoi diff over it is empty:
+#     an unchanged file comes back as it was, not re-printed, so a second
+#     apply would change no byte (Codex review R1, PR #377).
+first_diff="$(chezmoi --config "$off_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+  --destination "$off_root/home" diff 2>/dev/null)" || first_diff="<chezmoi diff failed>"
+if [[ -z "$first_diff" ]]; then
+  ok "test passed: right after a first apply chezmoi diff is empty (a second apply would change no byte)"
 else
-  fail "test failed: right after a first apply chezmoi diff is not empty or a second apply re-printed the file (rc=$first_rc)"
+  fail "test failed: right after a first apply chezmoi diff is not empty (a second apply would re-print the file)"
   status=1
 fi
 
@@ -1230,8 +1179,8 @@ for argv_step in diff apply diff; do
 done
 if [[ "$argv_rc" -eq 0 ]] && grep -Fqx -- '--argjson' "$argv_log" \
   && grep -Fq '"permissions"' "$argv_log" && ! grep -Fq -- "$argv_marker" "$argv_log" \
-  && [[ "$(yq -p json '.autoMode.environment[0]' "$argv_file")" == "$argv_marker" \
-    && "$(yq -p json '.tui' "$argv_file")" == "$(yq -p json '.tui' "$off_file")" ]]; then
+  && [[ "$(yq -p json -o yaml '.autoMode.environment[0]' "$argv_file")" == "$argv_marker" \
+    && "$(yq -p json -o yaml '.tui' "$argv_file")" == "$(yq -p json -o yaml '.tui' "$off_file")" ]]; then
   ok "test passed: a value only the live file holds never reaches jq's arguments (diff, apply and diff again)"
 else
   fail "test failed: a live-only value reached jq's arguments, the jq shim did not run, or the apply failed (rc=$argv_rc)"
