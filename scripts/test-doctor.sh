@@ -610,7 +610,7 @@ doctor_expect "malformed backup marker reported unreadable (exit 0)" \
 # Git signing (enableGitSigning, #85) and SSH 1Password agent
 # (enable1PasswordSSH, #17) reports. doctor stays report-only / exit 0 and
 # must reflect the active and the dangling (capability true but module
-# inactive) cases of each. One throwaway repo copy with both capabilities
+# inactive) cases of each. Throwaway repo copies with both capabilities
 # forced true, so the cases do not depend on the committed defaults and the
 # edits do not touch the real data files. The active SSH agent (N) is
 # asserted on the committed personal run of the opening fixture.
@@ -643,10 +643,17 @@ else
   fail "test failed: doctor must stay exit 0 (enableGitSigning=true module active; enable1PasswordSSH dangling)"
   status=1
 fi
-# M) git-signing removed as well -> dangling signing warning, still exit 0.
-remove_module_all "$sign_root" git-signing
+# M) git-signing removed and ssh-1password kept, on a copy of its own ->
+#    dangling signing warning, still exit 0. The mirror of L + O: with
+#    ssh-1password still active, a signing section that also reads the SSH
+#    module would report the managed mechanism here (Codex review R2).
+sign_m_root="$fixture_home/.dotfiles-signing-m"
+copy_repo_fixture "$sign_m_root"
+set_capability_all "$sign_m_root" enableGitSigning true
+set_capability_all "$sign_m_root" enable1PasswordSSH true
+remove_module_all "$sign_m_root" git-signing
 doctor_expect "enableGitSigning=true with module inactive is reported as dangling" \
-  env HOME="$fixture_home" "$sign_root/scripts/doctor.sh" personal -- "~git-signing module is inactive"
+  env HOME="$fixture_home" "$sign_m_root/scripts/doctor.sh" personal -- "~git-signing module is inactive" ! "SSH signing mechanism managed"
 
 # Global gitignore report (git-ignore module, #248). doctor stays report-only
 # / exit 0 and must tell apart: managed file in effect (ok), missing
