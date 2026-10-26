@@ -326,13 +326,18 @@ else
 fi
 
 # 6. A checksum mismatch (manifest sha does not match the file) is caught.
-#    The sha is the only defect: the entry keeps the file's real size and
-#    mode, and the zeros are 64 hex digits so the schema check passes.
+#    The manifest is written by hand, as before write_manifest: the file
+#    also does not have the declared mode "600", and the checksum must be
+#    the reason reported (a check that looked at the mode first would not
+#    say so).
 bad="$fixture_home/stage-badsum"
 mkdir -p "$bad/files"
 printf 'real content\n' > "$bad/files/.zshrc.local"
-write_manifest "$bad" .zshrc.local
-yq -i -p=json -o=json '.files[0].sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' "$bad/manifest.json"
+TS="2026-01-01T00:00:00Z" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": strenv(TS), "entries": [],
+  "files": [{"path": ".zshrc.local", "mode": "600", "size": 13, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}]
+}' > "$bad/manifest.json"
 make_archive "$bad" "$fixture_home/out/badsum.age"
 # Capture the status separately: each negative case must exit 1 as well as
 # report the cause, so a diagnostic alone cannot hide a successful exit.
@@ -2044,8 +2049,8 @@ ue_case "restore with a missing identity file" "identity file not found: $fixtur
 #     removal exit 1 instead (rmfail, endrmfail); SIG_NO_FIRST stops the
 #     fake yq at its snapshot (the end runs). Every other call goes to the
 #     real tool. A TMPDIR of its own per run, so a leftover shows and a
-#     KILL at the deadline
-#     (kill_tree) cannot leak into the suite's temp. backup's three list
+#     KILL at the deadline (kill_tree) cannot leak into the suite's temp.
+#     backup's three list
 #     files are made under that TMPDIR too (#372; case 34 pins how), so a
 #     cleanup that forgot them shows as a leftover (Codex review R5): the
 #     backup runs check that the three were in the temp at the manifest
