@@ -12,8 +12,7 @@ set -euo pipefail
 #     agent-tools operating-rules file (absolute, under the rendered home);
 #   - nothing local leaks into the managed file: no provider / model /
 #     small_model / plugin / mcp / agent / server keys and no secret-shaped
-#     strings;
-#   - the work profile renders no file at all (module not listed).
+#     strings.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +22,11 @@ source "$SCRIPT_DIR/lib-policy.sh"
 source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
+
+if ! command -v jq >/dev/null 2>&1; then
+  fail "jq not found; the JSON validity checks (strict_json_object) need it"
+  exit 1
+fi
 
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; render tests require it"
@@ -52,7 +56,8 @@ home="$home_root/home"
 config_file="$home/.config/opencode/opencode.json"
 
 # 1) Committed personal renders the managed file as valid JSON with the schema.
-if [[ -f "$config_file" ]] && yq -p json -e '."$schema" == "https://opencode.ai/config.json"' "$config_file" >/dev/null 2>&1; then
+if [[ -f "$config_file" ]] && strict_json_object "$config_file" \
+  && yq -p json -e '."$schema" == "https://opencode.ai/config.json"' "$config_file" >/dev/null 2>&1; then
   ok "test passed: personal renders ~/.config/opencode/opencode.json (valid JSON, opencode schema)"
 else
   fail "test failed: personal did not render a valid ~/.config/opencode/opencode.json with the opencode schema"
@@ -211,13 +216,14 @@ fi
 #     OpenCode's rule semantics (glob, last match wins). Expected decisions
 #     are written here by hand from docs/ai-policy.md — never derived from
 #     the map. The command set is the Codex probe list of doctor.sh (4c below
-#     checks every probe is a row; test-doctor.sh pins that list; the outward
-#     probes are the rows without a tab, expecting ask, and the secret-read
-#     probes of #334 carry their own expected decision) plus the forms the audit
-#     found: short-flag `gh api`, aliases, and the reads that must stay
-#     allowed. Only `*` is a metacharacter in OpenCode patterns; bash `case`
-#     also interprets `?`, `[`, `]` and `\`, so a rule containing those is
-#     rejected up front rather than silently evaluated differently.
+#     checks every probe is a row; test-doctor.sh pins that list; a row
+#     without a tab is an outward probe expecting ask, while the outward
+#     probes expecting deny and the secret-read probes of #334 are rows with
+#     their own expected decision) plus the forms the audit found: short-flag
+#     `gh api`, aliases, and the reads that must stay allowed. Only `*` is a
+#     metacharacter in OpenCode patterns; bash `case` also interprets `?`,
+#     `[`, `]` and `\`, so a rule containing those is rejected up front
+#     rather than silently evaluated differently.
 section "opencode bash rules: policy-derived decisions (#240)"
 
 rule_rows="$(yq -p json '.permission.bash | to_entries | .[] | .key + "\t" + .value' "$config_file")"
@@ -321,13 +327,11 @@ ask	gh repo delete o/r
 ask	gh repo edit o/r
 ask	gh repo archive o/r
 ask	gh repo rename x
-ask	gh api --method POST repos/o/r/issues
 ask	gh api repos/o/r/issues -XPOST
 ask	gh api repos/o/r/issues -ftitle=x
 ask	gh api repos/o/r/issues -F title=x --input body.json
 ask	gh api graphql -f query=x
 ask	gh api repos/o/r
-ask	gh auth login
 ask	gh auth logout
 ask	gh auth refresh -s repo
 ask	gh gist create f
@@ -353,10 +357,7 @@ ask	gh pr viewx
 ask	gh pr view-token 1
 ask	gh search
 ask	gh auth
-ask	sudo -v
 ask	sudo ls
-ask	curl https://example.invalid
-ask	wget https://example.invalid
 deny	gh secret set X
 deny	gh secret list
 deny	gh api repos/o/r/actions/secrets
@@ -632,19 +633,6 @@ if grep -Eqi 'sk-[a-z0-9]|ghp_[a-z0-9]|gho_[a-z0-9]|github_pat_|api[_-]?key"?[[:
   status=1
 else
   ok "test passed: no secret-like or email-like string in the rendered file"
-fi
-
-# 7) work does not list opencode-settings: nothing renders.
-work_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-opencode-settings-work.XXXXXX")"
-tmp_roots+=("$work_root")
-mkdir -p "$work_root/home"
-printf '[data]\nprofile = "work"\n' > "$work_root/chezmoi.toml"
-if chezmoi --config "$work_root/chezmoi.toml" --source "$DOTFILES_ROOT" --destination "$work_root/home" apply >/dev/null 2>&1 \
-  && [[ ! -e "$work_root/home/.config/opencode" ]]; then
-  ok "test passed: work renders no ~/.config/opencode (module not listed)"
-else
-  fail "test failed: work must not render ~/.config/opencode"
-  status=1
 fi
 
 if [[ "$status" -eq 0 ]]; then

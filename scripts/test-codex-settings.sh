@@ -42,6 +42,11 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
+if ! command -v jq >/dev/null 2>&1; then
+  fail "jq not found; the JSON validity checks (strict_json_object) need it"
+  exit 1
+fi
+
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; render tests require it"
   exit 1
@@ -94,7 +99,7 @@ expected_session_cmd="bash $(shell_single_quote "$HOME/.codex/herdr-agent-state.
 if [[ ! -f "$hooks_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/hooks.json (enableGitHubIsolatedReader is ON)"
   status=1
-elif ! yq -p json '.' "$hooks_file" >/dev/null 2>&1; then
+elif ! strict_json_object "$hooks_file"; then
   fail "test failed: ~/.codex/hooks.json is not valid JSON"
   status=1
 else
@@ -212,28 +217,28 @@ render_codex_hook_flip quality-off enableQualityLoopHooks
 quality_off_hooks="$hook_flip_file"
 render_codex_hook_flip herdr-off enableHerdrIntegration
 herdr_off_hooks="$hook_flip_file"
-if [[ -f "$reader_off_hooks" ]] \
+if [[ -f "$reader_off_hooks" ]] && strict_json_object "$reader_off_hooks" \
   && [[ "$(yq -p json -o json '.hooks | keys | sort' "$reader_off_hooks" | tr -d ' \n')" == '["PostToolUse","SessionStart","Stop"]' ]] \
   && [[ "$(yq -p json -o json 'del(.hooks.PreToolUse)' "$hooks_file")" == "$(yq -p json -o json '.' "$reader_off_hooks")" ]]; then
   ok "test passed: enableGitHubIsolatedReader=false keeps ~/.codex/hooks.json with exactly {PostToolUse, Stop, SessionStart} (on-render minus PreToolUse)"
 else
-  fail "test failed: enableGitHubIsolatedReader=false render is not the on-render minus PreToolUse (file missing, quality pair dropped, or another change leaked)"
+  fail "test failed: enableGitHubIsolatedReader=false render is not the on-render minus PreToolUse (file missing or not one JSON object, quality pair dropped, or another change leaked)"
   status=1
 fi
-if [[ -f "$quality_off_hooks" ]] \
+if [[ -f "$quality_off_hooks" ]] && strict_json_object "$quality_off_hooks" \
   && [[ "$(yq -p json -o json '.hooks | keys | sort' "$quality_off_hooks" | tr -d ' \n')" == '["PreToolUse","SessionStart"]' ]] \
   && [[ "$(yq -p json -o json 'del(.hooks.PostToolUse) | del(.hooks.Stop)' "$hooks_file")" == "$(yq -p json -o json '.' "$quality_off_hooks")" ]]; then
   ok "test passed: enableQualityLoopHooks=false keeps ~/.codex/hooks.json with exactly {PreToolUse, SessionStart} (on-render minus PostToolUse/Stop)"
 else
-  fail "test failed: enableQualityLoopHooks=false render is not the on-render minus PostToolUse/Stop (file missing, safe-gh hook dropped, or another change leaked)"
+  fail "test failed: enableQualityLoopHooks=false render is not the on-render minus PostToolUse/Stop (file missing or not one JSON object, safe-gh hook dropped, or another change leaked)"
   status=1
 fi
-if [[ -f "$herdr_off_hooks" ]] \
+if [[ -f "$herdr_off_hooks" ]] && strict_json_object "$herdr_off_hooks" \
   && [[ "$(yq -p json -o json '.hooks | keys | sort' "$herdr_off_hooks" | tr -d ' \n')" == '["PostToolUse","PreToolUse","Stop"]' ]] \
   && [[ "$(yq -p json -o json 'del(.hooks.SessionStart)' "$hooks_file")" == "$(yq -p json -o json '.' "$herdr_off_hooks")" ]]; then
   ok "test passed: enableHerdrIntegration=false keeps ~/.codex/hooks.json with exactly {PreToolUse, PostToolUse, Stop} (on-render minus SessionStart)"
 else
-  fail "test failed: enableHerdrIntegration=false render is not the on-render minus SessionStart (file missing, another hook dropped, or another change leaked)"
+  fail "test failed: enableHerdrIntegration=false render is not the on-render minus SessionStart (file missing or not one JSON object, another hook dropped, or another change leaked)"
   status=1
 fi
 
@@ -253,6 +258,11 @@ check_codex_hook_single_on() {
   local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
   if [[ ! -f "$file" ]]; then
     fail "test failed: $label did not render ~/.codex/hooks.json"
+    status=1
+    return
+  fi
+  if ! strict_json_object "$file"; then
+    fail "test failed: $label ~/.codex/hooks.json is not exactly one JSON object"
     status=1
     return
   fi

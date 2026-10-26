@@ -79,15 +79,24 @@ render_personal_into() {
 }
 
 # make_flipped_source DEST_PARENT
-# Copy the committed source into DEST_PARENT/src (dropping .git) so a test
+# Copy the source tree into DEST_PARENT/src (without .git) so a test
 # can flip capabilities without touching the real data files. DEST_PARENT
 # is created and registered for cleanup by the caller. Call as a plain
 # statement, never inside $(...) (the subshell would hide caller-side
 # cleanup registration — same trap as render_personal_into).
+# Entry by entry so .git is never copied: a main worktree's .git (a
+# directory of tens of MB) made each call take about 1 s, and the render
+# suites call this dozens of times per run. The three globs cover every
+# name but . and .. (untracked files are copied too, as before); a
+# linked worktree's .git file is skipped the same way.
 make_flipped_source() {
-  local dest_parent="$1"
-  cp -R "$DOTFILES_ROOT" "$dest_parent/src"
-  rm -rf "$dest_parent/src/.git"
+  local dest_parent="$1" entry
+  mkdir "$dest_parent/src"
+  for entry in "$DOTFILES_ROOT"/* "$DOTFILES_ROOT"/.[!.]* "$DOTFILES_ROOT"/..?*; do
+    [[ -e "$entry" || -L "$entry" ]] || continue
+    [[ "${entry##*/}" != .git ]] || continue
+    cp -R "$entry" "$dest_parent/src/"
+  done
 }
 
 # flip_personal_capability SRC CAP VALUE
@@ -149,6 +158,16 @@ shell_word() {
   else
     shell_single_quote "$1"
   fi
+}
+
+# strict_json_object FILE — whether FILE is exactly one JSON value and that
+# value is an object, read by jq (strict JSON apart from NaN). yq -p json is
+# lenient: it takes a leading or trailing comma in an object, a missing comma
+# between members, a raw line break in a string, several documents and an
+# empty file. The managed JSON templates join their members by hand, so the
+# validity checks use this; yq stays the reader for the content.
+strict_json_object() {
+  jq -e -s 'length == 1 and (.[0] | type) == "object"' "$1" >/dev/null 2>&1
 }
 
 # set_environment_kind ROOT PROFILE KIND

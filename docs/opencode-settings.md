@@ -149,7 +149,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   報告する(未設定のときは `~/.zshrc.local` に `OPENCODE_CONFIG` という文字列があるかだけを `grep -q` で見て、
   あれば非対話 shell 由来として中立表示する。export の行かは見ず、中身は表示しない)。
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash / edit の rule map を順序込みで、
-  `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在、work は非 render)。
+  `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在。work で render されないことは test-render.sh の managed set が固定する)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
   assert する(#240): doctor の Codex probe 39 本(外向き・昇格 27 + 認証情報の表示 3、#287 + secret の読み出し 9、#334。secret の読み出しは期待する判定つき)に、短縮 flag / alias / read 形、
   #381 の既定 ask(allow に戻した local の読み取りと git、名前の似た command(`lsx` など)、外向き・別 program を起動する
