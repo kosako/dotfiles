@@ -751,21 +751,11 @@ else
   miss "unsafe supplement path was not skipped as expected"
 fi
 
-# 11. Missing recipient is a usage error (exit 2), not a silent plaintext.
-norec_home="$fixture_home/norec"
-seed_home "$norec_home"
-rc=0
-run_in "$norec_home" backup --out "$norec_home/x.age" --yes >/dev/null 2>&1 || rc=$?
-if [[ "$rc" -eq 2 ]]; then
-  pass "missing recipient is a usage error (exit 2)"
-else
-  miss "missing recipient should exit 2, got $rc"
-fi
-
-# 11b. The other recipient sources (#330): the default recipient file (the
-#      path the docs recommend) and --recipients-file each produce an archive
-#      the matching identity verifies; a missing --recipients-file, and both
-#      flags at once, are usage errors (exit 2) that write nothing.
+# 11. The recipient sources (#330): the default recipient file (the path the
+#     docs recommend) and --recipients-file each produce an archive the
+#     matching identity verifies; no recipient at all (never a silent
+#     plaintext), a missing --recipients-file, and both flags at once are
+#     usage errors (exit 2) that write nothing.
 rcpt_home="$fixture_home/rcpt"
 seed_home "$rcpt_home"
 mkdir -p "$rcpt_home/.config/dotfiles" "$rcpt_home/out"
@@ -784,14 +774,18 @@ if run_in "$rcpt_home" backup --out "$rcpt_home/out/file.age" --recipients-file 
 else
   miss "backup --recipients-file did not produce a verifiable archive"
 fi
-# The two usage errors run in fresh homes (no marker yet), so "writes
-# nothing" covers the archive, its .partial and the marker (Codex review,
-# PR #351).
-for rcpt_err in missing-file both-flags; do
+# The three usage errors run in fresh homes (no marker yet, no default
+# recipient file), so "writes nothing" covers the archive, its .partial and
+# the marker (Codex review, PR #351).
+for rcpt_err in no-recipient missing-file both-flags; do
   rcpt_err_home="$fixture_home/rcpt-$rcpt_err"
   seed_home "$rcpt_err_home"
   rcpt_rc=0
   case "$rcpt_err" in
+    no-recipient)
+      rcpt_expect="[fail] no recipient: pass --recipient/--recipients-file or create $rcpt_err_home/.config/dotfiles/private-backup.recipient"
+      rcpt_out="$(run_in "$rcpt_err_home" backup --out "$rcpt_err_home/x.age" --yes 2>&1)" || rcpt_rc=$?
+      ;;
     missing-file)
       rcpt_expect="[fail] recipients file not found: $rcpt_err_home/no-such-file"
       rcpt_out="$(run_in "$rcpt_err_home" backup --out "$rcpt_err_home/x.age" \
@@ -1018,13 +1012,17 @@ else
   miss "restore did not refuse a symlinked backup-state path"
 fi
 
-# 17. restore refuses an archive that fails verification (corrupt manifest).
-out="$(run restore --in "$fixture_home/out/badsum.age" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply 2>&1)" || true
-if grep -Fq "refusing to restore" <<< "$out"; then
+# 17. restore --apply refuses an archive that fails verification (a checksum
+#     mismatch): exit 1 with the refusal, and the target is left as it was.
+r17_before="$(tree_state "$rdst")"
+r17_rc=0
+out="$(run restore --in "$fixture_home/out/badsum.age" --identity "$fixture_home/keys/id.txt" --target-home "$rdst" --apply 2>&1)" || r17_rc=$?
+if [[ "$r17_rc" -eq 1 ]] && grep -Fxq "[fail] archive failed verification; refusing to restore" <<< "$out" \
+  && [[ "$(tree_state "$rdst")" == "$r17_before" ]]; then
   pass "restore refuses an archive that fails verification"
 else
   printf '%s\n' "$out" >&2
-  miss "restore did not refuse a failed-verification archive"
+  miss "restore did not refuse a failed-verification archive, or changed the target (rc=$r17_rc)"
 fi
 
 # 18. Runtime gate: a denied profile refuses to restore.
@@ -1055,18 +1053,23 @@ set_profile personal
 # 19. A group-writable file (664) round-trips: capture, verify, and restore
 #     keep the recorded mode. Regression for the umask bug: extraction
 #     without -p turned 664 into 644 and the manifest mode check rejected
-#     every archive containing such a file (issue #141).
+#     every archive containing such a file (issue #141). The case also guards
+#     the cp -p of the staging and of restore.
 gw_home="$fixture_home/gw"
 seed_home "$gw_home"
 chmod 664 "$gw_home/.zshrc.local"
+# backup, verify and restore run under umask 022: losing a -p (tar -xpf in
+# decrypt_and_extract, cp -p in stage_file and in restore) shows only when
+# the umask masks group write. Under umask 002 a 664 file comes out 664
+# even without -p, so the caller's umask must not decide the result.
 gw_rc=0
-backup_in "$gw_home" "$gw_home/gw.age" >/dev/null 2>&1 || gw_rc=$?
+(umask 022; backup_in "$gw_home" "$gw_home/gw.age") >/dev/null 2>&1 || gw_rc=$?
 if [[ "$gw_rc" -eq 0 ]] \
-  && run_in "$gw_home" verify --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" >/dev/null 2>&1; then
+  && (umask 022; run_in "$gw_home" verify --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt") >/dev/null 2>&1; then
   gw_dst="$fixture_home/gw-restore"
   mkdir -p "$gw_dst"
-  if run_in "$gw_home" restore --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" \
-    --target-home "$gw_dst" --apply >/dev/null 2>&1 \
+  if (umask 022; run_in "$gw_home" restore --in "$gw_home/gw.age" --identity "$fixture_home/keys/id.txt" \
+    --target-home "$gw_dst" --apply) >/dev/null 2>&1 \
     && [[ "$(file_mode "$gw_dst/.zshrc.local")" == "664" ]]; then
     pass "group-writable file (664) survives backup/verify/restore with its mode"
   else
@@ -1675,20 +1678,58 @@ else
 fi
 chmod 600 "$en2_home/locked" # so the EXIT trap can clean up
 
+# 27c. All three causes in one run (#414): the fake find above fails the
+#      directory, a declared file is unreadable, and a declared file sits
+#      under a directory without search permission. The warning names all
+#      three, joined by "and"; 27b, 22 and 39 have one or two of the causes,
+#      so the join before the third shows only here. Same root guard as 22
+#      and 39 (mode bits do not bind for root).
+en3_home="$fixture_home/en3-home"
+mkdir -p "$en3_home/.config/dotfiles" "$en3_home/box" "$en3_home/shut"
+printf 'a\n' > "$en3_home/.zshrc.local"
+printf 'listed\n' > "$en3_home/box/listed"
+printf 'locked\n' > "$en3_home/locked"
+chmod 000 "$en3_home/locked"
+printf 'config\n' > "$en3_home/shut/config"
+chmod 600 "$en3_home/shut"
+printf 'backup_paths:\n  - { path: "box", type: dir }\n  - { path: "locked", type: file }\n  - { path: "shut/config", type: file }\n' \
+  > "$en3_home/.config/dotfiles/backup-paths.local"
+if [[ ! -r "$en3_home/locked" && ! -e "$en3_home/shut/config" ]]; then
+  en3_rc=0
+  en3_out="$(REAL_FIND="$real_find" FAKE_FIND_DIR="$en3_home/box" PATH="$en_fakebin:$PATH" \
+    backup_in "$en3_home" "$en3_home/all.age" 2>&1)" || en3_rc=$?
+  if [[ "$en3_rc" -eq 0 && -f "$en3_home/all.age" ]] \
+    && grep -Fq "capture INCOMPLETE: enumeration failed for 1 declared director(y/ies) and 1 existing file(s) could not be read and 1 declared path(s) could not be checked (a parent directory is not searchable);" <<< "$en3_out" \
+    && [[ "$(yq -p=json -o=tsv '.capture_incomplete' "$en3_home/.local/state/dotfiles/private-backup.json")" == "true" ]]; then
+    pass "a failed enumeration, an unreadable file and an unsearchable parent in one run are all named in the warning, and the marker records the capture incomplete"
+  else
+    printf '%s\n' "$en3_out" >&2
+    miss "a failed enumeration, an unreadable file and an unsearchable parent in one run were not all reported (rc=$en3_rc)"
+  fi
+else
+  warn "mode bits do not bind here (root?); three-cause incomplete case skipped"
+fi
+chmod 600 "$en3_home/locked" # so the EXIT trap can clean up
+chmod 700 "$en3_home/shut"
+
 # 28. The local supplement is user input: a structurally invalid entry must
 #     not be dropped silently or mangled (issue #246). The shared parser
 #     rejects the whole file before any row is used, so backup fails with the
-#     message, writes no archive and no marker. Three shapes: an entry
-#     without a path, a "|" in category (would shift fields into the path),
-#     and a newline inside a path (would split into two rows). A normal free
-#     label still passes, and a "|" INSIDE a path stays allowed (the
-#     odd-filename round-trip above already pins that).
+#     message, writes no archive, no partial and no marker. Four shapes: an
+#     entry without a path, a "|" in category (would shift fields into the
+#     path), a newline inside a path (would split into two rows), and a
+#     scalar in place of the list (`backup_paths: false`), which `// []`
+#     would have read as "no entries", letting the baseline-only backup
+#     succeed silently (Codex review, PR #254). A normal free label still
+#     passes, and a "|" INSIDE a path stays allowed (the odd-filename
+#     round-trip above already pins that).
+# sv_case LABEL BODY — back up from a fresh home whose supplement is BODY.
 sv_case() {
-  local label="$1" entry="$2" rc=0 out home
+  local label="$1" body="$2" rc=0 out home
   home="$fixture_home/sv-$label"
   seed_home "$home"
   mkdir -p "$home/.config/dotfiles"
-  printf 'backup_paths:\n%s\n' "$entry" > "$home/.config/dotfiles/backup-paths.local"
+  printf '%s\n' "$body" > "$home/.config/dotfiles/backup-paths.local"
   out="$(backup_in "$home" "$home/s.age" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $home/.config/dotfiles/backup-paths.local" <<< "$out" \
     && [[ ! -e "$home/s.age" && ! -e "$home/.local/state/dotfiles/private-backup.json" ]] \
@@ -1699,25 +1740,13 @@ sv_case() {
     miss "invalid supplement ($label) was accepted or mis-reported (rc=$rc)"
   fi
 }
-sv_case missing-path '  - { type: file, category: fixture }'
-sv_case pipe-in-category '  - { path: only-in-supplement, type: file, category: "shell|override" }'
-sv_case newline-in-path '  - { path: "one\nfile|other|two", type: file }'
-# A scalar in place of the list (`backup_paths: false`): must be rejected
-# too — `// []` would have read it as "no entries" and let the baseline-only
-# backup succeed silently (Codex review, PR #254).
-sv_scalar="$fixture_home/sv-scalar-list"
-seed_home "$sv_scalar"
-mkdir -p "$sv_scalar/.config/dotfiles"
-printf 'backup_paths: false\n' > "$sv_scalar/.config/dotfiles/backup-paths.local"
-sv_scalar_rc=0
-sv_scalar_out="$(backup_in "$sv_scalar" "$sv_scalar/s.age" 2>&1)" || sv_scalar_rc=$?
-if [[ "$sv_scalar_rc" -ne 0 ]] && grep -Fq "backup-paths entry invalid in $sv_scalar/.config/dotfiles/backup-paths.local" <<< "$sv_scalar_out" \
-  && [[ ! -e "$sv_scalar/s.age" && ! -e "$sv_scalar/.local/state/dotfiles/private-backup.json" ]]; then
-  pass "invalid supplement (scalar in place of the list) is rejected before capture: no archive, no marker"
-else
-  printf '%s\n' "$sv_scalar_out" >&2
-  miss "a scalar backup_paths in the supplement was accepted (rc=$sv_scalar_rc)"
-fi
+sv_case missing-path 'backup_paths:
+  - { type: file, category: fixture }'
+sv_case pipe-in-category 'backup_paths:
+  - { path: only-in-supplement, type: file, category: "shell|override" }'
+sv_case newline-in-path 'backup_paths:
+  - { path: "one\nfile|other|two", type: file }'
+sv_case scalar-list 'backup_paths: false'
 # Control: a free-form label without the delimiter is fine and the declared
 # file is captured under its own path.
 sv_ok="$fixture_home/sv-ok"
@@ -1905,6 +1934,53 @@ else
   printf '%s\n' "$dash_out" >&2
   miss "--out ./-archive.age must write the archive and record -archive.age in the marker (rc=$dash_rc)"
 fi
+# The other argument checks are usage errors too (exit 2, with the reason,
+# #468): what each subcommand requires, an unknown argument, both identities
+# at once, and a named archive, target home or identity file that is not
+# there (decrypt_and_extract's documented 2, which verify and restore pass
+# on). The restore runs carry --apply and a target that must stay empty, so
+# a check that let the run through would write into it (a dry-run writes
+# nothing either way). Labels are short; the argv holds fixture paths,
+# passed whole (they may contain spaces, #330).
+ue_dst="$fixture_home/ue-dst"
+mkdir -p "$ue_dst"
+ue_identity_command="$(printf 'cat %q' "$fixture_home/keys/id.txt")"
+# ue_case LABEL EXPECT ARGS... — run ARGS; it must exit 2 and print
+# "[fail] EXPECT" as a whole line, and nothing may appear under ue_dst
+# (emptied again after each run, so one failure does not spill over).
+ue_case() {
+  local label="$1" expect="$2" ue_rc=0 ue_out
+  shift 2
+  ue_out="$(run "$@" 2>&1)" || ue_rc=$?
+  if [[ "$ue_rc" -eq 2 ]] && grep -Fxq "[fail] $expect" <<< "$ue_out" \
+    && [[ -z "$(find "$ue_dst" -mindepth 1 -print)" ]]; then
+    pass "$label is a usage error (exit 2) that says why"
+  else
+    printf '%s\n' "$ue_out" >&2
+    miss "$label must exit 2 with \"$expect\" and write nothing (rc=$ue_rc)"
+  fi
+  rm -rf "$ue_dst"
+  mkdir "$ue_dst"
+}
+ue_case "backup without --out" "backup requires --out PATH" \
+  backup --recipient "$recipient" --yes
+ue_case "an unknown backup argument" "unknown backup argument: --bogus" \
+  backup --out "$fixture_home/out/ue.age" --bogus --recipient "$recipient" --yes
+ue_case "verify with both identities" "use only one of --identity / --identity-command" \
+  verify --in "$archive" --identity "$fixture_home/keys/id.txt" --identity-command "$ue_identity_command"
+ue_case "restore with both identities" "use only one of --identity / --identity-command" \
+  restore --in "$archive" --identity "$fixture_home/keys/id.txt" --identity-command "$ue_identity_command" \
+  --target-home "$ue_dst" --apply
+ue_case "verify without an identity" "verify requires --identity PATH or --identity-command CMD" \
+  verify --in "$archive"
+ue_case "verify of a missing archive" "archive not found: $fixture_home/out/no-such.age" \
+  verify --in "$fixture_home/out/no-such.age" --identity "$fixture_home/keys/id.txt"
+ue_case "restore into a missing target home" "target home is not a directory: $fixture_home/no-such-home" \
+  restore --in "$archive" --identity "$fixture_home/keys/id.txt" --target-home "$fixture_home/no-such-home" --apply
+ue_case "verify with a missing identity file" "identity file not found: $fixture_home/keys/no-such.txt" \
+  verify --in "$archive" --identity "$fixture_home/keys/no-such.txt"
+ue_case "restore with a missing identity file" "identity file not found: $fixture_home/keys/no-such.txt" \
+  restore --in "$archive" --identity "$fixture_home/keys/no-such.txt" --target-home "$ue_dst" --apply
 
 # 33. A run interrupted after its plaintext exists leaves nothing in its
 #     temp and ends by the signal (#358): backup (staging + self-check dir),
