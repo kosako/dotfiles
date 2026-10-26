@@ -499,14 +499,6 @@ fi
 # H) No marker yet ("no backup recorded yet", personal): asserted on the
 #    opening fixture above.
 
-# J) The local supplement is reported by existence only — never parsed or
-#    its contents/count shown. A supplement with a recognisable secret-ish
-#    line must not have that line (or an entry count) appear in output.
-#    Planted here and asserted on I's run below; it stays for the rest.
-mkdir -p "$fixture_home/.config/dotfiles"
-printf 'backup_paths:\n  - { path: .secret-canary-zzz, type: file }\n' \
-  > "$fixture_home/.config/dotfiles/backup-paths.local"
-
 # I) With a marker, doctor surfaces the last-success time / archive / count.
 mkdir -p "$fixture_home/.local/state/dotfiles"
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2}\n' \
@@ -521,17 +513,9 @@ if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     fail "test failed: backup marker details not reported"
     status=1
   fi
-  if grep -Fq "local supplement present" <<< "$pb_out" \
-    && ! grep -Fq "secret-canary-zzz" <<< "$pb_out"; then
-    ok "test passed: local supplement reported by existence only (contents not leaked)"
-  else
-    printf '%s\n' "$pb_out" >&2
-    fail "test failed: local supplement contents leaked or not reported"
-    status=1
-  fi
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: doctor must stay exit 0 with a backup marker and a local supplement"
+  fail "test failed: doctor must stay exit 0 with a backup marker"
   status=1
 fi
 
@@ -600,12 +584,23 @@ else
   status=1
 fi
 
+# J) The local supplement is reported by existence only — never parsed or
+#    its contents/count shown. A supplement with a recognisable secret-ish
+#    line must not have that line (or an entry count) appear in output.
+#    Planted only after the I / I2 / I3 runs, so they read a marker with no
+#    supplement (with it present, a marker check that also needed the
+#    supplement would pass); asserted on K's run, and it stays for the rest.
+mkdir -p "$fixture_home/.config/dotfiles"
+printf 'backup_paths:\n  - { path: .secret-canary-zzz, type: file }\n' \
+  > "$fixture_home/.config/dotfiles/backup-paths.local"
+
 # K) A malformed/null marker must not break doctor: report "unreadable"
 #    and stay exit 0 (guards the set -euo pipefail paths in the section).
 printf 'this is not valid json {{{\n' \
   > "$fixture_home/.local/state/dotfiles/private-backup.json"
-doctor_expect "malformed backup marker reported unreadable (exit 0)" \
-  env HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal -- "~backup marker present but unreadable"
+doctor_expect "malformed backup marker reported unreadable (exit 0); local supplement reported by existence only (contents not leaked)" \
+  env HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal -- "~backup marker present but unreadable" \
+  "~local supplement present" ! "secret-canary-zzz"
 
 # Git signing (enableGitSigning, #85) and SSH 1Password agent
 # (enable1PasswordSSH, #17) reports. doctor stays report-only / exit 0 and
@@ -1389,21 +1384,27 @@ else
   status=1
 fi
 
-# P3 + Q) the trust list and both safe-gh hook bodies PRESENT, under the
+# P3, Q) the trust list, then both safe-gh hook bodies, PRESENT under the
 #     committed personal capabilities (gateGitHubMcp and
-#     enableGitHubIsolatedReader ON, case P). One run, because the two files
-#     feed separate sections (the trust list the private-backup catalog, the
-#     bodies the two hook lines). Clean up after so later cases see the
+#     enableGitHubIsolatedReader ON, case P). Two runs, each planting only
+#     its own file: one run with both would not catch a section that also
+#     needs the other file (e.g. the body-present ok tied to the trust list,
+#     Codex review R3). Each cleans up after itself, so later cases see the
 #     absent state again.
 #     P3) doctor must report the trust list present via the backup catalog
 #         but NEVER echo its contents (contents-blind even when the file
 #         exists). A canary line catches a regression that read/leaked it.
-#     Q) with each hook body present (executable), the isolated-reader line
-#        flips from the body-absent warn (case P) to the wired ok. Presence
-#        is reported contents-blind (doctor never reads the body).
 mkdir -p "$fixture_home/.config/dotfiles"
 printf 'trusted-login = CANARY_TRUST_LEAK_7f3a\n' \
   > "$fixture_home/.config/dotfiles/github-trust.local"
+doctor_expect "trust list present reported, contents never echoed (contents-blind)" \
+  env HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal -- \
+  "~baseline present: .config/dotfiles/github-trust.local" ! "CANARY_TRUST_LEAK_7f3a"
+rm -f "$fixture_home/.config/dotfiles/github-trust.local"
+#     Q) with each hook body present (executable) and no trust list, the
+#        isolated-reader line flips from the body-absent warn (case P) to
+#        the wired ok. Presence is reported contents-blind (doctor never
+#        reads the body).
 mkdir -p "$fixture_home/.claude/agent-tools/scripts"
 printf '#!/bin/sh\nexit 0\n' > "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
 chmod +x "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
@@ -1413,29 +1414,11 @@ chmod +x "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
 mkdir -p "$fixture_home/.codex/agent-tools/scripts"
 printf '#!/bin/sh\nexit 0\n' > "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
 chmod +x "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
-present_rc=0
-present_out="$(HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal 2>&1)" || present_rc=$?
-if [[ "$present_rc" -ne 0 ]]; then
-  doctor_exit_fail "trust list and hook bodies present" "$present_rc" "$present_out"
-else
-  if grep -Fq "baseline present: .config/dotfiles/github-trust.local" <<< "$present_out" \
-    && ! grep -Fq "CANARY_TRUST_LEAK_7f3a" <<< "$present_out"; then
-    ok "test passed: trust list present reported, contents never echoed (contents-blind)"
-  else
-    printf '%s\n' "$present_out" >&2
-    fail "test failed: trust list present-state or contents-blind invariant not held"
-    status=1
-  fi
-  if grep -Fq "managed settings.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present" <<< "$present_out" \
-    && grep -Fq "managed ~/.codex/hooks.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present" <<< "$present_out"; then
-    ok "test passed: Claude & Codex hook registration + present bodies reported as wired steering"
-  else
-    printf '%s\n' "$present_out" >&2
-    fail "test failed: isolated-reader (Claude/Codex) wired state not reported with the bodies present"
-    status=1
-  fi
-fi
-rm -f "$fixture_home/.config/dotfiles/github-trust.local"
+doctor_expect "gateGitHubMcp=true enforced; Claude & Codex hook registration + present bodies reported as wired steering" \
+  env HOME="$fixture_home" "$gh_root/scripts/doctor.sh" personal -- \
+  "~denies the github MCP server" \
+  "~managed settings.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present" \
+  "~managed ~/.codex/hooks.json registers the PreToolUse hook -> safe-gh steering (fail-open, not a boundary); hook body present"
 rm -f "$fixture_home/.claude/agent-tools/scripts/personal-safe-gh-hook"
 rm -f "$fixture_home/.codex/agent-tools/scripts/personal-safe-gh-hook"
 
