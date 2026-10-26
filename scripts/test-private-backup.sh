@@ -2030,12 +2030,14 @@ ue_case "restore with a missing identity file" "identity file not found: $fixtur
 #     process to `sleep` first so that what the signal kills is a child
 #     doing the tool's work, as with the real tool; a fake rm, at the first
 #     removal under the temp (the cleanup under way), leaves a marker
-#     naming that removal, signals the group again and waits for that to
-#     land before it removes anything: an rm the signal can kill dies
-#     there, as the real one would, and one that ignores it (the cleanup
-#     ignores INT / TERM) goes on to remove. A marker made beforehand turns
-#     that off (once), SIG_EVERY keeps it on for every removal (every,
-#     endsig), and SIG_RM_FAIL makes that first removal exit 1 instead
+#     naming that removal and signals the group again, itself included (a
+#     signal a process sends itself lands before kill returns, so there is
+#     no wait and no delay), before it removes anything: an rm the signal
+#     can kill dies there by it, as the real one would, and one that
+#     ignores it (the cleanup ignores INT / TERM) goes on to remove. A
+#     marker made beforehand turns that off (once), SIG_EVERY keeps it on
+#     for every removal (every, endsig), and SIG_RM_FAIL makes that first
+#     removal exit 1 instead
 #     (rmfail, endrmfail); SIG_NO_FIRST stops the fake yq at its snapshot
 #     (the end runs). Every other call goes to the real tool. A TMPDIR of
 #     its own per run, so a leftover shows and a KILL at the deadline
@@ -2096,8 +2098,7 @@ if [ ! -e "$SIG_MARKER" ] || [ -n "$SIG_EVERY" ]; then
       "$SIG_TMP"/*)
         printf '%s\n' "$arg" > "$SIG_MARKER"
         [ -z "$SIG_RM_FAIL" ] || exit 1
-        (sleep 0.2; kill -"$SIG_NAME" 0) &
-        wait $!
+        kill -"$SIG_NAME" 0
         break
         ;;
     esac
