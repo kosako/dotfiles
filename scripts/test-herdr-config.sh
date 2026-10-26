@@ -44,17 +44,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# render_profile_into ROOT PROFILE — apply PROFILE from the committed source
-# into ROOT/home (which the caller may have pre-seeded); the caller mktemps
+# Renders use render_profile_into (test-lib.sh) from the committed source
+# into ROOT/home, which the caller may have pre-seeded; the caller mktemps
 # ROOT and registers it in tmp_roots (caller-creates-root contract, see the
-# #150 note in test-lib.sh).
-render_profile_into() {
-  local root="$1" profile="$2"
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "%s"\n' "$profile" > "$root/chezmoi.toml"
-  chezmoi --config "$root/chezmoi.toml" \
-    --source "$DOTFILES_ROOT" --destination "$root/home" apply >/dev/null 2>&1
-}
+# #150 note there).
 
 # seed_runtime_state HOME_DIR — herdr's runtime files next to the config.
 # The same bytes go to HOME_DIR/../seed/ as the reference for cmp.
@@ -77,7 +70,7 @@ section "herdr-config: managed set per profile"
 personal_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-herdr-config-personal.XXXXXX")"
 tmp_roots+=("$personal_root")
 seed_runtime_state "$personal_root/home"
-if ! render_profile_into "$personal_root" personal; then
+if ! render_profile_into "$DOTFILES_ROOT" "$personal_root" personal; then
   fail "test failed: personal apply did not render"
   exit 1
 fi
@@ -94,7 +87,7 @@ tmp_roots+=("$work_root")
 mkdir -p "$work_root/home/.config/herdr"
 printf '[ui]\nagent_panel_sort = "spaces"\n' > "$work_root/work-own.toml"
 cp "$work_root/work-own.toml" "$work_root/home/$managed_rel"
-if ! render_profile_into "$work_root" work; then
+if ! render_profile_into "$DOTFILES_ROOT" "$work_root" work; then
   fail "test failed: work apply did not render"
   exit 1
 fi

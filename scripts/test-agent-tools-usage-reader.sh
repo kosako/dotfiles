@@ -44,18 +44,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# render_profile_into ROOT PROFILE [HOME_DIR] — apply PROFILE from the
-# committed source into ROOT/home (which the caller may have pre-seeded),
-# with chezmoi's home directory (.chezmoi.homeDir) taken from HOME_DIR when
-# given; the caller mktemps ROOT and registers it in tmp_roots
-# (caller-creates-root contract, see the #150 note in test-lib.sh).
-render_profile_into() {
-  local root="$1" profile="$2" home_dir="${3:-$HOME}"
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "%s"\n' "$profile" > "$root/chezmoi.toml"
-  HOME="$home_dir" chezmoi --config "$root/chezmoi.toml" \
-    --source "$DOTFILES_ROOT" --destination "$root/home" apply >/dev/null 2>&1
-}
+# Renders use render_profile_into (test-lib.sh) from the committed source
+# into ROOT/home, which the caller may have pre-seeded; chezmoi's home
+# directory (.chezmoi.homeDir) is HOME, so the odd-home case sets HOME for
+# that call. The caller mktemps ROOT and registers it in tmp_roots
+# (caller-creates-root contract, see the #150 note there).
 
 # json_query FILE EXPR — one yq query against FILE read as JSON; a scalar
 # result comes out unquoted (-r), a collection as one line of JSON.
@@ -73,7 +66,7 @@ tmp_roots+=("$personal_root")
 mkdir -p "$personal_root/home/.config/agent-tools"
 printf '{"other": true}\n' > "$personal_root/sibling.json"
 cp "$personal_root/sibling.json" "$personal_root/home/.config/agent-tools/sibling.json"
-if ! render_profile_into "$personal_root" personal; then
+if ! render_profile_into "$DOTFILES_ROOT" "$personal_root" personal; then
   fail "test failed: personal apply did not render"
   exit 1
 fi
@@ -90,7 +83,7 @@ tmp_roots+=("$work_root")
 mkdir -p "$work_root/home/.config/agent-tools"
 printf '{"argv": ["/usr/bin/true"]}\n' > "$work_root/work-own.json"
 cp "$work_root/work-own.json" "$work_root/home/$managed_rel"
-if ! render_profile_into "$work_root" work; then
+if ! render_profile_into "$DOTFILES_ROOT" "$work_root" work; then
   fail "test failed: work apply did not render"
   exit 1
 fi
@@ -144,7 +137,7 @@ tmp_roots+=("$odd_root")
 odd_root="${odd_root//\/\//\/}"
 odd_home="$odd_root/h\"o\\me & <x>"
 mkdir -p "$odd_home"
-if render_profile_into "$odd_root" personal "$odd_home"; then
+if HOME="$odd_home" render_profile_into "$DOTFILES_ROOT" "$odd_root" personal; then
   check_content "home with \", \\, & and <" "$odd_root/home/$managed_rel" "$odd_home"
 else
   fail "test failed: personal apply with an unusual home path did not render"

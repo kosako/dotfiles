@@ -111,23 +111,15 @@ while IFS= read -r line; do
   key="${line%%=*}"
   if [[ "$key" == "min-release-age" ]]; then
     # The 7-day wait has two forms by npm version (#443), and doctor accepts
-    # both. Current npm keeps min-release-age as its own key and leaves
-    # `before` null: doctor reads the age and requires `before` unset (null
-    # and no source listing it in `npm config list`), since a set `before`,
-    # even null, can replace the wait. Older npm flattened the age into
-    # `before` (now - <days>) and deleted the key: doctor verifies that cutoff
-    # is ~7 days ago through npm_before_within_age_window (exercised below).
-    # A mere presence grep would catch neither a loosened age nor a loosened
-    # window, so require the exact tests: the age form as written, and the
-    # call args (days=7, tolerance=43200) of the window. A wrong age (e.g.
-    # `== "1"` or `1 43200`) or a loosened window (e.g. `7 90000`) must break
-    # this test, locking the 7-day (+/-12h) contract.
-    if grep -Fq '[[ "$npm_age" == "7" && "$npm_before" == "null" && "$npm_age_supported" == true && "$npm_before_listed" == false ]]' "$SCRIPT_DIR/doctor.sh"; then
-      ok "test passed: doctor verifies min-release-age=7 with before unset (current npm)"
-    else
-      fail "test failed: doctor.sh must require npm min-release-age=7 with before null and not listed on npm >= 11.10"
-      status=1
-    fi
+    # both. The current form (min-release-age=7 with `before` unset) and the
+    # min-release-age-exclude count are pinned by behavior in test-doctor.sh
+    # (NPM-E..Y). Older npm flattened the age into `before` (now - <days>):
+    # doctor verifies that cutoff is ~7 days ago through
+    # npm_before_within_age_window (exercised below). test-doctor's runs do
+    # not tell a loosened tolerance from the real one, so require the exact
+    # call args (days=7, tolerance=43200): a wrong age (e.g. `1 43200`) or a
+    # loosened window (e.g. `7 90000`) must break this test, locking the
+    # 7-day (+/-12h) contract.
     if grep -Eq 'npm_before_within_age_window .* 7 43200([[:space:]]|;|$)' "$SCRIPT_DIR/doctor.sh"; then
       ok "test passed: doctor verifies min-release-age via before cutoff (7d +/-12h, older npm)"
     else
@@ -144,14 +136,14 @@ while IFS= read -r line; do
   fi
 done < <(grep -E '^[a-z-]+=' "$NPMRC_TEMPLATE")
 
-# The template sets no min-release-age-exclude (above), and doctor must warn
-# when one appears (#443): it counts the key in `npm config list --json`
-# (the behavior is pinned in test-doctor.sh).
-if grep -Fq 'npm_list_json="$(npm config list --json 2>/dev/null)"' "$SCRIPT_DIR/doctor.sh" \
-  && grep -Fq 'has("min-release-age-exclude")' "$SCRIPT_DIR/doctor.sh"; then
-  ok "test passed: doctor checks min-release-age-exclude is empty"
+# doctor counts min-release-age-exclude in `npm config list --json`; the count
+# is pinned by behavior in test-doctor.sh, whose fake npm writes nothing to
+# stderr, so those runs do not see whether npm's own stderr is kept out of
+# the report. Only that redirect is pinned here.
+if grep -Fq 'npm config list --json 2>/dev/null' "$SCRIPT_DIR/doctor.sh"; then
+  ok "test passed: doctor reads npm config list --json with npm's stderr discarded"
 else
-  fail "test failed: doctor.sh does not check npm min-release-age-exclude"
+  fail "test failed: doctor.sh must read npm config list --json with 2>/dev/null"
   status=1
 fi
 

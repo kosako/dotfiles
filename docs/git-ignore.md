@@ -64,14 +64,15 @@ managed file `~/.config/git/ignore`(source: `private_dot_config/git/ignore`)が�
 ## 検証
 
 `scripts/test-git-ignore.sh`: personal で apply される / work でされない、header と pattern の exact
-pin、`enableGitSigning=false` でも残る(allowlist の祖先 dir は活性 module 全体から導出する、#207)、
-そして **`.gitignore` を持たない throwaway repo** で `git status` が `.agent-packets/x.md` と
+pin、そして **`.gitignore` を持たない throwaway repo** で `git status` が `.agent-packets/x.md` と
 `.claude/settings.local.json`(深さ問わず)を出さず、`keep.md` と `.agent-context.local.md` は出すこと
 (空 home の control run で全 file が出ることを先に確認し、`git check-ignore -v` で判定源が managed
 file であることまで確認)。git は `git init` を含めて `env -i` の throwaway HOME + `GIT_CONFIG_NOSYSTEM`
 + 空の `--template` で動かし(host の `init.templateDir` が `info/exclude` を仕込めない)、実 home や
 実 global / system config には触れない。doctor / preflight の case(`test-doctor.sh` / `test-preflight.sh`)
 も同じく `env -i` で、system scope だけの設定は `GIT_CONFIG_SYSTEM` の fixture file で再現する。
+`enableGitSigning=false` でもこの file が残ること(allowlist の祖先 dir は活性 module 全体から導出する、#207)は、
+`scripts/test-git-signing.sh` が signing を off にした render で確かめる。
 
 ## 関連
 

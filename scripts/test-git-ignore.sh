@@ -5,12 +5,14 @@ set -euo pipefail
 # global gitignore at git's DEFAULT excludes location (~/.config/git/ignore).
 # It must (1) be applied for personal and not for work, (2) carry the
 # managed-by header (the doctor orphan scan keys on it) and exactly the agent
-# local-only patterns, (3) survive enableGitSigning=false (the #207 allowlist
-# derives the ~/.config/git ancestor from every active module, not from
-# git-signing alone), and (4) actually make git hide .agent-packets/ and
+# local-only patterns, and (3) actually make git hide .agent-packets/ and
 # .claude/settings.local.json in a repository that has NO .gitignore of its
 # own — the acceptance criterion of #248 — while ordinary files and
 # .agent-context.local.md (per-repo .gitignore by design) stay visible.
+# That the file survives enableGitSigning=false (the #207 allowlist derives
+# the ~/.config/git ancestor from every active module, not from git-signing
+# alone) is checked in test-git-signing.sh, on its enableGitSigning=false
+# render: the same flipped source and personal apply this suite would build.
 # Renders into throwaway destinations and runs git against a throwaway HOME
 # with `env -i`; never touches the real home or global git config.
 
@@ -40,16 +42,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# render_profile_into SOURCE_DIR ROOT PROFILE — like render_personal_into
-# (test-lib.sh) but for any profile; the caller mktemps ROOT and registers
-# it in tmp_roots (caller-creates-root contract, see the #150 note there).
-render_profile_into() {
-  local source_dir="$1" root="$2" profile="$3"
-  mkdir -p "$root/home"
-  printf '[data]\nprofile = "%s"\n' "$profile" > "$root/chezmoi.toml"
-  chezmoi --config "$root/chezmoi.toml" \
-    --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1
-}
+# Renders use render_profile_into (test-lib.sh): the caller mktemps ROOT and
+# registers it in tmp_roots (caller-creates-root contract, see the #150 note
+# there).
 
 managed_rel=".config/git/ignore"
 expected_patterns=$'.agent-packets/\n**/.claude/settings.local.json'
@@ -112,29 +107,9 @@ else
   ok "test passed: .agent-context.local.md is not globally ignored (per-repo .gitignore unchanged)"
 fi
 
-# 3) enableGitSigning=false must not drop the file: ~/.config/git is an
-#    ancestor derived from EVERY active module's paths (#207), so the
-#    git-signing gate no longer takes the subtree with it.
-nosign_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-ignore-nosign-src.XXXXXX")"
-tmp_roots+=("$nosign_src")
-make_flipped_source "$nosign_src"
-flip_personal_capability "$nosign_src/src" enableGitSigning false
-nosign_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-ignore-nosign.XXXXXX")"
-tmp_roots+=("$nosign_root")
-if ! render_profile_into "$nosign_src/src" "$nosign_root" personal; then
-  fail "test failed: personal apply (enableGitSigning=false) did not render"
-  exit 1
-fi
-if [[ -f "$nosign_root/home/$managed_rel" && ! -e "$nosign_root/home/.config/git/signing.gitconfig" ]]; then
-  ok "test passed: enableGitSigning=false keeps $managed_rel (ancestor is not owned by git-signing)"
-else
-  fail "test failed: enableGitSigning=false must keep $managed_rel while dropping signing.gitconfig"
-  status=1
-fi
-
 section "git-ignore: git behaviour (repository without its own .gitignore)"
 
-# 4) Every git call — the init included — runs hermetically: `env -i`
+# 3) Every git call — the init included — runs hermetically: `env -i`
 #    drops XDG_CONFIG_HOME and any GIT_* of the developer shell,
 #    GIT_CONFIG_NOSYSTEM keeps a system gitconfig out, and the init uses an
 #    EMPTY template directory so a host init.templateDir cannot seed

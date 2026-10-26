@@ -9,16 +9,6 @@ STARSHIP_SRC="$DOTFILES_ROOT/private_dot_config/starship.toml"
 
 status=0
 
-check_contains() {
-  local name="$1" needle="$2"
-  if grep -Fq "$needle" "$STARSHIP_SRC"; then
-    ok "test passed: $name"
-  else
-    fail "test failed: $name (missing: $needle)"
-    status=1
-  fi
-}
-
 section "static checks: starship.toml"
 
 if [[ ! -f "$STARSHIP_SRC" ]]; then
@@ -44,13 +34,6 @@ if grep -Fq '@' "$STARSHIP_SRC"; then
 else
   ok "test passed: no email-like value in starship.toml"
 fi
-
-# The identity segment must classify by reading the local personal.gitconfig
-# (a runtime, value-free comparison), and define all three context modules.
-check_contains "classifies via local personal.gitconfig" '.config/git/personal.gitconfig'
-for module in git_ctx_personal git_ctx_other git_ctx_none; do
-  check_contains "defines custom.$module" "[custom.$module]"
-done
 
 # Prefer a full TOML parser (available in both CI jobs). Older Python/macOS
 # can still exercise the current multiline-literal `when` blocks with awk.
@@ -78,13 +61,16 @@ section "fixture checks: git identity classification"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-starship-test.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 fixture="$(cd "$fixture" && pwd -P)"
-mkdir -p "$fixture/home/.config/git" "$fixture/empty-template" "$fixture/outside"
+mkdir -p "$fixture/home/.config/git" "$fixture/xdg" "$fixture/empty-template" "$fixture/outside"
 
 # Clear inherited Git identity/config overrides as well as shell startup vars.
 # The ceiling also keeps the outside case outside any enclosing checkout.
+# XDG_CONFIG_HOME points at an empty directory away from $HOME/.config, so a
+# `when` that reads personal.gitconfig from anywhere but the ~/.config/git
+# path the gitconfig include uses fails the classification runs.
 run_isolated() {
   env -i PATH="$PATH" HOME="$fixture/home" \
-    XDG_CONFIG_HOME="$fixture/home/.config" LC_ALL=C \
+    XDG_CONFIG_HOME="$fixture/xdg" LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
     GIT_CEILING_DIRECTORIES="$fixture" "$@"
 }
