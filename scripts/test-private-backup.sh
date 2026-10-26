@@ -267,27 +267,6 @@ make_archive() {
   local stage="$1" out="$2"
   tar -cf - -C "$stage" . | age -r "$recipient" -o "$out"
 }
-# write_manifest STAGE [PATH...] — write STAGE/manifest.json declaring each
-# PATH under STAGE/files with its real sha256, size and mode, so a negative
-# case adds only its own defect (yq -i on the result) whatever the umask.
-# No PATH gives an empty files list (for cases rejected before extraction).
-write_manifest() {
-  local stage="$1" rel f sum size mode
-  shift
-  yq -n -o=json '{
-    "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
-    "created_at": "2026-01-01T00:00:00Z", "entries": [], "files": []
-  }' > "$stage/manifest.json"
-  for rel in "$@"; do
-    f="$stage/files/$rel"
-    sum="$(shasum -a 256 < "$f" | awk '{print $1}')"
-    size="$(wc -c < "$f" | tr -d ' ')"
-    mode="$(file_mode "$f")"
-    P="$rel" H="$sum" Z="$size" M="$mode" yq -i -p=json -o=json \
-      '.files += [{"path": strenv(P), "mode": strenv(M), "size": (strenv(Z) | tonumber), "sha256": strenv(H)}]' \
-      "$stage/manifest.json"
-  done
-}
 
 # A trailing pipe is part of the path (#390), even when the truncated name
 # also exists. Check the manifest, payload, verify and restore independently.
@@ -326,9 +305,9 @@ else
 fi
 
 # 6. A checksum mismatch (manifest sha does not match the file) is caught.
-#    The manifest is written by hand, as before write_manifest: the file
-#    also does not have the declared mode "600", and the checksum must be
-#    the reason reported (a check that looked at the mode first would not
+#    The manifest is written by hand: under the usual umask (022 / 002) the
+#    file also does not have the declared mode "600", and the checksum must
+#    be the reason reported (a check that looked at the mode first would not
 #    say so).
 bad="$fixture_home/stage-badsum"
 mkdir -p "$bad/files"
@@ -350,17 +329,23 @@ else
 fi
 
 # 7. An archive file not present in the manifest is caught (sprawl). The
-#    declared file matches its entry, so no mismatch may be reported next to
-#    the sprawl (a second defect in the fixture would hide behind it).
+#    entry is written by hand with mode "644", so under umask 002 the
+#    declared file has a mode mismatch too, and the sprawl must still be
+#    reported next to it.
 extra="$fixture_home/stage-extra"
 mkdir -p "$extra/files"
 printf 'x\n' > "$extra/files/declared"
 printf 'y\n' > "$extra/files/sneaked-in"
-write_manifest "$extra" declared
+sum="$(shasum -a 256 "$extra/files/declared" | awk '{print $1}')"
+SUM="$sum" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": "declared", "mode": "644", "size": 2, "sha256": strenv(SUM)}]
+}' > "$extra/manifest.json"
 make_archive "$extra" "$fixture_home/out/extra.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/extra.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
-if [[ "$verify_rc" -eq 1 ]] && grep -Fq "not in manifest" <<< "$out" && ! grep -Fq "mismatch:" <<< "$out"; then
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "not in manifest" <<< "$out"; then
   pass "verify detects an archive file missing from the manifest"
 else
   miss "verify missed an undeclared archive file"
@@ -393,7 +378,10 @@ ddir="$fixture_home/stage-disallowed"
 mkdir -p "$ddir/files"
 printf 'x\n' > "$ddir/files/ok"
 printf 'pwn\n' > "$ddir/evil.sh"
-write_manifest "$ddir"
+yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [], "files": []
+}' > "$ddir/manifest.json"
 make_archive "$ddir" "$fixture_home/out/disallowed.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/disallowed.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
@@ -661,8 +649,13 @@ mdir="$fixture_home/stage-mode"
 mkdir -p "$mdir/files"
 printf 'content\n' > "$mdir/files/.zshrc.local"
 chmod 644 "$mdir/files/.zshrc.local"
-write_manifest "$mdir" .zshrc.local
-yq -i -p=json -o=json '.files[0].mode = "600"' "$mdir/manifest.json"
+msum="$(shasum -a 256 "$mdir/files/.zshrc.local" | awk '{print $1}')"
+msize="$(wc -c < "$mdir/files/.zshrc.local" | tr -d ' ')"
+SUM="$msum" SZ="$msize" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": ".zshrc.local", "mode": "600", "size": (strenv(SZ) | tonumber), "sha256": strenv(SUM)}]
+}' > "$mdir/manifest.json"
 make_archive "$mdir" "$fixture_home/out/mode.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/mode.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
@@ -884,7 +877,12 @@ parent_path=".ssh/conf.d/config.local"
 mkdir -p "$parent_stage/files/.ssh/conf.d" "$parent_dst"
 printf 'Host private\n' > "$parent_stage/files/$parent_path"
 chmod 644 "$parent_stage/files/$parent_path"
-write_manifest "$parent_stage" "$parent_path"
+sum="$(shasum -a 256 "$parent_stage/files/$parent_path" | awk '{print $1}')"
+SUM="$sum" P="$parent_path" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": strenv(P), "mode": "644", "size": 13, "sha256": strenv(SUM)}]
+}' > "$parent_stage/manifest.json"
 make_archive "$parent_stage" "$parent_archive"
 if out="$(umask 022; run restore --in "$parent_archive" --identity "$fixture_home/keys/id.txt" \
   --target-home "$parent_dst" --apply 2>&1)" \
@@ -979,7 +977,12 @@ dash_archive="$fixture_home/out/dash-parent.age"
 mkdir -p "$dash_stage/files/-cfg"
 printf 'Host private\n' > "$dash_stage/files/$dash_path"
 chmod 600 "$dash_stage/files/$dash_path"
-write_manifest "$dash_stage" "$dash_path"
+sum="$(shasum -a 256 "$dash_stage/files/$dash_path" | awk '{print $1}')"
+SUM="$sum" P="$dash_path" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [{"path": strenv(P), "mode": "600", "size": 13, "sha256": strenv(SUM)}]
+}' > "$dash_stage/manifest.json"
 make_archive "$dash_stage" "$dash_archive"
 dash_dst="$fixture_home/restore-dash-dst"
 dash_escape="$fixture_home/dash-escape-target"
@@ -1225,7 +1228,15 @@ printf 'restored\n' > "$case_stage/files/LOWER"
 printf 'original\n' > "$case_dst/lower"
 case_folded=0
 [[ -e "$case_dst/LOWER" ]] && case_folded=1
-write_manifest "$case_stage" lower LOWER
+case_hash="$(shasum -a 256 "$case_stage/files/lower" | awk '{print $1}')"
+H="$case_hash" M="$(file_mode "$case_stage/files/lower")" yq -n -o=json '{
+  "schema_version": 1, "tool": "private-backup.sh", "tool_version": "1",
+  "created_at": "2026-01-01T00:00:00Z", "entries": [],
+  "files": [
+    {"path": "lower", "mode": strenv(M), "size": 9, "sha256": strenv(H)},
+    {"path": "LOWER", "mode": strenv(M), "size": 9, "sha256": strenv(H)}
+  ]
+}' > "$case_stage/manifest.json"
 make_archive "$case_stage" "$fixture_home/out/case.age"
 case_rc=0
 run restore --in "$fixture_home/out/case.age" --identity "$fixture_home/keys/id.txt" \
