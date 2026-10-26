@@ -336,6 +336,51 @@ for bad_path in '.config/*.toml' '.config/mise/' "'!.zshrc'" '.config/my dir' '~
     "$fixture/scripts/validate-policy.sh" personal
 done
 
+# A module path must stay under the home (#207): an absolute path or a ".."
+# would let its "!<path>" allowlist line admit a file outside the home or
+# above the declared directory. The literal-path check above catches
+# neither, so both pin the message, and the module check must fail as a
+# whole.
+make_fixture
+yq -i '.modules["supply-chain-npm"].paths += ["/etc/passwd", ".config/../x"]' "$fixture/.chezmoidata/modules.yaml"
+home_rc=0
+home_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || home_rc=$?
+home_missing=""
+for home_want in \
+  "module path must be home-relative: supply-chain-npm: /etc/passwd" \
+  "module path must be home-relative: supply-chain-npm: .config/../x" \
+  "module validation failed"; do
+  grep -Fq -- "$home_want" <<< "$home_output" || home_missing="$home_missing [$home_want]"
+done
+if [[ "$home_rc" -eq 0 || -n "$home_missing" ]]; then
+  printf '%s\n' "$home_output" >&2
+  fail "test failed: rejects a module path that is not home-relative (exit $home_rc, missing:$home_missing)"
+  exit 1
+fi
+ok "test passed: rejects a module path that is not home-relative"
+
+# A capability type that is neither boolean nor enum (a typo in the schema)
+# must fail closed, not skip the value check. git-signing requires
+# enableGitSigning, so the module check and the profile check each read the
+# type and each must fail on it.
+make_fixture
+yq -i '.capabilities.enableGitSigning.type = "bogus"' "$fixture/.chezmoidata/capabilities.schema.yaml"
+type_rc=0
+type_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || type_rc=$?
+type_missing=""
+for type_want in \
+  "unknown capability type for enableGitSigning: bogus" \
+  "module validation failed" \
+  "policy validation failed for profile: personal"; do
+  grep -Fq -- "$type_want" <<< "$type_output" || type_missing="$type_missing [$type_want]"
+done
+if [[ "$type_rc" -eq 0 || -n "$type_missing" ]]; then
+  printf '%s\n' "$type_output" >&2
+  fail "test failed: rejects an unknown capability type (exit $type_rc, missing:$type_missing)"
+  exit 1
+fi
+ok "test passed: rejects an unknown capability type"
+
 # A profile's modules: and a module's paths: must be absent / null or a list
 # of strings (#412). The readers enumerate with `[]?`, so a scalar listed as
 # nothing and a map listed its values; both passed before the shape check.
@@ -941,16 +986,29 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 # enum cross-check (#45): work / client / agent forbid npmHardeningMode=off
-# (report is the floor; off drops the install-script defenses). Retag
-# personal (npmHardeningMode: enforce) to each kind and force off to prove
-# the enum row fires for every constrained kind with the same message shape
-# as the boolean rows.
+# (report is the floor; off drops the install-script defenses). Retag the
+# committed work profile (npmHardeningMode: report, every forbidden boolean
+# false) to each kind and force off: the enum row is then the only
+# violation, so the hard fail (exit code), not just the message, is pinned
+# for every constrained kind. personal would not do for that: its forbidden
+# booleans are true, and those rows alone already exit 1. personal is still
+# retagged to each kind with off, to pin that the enum row is reported
+# alongside the boolean rows (every violation is reported, the check does
+# not stop at the first).
 for ek_kind in work client agent; do
+  make_fixture
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: work" "    environmentKind: $ek_kind"
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "      npmHardeningMode: report" "      npmHardeningMode: off"
+  run_fail_contains \
+    "$ek_kind environmentKind forbids npmHardeningMode=off" \
+    "environmentKind $ek_kind forbids npmHardeningMode=off" \
+    "$fixture/scripts/validate-policy.sh" work
+
   make_fixture
   replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
   replace_once "$fixture/.chezmoidata/profiles.yaml" "      npmHardeningMode: enforce" "      npmHardeningMode: off"
   run_fail_contains \
-    "$ek_kind environmentKind forbids npmHardeningMode=off" \
+    "$ek_kind environmentKind reports npmHardeningMode=off alongside the boolean rows" \
     "environmentKind $ek_kind forbids npmHardeningMode=off" \
     "$fixture/scripts/validate-policy.sh" personal
 done
