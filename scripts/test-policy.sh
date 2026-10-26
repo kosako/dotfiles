@@ -1006,9 +1006,9 @@ run_fail_contains \
 # enforceAiSandbox is a safety-hardening capability (opposite polarity to the
 # install / secret / network / AI-tool capabilities), so it must NOT be in the
 # environmentKind forbidden table: a restrictive kind (work) may set it true.
-# Flip every profile's value to true and assert --all (personal + both work
-# profiles) still validates; a regression that forbade it would hard-fail the
-# work profiles here.
+# Flip every profile's value to true and assert --all (personal + work) still
+# validates; a regression that forbade it would hard-fail the work profile
+# here.
 make_fixture
 set_capability_all "$fixture" enforceAiSandbox true
 run_ok \
@@ -1583,7 +1583,10 @@ term_case() {
     term_failure="the writer did not block on the full pipe within the deadline"
   fi
   : > "$eintr_dir/release"
-  wait "$pipeline" || true
+  # bash 3.2 reports the script that the TERM / HUP ended ("Terminated: 15",
+  # "Hangup: 1") on stderr when it reaps the pipeline; that is the expected
+  # end here, so it is not shown (as in check_suite_interrupt).
+  wait "$pipeline" 2>/dev/null || true
   if [[ -z "$term_failure" ]]; then
     printf -v line '[info] - %095d' "$at"
     if grep -Fqx -- "$line" "$eintr_dir/term.got"; then
