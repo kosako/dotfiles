@@ -160,6 +160,50 @@ done
 # cases (HI) ----
 if doctor_part 1; then
 
+# doctor_expect LABEL ARGV... -- EXPECT... [! ABSENT_SUBSTRING...]
+# One run of ARGV (a doctor command line, or a function that runs one) with
+# stderr folded in. It must exit 0 (else doctor_exit_fail); every EXPECT is
+# an exact line, or with a leading "~" a substring; after a "!" no
+# ABSENT_SUBSTRING may appear (a further "!" only separates). A failure
+# shows the output and every miss. Lists are expanded with the
+# ${a[@]+"${a[@]}"} guard: bash 3.2 under set -u calls an empty "${a[@]}"
+# unbound. Only part 1 uses it (C, D, F, G and the gi / hc / ur wrappers
+# below), so it is defined here rather than in the shared setup.
+doctor_expect() {
+  local label="$1" run_args=() want=() absent=() mode=run arg missing="" out rc=0
+  shift
+  for arg in "$@"; do
+    case "$mode:$arg" in
+      run:--) mode=want ;;
+      run:*) run_args+=("$arg") ;;
+      want:! | absent:!) mode=absent ;;
+      want:*) want+=("$arg") ;;
+      absent:*) absent+=("$arg") ;;
+    esac
+  done
+  out="$("${run_args[@]}" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "$label" "$rc" "$out"
+    return
+  fi
+  for arg in ${want[@]+"${want[@]}"}; do
+    case "$arg" in
+      '~'*) grep -Fq -- "${arg#?}" <<< "$out" || missing="${missing}expected text: ${arg#?}"$'\n' ;;
+      *) grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n' ;;
+    esac
+  done
+  for arg in ${absent[@]+"${absent[@]}"}; do
+    if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi
+  done
+  if [[ -z "$missing" ]]; then
+    ok "test passed: $label"
+  else
+    printf '%s\n%s' "$out" "$missing" >&2
+    fail "test failed: $label"
+    status=1
+  fi
+}
+
 # A leftover enforce-mode .npmrc, as after switching personal -> work.
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n' \
   > "$fixture_home/.npmrc"
@@ -346,38 +390,14 @@ for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 echo '{"contract_version":99,"repo":{"present":true,"clean":true},"sync_targets":[{"tool":"codex","name":"x","state":"conflict"},{"tool":"codex","name":"y","state":"deployed_but_inactive"}]}'
 SH
 chmod +x "$agent_scripts/status.sh"
-if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "expected 3 (not interpreting fields)" <<< "$at_out" \
-    && ! grep -Fq "agent-tools working tree clean" <<< "$at_out" \
-    && ! grep -Fq "sync conflicts" <<< "$at_out" \
-    && ! grep -Fq "deployed-but-inactive sync targets" <<< "$at_out"; then
-    ok "test passed: unknown contract version is not interpreted (exit 0)"
-  else
-    printf '%s\n' "$at_out" >&2
-    fail "test failed: contract version mismatch not handled"
-    status=1
-  fi
-else
-  printf '%s\n' "$at_out" >&2
-  fail "test failed: doctor must stay exit 0 on contract version mismatch"
-  status=1
-fi
+doctor_expect "unknown contract version is not interpreted (exit 0)" \
+  env HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal -- "~expected 3 (not interpreting fields)" \
+  ! "agent-tools working tree clean" "sync conflicts" "deployed-but-inactive sync targets"
 
 # D) Opt-in + missing status.sh: warning, still exit 0.
 rm -f "$agent_scripts/status.sh"
-if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "status.sh is missing or not executable" <<< "$at_out"; then
-    ok "test passed: missing status.sh is a warning (exit 0)"
-  else
-    printf '%s\n' "$at_out" >&2
-    fail "test failed: missing status.sh not reported"
-    status=1
-  fi
-else
-  printf '%s\n' "$at_out" >&2
-  fail "test failed: doctor must stay exit 0 when status.sh missing"
-  status=1
-fi
+doctor_expect "missing status.sh is a warning (exit 0)" \
+  env HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal -- "~status.sh is missing or not executable"
 
 # F) Opt-in + status.sh exits non-zero: warning, still exit 0.
 cat > "$agent_scripts/status.sh" <<'SH'
@@ -385,19 +405,8 @@ cat > "$agent_scripts/status.sh" <<'SH'
 exit 1
 SH
 chmod +x "$agent_scripts/status.sh"
-if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "no usable output" <<< "$at_out"; then
-    ok "test passed: status.sh failure is a warning (exit 0)"
-  else
-    printf '%s\n' "$at_out" >&2
-    fail "test failed: status.sh failure not handled"
-    status=1
-  fi
-else
-  printf '%s\n' "$at_out" >&2
-  fail "test failed: doctor must stay exit 0 when status.sh exits non-zero"
-  status=1
-fi
+doctor_expect "status.sh failure is a warning (exit 0)" \
+  env HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal -- "~no usable output"
 
 # G) Opt-in + 壊れた status JSON: 契約の gate が未知の version と同じく拒否する
 #    (yq が何も返さないので contract_version は unknown と読まれる) こと、field を
@@ -412,22 +421,10 @@ for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 echo 'this is not json {{{'
 SH
 chmod +x "$agent_scripts/status.sh"
-if at_out="$(HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fxq "[warn] agent-tools status contract_version=unknown, expected 3 (not interpreting fields)" <<< "$at_out" \
-    && ! grep -Fq "agent-tools working tree clean" <<< "$at_out" \
-    && ! grep -Fq "sync conflicts" <<< "$at_out" \
-    && ! grep -Fq "deployed-but-inactive sync targets" <<< "$at_out"; then
-    ok "test passed: malformed status JSON is refused as contract_version unknown and not interpreted (exit 0)"
-  else
-    printf '%s\n' "$at_out" >&2
-    fail "test failed: malformed status JSON must warn as contract_version unknown and interpret no field"
-    status=1
-  fi
-else
-  printf '%s\n' "$at_out" >&2
-  fail "test failed: malformed status JSON must not break doctor"
-  status=1
-fi
+doctor_expect "malformed status JSON is refused as contract_version unknown and not interpreted (exit 0)" \
+  env HOME="$fixture_home" "$optin_root/scripts/doctor.sh" personal -- \
+  "[warn] agent-tools status contract_version=unknown, expected 3 (not interpreting fields)" \
+  ! "agent-tools working tree clean" "sync conflicts" "deployed-but-inactive sync targets"
 
 # E) Absent agent-tools: report-only warning on a profile that opted in to its
 #    status (personal: enableAgentToolsStatus=true), exit 0.
@@ -571,7 +568,7 @@ if [[ "$pb_rc" -eq 0 ]] \
   ok "test passed: a marker archive name that starts with \"-\" is shown as is and doctor runs to the next actions (exit 0, #444)"
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: a marker archive name that starts with \"-\" must not stop doctor (rc=$pb_rc, #444)"
+  fail "test failed: a marker archive name that starts with \"-\" must be shown as is with capture: complete (capture_incomplete:false), and must not stop doctor before the next actions (rc=$pb_rc, #444)"
   status=1
 fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"%s","file_count":2,"capture_incomplete":false}\n' \
@@ -584,7 +581,7 @@ if [[ "$pb_rc" -eq 0 ]] \
   ok "test passed: a marker archive value with directories shows only its file name (#444)"
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: a marker archive value with directories must show only its file name, not the directories (rc=$pb_rc, #444)"
+  fail "test failed: a marker archive value with directories must show only its file name, not the directories, with capture: complete (capture_incomplete:false) (rc=$pb_rc, #444)"
   status=1
 fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"old/","file_count":2,"capture_incomplete":false}\n' \
@@ -596,7 +593,7 @@ if [[ "$pb_rc" -eq 0 ]] \
   ok "test passed: a marker archive value that leaves no file name is shown as unknown (#444)"
 else
   printf '%s\n' "$pb_out" >&2
-  fail "test failed: a marker archive value ending in \"/\" must be shown as unknown (rc=$pb_rc, #444)"
+  fail "test failed: a marker archive value ending in \"/\" must be shown as unknown, with capture: complete (capture_incomplete:false) (rc=$pb_rc, #444)"
   status=1
 fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2}\n' \
@@ -717,41 +714,35 @@ fi
 gi_home="$fixture_home/gi"
 gi_managed="$gi_home/.config/git/ignore"
 gi_other="$gi_home/elsewhere/ignore"
-# gi_check PROFILE EXPECT_LINE LABEL [VAR=value...] — extra env words for the
-# doctor run; GIT_CONFIG_NOSYSTEM=1 when none are given.
-gi_check() {
-  local profile="$1" expect="$2" label="$3" out
-  shift 3
+# gi_doctor PROFILE [VAR=value...] — one hermetic doctor run; extra env words
+# for it, GIT_CONFIG_NOSYSTEM=1 when none are given.
+gi_doctor() {
+  local profile="$1"
+  shift
   [[ $# -gt 0 ]] || set -- GIT_CONFIG_NOSYSTEM=1
-  if out="$(env -i PATH="$PATH" HOME="$gi_home" "$@" "$SCRIPT_DIR/doctor.sh" "$profile" 2>&1)"; then
-    if grep -Fxq -- "$expect" <<< "$out"; then
-      ok "test passed: global gitignore $label"
-    else
-      printf '%s\n' "$out" >&2
-      fail "test failed: global gitignore $label: expected the exact line '$expect'"
-      status=1
-    fi
-  else
-    printf '%s\n' "$out" >&2
-    fail "test failed: doctor must stay exit 0 (global gitignore $label)"
-    status=1
-  fi
+  env -i PATH="$PATH" HOME="$gi_home" "$@" "$SCRIPT_DIR/doctor.sh" "$profile"
+}
+# gi_check PROFILE EXPECT_LINE LABEL [VAR=value...] — doctor_expect on one
+# gi_doctor run.
+gi_check() {
+  doctor_expect "global gitignore $3" gi_doctor "$1" "${@:4}" -- "$2"
 }
 rm -rf "$gi_home"
 mkdir -p "$gi_home/.config/git"
 # GI-1) managed file present and read by git -> ok.
 cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
 gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo" "managed file in effect -> ok"
-# GI-2) missing -> action (mkdir then apply, %q-escaped like the identity reset).
+# GI-2) missing -> action (mkdir then apply, %q-escaped like the identity
+#       reset): the warn line and the two steps, consecutive, from one run.
 rm -f "$gi_managed"
-gi_check personal "[warn] global gitignore missing: $gi_managed (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" "missing -> action"
 if out="$(env -i PATH="$PATH" HOME="$gi_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fxq -- "[warn] global gitignore missing: $gi_managed (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" <<< "$out" \
   && steps_consecutive "$out" "        \$ mkdir -p $(printf '%q' "$gi_home/.config")" \
     "        \$ chezmoi apply $(printf '%q' "$gi_home/.config/git") $(printf '%q' "$gi_managed")"; then
-  ok "test passed: global gitignore missing -> steps are mkdir then apply, consecutive and %q-escaped"
+  ok "test passed: global gitignore missing -> action, steps mkdir then apply, consecutive and %q-escaped"
 else
   printf '%s\n' "${out:-<no output>}" >&2
-  fail "test failed: global gitignore missing -> expected the mkdir step immediately followed by the apply step"
+  fail "test failed: global gitignore missing -> expected the action line and the mkdir step immediately followed by the apply step"
   status=1
 fi
 # GI-3) present but core.excludesFile points elsewhere -> git reads the other file.
@@ -775,9 +766,16 @@ rm -f "$gi_home/system.gitconfig"
 gi_check personal "[warn] global gitignore: git reads $gi_home/xdg/git/ignore, not the managed $gi_managed (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect" "redirected by XDG_CONFIG_HOME -> warn" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/xdg"
 # GI-3d2) ... but XDG_CONFIG_HOME naming ~/.config itself is the managed file,
 #         however it is spelled: with repeated trailing slashes, or through a
-#         symlink to ~/.config (-ef) — no false redirect warn (#309).
+#         symlink to ~/.config (-ef) — no false redirect warn (#309). doctor
+#         compares only while the file exists, where -ef already matches the
+#         slashed spelling, so the stripping is pinned on the helper itself.
 gi_ok="[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
-gi_check personal "$gi_ok" "XDG_CONFIG_HOME=~/.config// is the managed file -> ok" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/.config//"
+if [[ "$(XDG_CONFIG_HOME="$gi_home/.config//" git_default_excludes_file)" == "$gi_managed" ]]; then
+  ok "test passed: global gitignore XDG_CONFIG_HOME=~/.config// resolves to the managed path (every trailing slash stripped)"
+else
+  fail "test failed: global gitignore XDG_CONFIG_HOME=~/.config// must resolve to $gi_managed"
+  status=1
+fi
 ln -s "$gi_home/.config" "$gi_home/config-alias"
 gi_check personal "$gi_ok" "XDG_CONFIG_HOME through a symlink to ~/.config is the managed file -> ok" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/config-alias"
 rm -f "$gi_home/config-alias"
@@ -808,10 +806,12 @@ rm -rf "$gi_home"
 # judged independently of presence, so a missing file under a redirect gets
 # both lines and no "built-in defaults" claim (Codex review, PR #273), and a
 # present one is not validated (the check would read the other file) — while
-# the same directory spelled with a trailing slash is the same file, not a
-# redirect, present or missing; and the module-inactive profile (work). `herdr config check` comes from a PATH-front fake whose exit
-# status the case sets (the real herdr may or may not be on PATH). Every run
-# is hermetic (`env -i`), so the developer shell's HERDR_CONFIG_PATH /
+# ~/.config spelled with a trailing slash (pinned while the file is missing,
+# where -ef cannot help) or through a symlink (pinned while it is present) is
+# the same file, not a redirect; and the module-inactive profile (work).
+# `herdr config check` comes from a PATH-front fake whose exit status the
+# case sets (the real herdr may or may not be on PATH). Every run is
+# hermetic (`env -i`), so the developer shell's HERDR_CONFIG_PATH /
 # XDG_CONFIG_HOME cannot leak in.
 hc_home="$fixture_home/hc"
 hc_managed="$hc_home/.config/herdr/config.toml"
@@ -828,65 +828,25 @@ exit 0
 SH
   chmod +x "$hc_fakebin/herdr"
 }
-# hc_run PROFILE [VAR=value...] — doctor output in hc_out; returns doctor's status.
-hc_run() {
+# hc_doctor PROFILE [VAR=value...] — one hermetic doctor run, the fake herdr
+# first on PATH.
+hc_doctor() {
   local profile="$1"
   shift
-  hc_out="$(env -i PATH="$hc_fakebin:$PATH" HOME="$hc_home" "$@" "$SCRIPT_DIR/doctor.sh" "$profile" 2>&1)"
+  env -i PATH="$hc_fakebin:$PATH" HOME="$hc_home" "$@" "$SCRIPT_DIR/doctor.sh" "$profile"
+}
+# hc_run PROFILE [VAR=value...] — doctor output in hc_out; returns doctor's status.
+hc_run() {
+  hc_out="$(hc_doctor "$@" 2>&1)"
+}
+# hc_expect LABEL PROFILE [VAR=value...] -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
+# doctor_expect on one hc_doctor run.
+hc_expect() {
+  doctor_expect "herdr config $1" hc_doctor "${@:2}"
 }
 # hc_check LABEL EXPECT_LINE PROFILE [VAR=value...]
 hc_check() {
-  local label="$1" expect="$2"
-  shift 2
-  if hc_run "$@"; then
-    if grep -Fxq -- "$expect" <<< "$hc_out"; then
-      ok "test passed: herdr config $label"
-    else
-      printf '%s\n' "$hc_out" >&2
-      fail "test failed: herdr config $label: expected the exact line '$expect'"
-      status=1
-    fi
-  else
-    printf '%s\n' "$hc_out" >&2
-    fail "test failed: doctor must stay exit 0 (herdr config $label)"
-    status=1
-  fi
-}
-# hc_expect LABEL PROFILE [VAR=value...] -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
-# One doctor run; every EXPECT_LINE must appear as an exact line and, after a
-# lone "!", no ABSENT_SUBSTRING may appear anywhere.
-hc_expect() {
-  local label="$1" run_args=() want=() absent=() mode=run arg missing=""
-  shift
-  for arg in "$@"; do
-    case "$mode:$arg" in
-      run:--) mode=want ;;
-      run:*) run_args+=("$arg") ;;
-      want:!) mode=absent ;;
-      want:*) want+=("$arg") ;;
-      absent:*) absent+=("$arg") ;;
-    esac
-  done
-  if ! hc_run "${run_args[@]}"; then
-    printf '%s\n' "$hc_out" >&2
-    fail "test failed: doctor must stay exit 0 (herdr config $label)"
-    status=1
-    return
-  fi
-  for arg in "${want[@]}"; do
-    grep -Fxq -- "$arg" <<< "$hc_out" || missing="${missing}expected line: $arg"$'\n'
-  done
-  for arg in "${absent[@]:-}"; do
-    [[ -z "$arg" ]] && continue
-    if grep -Fq -- "$arg" <<< "$hc_out"; then missing="${missing}unexpected: $arg"$'\n'; fi
-  done
-  if [[ -z "$missing" ]]; then
-    ok "test passed: herdr config $label"
-  else
-    printf '%s\n%s' "$hc_out" "$missing" >&2
-    fail "test failed: herdr config $label"
-    status=1
-  fi
+  hc_expect "$1" "${@:3}" -- "$2"
 }
 hc_redirect_line() {
   printf '%s' "[warn] herdr config: HERDR_CONFIG_PATH or XDG_CONFIG_HOME in this environment points herdr at '$1', not the managed $hc_managed — the managed settings (including [ui.toast] delivery) are not in effect for a herdr started from here"
@@ -902,17 +862,23 @@ hc_check "accepted -> ok" "[ok] herdr config: managed $hc_managed present and ac
 # HC-2) present, herdr config check fails -> an ACTION naming the command:
 #       the step line appears only in the next-actions summary, so a plain
 #       warn would fail here (and drop out of --actions-only; Codex review).
+#       The fake prints `__rc=0` before its exit 1 (HC-2b).
+hc_rejected_exit1="[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file"
+write_fake_herdr_config_check 1 "__rc=0"
+hc_expect "rejected (even after printing __rc=0) -> action with the herdr config check step in next actions" personal -- \
+  "$hc_rejected_exit1" "        \$ herdr config check"
+# HC-2a) the same failure with nothing on stdout. bounded_probe drops the
+#        command's stderr, so a check that reports its diagnostics there
+#        reaches doctor as a silent exit 1: still the action, not the "gave
+#        no answer" ok, which is for a check that does not finish in time.
 write_fake_herdr_config_check 1
-hc_expect "rejected -> action with the herdr config check step in next actions" personal -- \
-  "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file" \
-  "        \$ herdr config check"
+hc_expect "rejected with nothing on stdout -> the same action, not \"gave no answer\"" personal -- \
+  "$hc_rejected_exit1" "        \$ herdr config check" ! "gave no answer"
 # HC-2b) the probed command cannot pass for its own exit status (#335): a
 #        line it prints that looks like the probe's old status line is its
-#        output, so `__rc=0` before exit 1 is still a failure, and `__rc=`
-#        followed by a terminal escape is never shown as the status.
-write_fake_herdr_config_check 1 "__rc=0"
-hc_expect "a printed __rc=0 before exit 1 is still a failure" personal -- \
-  "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 1) — on a parse error herdr runs on ALL defaults, so agent state changes raise no OS notification; read its diagnostics, then fix the managed file"
+#        output, so `__rc=0` before exit 1 is still a failure (HC-2's fake),
+#        and `__rc=` followed by a terminal escape is never shown as the
+#        status.
 write_fake_herdr_config_check 3 "__rc="$'\033'"[2J"
 if hc_run personal \
   && grep -Fq "[warn] herdr config: herdr config check did not pass for the managed $hc_managed (exit 3)" <<< "$hc_out" \
@@ -971,10 +937,10 @@ hc_expect "redirected by XDG_CONFIG_HOME -> warn, check not run" \
 hc_expect "XDG_CONFIG_HOME set but empty -> warn naming the cwd-relative path" \
   personal XDG_CONFIG_HOME= -- "$(hc_redirect_line "herdr/config.toml")" "$hc_not_checked"
 write_fake_herdr_config_check 0
-# HC-5) XDG_CONFIG_HOME naming ~/.config with a trailing slash is the same
-#       file, so no redirect warning and the check runs.
-hc_check "XDG_CONFIG_HOME=~/.config/ is the managed file -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal XDG_CONFIG_HOME="$hc_home/.config/"
-# HC-5b) ... and so is XDG_CONFIG_HOME through a symlink to ~/.config (-ef, #307).
+# HC-5) XDG_CONFIG_HOME through a symlink to ~/.config is the managed file
+#       (-ef, #307): no redirect warning and the check runs. The
+#       trailing-slash spelling is HC-3c: while the file exists, -ef matches
+#       it too.
 ln -s "$hc_home/.config" "$hc_home/config-alias"
 hc_check "XDG_CONFIG_HOME through a symlink to ~/.config is the managed file -> ok" "[ok] herdr config: managed $hc_managed present and accepted by herdr config check" personal XDG_CONFIG_HOME="$hc_home/config-alias"
 rm -f "$hc_home/config-alias"
@@ -1007,41 +973,17 @@ ur_reader="$ur_home/go/bin/tacho"
 ur_wrapper="$ur_home/.claude/agent-tools/scripts/personal-usage-reader"
 ur_canary="canary-usage-reader-7f3c"
 ur_doctor="$SCRIPT_DIR/doctor.sh"
-# ur_expect LABEL PROFILE [VAR=value...] -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
-# One doctor run ($ur_doctor); every EXPECT_LINE must appear as an exact line
-# and, after a lone "!", no ABSENT_SUBSTRING may appear anywhere. The canary
-# never may.
-ur_expect() {
-  local label="$1" run_args=() want=() absent=("$ur_canary") mode=run arg missing="" out
+# ur_doctor_run PROFILE [VAR=value...] — one hermetic run of $ur_doctor (read
+# at call time: UR-7 points it at the opt-out copy).
+ur_doctor_run() {
+  local profile="$1"
   shift
-  for arg in "$@"; do
-    case "$mode:$arg" in
-      run:--) mode=want ;;
-      run:*) run_args+=("$arg") ;;
-      want:!) mode=absent ;;
-      want:*) want+=("$arg") ;;
-      absent:*) absent+=("$arg") ;;
-    esac
-  done
-  if ! out="$(env -i PATH="$PATH" HOME="$ur_home" "${run_args[@]:1}" "$ur_doctor" "${run_args[0]}" 2>&1)"; then
-    printf '%s\n' "$out" >&2
-    fail "test failed: doctor must stay exit 0 (usage reader $label)"
-    status=1
-    return
-  fi
-  for arg in "${want[@]}"; do
-    grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n'
-  done
-  for arg in "${absent[@]}"; do
-    if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi
-  done
-  if [[ -z "$missing" ]]; then
-    ok "test passed: usage reader $label"
-  else
-    printf '%s\n%s' "$out" "$missing" >&2
-    fail "test failed: usage reader $label"
-    status=1
-  fi
+  env -i PATH="$PATH" HOME="$ur_home" "$@" "$ur_doctor" "$profile"
+}
+# ur_expect LABEL PROFILE [VAR=value...] -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
+# doctor_expect on one ur_doctor_run run; the canary never may appear.
+ur_expect() {
+  doctor_expect "usage reader $1" ur_doctor_run "${@:2}" ! "$ur_canary"
 }
 # ur_write JSON — the config file's whole content.
 ur_write() {
@@ -1120,6 +1062,11 @@ else
   status=1
 fi
 ur_asked_check "missing -> --check not run" no
+# UR-1a) missing with XDG_CONFIG_HOME naming ~/.config with a trailing slash:
+#        the same location (no -ef possible while the file is missing), so no
+#        redirect warn and the plain missing action.
+ur_expect "missing + XDG_CONFIG_HOME=~/.config/ -> plain missing action, no redirect" \
+  personal XDG_CONFIG_HOME="$ur_home/.config/" -- "$ur_missing" ! "points agent-tools at"
 # UR-1b) missing while an absolute XDG_CONFIG_HOME points elsewhere: the
 #        redirect is reported and the missing action does not claim the
 #        "no usage reader" effect (the other file may hold one).
@@ -1138,10 +1085,7 @@ ur_asked_check "--check exit 0 -> --check run" yes
 ur_write "not json $ur_canary"
 ur_expect "--check accepts a non-JSON file -> ok (the wrapper decides, not doctor)" personal -- "$ur_ok"
 ur_write "$ur_valid"
-# UR-2c) XDG_CONFIG_HOME naming ~/.config with a trailing slash is the same
-#        file; a relative XDG_CONFIG_HOME is ignored (as the wrapper does).
-ur_expect "XDG_CONFIG_HOME=~/.config/ -> same file, ok" personal XDG_CONFIG_HOME="$ur_home/.config/" -- \
-  "$ur_ok" ! "points agent-tools at"
+# UR-2c) a relative XDG_CONFIG_HOME is ignored (as the wrapper does).
 ur_expect "relative XDG_CONFIG_HOME -> ignored, ok" personal XDG_CONFIG_HOME="rel/config" -- \
   "$ur_ok" ! "points agent-tools at"
 # UR-2d) XDG_CONFIG_HOME through a symlink to ~/.config is the same file
@@ -1661,6 +1605,33 @@ if ql_out="$(HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal 2>&1)"; 
 else
   printf '%s\n' "$ql_out" >&2
   fail "test failed: doctor must stay exit 0 (quality loop hooks dangling)"
+  status=1
+fi
+#     QL-e2) the same run: the other Claude-side capabilities committed true
+#            each report their own dangling warn (no managed settings.json
+#            carries them), and the injection-guard tiers that describe the
+#            managed file (secret floor, human-legit gate, main-push note)
+#            are not reported.
+for ql_dangling in \
+  "gateUnusedClaudeMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
+  "enableToolCallRecordHook=true but the claude-settings module is inactive for this profile; no managed settings carry the record hook (dangling capability)" \
+  "gateGitHubMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
+  "enableGitHubIsolatedReader=true but the claude-settings module is inactive for this profile; no managed settings carry the hook registration (dangling capability)"; do
+  if grep -Fxq "[warn] $ql_dangling" <<< "$ql_out"; then
+    ok "test passed: ${ql_dangling%% but *} with claude-settings inactive is reported as dangling"
+  else
+    printf '%s\n' "$ql_out" >&2
+    fail "test failed: dangling ${ql_dangling%% but *} not reported (missing: [warn] $ql_dangling)"
+    status=1
+  fi
+done
+if ! grep -Fq "secret floor declared" <<< "$ql_out" \
+  && ! grep -Fq "human-legit write gate" <<< "$ql_out" \
+  && ! grep -Fq "main-push deny is leaky steering" <<< "$ql_out"; then
+  ok "test passed: with claude-settings inactive the secret floor / human-legit gate / main-push note are not reported"
+else
+  printf '%s\n' "$ql_out" >&2
+  fail "test failed: the injection-guard tiers of the managed settings.json are reported with claude-settings inactive"
   status=1
 fi
 #     QL-f) after a profile switch (#201): both hook capabilities off and
