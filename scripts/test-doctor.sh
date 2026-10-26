@@ -104,17 +104,17 @@ fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # Kept outside the fixture HOME so no section's cleanup removes it.
 host_stub_dir=""
 # Sections that plant a mode-000 dir or file under the fixture HOME (GS-2,
-# OP, AIP, CL-8) restore the mode on their normal path only: a run that
+# OCP, AIP, CL-8) restore the mode on their normal path only: a run that
 # stops inside that window would leave a tree `rm -rf` cannot enter. The
 # modes are re-opened first (chmod -R visits a dir before reading it, so a
 # 000 dir is passed; best effort, the removal must still run), and the
 # cleanup is also wired to INT / TERM, so a second signal that lands
 # while it runs starts it over (modes first) instead of killing it
-# halfway (#359 review). The background cases (HI-d3's doctor, OP-i10's
-# FIFO run) do not get the suite's INT (a background job of a
-# non-interactive shell ignores it) and are past the deadline that would
-# have reaped them, so every process the suite started is stopped and
-# reaped before the fixture goes (#413).
+# halfway (#359 review). The background cases (HI-d3's doctor, the FIFO
+# runs of QL-f5's doctor and of OCP-i10's init reporter) do not get the
+# suite's INT (a background job of a non-interactive shell ignores it) and
+# are past the deadline that would have reaped them, so every process the
+# suite started is stopped and reaped before the fixture goes (#413).
 cleanup_fixtures() {
   stop_child_trees
   chmod -R u+rwX "$fixture_home" 2>/dev/null || true
@@ -1773,7 +1773,7 @@ fi
 #            is never read (a grep on it would block for good) and both
 #            registrations there are unchecked. The run has a deadline, so a
 #            doctor that reads the FIFO fails the case instead of hanging the
-#            suite (same as OP-i10).
+#            suite (same as OCP-i10).
 rm -f "$fixture_home/.claude/settings.json"
 mkfifo "$fixture_home/.codex/hooks.json"
 HOME="$fixture_home" "$ql_root/scripts/doctor.sh" personal > "$fixture_home/ql-fifo.out" 2>&1 &
@@ -1931,8 +1931,9 @@ hi_codex_ok="managed ~/.codex/hooks.json registers SessionStart -> herdr-agent-s
 hi_codex_note="(Codex: inert until a one-time /hooks trust; the installer also sets [features] hooks = true in codex-owned ~/.codex/config.toml, which dotfiles does not manage)"
 hi_unchecked="(version currency not checked: herdr integration status unavailable)"
 #     HI-a) no bodies installed -> both homes warn body-absent naming the
-#           install command (fail-open no-op); the scope item shows. Real
-#           PATH: the body-absent branch does not depend on herdr's answer.
+#           install command (fail-open no-op); the scope item shows. The
+#           suite's PATH, whose host-stub herdr exits 1 (#306): the
+#           body-absent branch does not depend on herdr's answer.
 if hi_out="$(HOME="$fixture_home" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body; run: herdr integration install claude) — fail-open no-op until installed" <<< "$hi_out" \
     && grep -Fq "managed ~/.codex/hooks.json registers the SessionStart hook but the body is absent or unreadable ($hi_codex_body; run: herdr integration install codex) — fail-open no-op until installed $hi_codex_note" <<< "$hi_out" \
@@ -1950,21 +1951,24 @@ else
 fi
 #     HI-b) both bodies present WITHOUT an exec bit (the registration runs
 #           them via bash, so a readable regular file is what counts) and
-#           herdr reports current -> both ok lines (Codex with its trust /
-#           config.toml honest-label).
+#           herdr reports current WITHOUT a trailing newline (fake mode
+#           `ok-nonl`: the unterminated last status line must still be seen
+#           and the answer adopted, no "unchecked") -> both ok lines (Codex
+#           with its trust / config.toml honest-label). A newline-terminated
+#           answer (mode `ok`) is adopted in HI-c, HI-e and HI-f.
 mkdir -p "$(dirname "$hi_claude_body")" "$(dirname "$hi_codex_body")"
 printf '#!/bin/sh\nexit 0\n' > "$hi_claude_body"
 printf '#!/bin/sh\nexit 0\n' > "$hi_codex_body"
 chmod 0644 "$hi_claude_body" "$hi_codex_body"
-write_fake_herdr_status "current (v9)" "current (v8)" ok
+write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
     && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out" \
     && ! grep -Fq "re-run: herdr integration install" <<< "$hi_out"; then
-    ok "test passed: herdr integration reported wired and current in both homes with non-executable bodies (Codex line carries the trust + config.toml caveats)"
+    ok "test passed: herdr integration reported wired and current in both homes with non-executable bodies and a status answer without a trailing newline (Codex line carries the trust + config.toml caveats)"
   else
     printf '%s\n' "$hi_out" >&2
-    fail "test failed: current herdr integration not reported as wired in both homes"
+    fail "test failed: current herdr integration (non-executable bodies, answer without a trailing newline) not reported as wired in both homes"
     status=1
   fi
 else
@@ -1972,35 +1976,28 @@ else
   fail "test failed: doctor must stay exit 0 (herdr integration, current)"
   status=1
 fi
-#     HI-b1) herdr answers without a trailing newline -> the status line must
-#            still be seen and the answer adopted (no "unchecked").
-write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
-if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "$hi_claude_ok and current per herdr integration status" <<< "$hi_out" \
-    && grep -Fq "$hi_codex_ok and current per herdr integration status $hi_codex_note" <<< "$hi_out"; then
-    ok "test passed: a herdr answer without a trailing newline is still adopted as current"
-  else
-    printf '%s\n' "$hi_out" >&2
-    fail "test failed: a herdr answer without a trailing newline was not adopted"
-    status=1
-  fi
-else
-  printf '%s\n' "$hi_out" >&2
-  fail "test failed: doctor must stay exit 0 (herdr integration, no trailing newline)"
-  status=1
-fi
-#     HI-b2) a directory at the body path must NOT count as present (a
-#            bare -x/-e probe would pass it).
+#     HI-b2) a directory at the Claude body path must NOT count as present (a
+#            bare -x/-e probe would pass it) although herdr answers current
+#            for it, and the Codex home must stay current (an absent body in
+#            one home must not cost the other its answer). Its own fake, not
+#            HI-b's left in place. Each check fails with its own message: the
+#            fake answers without a trailing newline as in HI-b, so a reader
+#            that drops such an answer fails the Codex check here, not the
+#            presence check.
 rm -f "$hi_claude_body"
 mkdir -p "$hi_claude_body"
+write_fake_herdr_status "current (v9)" "current (v8)" ok-nonl
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body;" <<< "$hi_out" \
-    && grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
-    ok "test passed: a directory at the herdr body path is reported absent (regular-file check), Codex home unaffected"
-  else
+  if ! grep -Fq "managed ~/.claude/settings.json registers the SessionStart hook but the body is absent or unreadable ($hi_claude_body;" <<< "$hi_out"; then
     printf '%s\n' "$hi_out" >&2
     fail "test failed: a directory at the herdr body path passed the presence check"
     status=1
+  elif ! grep -Fq "$hi_codex_ok and current per herdr integration status" <<< "$hi_out"; then
+    printf '%s\n' "$hi_out" >&2
+    fail "test failed: the Codex home did not stay current next to a directory at the Claude body path (its status answer, without a trailing newline as in HI-b, was not adopted)"
+    status=1
+  else
+    ok "test passed: a directory at the herdr body path is reported absent (regular-file check), Codex home unaffected"
   fi
 else
   printf '%s\n' "$hi_out" >&2
@@ -2030,8 +2027,10 @@ else
 fi
 #     HI-d) herdr prints "current" lines but exits non-zero -> the output
 #           must be discarded: presence-only ok lines saying currency was
-#           not checked, never a "current". herdr absent from PATH (CI)
-#           takes the same branch by construction.
+#           not checked, never a "current". herdr absent from PATH leaves
+#           the status empty the same way, by construction (not run here:
+#           the host stub keeps herdr on PATH, #306; NA's herdr-absent case
+#           covers the work profile's pointer).
 write_fake_herdr_status "current (v9)" "current (v8)" fail
 if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doctor.sh" personal 2>&1)"; then
   if grep -Fq "$hi_claude_ok $hi_unchecked" <<< "$hi_out" \
@@ -2177,6 +2176,16 @@ if hi_out="$(HOME="$fixture_home" PATH="$hi_fakebin:$PATH" "$hi_root/scripts/doc
 else
   printf '%s\n' "$hi_out" >&2
   fail "test failed: doctor must stay exit 0 (herdr integration, capability off, modules inactive)"
+  status=1
+fi
+#     HI-e2b) the same run, for the isolated reader committed true: with
+#             codex-settings inactive the Codex side is dangling too (the
+#             Claude side is checked in QL-e2).
+if grep -Fxq "[warn] enableGitHubIsolatedReader=true but the codex-settings module is inactive for this profile; no managed ~/.codex/hooks.json carries the hook registration (dangling capability on the Codex side)" <<< "$hi_out"; then
+  ok "test passed: enableGitHubIsolatedReader=true with codex-settings inactive is reported as dangling on the Codex side"
+else
+  printf '%s\n' "$hi_out" >&2
+  fail "test failed: dangling enableGitHubIsolatedReader (Codex side) not reported"
   status=1
 fi
 rm -rf "$hi_fakebin" "$hi_claude_body" "$hi_codex_body"
@@ -3153,10 +3162,12 @@ fi
 # HG) git hook gates readiness on a module-active profile (#307): the
 #     observer side of the two-key gate. Each case plants the agent-tools
 #     deploy (all four scripts, a subset, or one not executable) and the
-#     wiring (both shims + core.hooksPath at the managed shim directory, or
-#     nothing) in an own HOME and pins doctor's exact readiness lines — a
-#     deploy list cut short in doctor.sh (e.g. the dispatcher alone) would
-#     report a partial deploy as complete and fail here. Hermetic (env -i).
+#     wiring (a shim for every declared stage + core.hooksPath at the
+#     managed shim directory in its tilde or absolute form, with some shims
+#     broken or the hooksPath foreign, or nothing) in an own HOME and pins
+#     doctor's exact readiness lines — a deploy list cut short in doctor.sh
+#     (e.g. the dispatcher alone) would report a partial deploy as complete
+#     and fail here. Hermetic (env -i).
 hg_home="$fixture_home/hg-home"
 hg_deploy="$hg_home/.claude/agent-tools/scripts"
 hg_shims="$hg_home/.config/git-hook-gates/hooks"
@@ -3244,19 +3255,30 @@ hg_setup 1 "${hg_all[@]}"
 chmod 644 "$hg_deploy/personal-public-safety-gate"
 hg_expect "wired + a non-executable gate -> BLOCKED warning" -- \
   "$hg_wired_incomplete" ! "$hg_complete"
-# HG-3b) a searchable directory is not a deployed script, even with -x.
+# HG-3b) a searchable directory is not a deployed script, even with -x;
+#        core.hooksPath in its absolute form is the managed directory too.
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_deploy/personal-public-safety-gate"
 mkdir "$hg_deploy/personal-public-safety-gate"
-hg_expect "wired + a directory gate -> BLOCKED warning" -- \
+printf '[core]\n\thooksPath = %s\n' "$hg_shims" > "$hg_home/.gitconfig"
+hg_expect "wired (absolute hooksPath) + a directory gate -> BLOCKED warning" -- \
+  "[ok] global core.hooksPath -> managed shim directory" \
   "$hg_wired_incomplete" ! "$hg_complete"
-# HG-3c) a directory at a shim path must not count as wired.
+# HG-3c) a directory at a shim path must not count as wired (searchable, so
+#        -x alone would pass it), nor a shim without its execute bit; a
+#        core.hooksPath that points elsewhere is warned, its value never shown.
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_shims/pre-push"
 mkdir "$hg_shims/pre-push"
-hg_expect "a directory shim -> wiring incomplete" -- \
+chmod 644 "$hg_shims/post-merge"
+hg_canary="canary-hookspath-5c2a"
+printf '[core]\n\thooksPath = /elsewhere/%s/hooks\n' "$hg_canary" > "$hg_home/.gitconfig"
+hg_expect "a directory shim, a non-executable shim and a foreign hooksPath -> each named" -- \
   "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
-  ! "shims present and executable: all"
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/post-merge (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  "[warn] global core.hooksPath points somewhere else (value not shown); the managed gates are NOT on the commit path" \
+  "$hg_complete" \
+  ! "shims present and executable: all" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit" "$hg_canary"
 # HG-4) nothing wired + the dispatcher alone -> both halves incomplete.
 hg_setup 0 personal-git-hook-dispatcher
 hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- \
@@ -3265,14 +3287,14 @@ hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- 
   "$hg_both_incomplete" ! "$hg_complete"
 rm -rf "$hg_home"
 
-# OP) OpenCode plugins, OPENCODE_CONFIG and herdr's OpenCode view (#263).
-#     Static checks only: doctor must never run OpenCode (even `opencode
-#     debug config` writes its database), so a PATH-front fake opencode
-#     records any invocation and every case asserts it stayed unused. Config
-#     files carry a canary "secret" (an MCP header) that must never reach the
-#     report. A fake herdr answers `integration status`. Own HOME;
-#     OPENCODE_CONFIG is unset unless a case sets it. doctor stays exit 0.
-#     XDG_DATA_HOME too (the init marker's log, OP-i).
+# OCP) OpenCode plugins, OPENCODE_CONFIG and herdr's OpenCode view (#263).
+#      Static checks only: doctor must never run OpenCode (even `opencode
+#      debug config` writes its database), so a PATH-front fake opencode
+#      records any invocation and every case asserts it stayed unused. Config
+#      files carry a canary "secret" (an MCP header) that must never reach the
+#      report. A fake herdr answers `integration status`. Own HOME;
+#      OPENCODE_CONFIG is unset unless a case sets it. doctor stays exit 0.
+#      XDG_DATA_HOME too (the init marker's log, OCP-i).
 op_home="$fixture_home/op-home"
 op_fakebin="$fixture_home/opfake"
 op_cfg="$op_home/.config/opencode"
@@ -3320,15 +3342,8 @@ op_expect() {
   ok "test passed: $label"
 }
 op_ok_line="[ok] agent-tools plugin personal-agent-tools.js in the global plugins dir (OpenCode loads it at startup; its init is reported below)"
-#     OP-a) plugin in the global plugins dir, no config lists it -> ok with
-#           the honest-label; OpenCode never runs.
-if op_out="$(op_run)"; then
-  op_expect "the agent-tools plugin in the global plugins dir is ok (static, OpenCode not run)" "$op_out" "$op_ok_line"
-else
-  doctor_exit_fail "OpenCode plugin present" "$?" "$op_out"
-fi
-#     OP-b) the same plugin also listed in a config's plugin key -> double
-#           load warning; the config's other values never show.
+#     OCP-b) the same plugin also listed in a config's plugin key -> double
+#            load warning; the config's other values never show.
 printf '{"mcp":{"x":{"headers":{"Authorization":"%s"}}},"plugin":["file:///elsewhere/personal-agent-tools.js","some-npm-plugin@1"]}\n' "$op_canary" > "$op_cfg/opencode.local.json"
 if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
   op_expect "a plugin also listed in the active config's plugin key is a double-load warning" "$op_out" \
@@ -3336,13 +3351,17 @@ if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
 else
   doctor_exit_fail "OpenCode plugin listed in config" "$?" "$op_out"
 fi
-#     OP-b2) the same listing in opencode.local.json while OPENCODE_CONFIG does
-#            not point at it: OpenCode does not read that file here, so it is
-#            a note, never a double-load warning.
+#     OCP-b2) the same listing in opencode.local.json while OPENCODE_CONFIG
+#             does not point at it: OpenCode does not read that file here, so
+#             it is a note, never a double-load warning. ~/.zshrc.local does
+#             not exist yet (OCP-g writes it), so this run is also the case of
+#             a local config with OPENCODE_CONFIG unset and no export
+#             anywhere -> an action (that check never reads the file).
 if op_out="$(op_run)"; then
-  op_expect "a listing in an opencode.local.json that is not read here is only a note" "$op_out" \
+  op_expect "a listing in an opencode.local.json that is not read here is only a note; that local config with OPENCODE_CONFIG unset (no export anywhere) is an action" "$op_out" \
     "$op_ok_line" \
-    "[info] - personal-agent-tools is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it"
+    "[info] - personal-agent-tools is also listed in opencode.local.json's plugin key, which OpenCode reads only when OPENCODE_CONFIG points at it" \
+    "[warn] opencode.local.json exists but OPENCODE_CONFIG is not set — OpenCode ignores the local provider / model / mcp config"
   if grep -Fq "loads it twice" <<< "$op_out"; then
     fail "test failed: an inactive opencode.local.json listing was reported as a double load"
     status=1
@@ -3350,23 +3369,26 @@ if op_out="$(op_run)"; then
 else
   doctor_exit_fail "OpenCode inactive local listing" "$?" "$op_out"
 fi
-#     OP-c) names are compared literally, not as regexes: personal-a.b.js
-#           on disk does not match personal-a-b.js in the config.
+#     OCP-c) names are compared literally, neither as regexes nor as glob
+#            patterns: personal-a.b.js and personal-a?b.js on disk do not
+#            match personal-a-b.js in the config.
 printf '//\n' > "$op_cfg/plugins/personal-a.b.js"
+printf '//\n' > "$op_cfg/plugins/personal-a?b.js"
 printf '{"plugin":["personal-a-b.js"]}\n' > "$op_cfg/opencode.local.json"
 if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
-  op_expect "plugin names are matched literally (no regex false positive)" "$op_out" \
-    "[ok] agent-tools plugin personal-a.b.js in the global plugins dir"
-  if grep -Fq "personal-a.b is also listed" <<< "$op_out"; then
-    fail "test failed: personal-a.b.js was matched against personal-a-b.js"
+  op_expect "plugin names are matched literally (no regex or glob false positive)" "$op_out" \
+    "[ok] agent-tools plugin personal-a.b.js in the global plugins dir" \
+    "[ok] agent-tools plugin personal-a?b.js in the global plugins dir"
+  if grep -Fq "is also listed in" <<< "$op_out"; then
+    fail "test failed: personal-a.b.js or personal-a?b.js was matched against personal-a-b.js"
     status=1
   fi
 else
   doctor_exit_fail "OpenCode literal names" "$?" "$op_out"
 fi
-rm -f "$op_cfg/plugins/personal-a.b.js"
-#     OP-d) a config that is not JSON -> that check is reported as not done,
-#           never guessed, never printed.
+rm -f "$op_cfg/plugins/personal-a.b.js" "$op_cfg/plugins/personal-a?b.js"
+#     OCP-d) a config that is not JSON -> that check is reported as not done,
+#            never guessed, never printed.
 printf '{ "mcp": "%s", broken\n' "$op_canary" > "$op_cfg/opencode.local.json"
 if op_out="$(op_run)"; then
   op_expect "an unreadable config reports the double-load check as not done" "$op_out" \
@@ -3375,8 +3397,8 @@ if op_out="$(op_run)"; then
 else
   doctor_exit_fail "OpenCode unreadable config" "$?" "$op_out"
 fi
-#     OP-d2) the same broken file as the ACTIVE config (OPENCODE_CONFIG points
-#            at it) -> the active branch also reports "not checked".
+#     OCP-d2) the same broken file as the ACTIVE config (OPENCODE_CONFIG points
+#             at it) -> the active branch also reports "not checked".
 if op_out="$(op_run OPENCODE_CONFIG="$op_cfg/opencode.local.json")"; then
   op_expect "an unreadable active config reports the double-load check as not done" "$op_out" \
     "[info] - the plugin key of $op_cfg/opencode.local.json could not be read (not JSON?); double loading via config not checked (contents never shown)" \
@@ -3385,7 +3407,7 @@ else
   doctor_exit_fail "OpenCode unreadable active config" "$?" "$op_out"
 fi
 rm -f "$op_cfg/opencode.local.json"
-#     OP-e) no agent-tools plugin -> neutral item.
+#     OCP-e) no agent-tools plugin -> neutral item.
 mv "$op_cfg/plugins/personal-agent-tools.js" "$op_cfg/personal-agent-tools.js.off"
 if op_out="$(op_run)"; then
   op_expect "no agent-tools plugin is neutral" "$op_out" \
@@ -3394,31 +3416,39 @@ else
   doctor_exit_fail "OpenCode no plugin" "$?" "$op_out"
 fi
 mv "$op_cfg/personal-agent-tools.js.off" "$op_cfg/plugins/personal-agent-tools.js"
-#     OP-f) extra copies that OpenCode may load twice (.ts next to .js,
-#           singular plugin/ dir) -> one warning each.
+#     OCP-f) extra copies that OpenCode may load twice (.ts next to .js,
+#            singular plugin/ dir) -> one warning each. No config file is
+#            here, and plugins/personal-agent-tools.js itself still gets the
+#            ok line next to the copies (the baseline without a config, which
+#            used to be a run of its own).
 mkdir -p "$op_cfg/plugin"
 printf '//\n' > "$op_cfg/plugins/personal-agent-tools.ts"
 printf '//\n' > "$op_cfg/plugin/personal-agent-tools.js"
 if op_out="$(op_run)"; then
-  op_expect "extra plugin copies are warned" "$op_out" \
+  op_expect "extra plugin copies are warned; the plugin itself is still ok (no config)" "$op_out" \
     "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugins/personal-agent-tools.ts" \
-    "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugin/personal-agent-tools.js"
+    "[warn] agent-tools plugin copy that OpenCode may load twice: $op_cfg/plugin/personal-agent-tools.js" \
+    "$op_ok_line"
 else
   doctor_exit_fail "OpenCode extra copies" "$?" "$op_out"
 fi
 rm -rf "$op_cfg/plugin" "$op_cfg/plugins/personal-agent-tools.ts"
-#     OP-g) OPENCODE_CONFIG against a present opencode.local.json.
+#     OCP-g) OPENCODE_CONFIG against a present opencode.local.json (unset
+#            with no export anywhere -> the action, seen in OCP-b2's run).
 printf '{}\n' > "$op_cfg/opencode.local.json"
-if op_out="$(op_run)"; then
-  op_expect "local config present but OPENCODE_CONFIG unset (no export anywhere) is an action" "$op_out" \
-    "[warn] opencode.local.json exists but OPENCODE_CONFIG is not set — OpenCode ignores the local provider / model / mcp config"
-else
-  doctor_exit_fail "OPENCODE_CONFIG unset" "$?" "$op_out"
-fi
 printf 'export OPENCODE_CONFIG="$HOME/.config/opencode/opencode.local.json"\n' > "$op_home/.zshrc.local"
+# This run also shows herdr's view of its OpenCode integration, on the
+# fixture a run of its own had (other.json is not there yet, but it is not
+# read while OPENCODE_CONFIG is unset): a neutral item that leaves
+# installing to the user, never an action.
 if op_out="$(op_run)"; then
-  op_expect "an export in ~/.zshrc.local that this shell did not load is neutral" "$op_out" \
-    "[info] - OPENCODE_CONFIG is exported in ~/.zshrc.local but not set in this shell"
+  op_expect "an export in ~/.zshrc.local that this shell did not load is neutral; herdr's OpenCode integration state is shown as herdr's view" "$op_out" \
+    "[info] - OPENCODE_CONFIG is exported in ~/.zshrc.local but not set in this shell" \
+    "[info] - herdr's own view: opencode integration not installed"
+  if grep -Fq "\$ herdr integration install opencode" <<< "$op_out"; then
+    fail "test failed: herdr's OpenCode integration must not become an action"
+    status=1
+  fi
 else
   doctor_exit_fail "OPENCODE_CONFIG exported elsewhere" "$?" "$op_out"
 fi
@@ -3441,25 +3471,17 @@ if op_out="$(op_run OPENCODE_CONFIG="$op_home/missing.json")"; then
 else
   doctor_exit_fail "OPENCODE_CONFIG missing file" "$?" "$op_out"
 fi
-#     OP-h) herdr's view of its OpenCode integration is shown neutrally
-#           (installing it is the user's call; never an action).
-if op_out="$(op_run)"; then
-  op_expect "herdr's OpenCode integration state is shown as herdr's view" "$op_out" \
-    "[info] - herdr's own view: opencode integration not installed"
-  if grep -Fq "\$ herdr integration install opencode" <<< "$op_out"; then
-    fail "test failed: herdr's OpenCode integration must not become an action"
-    status=1
-  fi
-else
-  doctor_exit_fail "herdr OpenCode view" "$?" "$op_out"
-fi
-#     OP-i) the init marker of personal-agent-tools (#311, agent-tools#343):
-#           doctor reads OpenCode's existing log (never runs OpenCode) and
-#           calls the init confirmed only when the newest marker line's
-#           build_id equals the deployed file's marker; everything else is a
-#           neutral "not confirmed" with a reason. Log lines carry the canary
-#           in other fields and messages, so a line printed into the report
-#           fails op_expect. Exactly one init line per run.
+#     OCP-i) the init marker of personal-agent-tools (#311, agent-tools#343):
+#            doctor reads OpenCode's existing log (never runs OpenCode) and
+#            calls the init confirmed only when the newest marker line's
+#            build_id equals the deployed file's marker; everything else is a
+#            neutral "not confirmed" with a reason. Log lines carry the canary
+#            in other fields and messages, so a line printed into the report
+#            fails the case. The three end-to-end cases (OCP-i0) are doctor
+#            runs with exactly one init line each; every other case runs the
+#            reporter alone, extracted from doctor.sh: its whole output must
+#            be the expected line (so no log line, no canary) and OpenCode is
+#            never started.
 op_log="$op_home/.local/share/opencode/log/opencode.log"
 op_hex_a="$(printf '%064d' 0 | tr 0 a)"
 op_hex_b="$(printf '%064d' 0 | tr 0 b)"
@@ -3469,6 +3491,7 @@ op_confirmed="[ok] $op_init confirmed by OpenCode's log (build_id sha256:$op_hex
 op_no_marker="[info] - $op_init not confirmed: no init marker in OpenCode's log (not started since the plugin began logging it, started with --pure or a log level above INFO, a rotated log, or an init that threw; $op_deployed)"
 op_not_v1="[info] - $op_init not confirmed: the newest init marker is not in the v=1 form this doctor reads ($op_deployed)"
 op_no_log="[info] - $op_init not confirmed: no OpenCode log yet (not started here; $op_deployed)"
+op_relative_xdg="[info] - $op_init not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in ($op_deployed)"
 # op_line MESSAGE [quoted|bare] — one OpenCode 1.18.30 log line around MESSAGE.
 op_line() {
   if [[ "${2:-quoted}" == quoted ]]; then
@@ -3510,11 +3533,6 @@ op_init_check() {
   fi
   op_expect "OpenCode init: $label" "$out" "$expected"
 }
-#     OP-i1) line 1 is not agent-tools' marker for this plugin -> no build_id
-#            to compare: no marker (the fixture so far), a plain comment that
-#            merely carries a build_id, another plugin's marker, a marker for
-#            another target (Codex review R1, PR #325). A matching log line is
-#            in place, so a lax marker check would turn into "confirmed".
 op_not_marker="[info] - $op_init not confirmed: the deployed file's line 1 is not agent-tools' marker for this plugin with a sha256 build_id (agent-tools' doctor checks its marker)"
 op_plugin_file() {
   printf '%s\n// personal-agent-tools\n' "$1" > "$op_cfg/plugins/personal-agent-tools.js"
@@ -3522,6 +3540,55 @@ op_plugin_file() {
 op_marker_line() {
   printf '/* agent-tools:managed v=1 repo=agent-tools name=%s target=%s artifact_kind=plugin source=shared/plugins/personal-agent-tools.js build_id=sha256:%s */' "$1" "$2" "$op_hex_a"
 }
+#     OCP-i0) end to end: doctor hands the deployed file to the reporter and
+#             prints its line, from the default log and from the log under
+#             its own XDG_DATA_HOME, and a relative XDG_DATA_HOME reaches the
+#             reporter as it is.
+op_plugin_file "$(op_marker_line personal-agent-tools opencode)"
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
+op_init_case "doctor reports the confirmed init (end to end, the default log)" "$op_confirmed"
+# The default log names another build, so only the log under doctor's own
+# XDG_DATA_HOME can confirm: doctor passes its environment through.
+op_log_write "$(op_line "$(op_marker "sha256:$op_hex_b")")"
+mkdir -p "$op_home/xdg-e2e/opencode/log"
+op_line "$(op_marker "sha256:$op_hex_a")" > "$op_home/xdg-e2e/opencode/log/opencode.log"
+op_init_case "doctor reports the confirmed init (end to end, the log under XDG_DATA_HOME)" "$op_confirmed" XDG_DATA_HOME="$op_home/xdg-e2e"
+rm -rf "$op_home/xdg-e2e"
+# Made absolute on the way, the relative value would point at no log; dropped,
+# the default log's other build would show.
+op_init_case "doctor passes a relative XDG_DATA_HOME through (end to end) -> not confirmed" "$op_relative_xdg" XDG_DATA_HOME=rel/data
+printf '// personal-agent-tools\n' > "$op_cfg/plugins/personal-agent-tools.js"
+# From here on the reporter alone, the way CL-U runs the matcher: the
+# function is extracted from doctor.sh, and op_init_case is redefined to
+# call it in a bash of its own.
+op_fn="$(sed -n '/^  opencode_plugin_init_report() {/,/^  }$/p' "$SCRIPT_DIR/doctor.sh")"
+if [[ -z "$op_fn" || "$(printf '%s\n' "$op_fn" | tail -n 1)" != "  }" ]]; then
+  fail "test failed: opencode_plugin_init_report not found in doctor.sh"
+  status=1
+fi
+# op_init_case LABEL EXPECTED_LINE [VAR=value...] — the reporter on the
+# deployed file, with the fake opencode first on PATH: it exits 0, its whole
+# output is EXPECTED_LINE (nothing else, so no log line and no canary) and
+# OpenCode stays unrun.
+op_init_case() {
+  local label="$1" expected="$2" out rc=0
+  shift 2
+  out="$(env -u XDG_DATA_HOME HOME="$op_home" PATH="$op_fakebin:$PATH" "$@" bash -c 'set -euo pipefail; source "$1"; eval "$2"; opencode_plugin_init_report "$3"' \
+    _ "$SCRIPT_DIR/lib-policy.sh" "$op_fn" "$op_cfg/plugins/personal-agent-tools.js" 2>&1)" || rc=$?
+  if [[ "$rc" -eq 0 && "$out" == "$expected" && ! -e "$op_ran" ]]; then
+    ok "test passed: OpenCode init: $label"
+  else
+    printf 'rc=%s\n%s\n' "$rc" "$out" >&2
+    [[ ! -e "$op_ran" ]] || { printf 'ran opencode: %s\n' "$(head -n 1 "$op_ran")" >&2; rm -f "$op_ran"; }
+    fail "test failed: OpenCode init: $label (expected exactly: $expected)"
+    status=1
+  fi
+}
+#     OCP-i1) line 1 is not agent-tools' marker for this plugin -> no build_id
+#             to compare: no marker (the fixture so far), a plain comment that
+#             merely carries a build_id, another plugin's marker, a marker for
+#             another target (Codex review R1, PR #325). A matching log line is
+#             in place, so a lax marker check would turn into "confirmed".
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "deployed file without a marker -> not confirmed" "$op_not_marker"
 op_plugin_file "// build_id=sha256:$op_hex_a"
@@ -3532,30 +3599,30 @@ op_plugin_file "$(op_marker_line personal-agent-tools claude-code)"
 op_init_case "a marker for another target -> not confirmed" "$op_not_marker"
 op_plugin_file "$(op_marker_line personal-agent-tools opencode)"
 rm -rf "$op_home/.local/share/opencode"
-#     OP-i2) no log at all -> not started.
+#     OCP-i2) no log at all -> not started.
 op_init_case "no OpenCode log -> not confirmed (not started)" "$op_no_log"
-#     OP-i3) a log without the marker.
+#     OCP-i3) a log without the marker.
 op_log_write
 op_init_case "log without the marker -> not confirmed" "$op_no_marker"
-#     OP-i4) the newest marker matches, quoted (as 1.18.30 writes it) or bare.
+#     OCP-i4) the newest marker matches, quoted (as 1.18.30 writes it) or bare.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "quoted marker with the deployed build_id -> confirmed" "$op_confirmed"
 # A message with spaces is always quoted in OpenCode's key=value line, so an
 # unquoted one is not the plugin's marker line.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")" bare)"
 op_init_case "unquoted marker text -> no marker" "$op_no_marker"
-#     OP-i5) only the newest marker counts, whichever way round.
+#     OCP-i5) only the newest marker counts, whichever way round.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:$op_hex_b")")"
 op_init_case "newest marker from another build -> not confirmed, naming both" \
   "[info] - $op_init not confirmed: the newest init marker is from build_id sha256:$op_hex_b, not the deployed sha256:$op_hex_a (OpenCode not started since the last sync, or a process still on the old build)"
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_b")")" "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "an older marker from another build, newest matches -> confirmed" "$op_confirmed"
-#     OP-i6) build_id unknown.
+#     OCP-i6) build_id unknown.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker unknown)")"
 op_init_case "newest marker with build_id unknown -> not confirmed" \
   "[info] - $op_init not confirmed: the newest init marker carries build_id unknown (the plugin could not read its own marker; $op_deployed)"
-#     OP-i7) lines outside the v=1 form, each newest after a matching one: a
-#            newer version, an extra token, 65 hex digits, uppercase hex.
+#     OCP-i7) lines outside the v=1 form, each newest after a matching one: a
+#             newer version, an extra token, 65 hex digits, uppercase hex.
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" \
   "$(op_line "agent-tools:plugin-init v=2 name=personal-agent-tools build_id=sha256:$op_hex_a")"
 op_init_case "newest marker in v=2 -> not confirmed" "$op_not_v1"
@@ -3565,26 +3632,24 @@ op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_mar
 op_init_case "newest marker with 65 hex digits -> not confirmed" "$op_not_v1"
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" "$(op_line "$(op_marker "sha256:$(printf '%064d' 0 | tr 0 A)")")"
 op_init_case "newest marker with uppercase hex -> not confirmed" "$op_not_v1"
-#     OP-i8) marker text that does not open the message, or names another
-#            plugin, is no marker at all.
+#     OCP-i8) marker text that does not open the message, or names another
+#             plugin, is no marker at all.
 op_log_write "$(op_line "grep $(op_marker "sha256:$op_hex_a")")" \
   "$(op_line "agent-tools:plugin-init v=1 name=personal-agent-tools-x build_id=sha256:$op_hex_a")"
 op_init_case "marker text inside another message, or another plugin's marker -> no marker" "$op_no_marker"
-#            ... and a message that only quotes the marker after other text,
-#            even with its own quote, is not the marker: the line's first
-#            message field decides (Codex review R1, PR #325).
-op_log_write "$(op_line "copied message=$(op_marker "sha256:$op_hex_a") extra")"
-op_init_case "marker text after other text in a message -> no marker" "$op_no_marker"
+#             ... and a message that only quotes the marker after other text,
+#             even with its own quote, is not the marker: the line's first
+#             message field decides (Codex review R1, PR #325).
 op_log_write "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_a")\" extra")"
 op_init_case "a quoted marker inside another message -> no marker" "$op_no_marker"
-#            ... nor does such a later line hide an earlier real marker: the
-#            newest line is picked by its first message field too (Codex
-#            review R2, PR #325).
+#             ... nor does such a later line hide an earlier real marker: the
+#             newest line is picked by its first message field too (Codex
+#             review R2, PR #325).
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")" \
   "$(op_line "copied message=\"$(op_marker "sha256:$op_hex_b")\" extra")"
 op_init_case "a real marker, then a line quoting another marker -> confirmed" "$op_confirmed"
-#     OP-i9) XDG_DATA_HOME moves the log: absolute -> read there; empty -> the
-#            default; relative -> not confirmed (it depends on OpenCode's cwd).
+#     OCP-i9) XDG_DATA_HOME moves the log: absolute -> read there; empty -> the
+#             default; relative -> not confirmed (it depends on OpenCode's cwd).
 op_log_write
 mkdir -p "$op_home/xdg-data/opencode/log"
 op_line "$(op_marker "sha256:$op_hex_a")" > "$op_home/xdg-data/opencode/log/opencode.log"
@@ -3592,37 +3657,34 @@ op_init_case "absolute XDG_DATA_HOME -> the log there" "$op_confirmed" XDG_DATA_
 op_log_write "$(op_line "$(op_marker "sha256:$op_hex_a")")"
 op_init_case "empty XDG_DATA_HOME -> the default log" "$op_confirmed" XDG_DATA_HOME=
 op_init_case "absolute XDG_DATA_HOME without a log -> not started" "$op_no_log" XDG_DATA_HOME="$op_home/xdg-none"
-op_init_case "relative XDG_DATA_HOME -> not confirmed" \
-  "[info] - $op_init not confirmed: XDG_DATA_HOME is a relative path here, so where OpenCode logs depends on the directory it starts in ($op_deployed)" \
-  XDG_DATA_HOME=rel/data
-#     OP-i10) a log that is not a regular file (a FIFO would block a read:
-#             Codex review R1, PR #325) or cannot be read (skipped where
-#             permissions do not bind, e.g. as root).
-#             The FIFO run has a deadline: should doctor read the FIFO, it
-#             would block for good, so it is killed (with what it started)
-#             and the case fails instead of hanging the suite (Codex review
-#             R2, PR #325).
+op_init_case "relative XDG_DATA_HOME -> not confirmed" "$op_relative_xdg" XDG_DATA_HOME=rel/data
+#     OCP-i10) a log that is not a regular file (a FIFO would block a read:
+#              Codex review R1, PR #325) or cannot be read (skipped where
+#              permissions do not bind, e.g. as root).
+#              The FIFO case runs the reporter in the background with a
+#              deadline of 30s: should it read the FIFO, it would block for
+#              good, so it is killed (with what it started) and the case fails
+#              instead of hanging the suite (Codex review R2, PR #325). Its
+#              result reaches the suite's status through its output.
 mv "$op_log" "$op_log.keep"
 mkfifo "$op_log"
-op_run > "$fixture_home/op-fifo.out" 2>&1 &
+op_init_case "a FIFO in place of the log -> not confirmed, no hang" \
+  "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)" > "$fixture_home/op-fifo.out" 2>&1 &
 op_fifo_pid=$!
 op_fifo_waited=0
-while kill -0 "$op_fifo_pid" 2>/dev/null && [[ "$op_fifo_waited" -lt 120 ]]; do
+while kill -0 "$op_fifo_pid" 2>/dev/null && [[ "$op_fifo_waited" -lt 30 ]]; do
   sleep 1
   op_fifo_waited=$((op_fifo_waited + 1))
 done
 if kill -0 "$op_fifo_pid" 2>/dev/null; then
   kill_tree "$op_fifo_pid"
   wait "$op_fifo_pid" 2>/dev/null || true
-  fail "test failed: OpenCode init: a FIFO in place of the log hung doctor (killed after 120s)"
+  fail "test failed: OpenCode init: a FIFO in place of the log hung the reporter (killed after 30s)"
   status=1
-elif wait "$op_fifo_pid"; then
-  op_init_check "a FIFO in place of the log -> not confirmed, no hang" \
-    "[info] - $op_init not confirmed: OpenCode's log is not a regular file ($op_deployed)" \
-    "$(cat "$fixture_home/op-fifo.out")"
 else
-  op_fifo_rc=$?
-  doctor_exit_fail "OpenCode init: a FIFO in place of the log" "$op_fifo_rc" "$(cat "$fixture_home/op-fifo.out")"
+  wait "$op_fifo_pid" || true
+  cat "$fixture_home/op-fifo.out"
+  grep -q '^\[ok\] test passed' "$fixture_home/op-fifo.out" || status=1
 fi
 rm -f "$op_log" "$fixture_home/op-fifo.out"
 mv "$op_log.keep" "$op_log"
@@ -3639,15 +3701,28 @@ rm -rf "$op_home" "$op_fakebin" "$op_ran"
 #     is repeated once, numbered, at the end of the run with its steps, and
 #     `--actions-only` prints just that list. doctor stays exit 0 (report-
 #     only) and writes no file. Fixture: a fresh empty HOME with the
-#     committed repo (personal) — it always yields a few actions (identity
-#     files, drift is skipped without chezmoi state, ...); the assertions
-#     are structural (count = numbered lines, each with >= 1 step line, the
-#     same list in both modes), so they do not pin which host-side warnings
-#     a given environment produces.
+#     committed repo (personal) and a fake chezmoi on PATH whose status
+#     reports two drifted targets — it always yields a few actions (identity
+#     files, the two drift lines, ...); the assertions are structural
+#     (count = numbered lines, each with >= 1 step line, the same list in
+#     both modes), so they do not pin which host-side warnings a given
+#     environment produces. The fake keeps the drift section the same with
+#     or without a host chezmoi (the not-initialized / not-found skips are
+#     DRIFT-B's).
 na_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na.XXXXXX")"
 mkdir -p "$na_home/src/personal"
+na_fakebin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na-fake.XXXXXX")"
+cat > "$na_fakebin/chezmoi" <<'SH'
+#!/bin/sh
+case "$1" in
+  --version) echo "chezmoi version v0.0.0-fake" ;;
+  status) printf '%s\n' " M .gitconfig" "MM .npmrc" ;;
+  *) exit 0 ;;
+esac
+SH
+chmod +x "$na_fakebin/chezmoi"
 #     NA-a) full run: summary section is last, count matches, steps present.
-if na_out="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+if na_out="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   na_count="$(printf '%s\n' "$na_out" | sed -n 's/^\[info\] == next actions (\([0-9][0-9]*\)) ==$/\1/p')"
   na_numbered="$(printf '%s\n' "$na_out" | grep -c -E '^\[info\] [0-9]+\. ')"
   na_steps="$(printf '%s\n' "$na_out" | grep -c -E '^        [^ ]')"
@@ -3690,7 +3765,7 @@ fi
 #           same numbered list as the full run. (doctor itself writes no
 #           file; the tools it probes — npm, brew — keep their own caches
 #           under HOME, so "no file written" is not asserted on a fixture.)
-if na_only="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
+if na_only="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
   na_full_list="$(printf '%s\n' "$na_out" | sed -n '/^\[info\] == next actions (/,$p')"
   if [[ "$na_only" == "$na_full_list" ]] \
     && ! grep -q -E '^\[(ok|warn)\]' <<< "$na_only" \
@@ -3699,6 +3774,18 @@ if na_only="$(HOME="$na_home" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>
   else
     printf '%s\n' "$na_only" >&2
     fail "test failed: --actions-only output differs from the full run's summary or leaked other lines"
+    status=1
+  fi
+  #     NA-b2) drift step path: a chezmoi status line with a single-column
+  #            status (" M x") must yield "~/x", not "~/M x" (the path
+  #            starts after the fixed two status columns + space).
+  if grep -F -q -- "        \$ chezmoi diff $na_home/.gitconfig   #" <<< "$na_only" \
+    && grep -F -q -- "        \$ chezmoi diff $na_home/.npmrc   #" <<< "$na_only" \
+    && ! grep -F -q -- "/M .gitconfig" <<< "$na_only"; then
+    ok "test passed: drift steps point at the path after the two status columns (' M x' -> ~/x)"
+  else
+    printf '%s\n' "$na_only" >&2
+    fail "test failed: drift step path extraction wrong"
     status=1
   fi
 else
@@ -3791,35 +3878,6 @@ if [[ "$na_nostep_rc" -eq 0 && "$na_nostep" == *$'[info] 2. no step\n[warn] empt
 else
   printf 'rc=%s\n%s\n' "$na_nostep_rc" "$na_nostep" >&2
   fail "test failed: report_actions must return 0 when the last action has no (or an empty last) step"
-  status=1
-fi
-#     NA-d2) drift step path: a chezmoi status line with a single-column
-#            status (" M x") must yield "~/x", not "~/M x" (the path starts
-#            after the fixed two status columns + space). Fake chezmoi on
-#            PATH so the drift section is deterministic.
-na_fakebin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-na-fake.XXXXXX")"
-cat > "$na_fakebin/chezmoi" <<'SH'
-#!/bin/sh
-case "$1" in
-  --version) echo "chezmoi version v0.0.0-fake" ;;
-  status) printf '%s\n' " M .gitconfig" "MM .npmrc" ;;
-  *) exit 0 ;;
-esac
-SH
-chmod +x "$na_fakebin/chezmoi"
-if na_drift="$(HOME="$na_home" PATH="$na_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal --actions-only 2>&1)"; then
-  if grep -F -q -- "        \$ chezmoi diff $na_home/.gitconfig   #" <<< "$na_drift" \
-    && grep -F -q -- "        \$ chezmoi diff $na_home/.npmrc   #" <<< "$na_drift" \
-    && ! grep -F -q -- "/M .gitconfig" <<< "$na_drift"; then
-    ok "test passed: drift steps point at the path after the two status columns (' M x' -> ~/x)"
-  else
-    printf '%s\n' "$na_drift" >&2
-    fail "test failed: drift step path extraction wrong"
-    status=1
-  fi
-else
-  printf '%s\n' "$na_drift" >&2
-  fail "test failed: doctor must stay exit 0 (drift steps)"
   status=1
 fi
 rm -rf "$na_fakebin"
