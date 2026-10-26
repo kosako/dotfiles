@@ -318,8 +318,8 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 検証内容:
 
 - `validate-policy.sh --all` が全 profile を検証すること。
-- `validate-policy.sh --all` が一時 file を作らないこと(#329。Ctrl-C では bash 3.2 が EXIT trap を走らせず、file が
-  残りうるため): 呼ばれると marker を残して失敗する `mktemp` を PATH の先頭に置き、空の directory を `TMPDIR` にしても
+- `validate-policy.sh --all` が一時 file を作らないこと(#329。後始末の途中に 2 つ目の signal が届くと、trap の後始末が
+  終わらずに file が残りうるため。#358): 呼ばれると marker を残して失敗する `mktemp` を PATH の先頭に置き、空の directory を `TMPDIR` にしても
   通り、marker も `TMPDIR` の中身も残らないこと。
 - enum capability の許可値を正しく受け入れること。
 - unknown profile / module / capability(module の `requires:` 内も)、重複 capability / module、enum の不正値、
