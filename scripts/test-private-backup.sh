@@ -326,6 +326,8 @@ else
 fi
 
 # 6. A checksum mismatch (manifest sha does not match the file) is caught.
+#    The sha is the only defect: the entry keeps the file's real size and
+#    mode, and the zeros are 64 hex digits so the schema check passes.
 bad="$fixture_home/stage-badsum"
 mkdir -p "$bad/files"
 printf 'real content\n' > "$bad/files/.zshrc.local"
@@ -342,7 +344,9 @@ else
   miss "verify missed a checksum mismatch"
 fi
 
-# 7. An archive file not present in the manifest is caught (sprawl).
+# 7. An archive file not present in the manifest is caught (sprawl). The
+#    declared file matches its entry, so no mismatch may be reported next to
+#    the sprawl (a second defect in the fixture would hide behind it).
 extra="$fixture_home/stage-extra"
 mkdir -p "$extra/files"
 printf 'x\n' > "$extra/files/declared"
@@ -351,7 +355,7 @@ write_manifest "$extra" declared
 make_archive "$extra" "$fixture_home/out/extra.age"
 verify_rc=0
 out="$(run verify --in "$fixture_home/out/extra.age" --identity "$fixture_home/keys/id.txt" 2>&1)" || verify_rc=$?
-if [[ "$verify_rc" -eq 1 ]] && grep -Fq "not in manifest" <<< "$out"; then
+if [[ "$verify_rc" -eq 1 ]] && grep -Fq "not in manifest" <<< "$out" && ! grep -Fq "mismatch:" <<< "$out"; then
   pass "verify detects an archive file missing from the manifest"
 else
   miss "verify missed an undeclared archive file"
@@ -2037,10 +2041,10 @@ ue_case "restore with a missing identity file" "identity file not found: $fixtur
 #     ignores it (the cleanup ignores INT / TERM) goes on to remove. A
 #     marker made beforehand turns that off (once), SIG_EVERY keeps it on
 #     for every removal (every, endsig), and SIG_RM_FAIL makes that first
-#     removal exit 1 instead
-#     (rmfail, endrmfail); SIG_NO_FIRST stops the fake yq at its snapshot
-#     (the end runs). Every other call goes to the real tool. A TMPDIR of
-#     its own per run, so a leftover shows and a KILL at the deadline
+#     removal exit 1 instead (rmfail, endrmfail); SIG_NO_FIRST stops the
+#     fake yq at its snapshot (the end runs). Every other call goes to the
+#     real tool. A TMPDIR of its own per run, so a leftover shows and a
+#     KILL at the deadline
 #     (kill_tree) cannot leak into the suite's temp. backup's three list
 #     files are made under that TMPDIR too (#372; case 34 pins how), so a
 #     cleanup that forgot them shows as a leftover (Codex review R5): the

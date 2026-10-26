@@ -733,7 +733,9 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `-archive.age` になること(doctor が読む形。#444)。
 - verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
 - `--identity-command`(op seam)経由でも verify できること。
-- manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
+- manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。checksum・台帳外・mode の
+  case が手で作る manifest は、file の実際の sha・size・mode を書き、その上に case の不整合を 1 つだけ足す(どの
+  umask でも、狙いの不整合のほかに食い違いが出ない。台帳外ファイルの case は mismatch が出ないことも確かめる)。
 - 通常の file の mode を持たせた hardlink の header(python3 で byte 単位に作る。無ければ skip)を verify が拒否すること
   (bsdtar では展開後の検査で、GNU tar では展開前の一覧の検査で)。展開後の検査を private-backup.sh から取り出し、
   symlink・fifo・hardlink を拒否し、通常の file と dir の tree を通し、辿れない dir を拒否することを、戻り値と message の両方で直接
@@ -789,7 +791,8 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   なしに失敗する。signal を使わないので INT の回だけ)。signal は run の中から送る(timing の窓を作らない): PATH 先頭の
   fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を記録してから group へ。正常終了の run は記録だけ)と fake
   `rm`(temp 配下の削除 = 後始末の途中で自分を含む group へ送り、自分に届いてから本物の rm に渡す。自分に送った
-  signal は kill が戻る前に届くので、待たない。signal で死ぬ rm はそこで死に、無視する rm は削除を続ける)。backup の一覧 file 3 つも専用 TMPDIR の下に作られる(#372。作り方は下の bullet)ので、
+  signal は kill が戻る前に届くので、待たない。signal で死ぬ rm はそこで死に、無視する rm は削除を続ける)。
+  backup の一覧 file 3 つも専用 TMPDIR の下に作られる(#372。作り方は下の bullet)ので、
   消し忘れは残留の検査に映る(Codex review R5)。backup の run は、その 3 つが manifest 検査の時点で専用 TMPDIR にあったことも確かめる。
   中断の run は、終了後に専用 TMPDIR が空で、rc が 130 / 143 で、python3 の wrapper を親に
   して記録した waitpid の終了状態が `exit 130` ではなく signal であること。rmfail は失敗した削除の warn も確かめる。正常
