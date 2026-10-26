@@ -252,7 +252,9 @@ suite と bash32 の render group の suite、両 job の和と `docs/github-wor
 `scripts/test-*.sh`(source 専用の `test-lib.sh` と、`test-install-packages.sh` から呼ばれる `test-inventory.sh` を除く)が、
 それぞれ同じ集合であること(job ごとに比べるので、両 job で走る `test-npmrc.sh` を片方から落としても検出する。どれかの一覧が空なら
 fail)、bash32 の `test-doctor.sh` の part が 1 から `doctor_parts` まで 1 回ずつあること、`test-install-packages.sh` が
-`test-inventory.sh` を呼んでいること。
+`test-inventory.sh` を呼んでいること、bash32 job の step が `if: matrix.group == '<group>'` で名指す group がすべて matrix に
+あること(bash 3.2 の syntax check と validate-policy は others group でだけ走るので、group の名前が変わると黙ってどこでも
+走らなくなる。名指す step が 1 つも無ければ fail)。
 
 ## test-zshrc-compinit.sh
 
@@ -427,8 +429,12 @@ fixture は一時 directory に作り、実際の home や global Git config に
   約 7 日前の cutoff)を見る `npm_before_within_age_window` の呼び出しの引数が 7 日・±12h(`7 43200`)に固定されていることを
   確かめる(窓の幅は doctor の run では見分けられないため)。今の npm の形(`min-release-age` が 7 で `before` が null、かつ
   `npm config list` のどの source にも `before` が無い)と `min-release-age-exclude` の件数の検査は、`test-doctor.sh` が doctor を
-  走らせて挙動で固定する(#443)。その run の fake npm は stderr に何も書かないので、doctor が `npm config list --json` の stderr を
-  捨てること(`2>/dev/null`)だけはここで静的に固定する。
+  走らせて挙動で固定する(#443)。ただしその run は今の npm の形の age を 1 と 7 にしか置かないので、age の項だけはここで静的に
+  固定する: `npm min-release-age=7 honored (before unset)` を出す branch の条件(直前の if / elif の文。行の継続は 1 行に
+  つなぐ)が、age を `"$npm_age" == "7"` の形でだけ比べ、`||` を持たないこと(`-ge 5` のように緩めた条件は 1 と 7 の run を
+  通ってしまう)。また、その run の fake npm は stderr に何も書かず、知らない引数を無視するので、doctor が
+  `"$(npm config list --json 2>/dev/null)"` をそのまま読むこと(npm の stderr を捨て、引数を足さない。comment の行は数えない)も
+  ここで静的に固定する。
 
 静的検査は chezmoi 無しで実行できる(CI の validate job)。chezmoi がある環境では加えて personal を
 throwaway destination に実 render し、生成された `~/.npmrc` の内容(hardening 値・token / registry の

@@ -141,6 +141,26 @@ else
   wiring_failed=1
 fi
 
+# A bash32 step gated on one group (`if: matrix.group == '<group>'`) runs in
+# no group once that group is renamed, and the compares above only tell the
+# render group from the others: the bash 3.2 parse of every script and
+# validate-policy run in the others group alone. Every group a step names
+# must be in the matrix.
+yq -r '.jobs.bash32.steps[].if // ""' "$workflow" \
+  | { grep -oE "matrix\.group == '[a-z0-9-]+'" || true; } \
+  | sed "s/^matrix\.group == '\(.*\)'\$/\1/" | LC_ALL=C sort -u > "$wiring/step-groups"
+yq -r '.jobs.bash32.strategy.matrix.include[].group' "$workflow" | LC_ALL=C sort -u > "$wiring/groups"
+unknown_groups="$(LC_ALL=C comm -23 "$wiring/step-groups" "$wiring/groups" | tr '\n' ' ')"
+if [[ ! -s "$wiring/step-groups" || ! -s "$wiring/groups" ]]; then
+  fail "CI wiring: no bash32 step is gated on a matrix group, or the matrix has no group (renamed?)"
+  wiring_failed=1
+elif [[ -n "$unknown_groups" ]]; then
+  fail "CI wiring: bash32 steps are gated on groups the matrix does not have: ${unknown_groups% }"
+  wiring_failed=1
+else
+  ok "CI wiring: every group a bash32 step is gated on is in the matrix"
+fi
+
 if grep -Fq '"$SCRIPT_DIR/test-inventory.sh"' "$DOTFILES_ROOT/scripts/test-install-packages.sh"; then
   ok "CI wiring: test-install-packages.sh runs test-inventory.sh"
 else

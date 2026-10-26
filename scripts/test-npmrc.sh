@@ -107,19 +107,65 @@ check_module_gate "mise config managed only with enableRuntimeManagement" \
 
 section "consistency: doctor enforce expectations"
 
+# npm_honor_age_check — the age term of the current npm form. doctor honors
+# min-release-age with `before` unset in the branch that prints
+# `ok "npm min-release-age=7 honored (before unset)"`, and test-doctor runs
+# that form only at ages 1 (warned) and 7 (honored), so a condition loosened
+# to take other ages as well (e.g. `-ge 5`) passes those runs. Each such
+# branch's condition (the if/elif statement just before the ok line, its
+# backslash continuations joined, so a reflow still matches) must test the
+# age only as `"$npm_age" == "7"`, at least once, and hold no `||`. Its other
+# terms are pinned by behavior in test-doctor.sh. Prints why on failure.
+npm_honor_age_check() {
+  awk -v marker='ok "npm min-release-age=7 honored (before unset)"' -v term='"$npm_age" == "7"' '
+    {
+      if (cont) { stmt = stmt " " $0 } else { prev = stmt; stmt = $0 }
+      cont = (stmt ~ /\\$/)
+      if (cont) sub(/\\$/, "", stmt)
+      if (cont || !index($0, marker)) next
+      found++
+      why = ""
+      if (prev !~ /^[[:space:]]*(if|elif)[[:space:]].*[[:space:]]then[[:space:]]*$/) why = "no if/elif condition just before it"
+      else if (index(prev, "||")) why = "its condition has ||"
+      n = 0
+      rest = prev
+      while (why == "" && (i = index(rest, "npm_age")) > 0) {
+        if (substr(rest, i + 7, 1) !~ /[A-Za-z0-9_]/) {
+          n++
+          if (i < 3 || substr(rest, i - 2, length(term)) != term ||
+            substr(rest, i - 2 + length(term), 1) !~ /[[:space:]]/) why = "its condition tests npm_age other than as " term
+        }
+        rest = substr(rest, i + 7)
+      }
+      if (why == "" && n == 0) why = "its condition does not test npm_age"
+      if (why != "") { print "the ok on line " NR ": " why ": " prev; bad = 1 }
+    }
+    END {
+      if (!found) { print "no line " marker; exit 1 }
+      exit bad
+    }' "$SCRIPT_DIR/doctor.sh"
+}
+
 while IFS= read -r line; do
   key="${line%%=*}"
   if [[ "$key" == "min-release-age" ]]; then
     # The 7-day wait has two forms by npm version (#443), and doctor accepts
     # both. The current form (min-release-age=7 with `before` unset) and the
     # min-release-age-exclude count are pinned by behavior in test-doctor.sh
-    # (NPM-E..Y). Older npm flattened the age into `before` (now - <days>):
-    # doctor verifies that cutoff is ~7 days ago through
-    # npm_before_within_age_window (exercised below). test-doctor's runs do
-    # not tell a loosened tolerance from the real one, so require the exact
-    # call args (days=7, tolerance=43200): a wrong age (e.g. `1 43200`) or a
-    # loosened window (e.g. `7 90000`) must break this test, locking the
-    # 7-day (+/-12h) contract.
+    # (NPM-E..Y), except the age of the current form, which those runs set
+    # only to 1 and 7: npm_honor_age_check (above) pins it. Older npm
+    # flattened the age into `before` (now - <days>): doctor verifies that
+    # cutoff is ~7 days ago through npm_before_within_age_window (exercised
+    # below). test-doctor's runs do not tell a loosened tolerance from the
+    # real one, so require the exact call args (days=7, tolerance=43200): a
+    # wrong age (e.g. `1 43200`) or a loosened window (e.g. `7 90000`) must
+    # break this test, locking the 7-day (+/-12h) contract.
+    if npm_age_why="$(npm_honor_age_check)"; then
+      ok "test passed: doctor honors min-release-age with before unset only at 7 (current npm)"
+    else
+      fail "test failed: doctor.sh must honor min-release-age with before unset only when \"\$npm_age\" == \"7\" ($npm_age_why)"
+      status=1
+    fi
     if grep -Eq 'npm_before_within_age_window .* 7 43200([[:space:]]|;|$)' "$SCRIPT_DIR/doctor.sh"; then
       ok "test passed: doctor verifies min-release-age via before cutoff (7d +/-12h, older npm)"
     else
@@ -138,12 +184,16 @@ done < <(grep -E '^[a-z-]+=' "$NPMRC_TEMPLATE")
 
 # doctor counts min-release-age-exclude in `npm config list --json`; the count
 # is pinned by behavior in test-doctor.sh, whose fake npm writes nothing to
-# stderr, so those runs do not see whether npm's own stderr is kept out of
-# the report. Only that redirect is pinned here.
-if grep -Fq 'npm config list --json 2>/dev/null' "$SCRIPT_DIR/doctor.sh"; then
-  ok "test passed: doctor reads npm config list --json with npm's stderr discarded"
+# stderr and ignores the arguments it does not know, so those runs see
+# neither whether npm's own stderr is kept out of the report nor an argument
+# added to the call (e.g. `--location=global`, which lists one source only).
+# The whole command substitution is pinned here, on a line that is not a
+# comment.
+if awk -v call='"$(npm config list --json 2>/dev/null)"' \
+  '$0 !~ /^[[:space:]]*#/ && index($0, call) { found = 1 } END { exit !found }' "$SCRIPT_DIR/doctor.sh"; then
+  ok "test passed: doctor reads npm config list --json with no other argument and npm's stderr discarded"
 else
-  fail "test failed: doctor.sh must read npm config list --json with 2>/dev/null"
+  fail "test failed: doctor.sh must read \"\$(npm config list --json 2>/dev/null)\""
   status=1
 fi
 
