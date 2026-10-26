@@ -910,15 +910,15 @@ capability(`enforceAiSandbox` / `gateGitHubMcp` / `gateUnusedClaudeMcp`)を flip
 順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 21 件(#341)を足して計 56 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
 含めて追加)、1Password の CLI 全体(1 件)と #334 / #381 の secret を含みうる設定 file の読み取り(4 件)と #304 / #334 の作業を捨てる git と
-hook の skip(71 件)の計 76 件の無条件 ask、その rule を Claude Code の
+hook の skip(71 件)の計 76 件の無条件 ask、`allow` が `mcp__pencil` だけで permissions にほかの key が無いこと(key の順には依らない)、その rule を Claude Code の
 docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一の ` *` は bare の command にも一致、deny → ask の順)で git の
 command の集合に当てた判定(作業を捨てる形と代表的な束ね(`-uf` / `-df` / `-qf`)は ask、hook の skip は
 `git commit` / `git push` の直後なら deny でそれ以外(global option・後ろや最後の語・束ね・引用の中の言及)は ask、
 `--force-with-lease`・`feature-f` のような branch 名・branch の作成と切替・merge 済みの `-d`・`--soft` などの日常の git と、
 `cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
-として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで exact pin)、#93 で
+として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで、allow も exact pin。`gateGitHubMcp` / `gateUnusedClaudeMcp` を false にした render は既定の render から、`gateGitHubMcp=false` と `enforceAiSandbox=true` を合わせた render は `enforceAiSandbox=true` の render から、その gate の deny を除いたものと JSON 全体で一致すること)、#93 で
 取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
-PostToolUse + Stop / `enableHerdrIntegration` の SessionStart。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225)を exact に確認する。
+PostToolUse + Stop / `enableHerdrIntegration` の SessionStart / `enableToolCallRecordHook` の記録の hook。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225 / #353)を exact に確認する(personal 既定の render では `hooks` の object 全体を pin するので、entry に足された key(safe-gh の `async` や `timeout` など)も落ちる)。
 managed file は modify script(#360)なので、live の file がある home への apply も確かめる: `autoMode` / `modelSettings` /
 未知の key と `/model` の選択(`model`)が値も位置もそのまま残る、managed の key の古い値は render に戻り要らない
 `sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
@@ -926,7 +926,8 @@ byte のまま残る、`model` が無ければ template の値が入る、hook �
 capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、ちょうど 1 つの JSON の
 object でない live の file(配列・壊れた JSON・空白だけ・object 2 つ・改行だけ・NUL を含む。末尾の NUL も)は apply を止めて
 byte 単位で変えない、UTF-8 でない byte を string に含むだけの live の file は UTF-8 の locale でも apply が通り byte 単位で
-変わらない、file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない。script が
+変わらない、file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない(chezmoi は script に
+command を `CHEZMOI_COMMAND` で渡すので、diff と 2 回目の apply の両方を走らせる)。script が
 live の file のために自分で一時 file を作らず、jq の引数にも置かないこと(#446)も確かめる: `TMPDIR` が無い dir を指しても、
 live の file への `chezmoi diff` は通常の `TMPDIR` のときと同じ差分を出し、apply は同じ file を書き、その後の
 `chezmoi status` は空(chezmoi 自身が script を置く `scriptTempDir` は在る dir にする)。その 3 回では PATH の先頭の shim で、
