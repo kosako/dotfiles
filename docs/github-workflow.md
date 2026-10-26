@@ -132,7 +132,9 @@ git diff --check
 
 `test-render.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` /
 `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
-(CI では version pin して導入する。render job と、macOS の bash32 job の render group 所属)。`test-starship.sh` は source の静的検査と
+(CI では version pin して導入する。render job と、macOS の bash32 job の render group 所属)。`test-render.sh` / `test-claude-settings.sh` /
+`test-codex-settings.sh` / `test-opencode-settings.sh` は jq も必要とする(render した JSON がちょうど 1 つの object かを jq で確かめる。
+yq の JSON の reader は余分な comma を受け入れるため。jq は CI の runner と macOS に入っている)。`test-starship.sh` は source の静的検査と
 Git fixture での条件実行なので chezmoi は不要だが、CI では同じく render job と bash32 の render group で走る。
 `test-codex-settings.sh` は、render した Codex の rules を `codex execpolicy check` で評価する節も持つ。CI の render job と
 bash32 の render group は、version と sha256 を固定した codex(release の Linux 用 / macOS 用の binary)を入れて回し、codex が無ければ CI では fail、手元では表示して飛ばす。
