@@ -131,6 +131,21 @@ run_fixture() {
 probe_go() {
   run_fixture bash -c 'source "$1"; go_bin_dir' _ "$fixture/repo/scripts/lib-policy.sh"
 }
+# expect_ok LABEL CMD...: run CMD through run_fixture into $output (stderr
+# included). A step that must succeed and exits non-zero prints that output
+# and fails naming LABEL and the exit code, instead of ending the suite
+# without a word under set -e. Env prefixes reach run_fixture
+# (INVENTORY_TEST_STATE=empty expect_ok ...), and so does a redirect.
+expect_ok() {
+  local label="$1" rc=0
+  shift
+  output="$(run_fixture "$@" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    printf '%s\n' "$output" >&2
+    fail "$label: exited $rc, expected 0"
+    exit 1
+  fi
+}
 installer="$fixture/repo/scripts/install-packages.sh"
 
 if [[ "$(probe_go)" != "$fixture/gobin" ]] || [[ -e "$fixture/toolchain-download-attempt" ]]; then
@@ -151,7 +166,7 @@ done
 ok "failed or invalid Go env never falls back to /bin"
 
 : > "$fixture/installs"
-output="$(run_fixture "$installer" --apply 2>&1)"
+expect_ok "installer --apply with fixture-go in GOBIN" "$installer" --apply
 if ! grep -Fq 'already installed: fixture-go' <<< "$output" || [[ -s "$fixture/installs" ]]; then
   fail "GOBIN executable outside PATH must be skipped without reinstalling"
   printf '%s\n' "$output" >&2
@@ -159,7 +174,7 @@ if ! grep -Fq 'already installed: fixture-go' <<< "$output" || [[ -s "$fixture/i
 fi
 ok "installed Go executable outside PATH is not reinstalled"
 cp "$fixture/gobin/fixture-go" "$fixture/gopath/bin/fixture-go"
-output="$(INVENTORY_TEST_GO_STATE=gopath run_fixture "$installer" --apply 2>&1)"
+INVENTORY_TEST_GO_STATE=gopath expect_ok "installer --apply with fixture-go in GOPATH/bin" "$installer" --apply
 if ! grep -Fq 'already installed: fixture-go' <<< "$output" || [[ -s "$fixture/installs" ]]; then
   fail "GOPATH executable outside PATH must also be skipped"
   exit 1
@@ -181,7 +196,7 @@ mv "$fixture/gobin/fixture-go" "$fixture/saved-fixture-go"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/bin/fixture-go"
 chmod +x "$fixture/bin/fixture-go"
 : > "$fixture/installs"
-output="$(run_fixture "$installer" --apply 2>&1)"
+expect_ok "installer --apply with fixture-go only on PATH" "$installer" --apply
 if ! grep -Fxq 'go install example.invalid/fixture/cli@latest' "$fixture/installs" \
   || grep -Fq 'already installed: fixture-go' <<< "$output"; then
   fail "a Go executable only on PATH (outside the Go bin dir) must be installed into the Go bin dir"
@@ -225,8 +240,8 @@ for state in malformed wrong-shape; do
 done
 ok "npm parse and shape errors remain unknown"
 
-output="$(INVENTORY_TEST_STATE=fail run_fixture bash -c \
-  'set -euo pipefail; source "$1"; report_catalog_drift' _ "$fixture/repo/scripts/lib-policy.sh" 2>&1)"
+INVENTORY_TEST_STATE=fail expect_ok "catalog drift with failed inventories" bash -c \
+  'set -euo pipefail; source "$1"; report_catalog_drift' _ "$fixture/repo/scripts/lib-policy.sh"
 for source in brew_formula brew_leaves brew_cask npm_global go_install mas; do
   if ! grep -Fq "catalog inventory INCOMPLETE: $source" <<< "$output"; then
     fail "drift must disclose the failed $source inventory"
@@ -238,8 +253,8 @@ if grep -Eq 'no catalog drift|not installed:|undeclared:' <<< "$output"; then
   exit 1
 fi
 ok "catalog drift stays exit 0 and reports INCOMPLETE for failed sources"
-output="$(INVENTORY_TEST_STATE=partial run_fixture bash -c \
-  'set -euo pipefail; source "$1"; report_catalog_drift' _ "$fixture/repo/scripts/lib-policy.sh" 2>&1)"
+INVENTORY_TEST_STATE=partial expect_ok "catalog drift with one failed probe" bash -c \
+  'set -euo pipefail; source "$1"; report_catalog_drift' _ "$fixture/repo/scripts/lib-policy.sh"
 if ! grep -Fq 'catalog inventory INCOMPLETE: brew_formula' <<< "$output" \
   || ! grep -Fq 'not installed: fixture-npm' <<< "$output" \
   || grep -Eq 'not installed: fixture-formula|no catalog drift' <<< "$output"; then
@@ -278,12 +293,12 @@ fi
 ok "catalog drift writes no temp file (inventories held in variables)"
 
 rm "$fixture/gobin/fixture-go"
-output="$(INVENTORY_TEST_STATE=empty run_fixture "$installer" 2>&1)"
+INVENTORY_TEST_STATE=empty expect_ok "installer dry-run with empty inventories" "$installer"
 if ! grep -Fq '5 would be installed' <<< "$output" || [[ -s "$fixture/installs" ]]; then
   fail "successful empty inventories must plan installs without side effects"
   exit 1
 fi
-output="$(INVENTORY_TEST_STATE=empty run_fixture "$installer" --apply 2>&1)"
+INVENTORY_TEST_STATE=empty expect_ok "installer --apply with empty inventories" "$installer" --apply
 if ! grep -Fq '5 installed, 0 skipped, 0 failed' <<< "$output" \
   || [[ "$(awk 'END { print NR }' "$fixture/installs")" != 5 ]]; then
   fail "successful empty inventories must reach all five fake installers"
@@ -295,7 +310,8 @@ ok "confirmed absence still permits installation (fake managers only)"
 # still probed and installed; before, the first call swallowed the remaining
 # rows and the run closed as "1 installed, 0 skipped, 0 failed".
 : > "$fixture/installs"
-output="$(INVENTORY_TEST_STATE=empty INVENTORY_TEST_READ_STDIN=1 run_fixture "$installer" --apply 2>&1 </dev/null)"
+INVENTORY_TEST_STATE=empty INVENTORY_TEST_READ_STDIN=1 expect_ok "installer --apply with managers that read stdin" \
+  "$installer" --apply </dev/null
 if ! grep -Fq '5 installed, 0 skipped, 0 failed' <<< "$output" \
   || [[ "$(awk 'END { print NR }' "$fixture/installs")" != 5 ]]; then
   printf '%s\n' "$output" >&2

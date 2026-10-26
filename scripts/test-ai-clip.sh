@@ -10,7 +10,8 @@ set -euo pipefail
 #     exit, a non-zero exit, AND an interrupt (Ctrl-C) mid-command — the
 #     audit found it left behind on Ctrl-C (#243);
 #   - the command's own exit status is returned, and a clipboard failure
-#     does not change it;
+#     does not change it (checked with 1 and with a status other than 1, so
+#     a wrapper that turns every failure into 1 does not pass);
 #   - the command runs in the CURRENT shell (cd / export / source persist);
 #   - $? in the command is the status the line was entered with, as with
 #     Enter, also with ERR_RETURN / ERR_EXIT set (#400);
@@ -115,6 +116,13 @@ source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 _ai_clip_run 'echo err; false'
 print -r -- "rc=$?"
 ZSH
+# A status other than 1: a wrapper that maps every failure to 1 passes the
+# `false` case above but not this one.
+cat > "$fixture/cases/nonzero_3.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+_ai_clip_run 'echo err; (exit 3)'
+print -r -- "rc=$?"
+ZSH
 cat > "$fixture/cases/assign.zsh" <<'ZSH'
 source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 _ai_clip_run "$(< "$AI_CLIP_FIXTURE/command.txt")"
@@ -186,6 +194,13 @@ ZSH
 cat > "$fixture/cases/noclip.zsh" <<'ZSH'
 source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
 _ai_clip_run 'echo x; false' 2> "$AI_CLIP_FIXTURE/stderr.txt"
+print -r -- "rc=$?"
+ZSH
+# A status other than 1: a wrapper that returns 1 when the copy fails passes
+# the `false` case above but not this one.
+cat > "$fixture/cases/noclip_5.zsh" <<'ZSH'
+source "$AI_CLIP_FIXTURE/cases/prelude.zsh"
+_ai_clip_run 'echo x; (exit 5)' 2> "$AI_CLIP_FIXTURE/stderr.txt"
 print -r -- "rc=$?"
 ZSH
 
@@ -275,18 +290,24 @@ else
   status=1
 fi
 
-# 2) Non-zero exit: the command's status is returned; temp removed.
-rm -f "$fixture/clip.txt"
-if out="$(run_case "$with_clip" "" nonzero _ai_clip_run 2>&1)" \
-  && [[ "$out" == $'err\nrc=1' ]] \
-  && grep -Fxq '[exit status: 1]' "$fixture/clip.txt" \
-  && [[ "$(leftovers)" == 0 ]]; then
-  ok "test passed: non-zero exit -> status 1 preserved, temp removed"
-else
-  printf 'out=%s\nleftovers=%s\n' "$out" "$(leftovers)" >&2
-  fail "test failed: non-zero exit contract"
-  status=1
-fi
+# 2) Non-zero exit: the command's own status is returned and copied; temp
+#    removed. Twice: `false` (1) and `(exit 3)`. Status 1 alone would also
+#    pass a wrapper that maps every failure to 1; 3 does not.
+for nonzero_run in "nonzero 1 false" "nonzero_3 3 (exit 3)"; do
+  read -r nonzero_case nonzero_status nonzero_tail <<< "$nonzero_run"
+  rm -f "$fixture/clip.txt"
+  if out="$(run_case "$with_clip" "" "$nonzero_case" _ai_clip_run 2>&1)" \
+    && [[ "$out" == "err"$'\n'"rc=$nonzero_status" ]] \
+    && [[ "$(cat "$fixture/clip.txt")" == "\$ echo err; $nonzero_tail"$'\nerr\n'"[exit status: $nonzero_status]" ]] \
+    && [[ "$(leftovers)" == 0 ]]; then
+    ok "test passed: non-zero exit -> the command's own status ($nonzero_status) is returned and copied, temp removed"
+  else
+    printf 'status=%s\nout=%s\nclip=%s\nleftovers=%s\n' "$nonzero_status" "$out" \
+      "$(cat "$fixture/clip.txt" 2>/dev/null)" "$(leftovers)" >&2
+    fail "test failed: non-zero exit contract"
+    status=1
+  fi
+done
 
 # 3) SIGINT to the shell mid-command (the audit's reproduction), under an
 #    INTERACTIVE zsh. Reach markers pin that the command ran up to the
@@ -433,17 +454,23 @@ done
 
 # 5) No clipboard target (no pbcopy on PATH, OSC 52 not opted in): warning
 #    on stderr, command status unchanged, temp removed, nothing copied.
-rm -f "$fixture/clip.txt" "$fixture/stderr.txt"
-if out="$(run_case "$no_clip" "" noclip _ai_clip_run)" \
-  && [[ "$out" == $'x\nrc=1' ]] \
-  && grep -Fq 'ai-clip: no clipboard target' "$fixture/stderr.txt" \
-  && [[ ! -e "$fixture/clip.txt" && "$(leftovers)" == 0 ]]; then
-  ok "test passed: clipboard failure is reported on stderr and does not change the exit status; temp removed"
-else
-  printf 'out=%s\nstderr=%s\nleftovers=%s\n' "$out" "$(cat "$fixture/stderr.txt" 2>/dev/null)" "$(leftovers)" >&2
-  fail "test failed: clipboard-failure contract"
-  status=1
-fi
+#    Twice: `false` (1) and `(exit 5)`. A wrapper that returns 1 when the copy
+#    fails passes the first run but not the second.
+for noclip_run in "noclip 1" "noclip_5 5"; do
+  read -r noclip_case noclip_status <<< "$noclip_run"
+  rm -f "$fixture/clip.txt" "$fixture/stderr.txt"
+  if out="$(run_case "$no_clip" "" "$noclip_case" _ai_clip_run)" \
+    && [[ "$out" == "x"$'\n'"rc=$noclip_status" ]] \
+    && grep -Fq 'ai-clip: no clipboard target' "$fixture/stderr.txt" \
+    && [[ ! -e "$fixture/clip.txt" && "$(leftovers)" == 0 ]]; then
+    ok "test passed: clipboard failure is reported on stderr and does not change the exit status ($noclip_status); temp removed"
+  else
+    printf 'status=%s\nout=%s\nstderr=%s\nleftovers=%s\n' "$noclip_status" "$out" \
+      "$(cat "$fixture/stderr.txt" 2>/dev/null)" "$(leftovers)" >&2
+    fail "test failed: clipboard-failure contract"
+    status=1
+  fi
+done
 
 # 6) A failed temp allocation must stop before eval or clipboard access.
 reset_markers

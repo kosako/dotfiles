@@ -18,9 +18,10 @@ set -euo pipefail
 #   - partial deploy (dispatcher only): must NOT arm either (must-2: arming on
 #     the dispatcher alone would still block every commit).
 #   - full deploy: shims + hooks.gitconfig render with exact pinned bytes, and
-#     end to end a commit runs BOTH stages, a failing dispatcher blocks the
-#     commit, and --no-verify bypasses it (documented best-effort limit) but
-#     not the git-identity verdict in prepare-commit-msg (agent-tools#449).
+#     end to end a commit runs pre-commit / prepare-commit-msg / commit-msg /
+#     post-commit through the shims, a failing dispatcher blocks the commit,
+#     and --no-verify bypasses it (documented best-effort limit) but not the
+#     git-identity verdict in prepare-commit-msg (agent-tools#449).
 #   - enableGitHookGates=false: already-applied wiring is REMOVED on the next
 #     apply (template self-gate renders empty -> chezmoi prunes; a `requires:`
 #     gate would leave a fail-closed shim lingering, the #184 lesson).
@@ -169,10 +170,10 @@ fi
 
 section "git hook gates rendered content (full deploy)"
 
-# 3) Full deploy planted BEFORE apply: both shims and hooks.gitconfig render
-#    with the exact expected bytes and the shims are executable. The
-#    dispatcher path pins the ~/.claude deploy (the dotfiles pick of record;
-#    agent-tools deploys the same bytes to both tool homes).
+# 3) Full deploy planted BEFORE apply: every declared shim (#361) and
+#    hooks.gitconfig render with the exact expected bytes and the shims are
+#    executable. The dispatcher path pins the ~/.claude deploy (the dotfiles
+#    pick of record; agent-tools deploys the same bytes to both tool homes).
 home_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates.XXXXXX")"
 tmp_roots+=("$home_root")
 mkdir -p "$home_root/home"
@@ -281,9 +282,10 @@ section "git hook gates end to end (rendered ~/.gitconfig drives the shims)"
 #    render home, the rendered ~/.gitconfig is the global config (its
 #    unconditional include pulls hooks.gitconfig, which sets core.hooksPath),
 #    and the planted dispatcher stub is swapped for a logging fake. A passing
-#    dispatcher must see BOTH stages; a failing one must block the commit;
-#    --no-verify must bypass both (the documented best-effort limit), yet a
-#    failing git-identity verdict in prepare-commit-msg must still block it.
+#    dispatcher must see the four commit stages; a failing one must block the
+#    commit; --no-verify must bypass pre-commit / commit-msg (the documented
+#    best-effort limit), yet a failing git-identity verdict in
+#    prepare-commit-msg must still block it.
 if ! command -v git >/dev/null 2>&1; then
   warn "git not found, skipping end-to-end checks"
 else
@@ -451,8 +453,10 @@ section "git hook gates gating (#196)"
 #    — not just "does not newly create it". A lingering shim + hooksPath after
 #    a cap flip would keep commits pointed at a fail-closed dispatcher, so
 #    drive both applies into the SAME (fully deployed) home: cap ON renders
-#    the files, cap OFF must delete all three (template self-gate renders
-#    empty and chezmoi prunes; a `requires:` gate would miss this, #184).
+#    the files, cap OFF must delete every shim and hooks.gitconfig (template
+#    self-gate renders empty and chezmoi prunes; a `requires:` gate would
+#    miss this, #184). The cap-on precondition is gate_wiring_armed, the same
+#    exact pin as case 3 (5a uses it too).
 off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-off-src.XXXXXX")"
 tmp_roots+=("$off_src")
 make_flipped_source "$off_src"
@@ -470,7 +474,7 @@ apply_into_removal_home() {
 if ! apply_into_removal_home "$DOTFILES_ROOT"; then
   fail "test failed: cap-on apply into removal home did not render"
   status=1
-elif gate_files_absent "$removal_root/home"; then
+elif ! gate_wiring_armed "$removal_root/home"; then
   fail "test failed: cap-on apply did not arm the gate wiring (removal test precondition; deploy was planted)"
   status=1
 elif ! apply_into_removal_home "$off_src/src"; then
@@ -487,11 +491,11 @@ fi
 #     「配備が消えた場合」)。2 段 gate のもう片方: case 5 は intent (capability)
 #     を落とし、ここは readiness (deploy) を落とす。source は同じまま、cap ON で
 #     武装した home から agent-tools の scripts を消して再 apply すると、probe が
-#     unmet → 空 render → chezmoi が 3 file を prune する。消えるまでの commit は
+#     unmet → 空 render → chezmoi が全 shim と hooks.gitconfig を prune する。消えるまでの commit は
 #     無い dispatcher を exec して止まるので残置は許されない。source を変えない
 #     のは意図的: source が変わったときだけ再評価する probe や、render 済み target
 #     を readiness と見なす probe は case 5 を通って、ここだけで落ちる。武装の
-#     前提確認は gate_wiring_armed (3 file とも case 3 と同じ exact pin) で取る:
+#     前提確認は gate_wiring_armed (全 shim と hooks.gitconfig を case 3 と同じ exact pin で) で取る:
 #     1 file の残置を armed と誤認すると、この case の disarm 判定が空になる。
 disarm_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-disarm.XXXXXX")"
 tmp_roots+=("$disarm_root")
@@ -521,7 +525,9 @@ fi
 #    chezmoiignore drops a disabled module's directory subtree WHOLESALE, so
 #    gates placed under it would silently unwire when signing is off. Pin the
 #    placement: with enableGitSigning=false (and a full deploy) the gates must
-#    still arm.
+#    still arm, fully: gate_wiring_armed checks every declared shim and
+#    hooks.gitconfig against case 3's exact bytes, so one shim lost to the
+#    flip fails here.
 signing_off_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-signoff.XXXXXX")"
 tmp_roots+=("$signing_off_src")
 make_flipped_source "$signing_off_src"
@@ -534,9 +540,7 @@ plant_gate_deploy "$signing_off_root/home" "${GATE_SCRIPTS[@]}"
 if ! render_personal_into "$signing_off_src/src" "$signing_off_root"; then
   fail "test failed: enableGitSigning=false apply did not render"
   status=1
-elif [[ -x "$signing_off_root/home/.config/git-hook-gates/hooks/pre-commit" ]] \
-  && [[ -x "$signing_off_root/home/.config/git-hook-gates/hooks/commit-msg" ]] \
-  && [[ -f "$signing_off_root/home/.config/git-hook-gates/hooks.gitconfig" ]] \
+elif gate_wiring_armed "$signing_off_root/home" \
   && [[ ! -e "$signing_off_root/home/.config/git/signing.gitconfig" ]]; then
   ok "test passed: enableGitSigning=false keeps the gates armed (placement outside ~/.config/git is load-bearing)"
 else

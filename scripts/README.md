@@ -195,7 +195,7 @@ managed-path orphan、managed drift、Codex projects trust の stale / home 全�
 ## test-preflight.sh
 
 `preflight.sh` の report-only 契約と apply-impact 警告を fixture HOME で検証する(#150)。
-空 home の exit 0 / shell-extra・ssh-1password の replace 警告と override pointer /
+空 home の exit 0(`~/.config` も無いときは apply が 0700 で作るという item を出す)/ shell-extra・ssh-1password の replace 警告と override pointer /
 非管理 profile の left-as-is / `~/.config` 権限分岐 / config.local の中身非表示 /
 `-` 始まりの引数(`-h` / `--all` / `--list-profiles` など)と 2 つ目の引数を exit 2 で拒否し report を走らせない(#309)/
 git-ignore の apply impact(既存 `~/.config/git/ignore` の置換 warn と `.git/info/exclude` への pointer、
@@ -206,7 +206,8 @@ herdr config の apply impact(既存 `~/.config/herdr/config.toml` の置換 war
 agent-tools の残量の読み取り口の apply impact(既存 `~/.config/agent-tools/usage-reader.json` の置換 warn、work の left-as-is、不在時の ok、#301)/
 policy validation 失敗時のみ非 0 / commands 節が確認する tool がすべて catalog(name / pkg / bin)か
 catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)/
-git hook gates の deploy 4 本の readiness(完全な deploy は script ごとと武装と hooksPath が ok、identity gate が欠けた旧 deploy は
+git hook gates の deploy 4 本の readiness(完全な deploy は script ごとと武装と hooksPath が ok。hooksPath は `~/.gitconfig` に直接書いた形と、
+apply が配線する形(`~/.gitconfig` の `[include]` が読む `hooks.gitconfig` に書く。読むには `--includes` が要る、#196)の両方で確かめる。identity gate が欠けた旧 deploy は
 その script と「武装しない」の warn、script の path が directory でも不完全とする、#307 / #392)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
 値を出さないこと(それぞれの warn は出し、canary は出ない、#307)、をカバーする。
 
@@ -291,7 +292,7 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   到達 marker で「中断前まで実行・中断後は未実行」を確認し、旧実装(末尾 `rm`)が file を残すことを対照として
   assert する(空振り防止)。
 - コマンド自身の exit status が返り、clipboard 失敗(`pbcopy` 不在・OSC 52 未 opt-in)は stderr の警告のみで
-  status を変えないこと。
+  status を変えないこと。どちらも status 1 と 1 以外(3 / 5)で確かめ、失敗を全部 1 にする wrapper を通さない。
 - コマンドは現在の shell で実行され `cd` / `export` が残ること。
 - コピー内容が「`$ コマンド`」+ 出力 +「`[exit status: N]`」であること。
 - コマンドが wrapper の内部の変数名に代入しても壊れないこと(#280): 正常終了と非 0 の終了では、既存の file が無事で
@@ -661,7 +662,7 @@ manager が PATH に無ければ skip + warn(runtime は mise の領分)。
 計画し、manager を一切呼ばないこと(呼び出しを記録する fake manager を PATH に前置。gate を通る entry が
 0 件なら fail)を確認する。installer の run には空の fixture HOME を渡し、実 home の設定を読ませない。
 
-`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続、track-only / manual entry の skip、manager 不在 source の skip + warn、install 失敗の集計と exit 1(#333)を確認する。実 manager・実 install・実 home は使わない。
+`test-inventory.sh` はこの test から実行する inventory 回帰検証で、単独でも実行できる。fake manager だけを PATH に置き、Go toolchain 自動取得の抑止、GOBIN / GOPATH の PATH 外 executable の再 install 防止、PATH 上にだけある Go の copy は導入済みとみなさず Go の bin dir に入れること(#305)、inventory の取得・解析失敗時に install しないこと、doctor の INCOMPLETE / exit 0 と成功 source の検査継続、track-only / manual entry の skip、manager 不在 source の skip + warn、install 失敗の集計と exit 1(#333)を確認する。成功するはずの run が非 0 で終わったときは、その出力と step 名・exit code を出して止まり、`test-install-packages.sh` も fail の行を出す。実 manager・実 install・実 home は使わない。
 
 ## private-backup.sh
 
@@ -1034,7 +1035,7 @@ prepare-commit-msg → commit-msg → post-commit の順に呼ばれること、
 prepare-commit-msg の identity の検査が失敗すれば `--no-verify` の commit も止まること(agent-tools#449。#431)、checkout で
 素通しの post-checkout が shim を通ることを確認する。`enableGitHookGates=false` の apply で適用済みの配線が
 **削除される**こと、配備(deploy 4 本)が消えた後の同じ source での再 apply でも配線が削除されること、
-`enableGitSigning=false` でも gate が武装したままであること、doctor / preflight が `core.hooksPath` を
+`enableGitSigning=false` でも gate が武装したままであること(全 shim と `hooks.gitconfig` が、signing を落とさないときと同じ exact な内容で render される)、doctor / preflight が `core.hooksPath` を
 `--includes` 付きで読むこと(静的 pin)と、deploy 4 本の一覧が武装の template・doctor・preflight・この test で同じであること
 (静的 pin、#307。doctor / preflight の部分 deploy での振る舞いは test-doctor / test-preflight が固定する)も確認する。
 throwaway destination に render し、実 home には触れない。

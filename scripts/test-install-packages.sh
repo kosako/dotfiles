@@ -494,7 +494,7 @@ else
   miss "an unknown environmentKind must be refused at the entry point and grant no source (rc=$ek_rc)"
 fi
 
-"$SCRIPT_DIR/test-inventory.sh" || status=1
+"$SCRIPT_DIR/test-inventory.sh" || miss "test-inventory.sh (its output is above)"
 
 if [[ "$status" -eq 0 ]]; then
   ok "install-packages tests passed"
