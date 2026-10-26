@@ -364,8 +364,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   fixture でも、boolean の行と同時に enum の行が報告されること。権限を与えない capability と値(安全強化型の
   `enforceAiSandbox` / GitHub guard 2 本 / `gateUnusedClaudeMcp`、agent の hook を足すだけの `enableQualityLoopHooks` /
   `enableHerdrIntegration` / `enableToolCallRecordHook` の true、`npmHardeningMode=enforce`、`codexReviewEffort` /
-  `codexWorkerEffort` の `xhigh`)は全 kind で許容(forbidden 表に入っていないことの pin。case ごとに別の fixture の
-  `--all` で確かめる)。forbidden-enum 表の不正行(schema に無い値・`=` の無い行)は fail closed。
+  `codexWorkerEffort` の `xhigh`)は、fixture の定義済み profile(personal / work)で許容されること(forbidden 表に
+  入っていないことの、その 2 つの kind での pin。case ごとに別の fixture の `--all` で確かめる。ほかの kind の forbidden
+  表への追加は、この case では見ない)。forbidden-enum 表の不正行(schema に無い値・`=` の無い行)は fail closed。
 - capability registry(#151): `implemented:` 欠落は fail、`implemented: false` は doctor.sh がその名前に
   言及していなければ fail(undisclosed dormant)。
 - 単一 dash の option は usage error、非 mikefarah yq / v4 未満は fail closed、空の profiles / schema は fail closed。
