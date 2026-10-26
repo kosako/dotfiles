@@ -525,11 +525,18 @@ else
   status=1
 fi
 
-# I2) capture_incomplete (#242): true -> an action (warn + next-actions step)
-#     naming the re-run, exit 0. false -> "capture: complete" is asserted by
-#     the three I3 runs below (all their markers carry
-#     capture_incomplete:false); the pre-#242 marker in I gives capture:
-#     unknown.
+# I2) capture_incomplete (#242): false -> "capture: complete" ok line; true ->
+#     an action (warn + next-actions step) naming the re-run, exit 0.
+printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2,"capture_incomplete":false}\n' \
+  > "$fixture_home/.local/state/dotfiles/private-backup.json"
+if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
+  && grep -Fq "[ok] last backup: 2026-06-19T00:00:00Z (archive: backup.age, files: 2, capture: complete)" <<< "$pb_out"; then
+  ok "test passed: marker capture_incomplete=false -> capture: complete"
+else
+  printf '%s\n' "$pb_out" >&2
+  fail "test failed: marker capture_incomplete=false not reported as complete (or doctor exited non-zero)"
+  status=1
+fi
 printf '{"schema_version":1,"last_success":"2026-06-19T00:00:00Z","archive":"backup.age","file_count":2,"capture_incomplete":true}\n' \
   > "$fixture_home/.local/state/dotfiles/private-backup.json"
 if pb_out="$(HOME="$fixture_home" "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
@@ -1068,14 +1075,15 @@ ur_expect "missing + XDG_CONFIG_HOME elsewhere -> redirect warn and redirect-awa
   "$(ur_redirect_line "$ur_home/xdg/agent-tools/usage-reader.json")" \
   "[warn] usage reader config missing: $ur_config (agent-tools-usage-reader module) — restoring it takes effect only once the redirect above is gone" \
   ! "assignment ignores the remaining budget"
-# UR-2) --check accepts -> ok, values never shown; doctor adopts the
-#       wrapper's verdict instead of judging the shape itself, so a file that
-#       is not JSON but that --check accepts is ok (the canary-in-JSON ok runs
-#       are UR-2c/2d).
-ur_write "not json $ur_canary"
+# UR-2) --check accepts -> ok, values never shown.
+ur_write "$ur_valid"
 ur_fake 0 "$ur_usage" 0
-ur_expect "--check exit 0 -> ok, whatever the file holds (the wrapper decides, not doctor)" personal -- "$ur_ok" ! "contract not checked"
+ur_expect "--check exit 0 -> ok" personal -- "$ur_ok" ! "contract not checked"
 ur_asked_check "--check exit 0 -> --check run" yes
+# UR-2b) doctor adopts the wrapper's verdict instead of judging the shape
+#        itself: a file that is not JSON but that --check accepts is ok.
+ur_write "not json $ur_canary"
+ur_expect "--check accepts a non-JSON file -> ok (the wrapper decides, not doctor)" personal -- "$ur_ok"
 ur_write "$ur_valid"
 # UR-2c) a relative XDG_CONFIG_HOME is ignored (as the wrapper does).
 ur_expect "relative XDG_CONFIG_HOME -> ignored, ok" personal XDG_CONFIG_HOME="rel/config" -- \
