@@ -65,12 +65,39 @@ wiring="$fixture/wiring"
 mkdir -p "$wiring"
 wiring_failed=0
 
-# suites_of_job JOB — the ./scripts/test-*.sh the job's run steps call.
+# suites_of_job JOB [WORKFLOW] — the ./scripts/test-*.sh the job's run steps
+# call: a run line whose command is the suite. A commented-out call does not
+# run, so it must not count (the compares below would pass while CI skips it).
 suites_of_job() {
-  J="$1" yq -r '.jobs[strenv(J)].steps[].run // ""' "$workflow" \
-    | { grep -oE '\./scripts/test-[a-z0-9-]+\.sh' || true; } \
+  J="$1" yq -r '.jobs[strenv(J)].steps[].run // ""' "${2:-$workflow}" \
+    | awk '$1 ~ /^\.\/scripts\/test-[a-z0-9-]+\.sh$/ { print $1 }' \
     | sed 's|^\./scripts/||' | LC_ALL=C sort -u
 }
+
+# calls_inventory FILE — FILE runs test-inventory.sh: a line whose command is
+# the call, not a commented-out one.
+calls_inventory() {
+  grep -Eq '^[[:space:]]*"\$SCRIPT_DIR/test-inventory\.sh"([[:space:]]|$)' "$1"
+}
+
+# The two readers above against commented-out calls: each must count only
+# the call that runs.
+printf '%s\n' 'jobs:' '  j:' '    steps:' '      - run: |' '          ./scripts/test-a.sh' \
+  '          # ./scripts/test-b.sh' "      - run: '# ./scripts/test-c.sh'" > "$wiring/commented.yml"
+commented_suites="$(suites_of_job j "$wiring/commented.yml" | tr '\n' ' ')"
+if [[ "$commented_suites" == "test-a.sh " ]]; then
+  ok "CI wiring: a commented-out suite call in a run step is not counted"
+else
+  fail "CI wiring: suites read from run steps with commented-out calls: '${commented_suites% }', want 'test-a.sh'"
+  wiring_failed=1
+fi
+printf '%s\n' '# "$SCRIPT_DIR/test-inventory.sh" || miss "x"' > "$wiring/commented.sh"
+if calls_inventory "$wiring/commented.sh"; then
+  fail "CI wiring: a commented-out test-inventory.sh call is counted as a call"
+  wiring_failed=1
+else
+  ok "CI wiring: a commented-out test-inventory.sh call is not counted"
+fi
 
 # suites_of_bash32 render|others — the suites of the bash32 render group, or
 # of every other group.
@@ -161,7 +188,7 @@ else
   ok "CI wiring: every group a bash32 step is gated on is in the matrix"
 fi
 
-if grep -Fq '"$SCRIPT_DIR/test-inventory.sh"' "$DOTFILES_ROOT/scripts/test-install-packages.sh"; then
+if calls_inventory "$DOTFILES_ROOT/scripts/test-install-packages.sh"; then
   ok "CI wiring: test-install-packages.sh runs test-inventory.sh"
 else
   fail "CI wiring: test-install-packages.sh no longer runs test-inventory.sh; wire it into CI and the docs"
