@@ -388,9 +388,9 @@ SH
 # Run CMD with nothing of the caller's environment but PATH (#389): a hook
 # that runs a suite exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE /
 # GIT_CONFIG_COUNT, which would point a fixture's git calls at the parent
-# repo. HOME and XDG_CONFIG_HOME are the fixture home, LC_ALL is C, the
-# system config is off and GLOBAL_CONFIG is the global config; the NAME=VALUE
-# pairs before `--` are added after those. A word before `--` that is not a
+# repo. HOME is the fixture home and XDG_CONFIG_HOME its .config, LC_ALL
+# is C, the system config is off and GLOBAL_CONFIG is the global config; the
+# NAME=VALUE pairs before `--` are added after those. A word before `--` that is not a
 # pair, or no CMD, fails (status 2), so a missing `--` cannot turn the
 # command into a pair. The `${git_env_extra[@]+...}` form keeps an empty list
 # from tripping set -u in bash 3.2. The list has a name of its own: shellcheck

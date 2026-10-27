@@ -244,7 +244,7 @@ check の process がどれも残らず、fixture が消えることを確かめ
 fixture の下に作るので、呼び出し側の suite が check の途中で中断されても残らない(test-private-backup.sh / test-doctor.sh の冒頭で使う)。
 
 Git の fixture の helper(#389。2 つの suite の写しを #482 でまとめた): `fixture_git_env HOME GLOBAL_CONFIG [NAME=VALUE...] -- CMD...` は、呼び出し側の環境を PATH の
-ほかは引き継がずに(`env -i`)CMD を走らせる。HOME と XDG_CONFIG_HOME は fixture の home、`LC_ALL=C`、system の config は切り、
+ほかは引き継がずに(`env -i`)CMD を走らせる。HOME は fixture の home、XDG_CONFIG_HOME はその `.config`、`LC_ALL=C`、system の config は切り、
 global の config は GLOBAL_CONFIG にして、`--` の前の NAME=VALUE を足す(pair でない語や CMD が無いときは fail する)。suite を
 hook が走らせると GIT_DIR などが export されていて、fixture の git が親の repo を指すため。`check_git_env_isolation RUN_GIT DIR` は、
 suite の run_git がその環境を落とすことの自己検査。無関係な repo の GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_CONFIG_* を
