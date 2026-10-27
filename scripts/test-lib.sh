@@ -383,3 +383,103 @@ SH
   rm -rf "$dir"
   return 1
 }
+
+# fixture_git_env HOME GLOBAL_CONFIG [NAME=VALUE...] -- CMD...
+# Run CMD with nothing of the caller's environment but PATH (#389): a hook
+# that runs a suite exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE /
+# GIT_CONFIG_COUNT, which would point a fixture's git calls at the parent
+# repo. HOME and XDG_CONFIG_HOME are the fixture home, LC_ALL is C, the
+# system config is off and GLOBAL_CONFIG is the global config; the NAME=VALUE
+# pairs before `--` are added after those. A word before `--` that is not a
+# pair, or no CMD, fails (status 2), so a missing `--` cannot turn the
+# command into a pair. The `${git_env_extra[@]+...}` form keeps an empty list
+# from tripping set -u in bash 3.2. The list has a name of its own: shellcheck
+# reads a sourced file's locals as globals of every suite that sources it, and
+# a suite's own string `extra` then reads as an array (SC2178 / SC2128).
+fixture_git_env() {
+  local home="$1" global="$2"
+  shift 2
+  local git_env_extra=()
+  while [[ $# -gt 0 && "$1" != "--" ]]; do
+    case "$1" in
+      [A-Za-z_]*=*) git_env_extra+=("$1") ;;
+      *)
+        fail "fixture_git_env: not a NAME=VALUE pair: $1"
+        return 2
+        ;;
+    esac
+    shift
+  done
+  if [[ $# -lt 2 ]]; then
+    fail "fixture_git_env: missing -- CMD"
+    return 2
+  fi
+  shift
+  env -i PATH="$PATH" \
+    HOME="$home" \
+    XDG_CONFIG_HOME="$home/.config" \
+    LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL="$global" \
+    ${git_env_extra[@]+"${git_env_extra[@]}"} \
+    "$@"
+}
+
+# check_git_env_isolation RUN_GIT DIR
+# The #389 self-check of a suite's fixture git helper RUN_GIT, called as
+# RUN_GIT REPO ARGS... (the suite's run_git). A hook may export repository
+# selectors and command-scope config: under an exported GIT_DIR /
+# GIT_WORK_TREE / GIT_INDEX_FILE / GIT_CONFIG_* of an unrelated throwaway
+# repo, init / add / commit / checkout / config must land in the fixture
+# repo with the identity of DIR/.config/git/personal.gitconfig (`Dotfiles
+# Test`, which the caller writes first), and the throwaway repo's HEAD, refs,
+# index and config must stay byte-for-byte unchanged. DIR is the fixture
+# home: both repos live under DIR/src/personal so the includeIf identity
+# resolves. The check guards RUN_GIT only, so every suite with its own
+# wrapper calls it with that wrapper (test-gitconfig.sh and
+# test-git-hook-gates.sh). Prints the ok / fail line; returns 1 on failure.
+# Callers run it under `|| status=1`, where errexit is off, so the setup is
+# one chain: a throwaway repo that could not be built fails the check (the
+# two copies #482 replaced stopped the suite there under set -e).
+check_git_env_isolation() {
+  local run_git="$1" dir="$2"
+  local parent="$dir/src/personal/isolation-parent"
+  local repo="$dir/src/personal/isolation-fixture"
+  local before="$dir/isolation-before" log="$dir/isolation.log" rc=0
+  if ! { mkdir -p "$parent" "$repo" "$before" \
+    && "$run_git" "$parent" init --quiet --initial-branch=main \
+    && printf 'parent\n' > "$parent/tracked" \
+    && "$run_git" "$parent" add tracked \
+    && "$run_git" "$parent" commit --quiet -m parent \
+    && cp "$parent/.git/HEAD" "$parent/.git/index" "$parent/.git/config" "$before/" \
+    && cp -R "$parent/.git/refs" "$before/refs" \
+    && printf 'fixture\n' > "$repo/tracked"; }; then
+    fail "test failed: inherited Git environment check could not build its throwaway parent repo"
+    return 1
+  fi
+  (
+    export GIT_DIR="$parent/.git" GIT_WORK_TREE="$parent"
+    export GIT_INDEX_FILE="$parent/.git/index"
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0='Inherited Identity'
+    "$run_git" "$repo" init --quiet --initial-branch=main &&
+      "$run_git" "$repo" add tracked &&
+      "$run_git" "$repo" commit --quiet -m fixture &&
+      "$run_git" "$repo" checkout --quiet -b fixture-topic &&
+      "$run_git" "$repo" config isolation.marker fixture
+  ) > "$log" 2>&1 || rc=$?
+  if [[ "$rc" -eq 0 && -d "$repo/.git" ]] \
+    && [[ "$("$run_git" "$repo" log -1 --format='%an|%s')" == 'Dotfiles Test|fixture' ]] \
+    && [[ "$("$run_git" "$repo" show HEAD:tracked)" == fixture ]] \
+    && [[ "$("$run_git" "$repo" symbolic-ref --short HEAD)" == fixture-topic ]] \
+    && [[ "$("$run_git" "$repo" config isolation.marker)" == fixture ]] \
+    && cmp -s "$before/HEAD" "$parent/.git/HEAD" \
+    && cmp -s "$before/index" "$parent/.git/index" \
+    && cmp -s "$before/config" "$parent/.git/config" \
+    && diff -r "$before/refs" "$parent/.git/refs" >/dev/null; then
+    ok "test passed: inherited Git environment leaves parent HEAD/refs/index/config unchanged and commits in the fixture"
+    return 0
+  fi
+  cat "$log" >&2
+  fail "test failed: inherited Git environment escaped the fixture or changed parent HEAD/refs/index/config"
+  return 1
+}
