@@ -2742,7 +2742,9 @@ cx_run() {
   env -u CODEX_HOME HOME="$fixture_home" "$@" 2>&1
 }
 # cx_expect LABEL OUTPUT EXPECT_LINE... — each EXPECT_LINE is a line of
-# OUTPUT and the canary appears nowhere in it (expect_report, test-lib.sh).
+# OUTPUT and the canary appears nowhere in it (expect_report, test-lib.sh,
+# so an EXPECT_LINE with a leading "~" is a substring and a lone "!" starts
+# absent checks, as in doctor_expect).
 cx_expect() {
   local label="$1" out="$2"
   shift 2
@@ -3150,7 +3152,8 @@ hg_setup() {
 }
 # hg_expect LABEL -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
 # One doctor run on personal in $hg_home, checked by expect_report
-# (test-lib.sh).
+# (test-lib.sh): the "~" and "!" rules of doctor_expect apply, and an empty
+# ABSENT_SUBSTRING is not skipped (it matches any output).
 hg_expect() {
   local label="$1" out
   shift 2
