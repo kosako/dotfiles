@@ -67,13 +67,14 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 - すべての定義済み capability が profile に存在すること。
 - boolean capability が `true` または `false` であること。
 - enum capability が schema の `values` に含まれること。
+- capability の `type` が boolean / enum のどちらかであること(それ以外は値の検査を飛ばさず fail)。
 - environmentKind cross-check: kind が禁止する boolean capability が `true`(#43)、または
   enum capability が禁止値(work / client / agent の `npmHardeningMode=off`、#45)だと
   hard fail すること。boolean の行は、実行時の拒否(install-packages / private-backup)と共有する
   `lib-policy.sh` の `profile_environment_kind_violations` で判定する(#357)。
 - module の `paths:` が path の list であること(`modules:` と同じ型の検査、#412。空の path は `.chezmoiignore` に
   `!` だけの行を出し、chezmoi が止まる。#438)。各 path が home 相対の
-  リテラル path であること(glob / pattern 文字・空白・
+  リテラル path であること(先頭 `/`・`..` を含む path・glob / pattern 文字・空白・
   先頭 `~` / `./`・末尾 `/` は fail。`.chezmoiignore` allowlist の `!<path>` 行になるため、#207)。
   同一 path を複数 module が宣言していないこと。
 - module の `requires:` は map であること。省略・null・空の map は条件なしとし、それ以外の型は fail。
@@ -319,6 +320,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 検証内容:
 
 - `validate-policy.sh --all` が全 profile を検証すること。
+- `validate-policy.sh --all` が一時 file を作らないこと(#329。後始末の途中に 2 つ目の signal が届くと、trap の後始末が
+  終わらずに file が残りうるため。#358): 呼ばれると marker を残して失敗する `mktemp` を PATH の先頭に置き、空の directory を `TMPDIR` にしても
+  通り、marker も `TMPDIR` の中身も残らないこと。
 - enum capability の許可値を正しく受け入れること。
 - unknown profile / module / capability(module の `requires:` 内も)、重複 capability / module、enum の不正値、
   environmentKind の欠落 / 未知の値、schema が宣言する capability の欠落を拒否すること。
@@ -327,6 +331,11 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - `requires:` 自体の boolean / 文字列 / 数値 / 配列は exit 1 で拒否し、module 名と map が必要な旨を表示すること。
   省略・null・空の map は条件なしとして許容。不正な型や列挙失敗時には runtime の active 判定も失敗すること(#391)。
 - 同一 path を複数 module が宣言したら fail、`requires:` に条件を持つ module は `paths:` 必須。
+- module の `paths:` の各 path(#207): 先頭 `/` の絶対 path と `..` を含む path は、home 相対でないとして拒否すること。
+  どちらも 1 回の実行で、文言と module の検査の fail を pin する。pattern 文字・空白・先頭 `~`・末尾 `/` は、リテラルで
+  ないとして拒否すること。
+- capability の `type:` が boolean / enum のどちらでもない(schema の typo)と、module の `requires:` の検査と profile の
+  検査の両方で fail すること。`requires:` に使われる capability で、1 回の実行で両方を pin する。
 - profile の `modules:` と module の `paths:` の型(#412): 文字列・bool・数値・map と、文字列でない要素を含む list を
   拒否すること(`requires:` の無い module の `paths:` でも)。型の読み取りと、型が正しいあとの列挙のどちらに失敗しても、空の list と扱わずに fail すること
   (失敗させる読み取りは 1 case に 1 つ)。
@@ -352,15 +361,33 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar
   (`backup_paths: false`)を拒否。
 - environmentKind 制約: work / client / agent で権限付与型 capability の true、sandbox の
-  allowSecretsAccess、`npmHardeningMode=off` を hard fail。安全強化型(`enforceAiSandbox` /
-  GitHub guard 2 本 / `enableQualityLoopHooks` / `enableHerdrIntegration`)は全 kind で true を許容
-  (forbidden 表に入っていないことの pin)。forbidden-enum 表の不正行は fail closed。
+  allowSecretsAccess、`npmHardeningMode=off` を hard fail。`npmHardeningMode=off` は、禁止の boolean がすべて false の
+  work の profile を各 kind に付け替えて enum の行だけの違反にし、exit code まで pin する。personal を各 kind に付け替えた
+  fixture でも、boolean の行と同時に enum の行が報告されること。権限を与えない capability と値(安全強化型の
+  `enforceAiSandbox` / GitHub guard 2 本 / `gateUnusedClaudeMcp`、agent の hook を足すだけの `enableQualityLoopHooks` /
+  `enableHerdrIntegration` / `enableToolCallRecordHook` の true、`npmHardeningMode=enforce`、`codexReviewEffort` /
+  `codexWorkerEffort` の `xhigh`)は、fixture の定義済み profile(personal / work)で許容されること(forbidden 表に
+  入っていないことの、その 2 つの kind での pin。case ごとに別の fixture の `--all` で確かめる。ほかの kind の forbidden
+  表への追加は、この case では見ない)。forbidden-enum 表の不正行(schema に無い値・`=` の無い行)は fail closed。
 - capability registry(#151): `implemented:` 欠落は fail、`implemented: false` は doctor.sh がその名前に
   言及していなければ fail(undisclosed dormant)。
 - 単一 dash の option は usage error、非 mikefarah yq / v4 未満は fail closed、空の profiles / schema は fail closed。
+  yq の version の文字列は他の tool の出力なので、端末の escape を `?` にして表示し、fake の yq のどの case でも生の ESC を
+  出さないこと(#335)。
 - software catalog drift(`report_catalog_drift`): fake の brew / npm / go(と yq・coreutils)だけを置いた PATH で、
   drift なし・catalog 外の brew leaf / go binary・未 install の宣言・source 不一致(info)・Go toolchain 自身の
   binary を sprawl にしないこと・manager 不在時の skip を検証し、いずれも exit 0(report-only)であること。
+- report の書き込みと signal(#378): 満杯の pipe への書き込みが塞がっている最中に子が終わっても(bash 3.2 の SIGCHLD は
+  SA_RESTART なしで、builtin の printf が EINTR で失敗し set -e で止まっていた)、`item` / `warn` の 3000 行(stdio の
+  buffer より長い行を含む)が 1 回ずつ順に届き、script が最後まで走ること。どの段も時計ではなく合図で進める。素の builtin
+  で書く対照が bash 3.2 では途中で止まることも確かめる(再現しない fixture で空振りしないため。bash 4+ では報告だけ)。
+  fd が閉じていれば `report_write` は失敗のままであること。
+- bash 3.2 だけで(bash 4+ では skip): 書き込みが塞がっている最中に script へ送った TERM で trap が 3 秒以内に走り、
+  `report_write_stop` が書き手を残さず、書きかけの行が届かず、その後に書き進めないこと。trap の `report_write_stop` の
+  最中に 2 回目の signal(pgrep の shim から HUP)が来ても書き手が終わること。signal で終わるのは期待どおりなので、
+  bash 3.2 が pipeline を回収するときに出す `Terminated: 15` / `Hangup: 1` は表示しない。
+- doctor / preflight / validate-policy / install-packages / private-backup の EXIT trap(doctor と private-backup は
+  INT / TERM の trap も)が `report_write_stop` を呼ぶこと(静的検査)。
 
 ## test-gitconfig.sh
 
