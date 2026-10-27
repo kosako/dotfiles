@@ -223,7 +223,9 @@ test-*.sh が共有する fixture helper(source 専用、lib-policy.sh の後に
 cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp する形は cleanup trap から
 漏れる、#150)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
 限定 capability flip。boolean 専用。personal が宣言していない capability は fail する、#332)、`copy_repo_fixture`(scripts + .chezmoidata の最小
-repo copy)。
+repo copy)、`strict_json_object`(file がちょうど 1 つの JSON の object であることを jq で確かめる。yq の JSON の reader は
+object の先頭・末尾の comma、member の間の comma の抜け、複数の document、空の file を受け付けるので、JSON の妥当性の
+検査はこちらで行い、中身は yq で読む、#478)。
 
 process の後始末の helper(#413): `kill_tree`(PID と子孫を KILL。各 process を SIGSTOP で止め、ps で止まったことを確かめてから子を
 列挙するので、辿っている間に新しい子を作れない。確かめられなければ warn して続ける。doctor の期限付き probe の後始末と共有するので
@@ -400,9 +402,11 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 検証内容:
 
 - source に `user.useConfigOnly = true` と `transfer.credentialsInUrl = die` が含まれること。
-- 全 context(personal / work / client / sandbox / agent)の `includeIf` と include path が定義されていること。
-- include の**順序**が exact pin と一致すること(#202: personal の hasconfig 3 本 → personal gitdir →
-  非 personal 4 context それぞれで identity reset → context file の隣接 2 段 → mechanism の無条件 include)。
+- 全 context(personal / work / client / sandbox / agent)の `includeIf`・include path(identity reset・signing・
+  git-hook-gates の include も含む)と、その**順序**が exact pin と一致すること(#202: personal の hasconfig 3 本 →
+  personal gitdir → 非 personal 4 context それぞれで identity reset → context file の隣接 2 段 → mechanism の無条件
+  include)。header は行頭、path の行は comment でないことまで見る(comment にした行は存在の grep なら通ってしまう)。
+- hasconfig の rule が public な personal の 3 pattern だけであること(comment の行も含めて、ほかの org の URL を書かない)。
 - source に identity 値(`name =` / `email =`、email らしき値)が含まれないこと。
 - source に chezmoi のテンプレート構文が含まれないこと(fixture は source を git に直接渡すため)。
 - local fixture で、known root 外では commit が identity 未解決を理由に失敗すること。
@@ -894,7 +898,9 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 検証内容:
 
 - 全 profile が template エラーなしで apply できること。
-- 各 profile の managed target 一覧が期待値と一致すること(profile を追加・変更したら期待値の更新が必要)。
+- 各 profile の managed target 一覧が期待値と一致すること(profile を追加・変更したら期待値の更新が必要)。apply が
+  home に書いた entry がすべて managed target 一覧に含まれること(work では `~/.config/opencode` が作られない、など。
+  空に render される managed target は書かれないので、一致ではなく包含を見る)。
 - render した mise config が `go.set_gobin = false`(GOBIN を設定させない)で、`.zshenv` が `~/go/bin` を PATH の末尾に足すこと(#305)。
 - render した mise config が `not_found_auto_install = false` で、shim が無い runtime を勝手に install しないこと(#333)。
 - allowlist 契約(#207): source の複製に未宣言の root file / subtree / 宣言済み directory 配下の
@@ -908,7 +914,9 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
 - typo profile が known profile 一覧つきのエラーで fail すること。
 - profile 未設定が init 誘導メッセージで fail すること。
 - 非対話 init(`--promptString profile=<name>`)が動くこと。
-- profile 無回答の init が fail すること(default を持たない)。
+- profile 無回答の init が fail すること(default を持たない)。`--promptDefaults` を付けて default のある prompt には
+  default で答えさせ、閉じた stdin で profile の prompt(`promptStringOnce`)が失敗することを見る(flag なしでは default の
+  有無に関係なく EOF で失敗するので、default の復活を捕まえられない)。
 - README Quickstart の最小 Git apply(#241): README に `mkdir -p ~/.config` と
   `chezmoi apply --source ~/dotfiles ~/.gitconfig ~/.config/git-profile ~/.config/git-profile/identity-reset.gitconfig`
   の 2 行が exact にあること。その 3 target だけを apply すると `~/.gitconfig` と identity reset の 2 file だけが
@@ -922,14 +930,14 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   配列・欠落)なら apply が fail して Codex の profile file を作らないこと。両 profile file template の
   execute-template も同じエラーで fail すること。
 - home path の escape(#329): JSON の特殊文字と shell の特殊文字(`"` `\` `&` `<` `'` 空白 `$`)を含む home で
-  render しても、`~/.claude/settings.json` / `~/.codex/hooks.json` / `~/.config/opencode/opencode.json` が妥当な
-  JSON で、statusLine と各 hook の command を shell が意図した単語(path は 1 語)に分けること。OpenCode の
-  instructions の path も一致すること。通常の文字だけの home(固定の `/dotfiles-render-test-home`。host の `$HOME` に
+  render しても、`~/.claude/settings.json` / `~/.codex/hooks.json` / `~/.config/opencode/opencode.json` がちょうど
+  1 つの JSON の object(`strict_json_object`)で、statusLine と各 hook の command を shell が意図した単語(path は
+  1 語)に分けること。OpenCode の instructions の path も一致すること。通常の文字だけの home(固定の `/dotfiles-render-test-home`。host の `$HOME` に
   依らない。chezmoi はこの dir を作らない)では、statusLine・各 hook の command・instructions が引用符なしの
   以前と同じ文字列であること。test-claude-settings / test-codex-settings の hook の期待値は、test-lib の
   `shell_word` / `shell_single_quote`(template と同じ規則)で host の `$HOME` から作る。
 
-chezmoi が必要(CI では version pin して導入する)。
+chezmoi と jq が必要(chezmoi は CI では version pin して導入する)。
 
 ## test-claude-settings.sh
 
@@ -970,7 +978,9 @@ here-document を一時 file に置く)ことも見る。決まった path へ�
 managed `~/.codex/hooks.json` と `~/.codex/rules/default.rules` の rendered content を検証する。hooks 登録は
 Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は timeout なし、SessionStart は herdr installer と同一形の
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
-top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、hook capability が全部 false のとき
+top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、既定と各 capability を切った render の
+`hooks.json` がちょうど 1 つの JSON の object であること(Codex は厳格に parse する。手で comma を組む template の
+区切りの誤りを、寛容な yq ではなく jq で捕まえる)、hook capability が全部 false のとき
 apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content(read-only / local の allow 9 と、
 #304 / #334 の作業を捨てる git の prompt 10・commit / push 直後の hook の skip の forbidden 2・merge / rebase / am / pull 直後の
 `--no-verify` の prompt 1、#334 の secret の床の forbidden 6・prompt 3)と gate の独立性(#139)を確認する。`codex` が install されていれば、render した rules を
@@ -986,7 +996,7 @@ codex の無い PATH で確かめる)。install されているのに `execpolic
 forbidden だけ、一致なしは decision が無く `matchedRules` が空の配列のときだけ)は、codex が無くても固定の答えで確かめる。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
 どおりであること(どちらも `model_reasoning_effort` だけ。review 用 file に `service_tier` を書かない)・全行が agent-tools の読み手(worker preflight と同じ)の top-level の形に収まること、
 値が capability から来ること(別の値で render)、`off` で apply 済み file が消え他の file は残ることを確認する。
-chezmoi が必要(render job)。
+chezmoi と jq が必要(render job)。
 
 ## test-opencode-settings.sh
 
@@ -1001,14 +1011,15 @@ ssh 鍵 / keychain の password の読み出し・dump・export の deny 21 と�
 に固定されていること(#315)、
 `autoupdate: false` / `share: "disabled"` / `instructions` が agent-tools の運用ルール 1 件だけ(絶対 path)であること、
 top-level key が `$schema / autoupdate / share / instructions / permission` だけ(provider / model / plugin / mcp / agent を
-managed に書かない)、secret / email らしき文字列が無いこと、work では `~/.config/opencode` が render されないことを確認する。
+managed に書かない)、secret / email らしき文字列が無いこと、file がちょうど 1 つの JSON の object であること
+(`strict_json_object`)を確認する(work で render されないことは test-render.sh の managed set が固定する)。
 加えて rendered の bash map を OpenCode の規則(glob・last match wins)で評価し、doctor.sh の外向き probe と `gh` の
 mutation・短縮 flag・alias、deny、維持すべき read からなる固定 command 集合の判定が、`docs/ai-policy.md` から手で書いた
 期待値(allow / ask / deny。map からは導かない)と一致することを確認する(`*` 以外の pattern 文字を含む rule は fail、#240)。
 加えて doctor.sh の `outward_probe_commands` / `secret_read_probe_commands` を literal に読み出し(source しない)、全 probe が
 この command 集合の行にあることを機械的に確かめる(配列が読めない・行が `"..."` だけの plain な quoted 文字列の形に
 完全一致しない entry があれば fail、#332)。
-chezmoi が必要(render job)。
+chezmoi と jq が必要(render job)。
 
 ## test-git-signing.sh
 

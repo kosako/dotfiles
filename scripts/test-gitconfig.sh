@@ -42,19 +42,16 @@ fi
 check_contains "user.useConfigOnly enabled" "useConfigOnly = true"
 check_contains "transfer.credentialsInUrl die" "credentialsInUrl = die"
 
-for context in personal work client sandbox agent; do
-  check_contains "includeIf for $context" "[includeIf \"gitdir:~/src/$context/\"]"
-  check_contains "include path for $context" "path = ~/.config/git/$context.gitconfig"
-done
-check_contains "identity reset include path (#202)" "path = ~/.config/git-profile/identity-reset.gitconfig"
-
 # The include ORDER is the contract (#202): includeIf is last-match-wins, so
 # the three personal hasconfig rules come first, then the personal gitdir
 # rule, then for EACH non-personal context the managed identity reset
 # immediately followed by that context's local file, then the unconditional
-# mechanism includes. Presence checks cannot catch a reordering or a reset
-# that drifted away from its context, so the exact sequence is pinned:
-# "<condition>|<path>" per include, in source order.
+# mechanism includes (signing, #196's git hook gates; a missing file is a
+# silent no-op). A presence grep would also pass on a commented-out line and
+# cannot catch a reordering or a reset that drifted away from its context, so
+# the exact sequence is pinned: "<condition>|<path>" per include, in source
+# order. This pin is the static check for every include line: header at
+# column 0, uncommented path.
 expected_include_order="$(printf '%s\n' \
   'hasconfig:remote.*.url:https://github.com/kosako/**|~/.config/git/personal.gitconfig' \
   'hasconfig:remote.*.url:git@github.com:kosako/**|~/.config/git/personal.gitconfig' \
@@ -86,26 +83,6 @@ else
   status=1
 fi
 
-# Personal also has remote-URL (hasconfig) rules covering all three URL
-# spellings; work/client must never (their org URLs are confidential).
-for pattern in \
-  'hasconfig:remote.*.url:https://github.com/kosako/**' \
-  'hasconfig:remote.*.url:git@github.com:kosako/**' \
-  'hasconfig:remote.*.url:ssh://git@github.com/kosako/**'; do
-  check_contains "hasconfig personal pattern: $pattern" "[includeIf \"$pattern\"]"
-done
-
-# The git-signing module's mechanism is pulled in via an unconditional include
-# (a no-op when the file is absent / signing off).
-check_contains "git-signing include directive" "[include]"
-check_contains "git-signing include path" "path = ~/.config/git/signing.gitconfig"
-
-# The git hook gates (#196) use the same unconditional-include pattern: the
-# include target only renders when enableGitHookGates is on, and a missing
-# path is a silent no-op. test-git-hook-gates.sh drives the rendered chain;
-# here we pin that the plain gitconfig carries the include at all.
-check_contains "git-hook-gates include path" "path = ~/.config/git-hook-gates/hooks.gitconfig"
-
 # Commit/tag signing defaults off (unattended commits never block on the signer
 # prompt); opt-in is per-repo/context. The managed file must carry the false
 # default and must NEVER force signing on globally: a global `gpgsign = true`
@@ -134,9 +111,11 @@ else
 fi
 
 # Public-safety: the ONLY hasconfig rules allowed are the three public personal
-# patterns asserted above. Match against the exact allowlist (not a loose
-# "contains kosako", which would also accept e.g. github.com/work-kosako): any
-# other hasconfig line is a confidential org leaking into this public file.
+# patterns pinned in the include order above; work/client must never have one
+# (their org URLs are confidential). Match against the exact allowlist (not a
+# loose "contains kosako", which would also accept e.g. github.com/work-kosako):
+# any other hasconfig line, commented or not, is a confidential org leaking
+# into this public file.
 unexpected_hasconfig="$(grep -F 'hasconfig:remote' "$GITCONFIG_SOURCE" \
   | grep -vF 'hasconfig:remote.*.url:https://github.com/kosako/**' \
   | grep -vF 'hasconfig:remote.*.url:git@github.com:kosako/**' \
@@ -380,6 +359,9 @@ fi
 # Placement stays authoritative: a repo IN ~/src/work/ keeps the work identity
 # even when its remote is a personal (github.com/kosako) URL, because the
 # gitdir rule is listed after the hasconfig rules and wins when both match.
+# This runs before the identity reset is copied into the fixture HOME (#202
+# section below), the state of a home with ~/.gitconfig but no reset file
+# (Git skips a missing include), which the reset matrix does not cover.
 repo="$fixture/src/work/demo"
 run_git "$repo" init --quiet --initial-branch=main
 run_git "$repo" config remote.origin.url "https://github.com/kosako/x.git"

@@ -14,6 +14,11 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
+if ! command -v jq >/dev/null 2>&1; then
+  fail "jq not found; the JSON validity checks (strict_json_object) need it"
+  exit 1
+fi
+
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; render tests require it"
   exit 1
@@ -96,6 +101,19 @@ while IFS= read -r profile; do
   else
     printf '%s\n' "$diff_output" >&2
     fail "test failed: managed set mismatch for $profile"
+    status=1
+  fi
+  # What apply wrote is part of the managed set, so the pin above also holds
+  # on disk: e.g. work, which does not list opencode-settings, gets no
+  # ~/.config/opencode. A subset, not equality: a managed template that
+  # renders empty is not written.
+  unmanaged="$(LC_ALL=C comm -13 <(printf '%s\n' "$managed" | LC_ALL=C sort) \
+    <(cd "$root/home" && find . -mindepth 1 | sed 's|^\./||' | LC_ALL=C sort))"
+  if [[ -z "$unmanaged" ]]; then
+    ok "test passed: apply writes nothing outside the managed set for $profile"
+  else
+    printf '%s\n' "$unmanaged" >&2
+    fail "test failed: apply wrote entries outside the managed set for $profile"
     status=1
   fi
 
@@ -451,42 +469,58 @@ else
 fi
 
 # No default profile on purpose: init without an answer must fail
-# instead of silently picking one.
+# instead of silently picking one. --promptDefaults answers every prompt
+# that has a default with that default, so only a prompt without one
+# still hits EOF on the closed stdin (without the flag the prompt fails
+# at EOF whether or not a default exists). The failure must come from
+# the profile prompt, not from e.g. an unknown flag.
 make_root
 if output="$(env HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME="$root/data" \
-  chezmoi init --source "$DOTFILES_ROOT" --no-tty </dev/null 2>&1)"; then
+  chezmoi init --source "$DOTFILES_ROOT" --no-tty --promptDefaults </dev/null 2>&1)"; then
   printf '%s\n' "$output" >&2
   fail "test failed: init without a profile answer must fail (default has been reintroduced?)"
   status=1
+elif grep -Fq 'promptStringOnce' <<< "$output"; then
+  ok "test passed: init without a profile answer fails (no default profile)"
 else
-  ok "test passed: init without a profile answer fails"
+  printf '%s\n' "$output" >&2
+  fail "test failed: init without a profile answer failed before reaching the profile prompt"
+  status=1
 fi
 
 section "typed boolean guards (direct chezmoi, without validate-policy)"
 
+# One source copy per section: a pass only reads the source (apply and
+# execute-template), and it first puts the whole .chezmoidata back, so each
+# pass starts from the same source a fresh copy would give. The root
+# (config, home, chezmoi state) stays fresh per pass.
+make_root
+make_flipped_source "$root"
+guard_src="$root/src"
 for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
   for bool_input in profile requires implemented; do
     make_root
-    make_flipped_source "$root"
     write_config personal
+    rm -rf "$guard_src/.chezmoidata"
+    cp -R "$DOTFILES_ROOT/.chezmoidata" "$guard_src/.chezmoidata"
     case "$bool_input" in
       profile)
         V="$invalid_bool" yq -i '.profiles.personal.capabilities.enableQualityLoopHooks = env(V)' \
-          "$root/src/.chezmoidata/profiles.yaml"
+          "$guard_src/.chezmoidata/profiles.yaml"
         expected_error="capability must be boolean: personal.enableQualityLoopHooks"
         ;;
       requires)
         V="$invalid_bool" yq -i '.modules.runtime.requires.enableRuntimeManagement = env(V)' \
-          "$root/src/.chezmoidata/modules.yaml"
+          "$guard_src/.chezmoidata/modules.yaml"
         expected_error="module requires must be boolean: runtime.enableRuntimeManagement"
         ;;
       implemented)
         V="$invalid_bool" yq -i '.capabilities.enableQualityLoopHooks.implemented = env(V)' \
-          "$root/src/.chezmoidata/capabilities.schema.yaml"
+          "$guard_src/.chezmoidata/capabilities.schema.yaml"
         expected_error="capability registry: enableQualityLoopHooks implemented must be a YAML boolean"
         ;;
     esac
-    if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
+    if output="$(chezmoi --config "$root/chezmoi.toml" --source "$guard_src" \
       --destination "$root/home" apply 2>&1)"; then
       fail "test failed: apply accepted $bool_input YAML value $invalid_bool"
       status=1
@@ -505,8 +539,8 @@ for invalid_bool in '"true"' '"false"' 0 null '[]' '{}'; do
     # Each agent's template must guard itself as well as .chezmoiignore:
     # execute-template bypasses the managed-set/apply path entirely.
     for agent_template in dot_claude/modify_settings.json.tmpl dot_codex/hooks.json.tmpl; do
-      if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
-        --destination "$root/home" execute-template < "$root/src/$agent_template" 2>&1)"; then
+      if output="$(chezmoi --config "$root/chezmoi.toml" --source "$guard_src" \
+        --destination "$root/home" execute-template < "$guard_src/$agent_template" 2>&1)"; then
         fail "test failed: $agent_template accepted $bool_input YAML value $invalid_bool"
         status=1
       elif ! grep -Fq "$expected_error" <<< "$output"; then
@@ -522,21 +556,26 @@ section "typed enum guards (direct chezmoi, without validate-policy)"
 
 # The Codex profile files (#264) write the enum value verbatim, so an unknown,
 # mistyped or missing value must stop the apply in require-profile rather than
-# reach a rendered file. npmHardeningMode shows the guard is generic.
+# reach a rendered file. npmHardeningMode shows the guard is generic. One
+# source copy for the section, as for the boolean guards above.
+make_root
+make_flipped_source "$root"
+guard_src="$root/src"
 for enum_cap in codexReviewEffort codexWorkerEffort npmHardeningMode; do
   for invalid_enum in '"turbo"' '"HIGH"' true 0 null '[]' missing; do
     make_root
-    make_flipped_source "$root"
     write_config personal
+    rm -rf "$guard_src/.chezmoidata"
+    cp -R "$DOTFILES_ROOT/.chezmoidata" "$guard_src/.chezmoidata"
     if [[ "$invalid_enum" == missing ]]; then
       C="$enum_cap" yq -i 'del(.profiles.personal.capabilities[strenv(C)])' \
-        "$root/src/.chezmoidata/profiles.yaml"
+        "$guard_src/.chezmoidata/profiles.yaml"
     else
       C="$enum_cap" V="$invalid_enum" yq -i '.profiles.personal.capabilities[strenv(C)] = env(V)' \
-        "$root/src/.chezmoidata/profiles.yaml"
+        "$guard_src/.chezmoidata/profiles.yaml"
     fi
     expected_error="capability enum invalid: personal.$enum_cap (allowed: "
-    if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
+    if output="$(chezmoi --config "$root/chezmoi.toml" --source "$guard_src" \
       --destination "$root/home" apply 2>&1)"; then
       fail "test failed: apply accepted $enum_cap value $invalid_enum"
       status=1
@@ -554,8 +593,8 @@ for enum_cap in codexReviewEffort codexWorkerEffort npmHardeningMode; do
     # Each profile-file template guards itself too: execute-template bypasses
     # the managed-set/apply path.
     for profile_template in dot_codex/agent-tools-review.config.toml.tmpl dot_codex/agent-tools-worker.config.toml.tmpl; do
-      if output="$(chezmoi --config "$root/chezmoi.toml" --source "$root/src" \
-        --destination "$root/home" execute-template < "$root/src/$profile_template" 2>&1)"; then
+      if output="$(chezmoi --config "$root/chezmoi.toml" --source "$guard_src" \
+        --destination "$root/home" execute-template < "$guard_src/$profile_template" 2>&1)"; then
         fail "test failed: $profile_template accepted $enum_cap value $invalid_enum"
         status=1
       elif ! grep -Fq "$expected_error" <<< "$output"; then
@@ -601,7 +640,7 @@ check_command() {
 check_home_render() {
   local root="$1" home="$2" agent file cmd
   for file in .claude/settings.json .codex/hooks.json .config/opencode/opencode.json; do
-    if ! yq -p json -o json '.' "$root/home/$file" >/dev/null 2>&1; then
+    if ! strict_json_object "$root/home/$file"; then
       fail "test failed: $file is not valid JSON for home $home"
       status=1
       return 0
