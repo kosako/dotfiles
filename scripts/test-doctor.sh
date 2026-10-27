@@ -162,43 +162,30 @@ if doctor_part 1; then
 
 # doctor_expect LABEL ARGV... -- EXPECT... [! ABSENT_SUBSTRING...]
 # One run of ARGV (a doctor command line, or a function that runs one) with
-# stderr folded in. It must exit 0 (else doctor_exit_fail); every EXPECT is
-# an exact line, or with a leading "~" a substring; after a "!" no
-# ABSENT_SUBSTRING may appear (a further "!" only separates). A failure
-# shows the output and every miss. Lists are expanded with the
-# ${a[@]+"${a[@]}"} guard: bash 3.2 under set -u calls an empty "${a[@]}"
-# unbound. Only part 1 uses it (C, D, F, G and the gi / hc / ur wrappers
-# below), so it is defined here rather than in the shared setup.
+# stderr folded in. It must exit 0 (else doctor_exit_fail); the rest is
+# expect_report's (test-lib.sh): every EXPECT is an exact line, or with a
+# leading "~" a substring; after a "!" no ABSENT_SUBSTRING may appear (a
+# further "!" only separates); a failure shows the output and every miss.
+# The checks are expanded with the ${a[@]+"${a[@]}"} guard: bash 3.2 under
+# set -u calls an empty "${a[@]}" unbound. Only part 1 uses it (C, D, F, G
+# and the gi / hc / ur wrappers below), so it is defined here rather than in
+# the shared setup.
 doctor_expect() {
-  local label="$1" run_args=() want=() absent=() mode=run arg missing="" out rc=0
+  local label="$1" run_args=() checks=() mode=run arg out rc=0
   shift
   for arg in "$@"; do
     case "$mode:$arg" in
-      run:--) mode=want ;;
+      run:--) mode=check ;;
       run:*) run_args+=("$arg") ;;
-      want:! | absent:!) mode=absent ;;
-      want:*) want+=("$arg") ;;
-      absent:*) absent+=("$arg") ;;
+      check:*) checks+=("$arg") ;;
     esac
   done
   out="$("${run_args[@]}" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     doctor_exit_fail "$label" "$rc" "$out"
-    return
-  fi
-  for arg in ${want[@]+"${want[@]}"}; do
-    case "$arg" in
-      '~'*) grep -Fq -- "${arg#?}" <<< "$out" || missing="${missing}expected text: ${arg#?}"$'\n' ;;
-      *) grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n' ;;
-    esac
-  done
-  for arg in ${absent[@]+"${absent[@]}"}; do
-    if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi
-  done
-  if [[ -z "$missing" ]]; then
+  elif expect_report "$out" ${checks[@]+"${checks[@]}"}; then
     ok "test passed: $label"
   else
-    printf '%s\n%s' "$out" "$missing" >&2
     fail "test failed: $label"
     status=1
   fi
@@ -2754,24 +2741,17 @@ cx_canary="canary-effort-5e2a"
 cx_run() {
   env -u CODEX_HOME HOME="$fixture_home" "$@" 2>&1
 }
+# cx_expect LABEL OUTPUT EXPECT_LINE... — each EXPECT_LINE is a line of
+# OUTPUT and the canary appears nowhere in it (expect_report, test-lib.sh).
 cx_expect() {
   local label="$1" out="$2"
   shift 2
-  local line
-  for line in "$@"; do
-    if ! grep -Fxq -- "$line" <<< "$out"; then
-      printf '%s\n' "$out" >&2
-      fail "test failed: $label: missing line: $line"
-      status=1
-      return
-    fi
-  done
-  if grep -Fq "$cx_canary" <<< "$out"; then
-    fail "test failed: $label: a profile file value leaked into the report"
+  if expect_report "$out" "$@" ! "$cx_canary"; then
+    ok "test passed: $label"
+  else
+    fail "test failed: $label"
     status=1
-    return
   fi
-  ok "test passed: $label"
 }
 # cx_unflagged LABEL OUTPUT — the run of LABEL did not flag CODEX_HOME.
 cx_unflagged() {
@@ -3169,33 +3149,18 @@ hg_setup() {
   fi
 }
 # hg_expect LABEL -- EXPECT_LINE... [! ABSENT_SUBSTRING...]
+# One doctor run on personal in $hg_home, checked by expect_report
+# (test-lib.sh).
 hg_expect() {
-  local label="$1" want=() absent=() mode=want arg missing="" out
+  local label="$1" out
   shift 2
-  for arg in "$@"; do
-    case "$mode:$arg" in
-      want:!) mode=absent ;;
-      want:*) want+=("$arg") ;;
-      absent:*) absent+=("$arg") ;;
-    esac
-  done
   if ! out="$(env -i PATH="$PATH" HOME="$hg_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
     printf '%s\n' "$out" >&2
     fail "test failed: doctor must stay exit 0 (hook gates readiness $label)"
     status=1
-    return
-  fi
-  for arg in "${want[@]}"; do
-    grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n'
-  done
-  for arg in "${absent[@]:-}"; do
-    [[ -z "$arg" ]] && continue
-    if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi
-  done
-  if [[ -z "$missing" ]]; then
+  elif expect_report "$out" "$@"; then
     ok "test passed: hook gates readiness $label"
   else
-    printf '%s\n%s' "$out" "$missing" >&2
     fail "test failed: hook gates readiness $label"
     status=1
   fi
@@ -3287,20 +3252,17 @@ printf '// personal-agent-tools\n' > "$op_cfg/plugins/personal-agent-tools.js"
 op_run() {
   env -u OPENCODE_CONFIG -u XDG_DATA_HOME HOME="$op_home" PATH="$op_fakebin:$PATH" "$@" "$SCRIPT_DIR/doctor.sh" personal 2>&1
 }
+# op_expect LABEL OUTPUT TEXT... — each TEXT is in OUTPUT (a substring: the
+# "~" of expect_report, test-lib.sh), the canary is not, and doctor did not
+# run opencode.
 op_expect() {
-  local label="$1" out="$2"
+  local label="$1" out="$2" texts=() line
   shift 2
-  local line
   for line in "$@"; do
-    if ! grep -Fq -- "$line" <<< "$out"; then
-      printf '%s\n' "$out" >&2
-      fail "test failed: $label: missing: $line"
-      status=1
-      return
-    fi
+    texts+=("~$line")
   done
-  if grep -Fq "$op_canary" <<< "$out"; then
-    fail "test failed: $label: an OpenCode config value leaked into the report"
+  if ! expect_report "$out" ${texts[@]+"${texts[@]}"} ! "$op_canary"; then
+    fail "test failed: $label"
     status=1
     return
   fi

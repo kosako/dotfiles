@@ -227,6 +227,11 @@ repo copy)、`strict_json_object`(file がちょうど 1 つの JSON の object 
 object の先頭・末尾の comma、member の間の comma の抜け、複数の document、空の file を受け付けるので、JSON の妥当性の
 検査はこちらで行い、中身は yq で読む、#478)。
 
+report の照合の helper(#483): `expect_report OUTPUT EXPECT... [! ABSENT...]` は、手元にある出力を照合する。各 EXPECT が
+exact な行として(先頭が `~` なら部分一致で)あり、`!` のあとの文字列がどこにも無いことを確かめる(2 つ目からの `!` は区切り
+だけ)。外れたときは出力と、外れた期待ごとの 1 行(`expected line:` / `expected text:` / `unexpected:`)を stderr に出し、1 を
+返す。command の実行と ok / fail の報告は呼び出し側が持つ(test-doctor.sh の `doctor_expect`・`hg_expect`・`cx_expect`・`op_expect`)。
+
 process の後始末の helper(#413): `kill_tree`(PID と子孫を KILL。各 process を SIGSTOP で止め、ps で止まったことを確かめてから子を
 列挙するので、辿っている間に新しい子を作れない。確かめられなければ warn して続ける。doctor の期限付き probe の後始末と共有するので
 `lib-policy.sh` に置く、#423。停止の待ちと warn は test-doctor.sh の KT が確かめる、#440)、`stop_child_trees`(この shell が起動して回収していない
