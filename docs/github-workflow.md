@@ -156,6 +156,10 @@ render job の test も、同じ job の render group で、macOS 用の chezmoi
 macOS の runner では `test-doctor.sh` だけで約 56 分かかったので、test-doctor は `TEST_DOCTOR_PART` で 3 つの part
 (doctor-1〜3、それぞれ約 20 分)に分け、private-backup / その他 / render と合わせて 6 つの group を並列に回す
 (#456。待ち時間は最も遅い group で決まる)。validate job と手元では、`TEST_DOCTOR_PART` を付けずに全部の part を回す。
+`.github/repo-baseline.json` の `required_checks` は、PR の merge の前に success であるべき check の一覧で、CI の
+check の名前 (`validate`・`render`・`bash32 (<group>)`) をそのまま並べる(#487。agent が PR を merge する条件と、
+default branch の ruleset の必須の check に使う)。job や bash32 の group を足す・消す・名前を変えるときは、同じ PR で
+この一覧も揃える(古い名前が残ると、その check は報告されず、merge の条件を満たせない)。
 手元で 3.2 で回すときも同じく、`/bin/bash` への symlink を置いた directory を PATH の先頭に置く
 (`#!/usr/bin/env bash` が 3.2 に解決される):
 
