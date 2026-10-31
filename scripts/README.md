@@ -766,7 +766,11 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   `-archive.age` になること(doctor が読む形。#444)。
 - verify が正アーカイブを受理し、wrong identity / 改竄アーカイブを拒否すること。
 - `--identity-command`(op seam)経由でも verify できること。
-- manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。
+- manifest 不整合(checksum mismatch / 台帳外ファイル / symlink 混入)を検出すること。case の manifest は手書きで、
+  元の宣言の mode(checksum の case は `600`、台帳外ファイルの case は `644`)をそのまま持つ。file の mode は umask で
+  決まるので、umask によっては case 自身の不整合の隣に mode の食い違いも乗る(台帳外ファイルの case は umask 002 で
+  mode mismatch も出て、その隣でも台帳外を報告すること)。checksum の case は umask 022 / 002 で sha と mode の両方が
+  食い違う状態を保ち、報告する理由が checksum であること(mode を先に見る検査では理由が変わる)。
 - 通常の file の mode を持たせた hardlink の header(python3 で byte 単位に作る。無ければ skip)を verify が拒否すること
   (bsdtar では展開後の検査で、GNU tar では展開前の一覧の検査で)。展開後の検査を private-backup.sh から取り出し、
   symlink・fifo・hardlink を拒否し、通常の file と dir の tree を通し、辿れない dir を拒否することを、戻り値と message の両方で直接
@@ -778,17 +782,26 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   environmentKind の拒否行で exit 1 になり、age を呼ばず、archive を書かず、marker も restore 先も変えないこと。
 - 非コミットの local 補足にある unsafe path(`..` 等)を skip し、baseline は捕捉すること。
 - local 補足リストの構造不正(#246): path の無い entry・category の `|`・path 内の改行・list の代わりの scalar
-  (`backup_paths: false`)があれば、`backup-paths entry invalid` で backup ごと fail し、archive も marker も
-  書かないこと(個々の unsafe path を skip する上の扱いとは別)。`|` を含まない自由な category label は通り、
+  (`backup_paths: false`)があれば、`backup-paths entry invalid` で backup ごと fail し、archive も partial も
+  marker も書かないこと(個々の unsafe path を skip する上の扱いとは別)。`|` を含まない自由な category label は通り、
   宣言どおり manifest に記録されること。
-- recipient 未指定は usage error(exit 2)になること。
+- recipient の指定(#330): 既定の recipient file と `--recipients-file` はそれぞれ verify の通る archive を作り、
+  recipient の未指定(平文にはしない)・存在しない `--recipients-file`・2 つの flag の同時指定は usage error(exit 2)で、
+  理由の行を出し、archive も partial も marker も書かないこと。
+- ほかの引数の検査も usage error(exit 2)で理由の行を出すこと(#468): backup の `--out` の欠落と未知の引数、
+  verify / restore の identity の二重指定、verify の identity の欠落、存在しない archive・restore 先・identity file
+  (decrypt_and_extract の 2 を verify / restore がそのまま返す)。restore の run は `--apply` で、空の restore 先に
+  何も書かないことも確かめる。
 - restore が dry-run では何も書かず、`--apply` で原文どおり復元すること。
 - restore の上書きで既存ファイルを timestamp 退避すること。`--skip-existing` で既存を触らないこと。
 - restore が **symlink 化した親ディレクトリ経由の書き込みを拒否**し escape しないこと。
 - restore が復元先と退避先に新しく作る親 directory が 0700 であること(#295)。
 - `--out` は file の path で、既存の directory と directory への symlink を書き込みの前に拒否し、引数の検査の後に
   directory が現れる競合(fake の `mv`)でも成功を表示しないこと。既存の regular file は上書きできること(#298)。
-- restore が verify 不合格アーカイブ / 拒否 profile では復元を拒否すること。
+- restore が verify 不合格アーカイブ / 拒否 profile では復元を拒否すること(verify 不合格の `--apply` は exit 1 で、
+  restore 先を変えない)。
+- group 書き込みの file(664)が backup → verify → restore で mode を保つこと(#141)。展開の `-p` や `cp -p` が
+  落ちたことが見えるように、3 つとも umask 022 で走らせる(umask 002 では `-p` が無くても 664 のまま)。
 - local 補足リスト自体が payload として canonical path(`.config/dotfiles/backup-paths.local`)に
   捕捉され、restore が dry-run で計画し `--apply` で内容と mode ごと復元し、復元した home からの
   再 backup が local 対象と補足を 1 回ずつ含むこと(#208。archive 最上位の旧形式 copy は作らない)。
@@ -803,7 +816,8 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   にだけ部分 NUL 一覧を出して exit 1、他は実 find に委譲)で、列挙できた file は捕捉しつつ
   `directory enumeration incomplete` と `capture INCOMPLETE` を warn し、skip 1 件を計上し、marker の
   `capture_incomplete` が true になること。正常 run では false。その archive の verify は通ること
-  (整合と完全性は別)。
+  (整合と完全性は別)。列挙の失敗・読めない file・検索できない directory の下の宣言が同じ run で重なれば、
+  warn はそれらを and でつないで全部を名指しすること(2 つの run と 3 つの run。#398 review・#414)。
 - 平文ができた後の中断で temp に何も残らず、同じ signal で終わること(#358): backup / verify / restore を `set -m` の
   background job(自分の process group)にし、SIGINT / SIGTERM それぞれで 4 種の run を回す: once(1 回)/ twice(後始末の
   途中にもう 1 回)/ every(temp 配下の削除のたびにもう 1 回 = key の押しっぱなし)/ rmfail(1 回。temp 配下の最初の削除が
@@ -811,8 +825,9 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   終了まで進め、EXIT の後始末の temp 配下の削除のたびに 1 回)/ endrmfail(その後始末の temp 配下の最初の削除が signal
   なしに失敗する。signal を使わないので INT の回だけ)。signal は run の中から送る(timing の窓を作らない): PATH 先頭の
   fake `yq`(temp への manifest 検査 = 平文が揃った時点で中身を記録してから group へ。正常終了の run は記録だけ)と fake
-  `rm`(temp 配下の削除 = 後始末の途中で group へ送り、届くのを待ってから本物の rm に渡す。signal で死ぬ rm はそこで死に、
-  無視する rm は削除を続ける)。backup の一覧 file 3 つも専用 TMPDIR の下に作られる(#372。作り方は下の bullet)ので、
+  `rm`(temp 配下の削除 = 後始末の途中で自分を含む group へ送り、自分に届いてから本物の rm に渡す。自分に送った
+  signal は kill が戻る前に届くので、待たない。signal で死ぬ rm はそこで死に、無視する rm は削除を続ける)。
+  backup の一覧 file 3 つも専用 TMPDIR の下に作られる(#372。作り方は下の bullet)ので、
   消し忘れは残留の検査に映る(Codex review R5)。backup の run は、その 3 つが manifest 検査の時点で専用 TMPDIR にあったことも確かめる。
   中断の run は、終了後に専用 TMPDIR が空で、rc が 130 / 143 で、python3 の wrapper を親に
   して記録した waitpid の終了状態が `exit 130` ではなく signal であること。rmfail は失敗した削除の warn も確かめる。正常
