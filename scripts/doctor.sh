@@ -183,7 +183,11 @@ if command -v git >/dev/null 2>&1; then
             gh_cred_host="${gh_cred_url%%/*}"
             gh_cred_host="${gh_cred_host##*@}"
             if [[ "$gh_cred_host" == *:* ]]; then
-              [[ "${gh_cred_host##*:}" == 443 ]] || continue
+              # Git compares the port without its leading zeros, and an empty
+              # one is the default (R9).
+              gh_cred_port="${gh_cred_host##*:}"
+              while [[ "$gh_cred_port" == 0?* ]]; do gh_cred_port="${gh_cred_port#0}"; done
+              [[ -z "$gh_cred_port" || "$gh_cred_port" == 443 ]] || continue
               gh_cred_host="${gh_cred_host%:*}"
             fi
             gh_cred_part1="" gh_cred_part2="" gh_cred_part3=""

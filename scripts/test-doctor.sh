@@ -746,6 +746,8 @@ gc_action_check() {
   fi
 }
 gc_helper="!$host_stub_dir/bin/gh auth git-credential"
+# The warn for a value-less helper entry (GH-2f, GH-2g, GH-2m).
+gc_broken="[warn] GitHub HTTPS credential helper broken: a global credential helper entry for github.com (or a URL under it) has no value (\`helper\` without \`=\`), and git stops its credential lookup there with an error"
 # gc_write_managed HELPER — the managed file as the template renders it:
 # github.com and gist.github.com, each list reset and then HELPER.
 gc_write_managed() {
@@ -844,6 +846,12 @@ printf '[credential "https://github.com:8443"]\n\thelper\n' >> "$gc_home/.gitcon
 doctor_expect "gh credential helper with a value-less entry for github.com on another port -> ok (another URL)" gc_doctor "$gc_root" work "$PATH" -- \
   "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2m) ... but the default port written another way (`:0443`; git drops
+#        the leading zeros) is github.com itself: its value-less `helper`
+#        stops git's lookup -> warn (broken) (Codex review R9).
+printf '[credential "https://github.com:0443"]\n\thelper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a value-less entry for github.com:0443 (the default port) -> warn (broken)" gc_doctor "$gc_root" work "$PATH" -- "$gc_broken"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-2e) ... but the same path section BEFORE the include (as a context
 #        identity file would carry it) is cleared by the managed reset, which
 #        every github.com URL sees -> ok (Codex review R2).
@@ -852,7 +860,6 @@ doctor_expect "gh credential helper with an unmatched github.com section before 
   "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
 # GH-2f) a generic `helper` with no value at all, even before the include: git
 #        stops its credential lookup with an error -> warn, not a reset.
-gc_broken="[warn] GitHub HTTPS credential helper broken: a global credential helper entry for github.com (or a URL under it) has no value (\`helper\` without \`=\`), and git stops its credential lookup there with an error"
 { printf '[credential]\n\thelper\n'; cat "$DOTFILES_ROOT/dot_gitconfig"; } > "$gc_home/.gitconfig"
 doctor_expect "gh credential helper with a value-less helper entry -> warn (broken, not a reset)" gc_doctor "$gc_root" work "$PATH" -- "$gc_broken"
 # GH-2g) ... the same in a path section doctor does not match, before the

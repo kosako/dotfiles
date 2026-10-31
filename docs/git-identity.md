@@ -248,7 +248,8 @@ organization が SAML SSO を求める repo では、SSO を許可した gh の 
   にあっても同じで、後ろの reset では消えない)。protocol を明示した URL は https のものだけを数える(git は protocol も照合する)。protocol を省いた `github.com` は
   https にも効くので、`https://github.com` と同じに数える。host を省いた `https://` は https の全体に効くので、一般の
   `[credential]` と同じに数える。host を省いて path だけを持つ URL はどの host のその path にも効くので、確かめられない側に
-  入れる。443 以外の port を持つ URL は `https://github.com` に当たらないので数えない。
+  入れる。443 以外の port を持つ URL は `https://github.com` に当たらないので数えない(先頭の 0 は除いて比べ、空の port は
+  既定の 443 として扱う)。
   この判定は、repo の外から見た machine 全体の設定の近似で、context の local file(`includeIf "gitdir:..."` で読む
   `~/.config/git/<context>.gitconfig`)は辿らない(その context の repo の中でだけ読まれるため)。doctor はそのことを
   item の 1 行で示す。file が無いときは、doctor の PATH に gh があれば `chezmoi apply` の action、無いか
