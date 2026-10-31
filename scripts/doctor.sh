@@ -126,9 +126,10 @@ if command -v git >/dev/null 2>&1; then
   # clears it, so the global entries are enough. Only the generic section and
   # https://github.com itself are matched; a github.com section with a path,
   # a user or a wildcard is not, and leaves the result unconfirmed until a
-  # later reset that every github.com URL sees clears it. A matching entry
-  # with no value at all (`helper`, no `=`) is not a reset: git stops its
-  # credential lookup with an error wherever it sits (Codex review R2).
+  # later reset that every github.com URL sees clears it. An entry with no
+  # value at all (`helper`, no `=`) is not a reset: git stops its credential
+  # lookup with an error wherever it sits, so a later reset does not clear it
+  # (Codex review R2), in an unmatched section too (R3).
   gh_cred_file="$HOME/.config/git/gh-credential.gitconfig"
   gh_cred_path=""
   gh_cred_plain='^/[A-Za-z0-9_@%+=:,./-]+$'
@@ -167,7 +168,11 @@ if command -v git >/dev/null 2>&1; then
             # shellcheck disable=SC2053 # the parts are git's host patterns: glob on purpose
             if [[ "$gh_cred_host" == github.com ]] \
               || [[ "$gh_cred_host" == *'*'* && -z "$gh_cred_part3" && -n "$gh_cred_part2" && github == $gh_cred_part1 && com == $gh_cred_part2 ]]; then
-              gh_cred_unmatched=1
+              if [[ "$gh_cred_has_value" -eq 0 ]]; then
+                gh_cred_valueless=1
+              else
+                gh_cred_unmatched=1
+              fi
             fi
             continue
           fi
@@ -189,7 +194,7 @@ if command -v git >/dev/null 2>&1; then
       gh_cred_bin="${gh_cred_managed#!}"
       gh_cred_bin="${gh_cred_bin% auth git-credential}"
       if [[ "$gh_cred_valueless" -eq 1 ]]; then
-        warn "GitHub HTTPS credential helper broken: a global credential helper entry for github.com has no value (\`helper\` without \`=\`), and git stops its credential lookup with an error"
+        warn "GitHub HTTPS credential helper broken: a global credential helper entry for github.com (or a URL under it) has no value (\`helper\` without \`=\`), and git stops its credential lookup there with an error"
       elif [[ "$gh_cred_unmatched" -eq 1 ]]; then
         warn "GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)"
       elif [[ -n "$gh_cred_managed" && "$gh_cred_first" == "$gh_cred_managed" ]]; then

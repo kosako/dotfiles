@@ -798,9 +798,14 @@ doctor_expect "gh credential helper with an unmatched github.com section before 
   "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
 # GH-2f) a generic `helper` with no value at all, even before the include: git
 #        stops its credential lookup with an error -> warn, not a reset.
+gc_broken="[warn] GitHub HTTPS credential helper broken: a global credential helper entry for github.com (or a URL under it) has no value (\`helper\` without \`=\`), and git stops its credential lookup there with an error"
 { printf '[credential]\n\thelper\n'; cat "$DOTFILES_ROOT/dot_gitconfig"; } > "$gc_home/.gitconfig"
-doctor_expect "gh credential helper with a value-less helper entry -> warn (broken, not a reset)" gc_doctor "$gc_root" work "$PATH" -- \
-  "[warn] GitHub HTTPS credential helper broken: a global credential helper entry for github.com has no value (\`helper\` without \`=\`), and git stops its credential lookup with an error"
+doctor_expect "gh credential helper with a value-less helper entry -> warn (broken, not a reset)" gc_doctor "$gc_root" work "$PATH" -- "$gc_broken"
+# GH-2g) ... the same in a path section doctor does not match, before the
+#        include: the managed reset clears the section's mark, not the error
+#        git hits for that path -> warn (Codex review R3).
+{ printf '[credential "https://github.com/some-org"]\n\thelper\n'; cat "$DOTFILES_ROOT/dot_gitconfig"; } > "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a value-less entry in a path section before the managed reset -> warn (broken)" gc_doctor "$gc_root" work "$PATH" -- "$gc_broken"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-3) file missing, gh on PATH -> action: chezmoi apply renders it.
 rm -f "$gc_file"

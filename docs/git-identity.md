@@ -244,7 +244,8 @@ organization が SAML SSO を求める repo では、SSO を許可した gh の 
   action。ほかの helper が先に聞かれるなら warn(後の global の設定が list を空にしている)。照合するのは一般の
   `[credential]` と `https://github.com` だけで、path・user・wildcard を含む github.com の section が helper を持つときは、
   確かめられないとして warn(その後ろに github.com のどの URL にも効く reset があれば、その section は無効なので
-  数えない)。値の無い `helper`(`=` なし)は reset ではなく、git の照会が error で止まるので warn。file が無いときは、doctor の PATH に gh があれば `chezmoi apply` の action、無いか
+  数えない)。値の無い `helper`(`=` なし)は reset ではなく、git の照会がその URL で error で止まるので warn(照合できない section
+  にあっても同じで、後ろの reset では消えない)。file が無いときは、doctor の PATH に gh があれば `chezmoi apply` の action、無いか
   引用の要る path なら warn。capability が false なのに file が残っていれば、include が無条件なので gh が効き続ける。
   module が active なら `chezmoi apply` が消し、別の profile の残りなら手で消す(どちらも action)。helper の値は
   表示しない。
