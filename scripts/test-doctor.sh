@@ -821,6 +821,14 @@ doctor_expect "gh credential helper cleared by a later github.com section withou
   "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)" \
   ! "other-helper"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2j) a later https URL without a host (`https://`) covers every https
+#        URL: it clears the list and sets another helper -> warn (Codex
+#        review R7).
+printf '[credential "https://"]\n\thelper =\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper cleared by a later https:// section without a host -> warn" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)" \
+  ! "other-helper"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-2e) ... but the same path section BEFORE the include (as a context
 #        identity file would carry it) is cleared by the managed reset, which
 #        every github.com URL sees -> ok (Codex review R2).
