@@ -231,9 +231,9 @@ object の先頭・末尾の comma、member の間の comma の抜け、複数�
 CI で飛ばしてはいけない case の gate(#484): `ci_gate PROBE...` は、PROBE(1 つの command と引数)が通れば `run`、
 通らなければ CI(`CI=true`)では `fail`、それ以外では `skip` を出す。CI での skip は case が走らなかったことなので、
 導入の step が消えたり PATH が壊れたりしても green にしない(#330)。PROBE の出力は捨て、stdin は `/dev/null` にする。
-1 つの gate には 1 つの道具を渡す(`command -v a b` はどちらかがあれば通る)。`fail` を case の失敗に、`skip` を warn に
-するのは呼び出し側(test-codex-settings.sh の codex、test-private-backup.sh と test-starship.sh の python3)。gate 自体は
-test-policy.sh が 1 回だけ確かめる。
+1 つの gate には 1 つの道具を渡す(`command -v a b` はどちらかがあれば通る)。`fail` を case の失敗にし、`skip` を報告する
+のは呼び出し側(test-codex-settings.sh の codex は item、test-private-backup.sh と test-starship.sh の python3 は warn)。
+gate 自体は test-policy.sh が 1 回だけ確かめる。
 
 report の照合の helper(#483): `expect_report OUTPUT EXPECT... [! ABSENT...]` は、手元にある出力を照合する。各 EXPECT が
 exact な行として(先頭が `~` なら部分一致で)あり、`!` のあとの文字列がどこにも無いことを確かめる(2 つ目からの `!` は区切り

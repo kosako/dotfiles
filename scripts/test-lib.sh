@@ -183,7 +183,8 @@ strict_json_object() {
 # broken PATH must fail there (#330, #484). PROBE's output is discarded and
 # its stdin is /dev/null. Give one tool per gate (`command -v a b` succeeds
 # when either is found). Call as `gate="$(ci_gate command -v python3)"`; the
-# caller turns "fail" into the case's failure and "skip" into its warning.
+# caller turns "fail" into the case's failure and reports "skip" (a warning,
+# or an item where the suite already used one).
 # test-policy.sh checks the gate itself.
 ci_gate() {
   if "$@" >/dev/null 2>&1 </dev/null; then
