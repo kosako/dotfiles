@@ -176,6 +176,25 @@ strict_json_object() {
   jq -e -s 'length == 1 and (.[0] | type) == "object"' "$1" >/dev/null 2>&1
 }
 
+# ci_gate PROBE... — whether a case that needs a tool runs here: "run" when
+# PROBE (one command with its arguments) succeeds; otherwise "fail" on CI
+# (CI=true, set by GitHub Actions) and "skip" elsewhere. A skip on CI means
+# the case did not run, not that it passed, so a dropped install step or a
+# broken PATH must fail there (#330, #484). PROBE's output is discarded and
+# its stdin is /dev/null. Give one tool per gate (`command -v a b` succeeds
+# when either is found). Call as `gate="$(ci_gate command -v python3)"`; the
+# caller turns "fail" into the case's failure and "skip" into its warning.
+# test-policy.sh checks the gate itself.
+ci_gate() {
+  if "$@" >/dev/null 2>&1 </dev/null; then
+    printf 'run\n'
+  elif [[ "${CI:-}" == "true" ]]; then
+    printf 'fail\n'
+  else
+    printf 'skip\n'
+  fi
+}
+
 # set_environment_kind ROOT PROFILE KIND
 # Retag PROFILE in ROOT/.chezmoidata/profiles.yaml to environmentKind KIND,
 # for the rows of the forbidden table that have no profile of their own

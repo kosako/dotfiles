@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 STARSHIP_SRC="$DOTFILES_ROOT/private_dot_config/starship.toml"
 
@@ -35,10 +37,16 @@ else
   ok "test passed: no email-like value in starship.toml"
 fi
 
-# Prefer a full TOML parser (available in both CI jobs). Older Python/macOS
-# can still exercise the current multiline-literal `when` blocks with awk.
+# Prefer a full TOML parser. Older Python/macOS can still exercise the
+# current multiline-literal `when` blocks with awk, but the parse check then
+# does not run: a skip locally, a failure on CI, where both jobs have it
+# (ci_gate in test-lib.sh, #484).
 has_tomllib=0
-if command -v python3 >/dev/null 2>&1 && python3 -c 'import tomllib' 2>/dev/null; then
+tomllib_gate="$(ci_gate python3 -c 'import tomllib')"
+if [[ "$tomllib_gate" == fail ]]; then
+  fail "test failed: python3/tomllib not found on CI; the TOML parse check must run there"
+  status=1
+elif [[ "$tomllib_gate" == run ]]; then
   has_tomllib=1
   if python3 - "$STARSHIP_SRC" <<'PY'
 import sys

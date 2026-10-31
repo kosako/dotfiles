@@ -228,6 +228,13 @@ repo copy)、`strict_json_object`(file がちょうど 1 つの JSON の object 
 object の先頭・末尾の comma、member の間の comma の抜け、複数の document、空の file を受け付けるので、JSON の妥当性の
 検査はこちらで行い、中身は yq で読む、#478)。
 
+CI で飛ばしてはいけない case の gate(#484): `ci_gate PROBE...` は、PROBE(1 つの command と引数)が通れば `run`、
+通らなければ CI(`CI=true`)では `fail`、それ以外では `skip` を出す。CI での skip は case が走らなかったことなので、
+導入の step が消えたり PATH が壊れたりしても green にしない(#330)。PROBE の出力は捨て、stdin は `/dev/null` にする。
+1 つの gate には 1 つの道具を渡す(`command -v a b` はどちらかがあれば通る)。`fail` を case の失敗に、`skip` を warn に
+するのは呼び出し側(test-codex-settings.sh の codex、test-private-backup.sh と test-starship.sh の python3)。gate 自体は
+test-policy.sh が 1 回だけ確かめる。
+
 report の照合の helper(#483): `expect_report OUTPUT EXPECT... [! ABSENT...]` は、手元にある出力を照合する。各 EXPECT が
 exact な行として(先頭が `~` なら部分一致で)あり、`!` のあとの文字列がどこにも無いことを確かめる(2 つ目からの `!` は区切り
 だけ)。外れたときは出力と、外れた期待ごとの 1 行(`expected line:` / `expected text:` / `unexpected:`)を stderr に出し、1 を
@@ -801,11 +808,11 @@ gate profile を与える・throwaway age 鍵)。実 home には触れない。`
   決まるので、umask によっては case 自身の不整合の隣に mode の食い違いも乗る(台帳外ファイルの case は umask 002 で
   mode mismatch も出て、その隣でも台帳外を報告すること)。checksum の case は umask 022 / 002 で sha と mode の両方が
   食い違う状態を保ち、報告する理由が checksum であること(mode を先に見る検査では理由が変わる)。
-- 通常の file の mode を持たせた hardlink の header(python3 で byte 単位に作る。無ければ skip)を verify が拒否すること
+- 通常の file の mode を持たせた hardlink の header(python3 で byte 単位に作る。無ければ手元は skip、CI では fail。#484)を verify が拒否すること
   (bsdtar では展開後の検査で、GNU tar では展開前の一覧の検査で)。展開後の検査を private-backup.sh から取り出し、
   symlink・fifo・hardlink を拒否し、通常の file と dir の tree を通し、辿れない dir を拒否することを、戻り値と message の両方で直接
   確かめる。mode 000 の dir(中に file)を残す archive を verify が拒否し、その後に temp が中身ごと消え、archive 由来の名前が
-  出ないことも確かめる(root では飛ばす。#335)。
+  出ないことも確かめる(root では飛ばす。#335。python3 が無いときは hardlink の case と同じ扱い)。
 - 拒否 profile(work)では backup が実行拒否し、アーカイブを書かないこと。
 - environmentKind の実行時の拒否(#357): work に `allowSecretsAccess=true` を入れた repo の copy(copy の
   validate-policy が同じ data を拒否することも確かめる)では、backup / verify / restore `--apply` が
@@ -1036,8 +1043,8 @@ apply 済み file が **削除される**こと(template 自己 gate)、rules ba
 codex(release の Linux 用 binary。npm は通さない)を入れてこの評価を回す(#332 F36)。CI の codex は手元の版と同じとは限らないので、
 手元の codex の版が変わったときの解釈の変化は、手元でのこの test と doctor の rules の意味の検査が受け持つ。rules を変える PR は、
 codex の入った手元でもこの test を回す。`codex` が無いと、
-手元ではその旨を表示して飛ばし(exact pin だけが効く)、CI(`CI=true`)では fail にする(#330 の age と同じ。この分かれ目も
-codex の無い PATH で確かめる)。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
+手元ではその旨を表示して飛ばし(exact pin だけが効く)、CI(`CI=true`)では fail にする(#330 の age と同じ。分かれ目は test-lib.sh の
+`ci_gate` で、test-policy.sh が確かめる)。install されているのに `execpolicy check` が使えない、非 0 で終わる、decision も空の
 `matchedRules` も無い答えを返す、のどれも「一致なし」とはせず fail にする。答えの読み取り(decision は allow / prompt /
 forbidden だけ、一致なしは decision が無く `matchedRules` が空の配列のときだけ)は、codex が無くても固定の答えで確かめる。Codex review / worker 用 profile file(#264 / #299)は、1 行目の managed-by header・設定が capability の値
 どおりであること(どちらも `model_reasoning_effort` だけ。review 用 file に `service_tier` を書かない)・全行が agent-tools の読み手(worker preflight と同じ)の top-level の形に収まること、
@@ -1148,7 +1155,7 @@ zsh が必要(validate job、apt で導入)。
 
 `private_dot_config/starship.toml`(template ではない source)を render せずに検証する。identity の実値
 (`name =` / `email =` の代入や `@`)が含まれないこと、TOML として parse できること(tomllib。python3 や tomllib が
-無ければ skip)を静的に確認する。さらに source から `custom.git_ctx_personal` / `git_ctx_other` / `git_ctx_none` の
+無ければ手元は skip、CI では fail。#484)を静的に確認する。さらに source から `custom.git_ctx_personal` / `git_ctx_other` / `git_ctx_none` の
 3 module の `when` を取り出し(どれかが取り出せなければ fail)、隔離した HOME / Git config と dummy identity の
 git fixture で実行する。fixture の personal.gitconfig は `$HOME/.config/git/` にだけ置き、`XDG_CONFIG_HOME` は別の空
 directory に向けるので、分類が gitconfig の include と同じ local の `~/.config/git/personal.gitconfig` を読むことも
