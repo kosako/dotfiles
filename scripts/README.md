@@ -244,6 +244,15 @@ run の fixture に、中身のある権限の無い dir を置く(権限を外�
 check の process がどれも残らず、fixture が消えることを確かめる。check の一時 dir と内側の run の fixture(TMPDIR)は呼び出し側の
 fixture の下に作るので、呼び出し側の suite が check の途中で中断されても残らない(test-private-backup.sh / test-doctor.sh の冒頭で使う)。
 
+Git の fixture の helper(#389。2 つの suite の写しを #482 でまとめた): `fixture_git_env HOME GLOBAL_CONFIG [NAME=VALUE...] -- CMD...` は、呼び出し側の環境を PATH の
+ほかは引き継がずに(`env -i`)CMD を走らせる。HOME は fixture の home、XDG_CONFIG_HOME はその `.config`、`LC_ALL=C`、system の config は切り、
+global の config は GLOBAL_CONFIG にして、`--` の前の NAME=VALUE を足す(pair でない語や CMD が無いときは fail する)。suite を
+hook が走らせると GIT_DIR などが export されていて、fixture の git が親の repo を指すため。`check_git_env_isolation RUN_GIT DIR` は、
+suite の run_git がその環境を落とすことの自己検査。無関係な repo の GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_CONFIG_* を
+export した下で、init / add / commit / checkout / config が fixture の repo に入り、無関係な repo の HEAD・refs・index・config が
+byte 単位で変わらないことを確かめる。check は渡した wrapper だけを守るので、test-gitconfig.sh と test-git-hook-gates.sh が
+それぞれ自分の run_git で呼ぶ。
+
 ## test-shell-syntax.sh
 
 CI の bash / zsh syntax check をそのまま取り出し、各入力ファイルへ構文エラーを
