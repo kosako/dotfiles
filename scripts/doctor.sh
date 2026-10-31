@@ -165,14 +165,18 @@ if command -v git >/dev/null 2>&1; then
         if [[ "$gh_cred_key" != credential.helper ]]; then
           gh_cred_url="${gh_cred_key#credential.}"
           gh_cred_url="$(printf '%s' "${gh_cred_url%.helper}" | tr '[:upper:]' '[:lower:]')"
-          if [[ "$gh_cred_url" != https://* ]]; then
-            continue
-          elif [[ "${gh_cred_url%/}" != https://github.com ]]; then
+          # A URL that names its protocol counts only for https; a partial one
+          # without a protocol (`github.com`) matches https too (Codex review
+          # R6), so both are compared from the host on.
+          if [[ "$gh_cred_url" == *://* ]]; then
+            [[ "$gh_cred_url" == https://* ]] || continue
+            gh_cred_url="${gh_cred_url#*://}"
+          fi
+          if [[ "${gh_cred_url%/}" != github.com ]]; then
             # Another URL counts only when its host could be github.com: the
             # host itself with a path, a user or a port, or a wildcard that
             # matches it (git's `*` stands for one dot-separated part).
-            gh_cred_host="${gh_cred_url#*://}"
-            gh_cred_host="${gh_cred_host%%/*}"
+            gh_cred_host="${gh_cred_url%%/*}"
             gh_cred_host="${gh_cred_host##*@}"
             gh_cred_host="${gh_cred_host%:*}"
             gh_cred_part1="" gh_cred_part2="" gh_cred_part3=""
