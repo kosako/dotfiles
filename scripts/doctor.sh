@@ -125,7 +125,10 @@ if command -v git >/dev/null 2>&1; then
   # R1, PR #495). The system scope comes first and the managed `helper =`
   # clears it, so the global entries are enough. Only the generic section and
   # https://github.com itself are matched; a github.com section with a path,
-  # a user or a wildcard is not, and leaves the result unconfirmed.
+  # a user or a wildcard is not, and leaves the result unconfirmed until a
+  # later reset that every github.com URL sees clears it. A matching entry
+  # with no value at all (`helper`, no `=`) is not a reset: git stops its
+  # credential lookup with an error wherever it sits (Codex review R2).
   gh_cred_file="$HOME/.config/git/gh-credential.gitconfig"
   gh_cred_path=""
   gh_cred_plain='^/[A-Za-z0-9_@%+=:,./-]+$'
@@ -137,10 +140,17 @@ if command -v git >/dev/null 2>&1; then
       gh_cred_first=""
       gh_cred_count=0
       gh_cred_unmatched=0
+      gh_cred_valueless=0
       while IFS= read -r gh_cred_line; do
+        # `--get-regexp` prints `KEY VALUE`, `KEY ` for an empty value and a
+        # bare `KEY` for an entry without `=`.
         gh_cred_key="${gh_cred_line%% *}"
         gh_cred_value=""
-        [[ "$gh_cred_line" != *" "* ]] || gh_cred_value="${gh_cred_line#* }"
+        gh_cred_has_value=0
+        if [[ "$gh_cred_line" == *" "* ]]; then
+          gh_cred_value="${gh_cred_line#* }"
+          gh_cred_has_value=1
+        fi
         if [[ "$gh_cred_key" != credential.helper ]]; then
           gh_cred_url="${gh_cred_key#credential.}"
           gh_cred_url="$(printf '%s' "${gh_cred_url%.helper}" | tr '[:upper:]' '[:lower:]')"
@@ -162,9 +172,12 @@ if command -v git >/dev/null 2>&1; then
             continue
           fi
         fi
-        if [[ -z "$gh_cred_value" ]]; then
+        if [[ "$gh_cred_has_value" -eq 0 ]]; then
+          gh_cred_valueless=1
+        elif [[ -z "$gh_cred_value" ]]; then
           gh_cred_first=""
           gh_cred_count=0
+          gh_cred_unmatched=0
         else
           [[ "$gh_cred_count" -gt 0 ]] || gh_cred_first="$gh_cred_value"
           gh_cred_count=$((gh_cred_count + 1))
@@ -175,7 +188,9 @@ if command -v git >/dev/null 2>&1; then
       # running a command that is not there.
       gh_cred_bin="${gh_cred_managed#!}"
       gh_cred_bin="${gh_cred_bin% auth git-credential}"
-      if [[ "$gh_cred_unmatched" -eq 1 ]]; then
+      if [[ "$gh_cred_valueless" -eq 1 ]]; then
+        warn "GitHub HTTPS credential helper broken: a global credential helper entry for github.com has no value (\`helper\` without \`=\`), and git stops its credential lookup with an error"
+      elif [[ "$gh_cred_unmatched" -eq 1 ]]; then
         warn "GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)"
       elif [[ -n "$gh_cred_managed" && "$gh_cred_first" == "$gh_cred_managed" ]]; then
         if [[ -f "$gh_cred_bin" && -x "$gh_cred_bin" ]]; then

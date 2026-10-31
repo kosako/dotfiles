@@ -790,6 +790,18 @@ doctor_expect "gh credential helper with a wildcard section matching github.com 
   "[warn] GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)" \
   ! "other-helper"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2e) ... but the same path section BEFORE the include (as a context
+#        identity file would carry it) is cleared by the managed reset, which
+#        every github.com URL sees -> ok (Codex review R2).
+{ printf '[credential "https://github.com/some-org"]\n\thelper = !/bin/echo other-helper\n'; cat "$DOTFILES_ROOT/dot_gitconfig"; } > "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with an unmatched github.com section before the managed reset -> ok" gc_doctor "$gc_root" work "$PATH" -- \
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
+# GH-2f) a generic `helper` with no value at all, even before the include: git
+#        stops its credential lookup with an error -> warn, not a reset.
+{ printf '[credential]\n\thelper\n'; cat "$DOTFILES_ROOT/dot_gitconfig"; } > "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a value-less helper entry -> warn (broken, not a reset)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper broken: a global credential helper entry for github.com has no value (\`helper\` without \`=\`), and git stops its credential lookup with an error"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-3) file missing, gh on PATH -> action: chezmoi apply renders it.
 rm -f "$gc_file"
 gc_action_check "gh credential helper missing with gh on PATH -> action chezmoi apply" "$gc_root" work "$PATH" \
