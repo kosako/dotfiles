@@ -142,7 +142,16 @@ run_gclone "garbage url rejected" 2 "" -n "not-a-url"
 run_gclone "deep https path rejected" 2 "" -n https://github.com/kosako/foo/tree/main
 run_gclone "missing url is usage error" 2 "" -n
 
-# 7. A last line without a trailing newline still counts (#281): `read` fails
+# 7. An absolute context path escapes ~/src as well, and is rejected the same
+#    way as a traversal (rc=2, nothing printed). The line is appended after
+#    the last case that reads this mapping file (section 8 rewrites it), so
+#    no other case's input changes.
+printf 'abs /abs\n' \
+  >> "$fixture_home/.config/dotfiles/clone-contexts.local"
+run_gclone "absolute context rejected" 2 "" \
+  -n https://github.com/abs/tool
+
+# 8. A last line without a trailing newline still counts (#281): `read` fails
 #    at that EOF after filling the fields, so a plain `while read` dropped the
 #    line and a kosako repo line silently lost to the managed rule. The file is
 #    rewritten here (printf without "\n" at the end) so each case's line is the

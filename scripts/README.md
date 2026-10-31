@@ -219,9 +219,10 @@ test-*.sh が共有する fixture helper(source 専用、lib-policy.sh の後に
 `set_capability_all` / `remove_module_all` が fixture の profiles.yaml を yq で構造的に
 編集し、対象が存在しなければ fail する(行形式一致の awk 直書きが無言で no-op 化して
 テストが vacuous pass する事故の再発防止。#149)。ほかに render/fixture 構築の共有形:
-`render_personal_into`(throwaway home への personal apply。root は呼び出し側が mktemp +
+`render_profile_into` / `render_personal_into`(throwaway home への profile の apply。後者は personal 固定の形。root は呼び出し側が mktemp +
 cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp する形は cleanup trap から
-漏れる、#150)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
+漏れる、#150。呼び出し側が先に置いた ROOT/home の file はそのまま残し、作り直さない。chezmoi の home directory は
+`HOME` に従うので、別の home で render するときは `HOME=... render_profile_into ...` と呼ぶ)、`make_flipped_source` / `flip_personal_capability`(source copy + personal
 限定 capability flip。boolean 専用。personal が宣言していない capability は fail する、#332)、`copy_repo_fixture`(scripts + .chezmoidata の最小
 repo copy)、`strict_json_object`(file がちょうど 1 つの JSON の object であることを jq で確かめる。yq の JSON の reader は
 object の先頭・末尾の comma、member の間の comma の抜け、複数の document、空の file を受け付けるので、JSON の妥当性の
@@ -248,6 +249,15 @@ fixture の下に作るので、呼び出し側の suite が check の途中で�
 CI の bash / zsh syntax check をそのまま取り出し、各入力ファイルへ構文エラーを
 順番に挿入して非 0 になることを検証する。先頭ファイルだけの検査や、後続ファイルの
 成功で途中の失敗が隠れる退行を防ぐ(#211)。
+bash32 job の bash 3.2 の syntax check(`bash syntax check (bash 3.2)`)も同じ形で取り出して検証し、job 名や step 名が変わったら「missing CI syntax step」で fail closed する。
+CI の suite の配線も確かめる: validate job の step が呼ぶ suite と bash32 job の render 以外の group の suite、render job の step が呼ぶ
+suite と bash32 の render group の suite、両 job の和と `docs/github-workflow.md` の「最低限の validation」の最初の一覧、両 job の和と
+`scripts/test-*.sh`(source 専用の `test-lib.sh` と、`test-install-packages.sh` から呼ばれる `test-inventory.sh` を除く)が、
+それぞれ同じ集合であること(job ごとに比べるので、両 job で走る `test-npmrc.sh` を片方から落としても検出する。どれかの一覧が空なら
+fail)、bash32 の `test-doctor.sh` の part が 1 から `doctor_parts` まで 1 回ずつあること、`test-install-packages.sh` が
+`test-inventory.sh` を呼んでいること、bash32 job の step が `if: matrix.group == '<group>'` で名指す group がすべて matrix に
+あること(bash 3.2 の syntax check と validate-policy は others group でだけ走るので、group の名前が変わると黙ってどこでも
+走らなくなる。名指す step が 1 つも無ければ fail)。
 
 ## test-zshrc-compinit.sh
 
@@ -446,10 +456,16 @@ fixture は一時 directory に作り、実際の home や global Git config に
   宣言されないので apply されない。managed set の pin と未宣言 source の検知は `test-render.sh`、#207)。
 - modules.yaml の宣言で `.npmrc` が `npmHardeningMode=enforce` のみ、mise config が `enableRuntimeManagement=true` のみで管理されること。
 - template が `min-release-age-exclude`(7 日の待ちから外す package)を設定しないこと(#443)。
-- template の設定値と `doctor.sh` の enforce 期待値が一致していること。`min-release-age=7` は、今の npm の形
-  (`min-release-age` が 7 で `before` が null、かつ `npm config list` のどの source にも `before` が無い)と
-  古い npm の形(`before` が約 7 日前の cutoff、`npm_before_within_age_window`)の両方の検査が 7 日に固定されていることと、
-  doctor が `min-release-age-exclude` を `npm config list --json` で検査することを確かめる(#443)。
+- template の設定値と `doctor.sh` の enforce 期待値が一致していること。`min-release-age=7` は、古い npm の形(`before` が
+  約 7 日前の cutoff)を見る `npm_before_within_age_window` の呼び出しの引数が 7 日・±12h(`7 43200`)に固定されていることを
+  確かめる(窓の幅は doctor の run では見分けられないため)。今の npm の形(`min-release-age` が 7 で `before` が null、かつ
+  `npm config list` のどの source にも `before` が無い)と `min-release-age-exclude` の件数の検査は、`test-doctor.sh` が doctor を
+  走らせて挙動で固定する(#443)。ただしその run は今の npm の形の age を 1 と 7 にしか置かないので、age の項だけはここで静的に
+  固定する: `npm min-release-age=7 honored (before unset)` を出す branch の条件(直前の if / elif の文。行の継続は 1 行に
+  つなぐ)が、age を `"$npm_age" == "7"` の形でだけ比べ、`||` を持たないこと(`-ge 5` のように緩めた条件は 1 と 7 の run を
+  通ってしまう)。また、その run の fake npm は stderr に何も書かず、知らない引数を無視するので、doctor が
+  `"$(npm config list --json 2>/dev/null)"` をそのまま読むこと(npm の stderr を捨て、引数を足さない。comment の行は数えない)も
+  ここで静的に固定する。
 
 静的検査は chezmoi 無しで実行できる(CI の validate job)。chezmoi がある環境では加えて personal を
 throwaway destination に実 render し、生成された `~/.npmrc` の内容(hardening 値・token / registry の
@@ -892,9 +908,10 @@ profile を解決できない・未知の profile・`true` 以外の値はすべ
 - environmentKind の実行時の拒否(#357): repo の copy の gate が、work に `allowSecretsAccess=true` を入れた
   data・YAML の alias で personal の map を流用した work・sandbox に付け替えた personal・未知の kind を、
   validate-policy を経ずに environmentKind の拒否行で拒否し、`profile_allows_secrets_access` も許可しないこと。
-  未改変の copy の gate が personal を許可すること(control)、copy の validate-policy が同じ data を拒否する
-  こと、`set_environment_kind`(test-lib.sh)が未定義の profile と environmentKind の無い profile で fail して
-  file を変えないことも確かめる。
+  未改変の copy の gate が personal を許可すること(control)、alias と sandbox の copy では copy の validate-policy も
+  同じ data を同じ行で拒否すること(静的な検査と gate が alias を同じに読む。sandbox の行は test-policy.sh が部分一致でしか
+  見ないため。work の data の同じ検査は test-private-backup.sh の 9b が同じ fixture で持つ)、`set_environment_kind`(test-lib.sh)が
+  未定義の profile と environmentKind の無い profile で fail して file を変えないことも確かめる。
 - chezmoi が profile を解決できる環境では、gate の判定が profiles.yaml の
   `allowSecretsAccess` 宣言値(yq 直読みの独立期待値)と一致すること
   (より緩くならない。chezmoi 不在の CI では skip)。
@@ -1044,17 +1061,19 @@ git-signing module の gating を検証する。`enableGitSigning` の on/off �
 signing mechanism の値は文字列の部分一致ではなく、render した `~/.gitconfig` の include を Git 自身にたどらせて
 (`git config --global --includes --get`)`gpg.format` と `gpg.ssh.program` を完全一致で確かめる。行をコメントにした
 copy と、signer を `[gpg "ssh"]` の外に置いた copy を対照にし、どちらも弾くことを確かめる(#384)。
+`enableGitSigning=false` の render では、signing.gitconfig だけが落ち、`~/.config/git` 配下の別 module の file
+(git-ignore の `~/.config/git/ignore`)は残ること(allowlist の祖先導出、#207)も確かめる。
 chezmoi が必要(render job)。
 
 ## test-git-ignore.sh
 
 git-ignore module(#248)を検証する。personal で `~/.config/git/ignore` が apply され work では
 されないこと、managed-by header と pattern 2 行(`.agent-packets/`、`**/.claude/settings.local.json`)の
-exact pin、`.agent-context.local.md` を global では除外しないこと、`enableGitSigning=false` でも
-`~/.config/git` 配下の file が残ること(allowlist の祖先導出、#207)、そして `.gitignore` を持たない
+exact pin、`.agent-context.local.md` を global では除外しないこと、そして `.gitignore` を持たない
 throwaway repo に対して `env -i` の throwaway HOME で `git status` を回し、agent local-only file だけが
 消え通常 file は残ること(空 home の control run で全 file が出ることを先に確認し、`git check-ignore -v`
-で判定源が managed file であることも確認)。chezmoi と git が必要(render job)。実 home や実 global
+で判定源が managed file であることも確認)。`enableGitSigning=false` でもこの file が残ること(#207)は、同じ
+flip と render を持つ `test-git-signing.sh` が確かめる。chezmoi と git が必要(render job)。実 home や実 global
 git config には触れない。
 
 ## test-herdr-config.sh
@@ -1108,17 +1127,18 @@ config.local の解決)を確認する。chezmoi が必要(render job)。
 dot_zshrc の `gclone` helper(#177)をマーカー抽出 + fixture HOME + `zsh -f` で検証する。
 実 clone はしない(`-n` の解決のみ)。context 解決の順序(local の repo 行 → managed の
 kosako ルール → local の owner 行 → fail-closed 中断。#260)、URL 3 形式(https / ssh:// / scp)の parse、
-path traversal 拒否、既存 dest の非破壊、末尾改行の無い最終行も 1 行として読むこと(#281)を固定する。
+path traversal と絶対 path の context の拒否、既存 dest の非破壊、末尾改行の無い最終行も 1 行として読むこと(#281)を固定する。
 zsh が必要(validate job、apt で導入)。
 
 ## test-starship.sh
 
 `private_dot_config/starship.toml`(template ではない source)を render せずに検証する。identity の実値
-(`name =` / `email =` の代入や `@`)が含まれないこと、git-identity context が runtime に local の
-`~/.config/git/personal.gitconfig` と照合する形で `custom.git_ctx_personal` / `git_ctx_other` / `git_ctx_none` の
-3 module を定義していること、TOML として parse できること(tomllib。python3 や tomllib が無ければ skip)を確認する。
-さらに source から 3 module の `when` を取り出し、隔離した HOME / Git config と dummy identity の
-git fixture で実行する。personal / 別 email / email 未設定では対応する module だけが成立し、repo 外では
+(`name =` / `email =` の代入や `@`)が含まれないこと、TOML として parse できること(tomllib。python3 や tomllib が
+無ければ skip)を静的に確認する。さらに source から `custom.git_ctx_personal` / `git_ctx_other` / `git_ctx_none` の
+3 module の `when` を取り出し(どれかが取り出せなければ fail)、隔離した HOME / Git config と dummy identity の
+git fixture で実行する。fixture の personal.gitconfig は `$HOME/.config/git/` にだけ置き、`XDG_CONFIG_HOME` は別の空
+directory に向けるので、分類が gitconfig の include と同じ local の `~/.config/git/personal.gitconfig` を読むことも
+実行で確かめる。personal / 別 email / email 未設定では対応する module だけが成立し、repo 外では
 すべて不成立になることを確認する。host の環境変数・global / system Git config・init template は使わない。
 抽出は tomllib を優先し、無ければ現在の multiline literal を awk で読む(明示的な `shell` 設定や別の
 TOML 記法には tomllib が必要)。実行 shell は module の `shell` 設定、未設定なら `sh` を使う。

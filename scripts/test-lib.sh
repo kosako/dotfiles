@@ -63,20 +63,26 @@ remove_module_all() {
   M="$module" yq -i 'del(.profiles[].modules[] | select(. == strenv(M)))' "$file"
 }
 
-# render_personal_into SOURCE_DIR ROOT
-# Apply the personal profile from SOURCE_DIR into ROOT/home (writes
-# ROOT/chezmoi.toml; requires chezmoi — render tests check for it upfront).
+# render_profile_into SOURCE_DIR ROOT PROFILE
+# render_personal_into SOURCE_DIR ROOT (the same with PROFILE personal)
+# Apply PROFILE from SOURCE_DIR into ROOT/home (writes ROOT/chezmoi.toml;
+# requires chezmoi — render tests check for it upfront).
 # ROOT is created by the CALLER and registered in tmp_roots there: a helper
 # that mktemps and returns via command substitution would append to
 # tmp_roots only inside the substitution subshell, so the cleanup trap
 # would never see it and the render roots would leak (Codex review, #150).
-render_personal_into() {
-  local source_dir="$1" root="$2"
+# ROOT/home may be pre-seeded by the caller (mkdir -p, never recreated), so
+# a test can check that apply leaves the files next to a target alone.
+# chezmoi's home directory (.chezmoi.homeDir) follows HOME: a caller that
+# needs another one writes `HOME=... render_profile_into ...`.
+render_profile_into() {
+  local source_dir="$1" root="$2" profile="$3"
   mkdir -p "$root/home"
-  printf '[data]\nprofile = "personal"\n' > "$root/chezmoi.toml"
+  printf '[data]\nprofile = "%s"\n' "$profile" > "$root/chezmoi.toml"
   chezmoi --config "$root/chezmoi.toml" \
     --source "$source_dir" --destination "$root/home" apply >/dev/null 2>&1
 }
+render_personal_into() { render_profile_into "$1" "$2" personal; }
 
 # make_flipped_source DEST_PARENT
 # Copy the source tree into DEST_PARENT/src (without .git) so a test

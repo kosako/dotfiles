@@ -6,7 +6,8 @@ set -euo pipefail
 # applied ONLY when enableGitSigning is true. Both gated states are forced in
 # throwaway source copies so the test is independent of the committed default
 # (the unconditional [include] in ~/.gitconfig is a no-op when the file is
-# absent). The signing
+# absent). The off state must drop only signing.gitconfig and keep
+# git-ignore's sibling under ~/.config/git (#207). The signing
 # key and the per-context commit.gpgsign live in the local identity files
 # (docs/git-identity.md) and are intentionally out of the managed mechanism.
 # The mechanism's values are read the way Git reads them (through the include in
@@ -62,6 +63,17 @@ if [[ -e "$off_home/.config/git/signing.gitconfig" ]]; then
   status=1
 else
   ok "test passed: enableGitSigning=false does not apply signing.gitconfig"
+fi
+
+# 1b) enableGitSigning=false drops signing.gitconfig only: a sibling under
+#     ~/.config/git (git-ignore's ~/.config/git/ignore, #248) stays, because
+#     the allowlist derives the ~/.config/git ancestor from EVERY active
+#     module's paths (#207), not from git-signing alone.
+if [[ -f "$off_home/.config/git/ignore" ]]; then
+  ok "test passed: enableGitSigning=false keeps .config/git/ignore (the ~/.config/git ancestor is not owned by git-signing, #207)"
+else
+  fail "test failed: enableGitSigning=false must keep .config/git/ignore (the ~/.config/git ancestor is not owned by git-signing, #207)"
+  status=1
 fi
 
 # signing_values HOME -> "gpg.format|gpg.ssh.program" as Git itself resolves them

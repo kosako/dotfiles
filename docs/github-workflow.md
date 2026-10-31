@@ -143,7 +143,7 @@ rules を変える PR は、codex の入った手元でもこの test を回す(
 検査は render job で実行される。#150。bash32 job でも others と render の両方の group で走る)。
 `test-inventory.sh` は `test-install-packages.sh` から呼ばれるため個別には載せない(単独実行も可)。
 `test-lib.sh` はテスト共通の helper で、source 専用(直接は実行しない)。
-この一覧は `.github/workflows/validate.yml` が正なので、CI にテストを足したらここも更新する。
+この一覧は `.github/workflows/validate.yml` が正なので、CI にテストを足したらここも更新する(CI の job・bash32 の matrix・この一覧・`scripts/test-*.sh` のずれは `test-shell-syntax.sh` が検出する)。
 一覧の `git diff --check` は手元用で、未 stage の変更だけを見る(stage 済みの変更は `git diff --cached --check` で見る)。
 CI は fresh checkout で差分が無いため、代わりに commit 済み tree 全体を空 tree と比べる
 `git diff --check "$(git hash-object -t tree /dev/null)" HEAD` を実行する。

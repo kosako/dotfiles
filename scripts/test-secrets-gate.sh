@@ -129,11 +129,16 @@ fi
 #     true", which would misstate the data), even though nothing ran
 #     validate-policy first. Each case runs the gate of a repo copy
 #     (copy_repo_fixture) whose data is changed fail-closed
-#     (set_capability_all / set_environment_kind); the copy's validate-policy
-#     rejecting the same data shows the change took, and the unchanged
-#     control shows the copy's gate grants at all, so no refusal below can
-#     come from a broken copy. The permission (profile_allows_secrets_access)
-#     is checked in each copy too, not only the entry point.
+#     (set_capability_all / set_environment_kind); the gate's exact refusal
+#     line names the capability, the kind and the profile, so it shows the
+#     change took, and the unchanged control shows the copy's gate grants at
+#     all, so no refusal below can come from a broken copy. The copy's
+#     validate-policy must reject the same data with the exact line in the
+#     alias case (the input no other suite has) and the sandbox case
+#     (test-policy.sh checks that row only by a substring); for the plain
+#     work data the same check is test-private-backup.sh 9b, on the same
+#     fixture. The permission (profile_allows_secrets_access) is checked in
+#     each copy too, not only the entry point.
 ek_gate() {
   # $1 = repo copy; runs that copy's require_secrets_access with the fake chezmoi
   ek_rc=0
@@ -194,7 +199,6 @@ fake_chezmoi '{"profile":"work"}' 0
 ek_gate "$fixture_bin/ek-work"
 if [[ "$ek_rc" -eq 1 ]] \
   && grep -Fxq "[fail] machine profile 'work' sets allowSecretsAccess=true, which environmentKind work forbids; refusing private-backup. Run: ./scripts/validate-policy.sh work" <<< "$ek_out" \
-  && ek_rejects "$fixture_bin/ek-work" work work \
   && ek_denies "$fixture_bin/ek-work" work; then
   pass "gate refuses work with allowSecretsAccess=true (environmentKind work forbids it)"
 else
