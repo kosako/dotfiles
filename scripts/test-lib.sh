@@ -200,6 +200,30 @@ set_environment_kind() {
   P="$profile" K="$kind" yq -i '.profiles[strenv(P)].environmentKind = strenv(K)' "$file"
 }
 
+# expect_report OUTPUT EXPECT... [! ABSENT_SUBSTRING...]
+# Whether OUTPUT (a report already in hand) has every EXPECT, as an exact
+# line or, with a leading "~", as a substring, and, after a "!", no
+# ABSENT_SUBSTRING anywhere (a further "!" only separates). Silent when all
+# hold; otherwise OUTPUT and then one "expected line: ..." / "expected text:
+# ..." / "unexpected: ..." per miss go to stderr, and it returns 1. The
+# caller runs the command and reports the case's ok / fail (test-doctor.sh's
+# doctor_expect, hg_expect, cx_expect and op_expect, #483).
+expect_report() {
+  local out="$1" mode=want arg missing=""
+  shift
+  for arg in "$@"; do
+    case "$mode:$arg" in
+      want:! | absent:!) mode=absent ;;
+      want:'~'*) grep -Fq -- "${arg#?}" <<< "$out" || missing="${missing}expected text: ${arg#?}"$'\n' ;;
+      want:*) grep -Fxq -- "$arg" <<< "$out" || missing="${missing}expected line: $arg"$'\n' ;;
+      absent:*) if grep -Fq -- "$arg" <<< "$out"; then missing="${missing}unexpected: $arg"$'\n'; fi ;;
+    esac
+  done
+  [[ -n "$missing" ]] || return 0
+  printf '%s\n%s' "$out" "$missing" >&2
+  return 1
+}
+
 # kill_tree (KILL a PID and its descendants, stopping each before listing
 # its children) lives in lib-policy.sh, shared with doctor's probe cleanup
 # (#423).
