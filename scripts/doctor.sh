@@ -133,7 +133,13 @@ if command -v git >/dev/null 2>&1; then
   # unconfirmed until a later reset that every github.com URL sees clears it. An entry with no
   # value at all (`helper`, no `=`) is not a reset: git stops its credential
   # lookup with an error wherever it sits, so a later reset does not clear it
-  # (Codex review R2), in an unmatched section too (R3).
+  # (Codex review R2), in an unmatched section too (R3). Git matches the
+  # protocol too, so a section for another scheme (http://github.com) does
+  # not count (R5). The check is an approximation of the machine-wide
+  # settings: reading from outside any repository, it does not follow a
+  # context's local file (an includeIf gitdir), which only a repository under
+  # that context would load; doctor says so in an item line (R5, by the
+  # user's decision).
   gh_cred_file="$HOME/.config/git/gh-credential.gitconfig"
   gh_cred_path=""
   gh_cred_plain='^/[A-Za-z0-9_@%+=:,./-]+$'
@@ -159,7 +165,9 @@ if command -v git >/dev/null 2>&1; then
         if [[ "$gh_cred_key" != credential.helper ]]; then
           gh_cred_url="${gh_cred_key#credential.}"
           gh_cred_url="$(printf '%s' "${gh_cred_url%.helper}" | tr '[:upper:]' '[:lower:]')"
-          if [[ "${gh_cred_url%/}" != https://github.com ]]; then
+          if [[ "$gh_cred_url" != https://* ]]; then
+            continue
+          elif [[ "${gh_cred_url%/}" != https://github.com ]]; then
             # Another URL counts only when its host could be github.com: the
             # host itself with a path, a user or a port, or a wildcard that
             # matches it (git's `*` stands for one dot-separated part).
@@ -211,6 +219,7 @@ if command -v git >/dev/null 2>&1; then
       else
         warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)"
       fi
+      item "approximate check: doctor reads the machine-wide settings from outside any repository, so a context's local file read by an includeIf gitdir (~/.config/git/<context>.gitconfig) is not followed, and only https URLs count (docs/git-identity.md)"
     elif gh_cred_path="$(command -v gh 2>/dev/null)" && [[ "$gh_cred_path" =~ $gh_cred_plain ]]; then
       action "GitHub HTTPS credential helper not managed yet: $gh_cred_file missing (gh-credential-helper module)" \
         "\$ chezmoi apply"

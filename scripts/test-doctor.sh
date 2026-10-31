@@ -756,9 +756,11 @@ if [[ "$(PATH="$gc_nogh_path"; hash -r; command -v gh || true)" != "" ]]; then
   fail "test failed: the no-gh cases need a PATH without gh, but the system dirs copy still has one"
   status=1
 fi
-# GH-1) work, managed file present and in effect -> ok.
+# GH-1) work, managed file present and in effect -> ok, with the item that
+#       says the check is an approximation.
 doctor_expect "gh credential helper in effect -> ok" gc_doctor "$gc_root" work "$PATH" -- \
-  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)" \
+  "[info] - approximate check: doctor reads the machine-wide settings from outside any repository, so a context's local file read by an includeIf gitdir (~/.config/git/<context>.gitconfig) is not followed, and only https URLs count (docs/git-identity.md)"
 # GH-1b) ... but the gh it runs is gone (moved since apply) -> action apply.
 gc_write_managed "!$gc_home/moved/gh auth git-credential"
 gc_action_check "gh credential helper running a gh that is gone -> action chezmoi apply" "$gc_root" work "$PATH" \
@@ -804,6 +806,12 @@ printf '[credential "https://*.com"]\n\thelper = !/bin/echo other-helper\n' >> "
 doctor_expect "gh credential helper with a wildcard section matching github.com -> warn (not confirmed)" gc_doctor "$gc_root" work "$PATH" -- \
   "[warn] GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)" \
   ! "other-helper"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2h) a value-less `helper` for http://github.com: git matches the
+#        protocol, so it does not touch https -> ok (Codex review R5).
+printf '[credential "http://github.com"]\n\thelper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a value-less entry for http://github.com -> ok (another protocol)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-2e) ... but the same path section BEFORE the include (as a context
 #        identity file would carry it) is cleared by the managed reset, which

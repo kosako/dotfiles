@@ -29,9 +29,8 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
   - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
     `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
-    ただし doctor を repo の中で実行すると、global の `core.hooksPath`、(`git-ignore` module が active な
-    profile では)`core.excludesFile`、(`gh-credential-helper` module が active で managed な file が在るときは)
-    GitHub の `credential.helper` を引く照会(`git config --global --includes`)で、git は `~/.gitconfig` の
+    ただし doctor を repo の中で実行すると、global の `core.hooksPath` と(`git-ignore` module が active な
+    profile では)`core.excludesFile` を引く照会(`git config --global --includes`)で、git は `~/.gitconfig` の
     includeIf のうち `gitdir` の条件がその repo の git directory の path に合うものを辿り、その identity file
     (そこから include される file も)も読む。linked worktree では起動した場所でなく主 repo の `.git` の場所で
     決まる([git-identity](git-identity.md) の「非 personal context の identity reset」)。git はこの path を
@@ -39,6 +38,8 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     同じ repo でも起動した path で読む file が変わりうる(実体が `~/src` の外にある repo に `~/src/work/` の下の
     symlink から入り、work tree の top で起動すると work の identity file を読み、実体の path からでは読まない)。
     remote URL による二次判定(`hasconfig`)は、`--global` の照会では repo の remote が見えないので当たらない。
+    GitHub の `credential.helper` の照会(`gh-credential-helper` module が active で managed な file が在るとき)は
+    repo の外(`/`)から行うので、identity file は読まない。
     `core.hooksPath` と `credential.helper` の値は出さないが、managed な `~/.config/git/ignore` が在り、`core.excludesFile` が
     それと別の file を指すときは、git が読む file としてその path を表示する
     ([git-ignore](git-ignore.md) の「doctor / preflight」)。
