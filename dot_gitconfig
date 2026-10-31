@@ -88,6 +88,15 @@
 [include]
 	path = ~/.config/git/signing.gitconfig
 
+# GitHub's HTTPS credential helper set to gh (#492), managed only when
+# enableGhCredentialHelper is on and gh is on PATH at apply time
+# (gh-credential-helper module). Same pattern as the signing include above:
+# unconditional here, a silent no-op until the file renders. `gh auth
+# setup-git` writes these lines into this file instead, where the next
+# chezmoi apply removes them. See docs/git-identity.md.
+[include]
+	path = ~/.config/git/gh-credential.gitconfig
+
 # Commit-boundary git hook gates (public-safety / git-identity / AI trailer;
 # #196 / #239), managed only when enableGitHookGates is on (git-hook-gates
 # module). Same pattern as the signing include above: unconditional here, a

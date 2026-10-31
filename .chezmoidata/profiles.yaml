@@ -48,6 +48,11 @@ profiles:
       installGuiApps: true
       enable1PasswordSSH: true
       enableGitSigning: true
+      # #492: off. This machine's GitHub HTTPS stays on the system credential
+      # helper. The gh helper is for organizations that require SAML SSO
+      # (work); listing the gh-credential-helper module and flipping this on
+      # is all it takes here too.
+      enableGhCredentialHelper: false
       enableDirenv: true
       enableRuntimeManagement: true
       npmHardeningMode: enforce
@@ -181,6 +186,10 @@ profiles:
       - direnv-policy
       - update-policy
       - ai-policy
+      # #492: GitHub HTTPS goes through gh's credential helper (the token gh
+      # holds, SAML SSO included). enableGhCredentialHelper is the intent;
+      # the template also needs gh on PATH at apply time.
+      - gh-credential-helper
       # git-ignore (#248) is not listed: no agent-tools packets are written on
       # work machines, and apply would replace an existing ~/.config/git/ignore
       # (git reads one global excludes file, no .local). Opt in by listing it
@@ -190,6 +199,7 @@ profiles:
       installGuiApps: false
       enable1PasswordSSH: false
       enableGitSigning: false
+      enableGhCredentialHelper: true
       enableDirenv: true
       enableRuntimeManagement: true
       npmHardeningMode: report

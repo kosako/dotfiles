@@ -220,6 +220,31 @@ commit / tag は 1Password の op-ssh-sign で **SSH 署名**できるが、**�
 - 復元との関係: identity + 署名紐付けを持つ `personal.gitconfig` は backup catalog に含めるので
   (#85)、新マシンでは復元される([private-backup](private-backup.md))。
 
+## GitHub の HTTPS の credential helper(gh-credential-helper module、Issue #492)
+
+organization が SAML SSO を求める repo では、SSO を許可した gh の token を git に渡す必要がある。`gh auth setup-git` は
+その設定を `~/.gitconfig` の末尾に足すが、`~/.gitconfig` は `dot_gitconfig` が管理しているので、次の `chezmoi apply` で
+消える(helper は system の osxkeychain に戻る)。そこで、helper の設定を capability で gate した managed な file に置く。
+
+- `enableGhCredentialHelper=true` の profile(既定は work)で、`gh-credential-helper` module が
+  `~/.config/git/gh-credential.gitconfig` を出す。`dot_gitconfig` は signing と同じく常時 `[include]` し、file が無ければ
+  git は無視する(no-op)。
+- 中身は `gh auth setup-git` が書くのと同じ形にする。github.com と gist.github.com のそれぞれで helper の list を空に
+  してから(`helper =`)、`!<gh の絶対 path> auth git-credential` を足す。ほかの host は system の helper のまま。token は
+  gh が持ち、この file には置かない。
+- render は 2 段 gate にする。capability が intent で、apply の時点で PATH に gh があり、その path が引用の要らない絶対
+  path であることが readiness。git は helper の行を shell で実行し、gh は path を引用せずに書くので、空白や quote を含む
+  path では出さない。どちらかが欠けると空に render し、chezmoi が既存の file も消す(git-hook-gates と同じ template
+  自己 gate)。git は system の helper に戻る。
+- gh を入れ直して path が変わったときは、`chezmoi apply` で書き直す。`gh auth setup-git` は今後も `~/.gitconfig` に
+  同じ行を足すが、次の apply で消える。managed な file が同じ設定を持つので、影響はない。
+- 検査(doctor): file が在り、global の実効値(include を辿る)が file の helper と一致し、helper の gh が今も実行できれば
+  ok。gh がその path から消えていれば(入れ直しで path が変わったなど)、`chezmoi apply` の action。一致しなければ warn
+  (後の global の設定が勝っている)。file が無いときは、doctor の PATH に gh があれば `chezmoi apply` の action、無いか
+  引用の要る path なら warn。capability が false なのに file が残っていれば、include が無条件なので gh が効き続ける。
+  module が active なら `chezmoi apply` が消し、別の profile の残りなら手で消す(どちらも action)。helper の値は
+  表示しない。
+
 ## 対象外
 
 - secret store(1Password など)からの identity 値の自動取得(署名鍵は 1Password agent 経由で

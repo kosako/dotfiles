@@ -137,7 +137,7 @@ fi
 fi
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
-write_call_recorders "$host_stub_dir/bin" "$host_stub_dir/calls" 1 op herdr codex opencode brew npm
+write_call_recorders "$host_stub_dir/bin" "$host_stub_dir/calls" 1 op herdr codex opencode brew npm gh
 PATH="$host_stub_dir/bin:$PATH"
 export PATH
 # The go install target check (#305) reads `go env GOBIN` / `GOPATH`: a GOBIN
@@ -145,7 +145,7 @@ export PATH
 # otherwise turn every fixture run into an extra action. Unset, Go answers
 # for the fixture HOME ($HOME/go); the GO cases below use their own fake go.
 unset GOBIN GOPATH
-for host_tool in op herdr codex opencode brew npm; do
+for host_tool in op herdr codex opencode brew npm gh; do
   if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
     fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
     exit 1
@@ -680,6 +680,115 @@ else
   fail "test failed: doctor must stay exit 0 (enableGitSigning dangling)"
   status=1
 fi
+
+# GH) GitHub HTTPS credential helper (enableGhCredentialHelper, #492). doctor
+#     stays report-only / exit 0. Hermetic runs like the gitignore cases
+#     below: `env -i` with PATH, HOME and GIT_CONFIG_NOSYSTEM=1, so only the
+#     fixture HOME's ~/.gitconfig (a copy of dot_gitconfig, whose include
+#     reads ~/.config/git/gh-credential.gitconfig) is in play. gh is the host
+#     stub on PATH (doctor only looks it up); the no-gh case swaps PATH for a
+#     private bin (yq, git and the other host stubs) plus a copy of the
+#     system dirs without gh, and the quoting case puts a gh in a directory
+#     with a space first. Repo copies: the data as is (work on, personal
+#     off), work off with the module still listed, and the module removed.
+gc_home="$fixture_home/gc"
+gc_file="$gc_home/.config/git/gh-credential.gitconfig"
+gc_root="$fixture_home/.dotfiles-ghcred"
+gc_off="$fixture_home/.dotfiles-ghcred-off"
+gc_nomod="$fixture_home/.dotfiles-ghcred-nomod"
+copy_repo_fixture "$gc_root"
+copy_repo_fixture "$gc_off"
+set_capability_all "$gc_off" enableGhCredentialHelper false
+copy_repo_fixture "$gc_nomod"
+remove_module_all "$gc_nomod" gh-credential-helper
+gc_nogh_bin="$fixture_home/gc-nogh-bin"
+gc_sysbin="$fixture_home/gc-sysbin"
+gc_space_bin="$fixture_home/gc space bin"
+mkdir -p "$gc_home/.config/git" "$gc_nogh_bin" "$gc_sysbin" "$gc_space_bin"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+ln -sf "$(command -v yq)" "$gc_nogh_bin/yq"
+ln -sf "$(command -v git)" "$gc_nogh_bin/git"
+for host_tool in op herdr codex opencode brew npm; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$gc_nogh_bin/$host_tool"
+done
+ln -s /bin/* "$gc_sysbin/"
+ln -sf /usr/bin/* "$gc_sysbin/"
+rm -f "$gc_sysbin/gh"
+ln -sf "$host_stub_dir/bin/gh" "$gc_space_bin/gh"
+gc_nogh_path="$gc_nogh_bin:$gc_sysbin"
+# gc_doctor ROOT PROFILE PATH — one hermetic doctor run of ROOT's doctor.
+gc_doctor() {
+  env -i PATH="$3" HOME="$gc_home" GIT_CONFIG_NOSYSTEM=1 "$1/scripts/doctor.sh" "$2"
+}
+# gc_action_listed OUTPUT REASON STEP — REASON is a numbered entry of the
+# next actions summary, followed by STEP.
+gc_action_listed() {
+  R="$2" S="$3" awk '
+    pending { matched = ($0 == ENVIRON["S"]); done = 1; exit }
+    /^\[info\] [0-9]+\. / { line = $0; sub(/^\[info\] [0-9]+\. /, "", line); if (line == ENVIRON["R"]) pending = 1 }
+    END { exit (done && matched) ? 0 : 1 }' <<< "$1"
+}
+# gc_action_check LABEL ROOT PROFILE PATH REASON STEP — the reason as a warn
+# line and as a next action followed by STEP, from one run.
+gc_action_check() {
+  local out rc=0
+  out="$(gc_doctor "$2" "$3" "$4" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "$1" "$rc" "$out"
+  elif grep -Fxq -- "[warn] $5" <<< "$out" && gc_action_listed "$out" "$5" "        $6"; then
+    ok "test passed: $1"
+  else
+    printf '%s\n' "$out" >&2
+    fail "test failed: $1"
+    status=1
+  fi
+}
+gc_helper="!$host_stub_dir/bin/gh auth git-credential"
+printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n' "$gc_helper" > "$gc_file"
+if [[ "$(PATH="$gc_nogh_path"; hash -r; command -v gh || true)" != "" ]]; then
+  fail "test failed: the no-gh cases need a PATH without gh, but the system dirs copy still has one"
+  status=1
+fi
+# GH-1) work, managed file present and in effect -> ok.
+doctor_expect "gh credential helper in effect -> ok" gc_doctor "$gc_root" work "$PATH" -- \
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
+# GH-1b) ... but the gh it runs is gone (moved since apply) -> action apply.
+printf '[credential "https://github.com"]\n\thelper =\n\thelper = !%s auth git-credential\n' "$gc_home/moved/gh" > "$gc_file"
+gc_action_check "gh credential helper running a gh that is gone -> action chezmoi apply" "$gc_root" work "$PATH" \
+  "GitHub HTTPS credential helper in $gc_file runs a gh that is no longer there (value not shown); git cannot get GitHub's token from it — run chezmoi apply to render the gh on PATH now" "\$ chezmoi apply"
+printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n' "$gc_helper" > "$gc_file"
+# GH-2) ... but a later global setting wins -> warn, value not shown.
+printf '[credential "https://github.com"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper overridden by a later global setting -> warn" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (another global setting wins, or the file has no helper for https://github.com; value not shown)" \
+  ! "other-helper"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-3) file missing, gh on PATH -> action: chezmoi apply renders it.
+rm -f "$gc_file"
+gc_action_check "gh credential helper missing with gh on PATH -> action chezmoi apply" "$gc_root" work "$PATH" \
+  "GitHub HTTPS credential helper not managed yet: $gc_file missing (gh-credential-helper module)" "\$ chezmoi apply"
+# GH-4) file missing, no gh on PATH -> warn (the render stays empty).
+doctor_expect "gh credential helper missing without gh -> warn" gc_doctor "$gc_root" work "$gc_nogh_path" -- \
+  "[warn] gh not on PATH: GitHub HTTPS uses the system credential helper (once gh is installed, chezmoi apply renders the managed one)"
+# GH-5) file missing, gh at a path with a space -> warn (not ready, path not shown).
+doctor_expect "gh credential helper missing with gh at a path that needs quoting -> warn" gc_doctor "$gc_root" work "$gc_space_bin:$gc_nogh_path" -- \
+  "[warn] gh is on PATH at a path the managed helper line cannot carry unquoted (value not shown); GitHub HTTPS uses the system credential helper" \
+  ! "$gc_space_bin"
+# GH-6) capability on, module removed -> dangling warn.
+doctor_expect "enableGhCredentialHelper=true with the module inactive -> dangling warn" gc_doctor "$gc_nomod" work "$PATH" -- \
+  "[warn] enableGhCredentialHelper=true but the gh-credential-helper module is inactive for this profile (GitHub HTTPS credential helper not managed — dangling capability)"
+# GH-7) personal (off, module not listed), no file -> ok.
+doctor_expect "gh credential helper off without a file -> ok" gc_doctor "$gc_root" personal "$PATH" -- \
+  "[ok] GitHub HTTPS credential helper not managed (enableGhCredentialHelper=false)"
+# GH-8) ... with a file left by another profile -> action: remove it by hand.
+printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n' "$gc_helper" > "$gc_file"
+gc_action_check "gh credential helper off with a file left by another profile -> action rm" "$gc_root" personal "$PATH" \
+  "enableGhCredentialHelper=false but $gc_file lingers, left by another profile; the ~/.gitconfig include still sends GitHub HTTPS to gh, and this profile does not manage the file, so chezmoi apply will NOT remove it; remove it by hand" \
+  "\$ rm -i $(shell_quote_safe "$gc_file")"
+# GH-9) work turned off with the module still listed -> action: apply prunes it.
+gc_action_check "gh credential helper off with the module listed and the file present -> action chezmoi apply" "$gc_off" work "$PATH" \
+  "enableGhCredentialHelper=false but $gc_file lingers; the ~/.gitconfig include still sends GitHub HTTPS to gh — run chezmoi apply to prune it" "\$ chezmoi apply"
+rm -rf "${gc_home:?}" "${gc_nogh_bin:?}" "${gc_sysbin:?}" "${gc_space_bin:?}"
 
 # Global gitignore report (git-ignore module, #248). doctor stays report-only
 # / exit 0 and must tell apart: managed file in effect (ok), missing
@@ -3856,13 +3965,13 @@ fi
 #           herdr absent: a PATH of the system dirs plus a private bin
 #           holding a yq symlink — the real yq's directory (homebrew bin) is
 #           NOT on it, because that is where a real herdr lives — and the
-#           op / codex / opencode / brew / npm stubs (this PATH replaces the
+#           op / codex / opencode / brew / npm / gh stubs (this PATH replaces the
 #           one carrying them, and a system dir can hold a real npm, #306,
 #           #458). A herdr in the system dirs would make this case run the
 #           real tool, so it fails up front instead of running doctor.
 rm -f "$hi_fakebin/herdr"
 ln -sf "$(command -v yq)" "$hi_fakebin/yq"
-for host_tool in op codex opencode brew npm; do
+for host_tool in op codex opencode brew npm gh; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$hi_fakebin/$host_tool"
 done
 if (PATH="$hi_fakebin:/usr/bin:/bin"; hash -r; command -v herdr >/dev/null 2>&1); then
@@ -5903,7 +6012,7 @@ rm -rf "${ds4_home:?}" "${ds4_bin:?}"
 #     だけで決まる (work = false は warn、personal = true は中立の item)。PATH に
 #     無ければその旨の ok。doctor は tool を探すだけで実行しない: fake は呼び出しを
 #     記録するので、記録 (marker) の不在で「実行しない」を pin する。PATH は fake dir
-#     (fake の tailscale、yq と op / herdr / codex / opencode / brew / npm の stub の
+#     (fake の tailscale、yq と op / herdr / codex / opencode / brew / npm / gh の stub の
 #     link。system dir には本物の npm が在りうるので、stub を先に置く。#458) と
 #     system dir の写し (/usr/bin と /bin の全 entry への symlink から tunnel tool の
 #     名前だけを除いた dir) に固定する。tunnel tool の有無は fake dir だけで決まり、
@@ -5916,7 +6025,7 @@ nt_sysbin="$fixture_home/nt-sysbin"
 nt_calls="$fixture_home/nt-calls"
 mkdir -p "$nt_home" "$nt_fakebin" "$nt_sysbin"
 ln -sf "$(command -v yq)" "$nt_fakebin/yq"
-for host_tool in op herdr codex opencode brew npm; do
+for host_tool in op herdr codex opencode brew npm gh; do
   ln -sf "$host_stub_dir/bin/$host_tool" "$nt_fakebin/$host_tool"
 done
 # /bin を先に link し /usr/bin を -f で上書きする: 同名は /usr/bin が勝つ (PATH

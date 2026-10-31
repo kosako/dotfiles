@@ -109,6 +109,58 @@ if command -v git >/dev/null 2>&1; then
   else
     ok "Git signing mechanism not managed (enableGitSigning=false)"
   fi
+  # enableGhCredentialHelper (#492) gates the managed gh credential helper for
+  # GitHub's HTTPS (~/.config/git/gh-credential.gitconfig, read via the
+  # unconditional include in ~/.gitconfig). The template renders only while
+  # gh is on PATH at apply time at an absolute path that needs no quoting, so
+  # a missing file is told apart with doctor's own gh lookup. The include is
+  # unconditional, so a file left after the capability was turned off keeps
+  # GitHub on gh until it is removed. The helper value is a command line and
+  # is not shown; the comparison is the effective global value (includes
+  # followed) against the managed file's.
+  gh_cred_file="$HOME/.config/git/gh-credential.gitconfig"
+  gh_cred_path=""
+  gh_cred_plain='^/[A-Za-z0-9_@%+=:,./-]+$'
+  if [[ "$(capability_value "$profile" enableGhCredentialHelper)" == "true" ]]; then
+    if ! module_active_for_profile "$profile" gh-credential-helper; then
+      warn "enableGhCredentialHelper=true but the gh-credential-helper module is inactive for this profile (GitHub HTTPS credential helper not managed — dangling capability)"
+    elif [[ -f "$gh_cred_file" ]]; then
+      gh_cred_managed="$(git config --file "$gh_cred_file" --get-urlmatch credential.helper https://github.com 2>/dev/null || true)"
+      gh_cred_effective="$(git config --global --includes --get-urlmatch credential.helper https://github.com 2>/dev/null || true)"
+      # The managed line is `!<gh path> auth git-credential`, rendered with the
+      # gh found at apply time: a gh moved or removed since then leaves git
+      # running a command that is not there.
+      gh_cred_bin="${gh_cred_managed#!}"
+      gh_cred_bin="${gh_cred_bin% auth git-credential}"
+      if [[ -n "$gh_cred_managed" && "$gh_cred_effective" == "$gh_cred_managed" ]]; then
+        if [[ -f "$gh_cred_bin" && -x "$gh_cred_bin" ]]; then
+          ok "GitHub HTTPS credential helper -> gh (managed $gh_cred_file)"
+        else
+          action "GitHub HTTPS credential helper in $gh_cred_file runs a gh that is no longer there (value not shown); git cannot get GitHub's token from it — run chezmoi apply to render the gh on PATH now" \
+            "\$ chezmoi apply"
+        fi
+      else
+        warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (another global setting wins, or the file has no helper for https://github.com; value not shown)"
+      fi
+    elif gh_cred_path="$(command -v gh 2>/dev/null)" && [[ "$gh_cred_path" =~ $gh_cred_plain ]]; then
+      action "GitHub HTTPS credential helper not managed yet: $gh_cred_file missing (gh-credential-helper module)" \
+        "\$ chezmoi apply"
+    elif [[ -n "$gh_cred_path" ]]; then
+      warn "gh is on PATH at a path the managed helper line cannot carry unquoted (value not shown); GitHub HTTPS uses the system credential helper"
+    else
+      warn "gh not on PATH: GitHub HTTPS uses the system credential helper (once gh is installed, chezmoi apply renders the managed one)"
+    fi
+  elif [[ -e "$gh_cred_file" || -L "$gh_cred_file" ]]; then
+    if module_active_for_profile "$profile" gh-credential-helper; then
+      action "enableGhCredentialHelper=false but $gh_cred_file lingers; the ~/.gitconfig include still sends GitHub HTTPS to gh — run chezmoi apply to prune it" \
+        "\$ chezmoi apply"
+    else
+      action "enableGhCredentialHelper=false but $gh_cred_file lingers, left by another profile; the ~/.gitconfig include still sends GitHub HTTPS to gh, and this profile does not manage the file, so chezmoi apply will NOT remove it; remove it by hand" \
+        "\$ rm -i $(shell_quote_safe "$gh_cred_file")"
+    fi
+  else
+    ok "GitHub HTTPS credential helper not managed (enableGhCredentialHelper=false)"
+  fi
   # git-ignore module (#248): the managed global gitignore sits at git's
   # DEFAULT excludes location (~/.config/git/ignore), which git reads only
   # while core.excludesFile is unset — in the global AND the system scope
