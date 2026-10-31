@@ -54,6 +54,20 @@ elif [[ -z "${PRIVATE_BACKUP_TEST_INNER:-}" ]]; then
   warn "age is in /usr/bin or /bin here; the no-age check of this suite is skipped"
 fi
 
+# The cases that write an archive byte by byte (8b2, 8b2b, 8b4) and the
+# interrupt cases' wrapper need python3. Without it they are skipped with a
+# warning locally and fail on CI, as without age (ci_gate in test-lib.sh,
+# #484). python3_unavailable WHAT reports the cases that did not run.
+python3_gate="$(ci_gate command -v python3)"
+python3_unavailable() {
+  if [[ "$python3_gate" == fail ]]; then
+    fail "python3 not found on CI; $1 must run there"
+    status=1
+  else
+    warn "python3 not found; skipping $1"
+  fi
+}
+
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-pb-test.XXXXXX")"
 
 # Stop the background cases (the FIFO case, the signal cases) and reap them
@@ -398,7 +412,7 @@ fi
 #      (GNU tar lists it as "h", and the type pass rejects it first). The
 #      archive is written byte by byte (no tar writes this shape), so the
 #      case needs python3.
-if command -v python3 >/dev/null 2>&1; then
+if [[ "$python3_gate" == run ]]; then
   hl_tar="$fixture_home/out/hardlink-mode.tar"
   python3 - "$hl_tar" <<'PY'
 import io
@@ -457,7 +471,7 @@ PY
     miss "verify did not reject a hardlink header carrying a regular mode (expected: $hl_expect; exit $hl_rc)"
   fi
 else
-  warn "python3 not found; skipping the crafted hardlink-mode archive case"
+  python3_unavailable "the crafted hardlink-mode archive case"
 fi
 
 # 8b2b. An archive that leaves a directory without permissions (mode 000,
@@ -467,7 +481,11 @@ fi
 #       rejects it at the tree check, GNU tar already at extraction). Run
 #       with a TMPDIR of its own so a leftover temp shows. Skipped as root
 #       (root walks and removes the directory anyway).
-if command -v python3 >/dev/null 2>&1 && [[ "$(id -u)" != "0" ]]; then
+if [[ "$(id -u)" == "0" ]]; then
+  :
+elif [[ "$python3_gate" != run ]]; then
+  python3_unavailable "the mode 000 directory archive case"
+else
   locked_tar="$fixture_home/out/locked-dir.tar"
   python3 - "$locked_tar" <<'PY'
 import io
@@ -608,7 +626,7 @@ else
   printf '%s\n' "$out" >&2
   miss "verify did not reject a plain hardlink member before extraction (exit $hlink_rc, extracted=$spy_extracted)"
 fi
-if command -v python3 >/dev/null 2>&1; then
+if [[ "$python3_gate" == run ]]; then
   for crafted in "./files/../escaped" "/escaped-absolute"; do
     crafted_tar="$fixture_home/out/crafted-name.tar"
     python3 - "$crafted_tar" "$crafted" <<'PY'
@@ -641,7 +659,7 @@ PY
     fi
   done
 else
-  warn "python3 not found; skipping the crafted traversal / absolute member cases"
+  python3_unavailable "the crafted traversal / absolute member cases"
 fi
 
 # 8c. A mode mismatch (manifest mode != extracted file mode) is caught.
@@ -2073,13 +2091,8 @@ ue_case "restore with a missing identity file" "identity file not found: $fixtur
 #     cases are skipped with a warning; on CI (CI=true, set by GitHub
 #     Actions) that is a failure instead, as without age (#330): a skip
 #     there means the cases did not run, not that they passed.
-if ! command -v python3 >/dev/null 2>&1; then
-  if [[ "${CI:-}" == "true" ]]; then
-    fail "python3 not found on CI; the interrupt cases must run there"
-    status=1
-  else
-    warn "python3 not found; the interrupt cases are skipped"
-  fi
+if [[ "$python3_gate" != run ]]; then
+  python3_unavailable "the interrupt cases"
 else
   sig_home="$fixture_home/sig-home"
   seed_home "$sig_home"

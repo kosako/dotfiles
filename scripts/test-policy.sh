@@ -1106,6 +1106,25 @@ if flip_personal_capability "$fixture" enforceAiSandbox true 2>/dev/null; then
 fi
 ok "test passed: flip_personal_capability fails closed when the personal profile is absent"
 
+# ci_gate (#484), checked once here for every suite that uses it: a probe
+# that fails answers "fail" on CI and "skip" elsewhere (an empty bin dir
+# stands in for a PATH without the tool), a probe that succeeds answers
+# "run", and the probe's output reaches neither the answer (the callers
+# compare it whole) nor the log. Its stdin is /dev/null, so a probe that
+# reads stdin cannot pass on the caller's input.
+gate_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-gate.XXXXXX")"
+tmp_roots+=("$gate_bin")
+gate_ci="$(PATH="$gate_bin" CI=true ci_gate command -v python3 2>&1)"
+gate_local="$(PATH="$gate_bin" CI='' ci_gate command -v python3 2>&1)"
+gate_run="$(CI=true ci_gate sh -c 'echo probe-out; echo probe-err >&2' 2>&1)"
+gate_rc3="$(CI='' ci_gate sh -c 'echo probe-out; echo probe-err >&2; exit 3' 2>&1)"
+gate_stdin="$(CI='' ci_gate sh -c 'read -r line' <<< 'caller input' 2>&1)"
+if [[ "$gate_ci" != fail || "$gate_local" != skip || "$gate_run" != run || "$gate_rc3" != skip || "$gate_stdin" != skip ]]; then
+  fail "test failed: ci_gate answered '$gate_ci' on CI and '$gate_local' elsewhere without the tool (expected fail / skip), '$gate_run' for a probe that prints and succeeds (expected run), '$gate_rc3' for one that prints and exits 3 (expected skip) and '$gate_stdin' for one that reads stdin (expected skip)"
+  exit 1
+fi
+ok "test passed: ci_gate runs on a passing probe, fails on CI and skips elsewhere on a failing one, and keeps the probe's output and stdin out"
+
 # Capability registry (#151): a capability without implemented: true|false
 # fails closed, and implemented: false without a doctor disclosure (the
 # static proxy: doctor.sh mentions the name) fails. The mutations are
