@@ -744,7 +744,12 @@ gc_action_check() {
   fi
 }
 gc_helper="!$host_stub_dir/bin/gh auth git-credential"
-printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n' "$gc_helper" > "$gc_file"
+# gc_write_managed HELPER — the managed file as the template renders it:
+# github.com and gist.github.com, each list reset and then HELPER.
+gc_write_managed() {
+  printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n[credential "https://gist.github.com"]\n\thelper =\n\thelper = %s\n' "$1" "$1" > "$gc_file"
+}
+gc_write_managed "$gc_helper"
 if [[ "$(PATH="$gc_nogh_path"; hash -r; command -v gh || true)" != "" ]]; then
   fail "test failed: the no-gh cases need a PATH without gh, but the system dirs copy still has one"
   status=1
@@ -753,14 +758,36 @@ fi
 doctor_expect "gh credential helper in effect -> ok" gc_doctor "$gc_root" work "$PATH" -- \
   "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
 # GH-1b) ... but the gh it runs is gone (moved since apply) -> action apply.
-printf '[credential "https://github.com"]\n\thelper =\n\thelper = !%s auth git-credential\n' "$gc_home/moved/gh" > "$gc_file"
+gc_write_managed "!$gc_home/moved/gh auth git-credential"
 gc_action_check "gh credential helper running a gh that is gone -> action chezmoi apply" "$gc_root" work "$PATH" \
   "GitHub HTTPS credential helper in $gc_file runs a gh that is no longer there (value not shown); git cannot get GitHub's token from it — run chezmoi apply to render the gh on PATH now" "\$ chezmoi apply"
-printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n' "$gc_helper" > "$gc_file"
-# GH-2) ... but a later global setting wins -> warn, value not shown.
-printf '[credential "https://github.com"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
-doctor_expect "gh credential helper overridden by a later global setting -> warn" gc_doctor "$gc_root" work "$PATH" -- \
-  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (another global setting wins, or the file has no helper for https://github.com; value not shown)" \
+gc_write_managed "$gc_helper"
+# GH-2) ... but a later GENERIC section clears the list and sets another
+#       helper: git asks that one first, though a most-specific lookup still
+#       answers gh (Codex review R1, PR #495) -> warn, value not shown.
+printf '[credential]\n\thelper =\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper cleared by a later generic section -> warn" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (a later global setting clears the list or the file has no helper for https://github.com, so git asks another helper first; value not shown)" \
+  ! "other-helper"
+# GH-2b) a later helper WITHOUT a reset only follows gh in the list: git
+#        still asks gh first -> ok.
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+printf '[credential "https://github.com/"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper followed by a later helper without a reset -> ok (gh is asked first)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
+# GH-2c) a github.com section doctor does not match (a path in the URL)
+#        also sets a helper -> warn: not confirmed.
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+printf '[credential "https://github.com/some-org"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with an unmatched github.com section -> warn (not confirmed)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)" \
+  ! "other-helper"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2d) ... the same for a wildcard host that matches github.com (`*`
+#        stands for one dot-separated part, so *.com does).
+printf '[credential "https://*.com"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a wildcard section matching github.com -> warn (not confirmed)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)" \
   ! "other-helper"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-3) file missing, gh on PATH -> action: chezmoi apply renders it.
@@ -781,7 +808,7 @@ doctor_expect "enableGhCredentialHelper=true with the module inactive -> danglin
 doctor_expect "gh credential helper off without a file -> ok" gc_doctor "$gc_root" personal "$PATH" -- \
   "[ok] GitHub HTTPS credential helper not managed (enableGhCredentialHelper=false)"
 # GH-8) ... with a file left by another profile -> action: remove it by hand.
-printf '[credential "https://github.com"]\n\thelper =\n\thelper = %s\n' "$gc_helper" > "$gc_file"
+gc_write_managed "$gc_helper"
 gc_action_check "gh credential helper off with a file left by another profile -> action rm" "$gc_root" personal "$PATH" \
   "enableGhCredentialHelper=false but $gc_file lingers, left by another profile; the ~/.gitconfig include still sends GitHub HTTPS to gh, and this profile does not manage the file, so chezmoi apply will NOT remove it; remove it by hand" \
   "\$ rm -i $(shell_quote_safe "$gc_file")"

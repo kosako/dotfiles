@@ -238,9 +238,12 @@ organization が SAML SSO を求める repo では、SSO を許可した gh の 
   自己 gate)。git は system の helper に戻る。
 - gh を入れ直して path が変わったときは、`chezmoi apply` で書き直す。`gh auth setup-git` は今後も `~/.gitconfig` に
   同じ行を足すが、次の apply で消える。managed な file が同じ設定を持つので、影響はない。
-- 検査(doctor): file が在り、global の実効値(include を辿る)が file の helper と一致し、helper の gh が今も実行できれば
-  ok。gh がその path から消えていれば(入れ直しで path が変わったなど)、`chezmoi apply` の action。一致しなければ warn
-  (後の global の設定が勝っている)。file が無いときは、doctor の PATH に gh があれば `chezmoi apply` の action、無いか
+- 検査(doctor): git は、URL に合う entry を設定の順に辿って helper の list を作り(空の値で list を空にする)、その順に
+  helper を聞く。doctor も global の entry(include を辿る)を同じ順に辿り、最初に聞かれる helper が file の helper で、
+  その gh が今も実行できれば ok。gh がその path から消えていれば(入れ直しで path が変わったなど)、`chezmoi apply` の
+  action。ほかの helper が先に聞かれるなら warn(後の global の設定が list を空にしている)。照合するのは一般の
+  `[credential]` と `https://github.com` だけで、path・user・wildcard を含む github.com の section が helper を持つときは、
+  確かめられないとして warn。file が無いときは、doctor の PATH に gh があれば `chezmoi apply` の action、無いか
   引用の要る path なら warn。capability が false なのに file が残っていれば、include が無条件なので gh が効き続ける。
   module が active なら `chezmoi apply` が消し、別の profile の残りなら手で消す(どちらも action)。helper の値は
   表示しない。

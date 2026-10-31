@@ -116,8 +116,16 @@ if command -v git >/dev/null 2>&1; then
   # a missing file is told apart with doctor's own gh lookup. The include is
   # unconditional, so a file left after the capability was turned off keeps
   # GitHub on gh until it is removed. The helper value is a command line and
-  # is not shown; the comparison is the effective global value (includes
-  # followed) against the managed file's.
+  # is not shown.
+  # Git builds the helper list for a URL from every matching entry in config
+  # order (an empty value clears it) and asks the helpers in that order, so
+  # the check walks the global entries (includes followed) the same way and
+  # compares the FIRST helper left with the managed one. A most-specific
+  # lookup (--get-urlmatch) would miss a later generic reset (Codex review
+  # R1, PR #495). The system scope comes first and the managed `helper =`
+  # clears it, so the global entries are enough. Only the generic section and
+  # https://github.com itself are matched; a github.com section with a path,
+  # a user or a wildcard is not, and leaves the result unconfirmed.
   gh_cred_file="$HOME/.config/git/gh-credential.gitconfig"
   gh_cred_path=""
   gh_cred_plain='^/[A-Za-z0-9_@%+=:,./-]+$'
@@ -126,13 +134,50 @@ if command -v git >/dev/null 2>&1; then
       warn "enableGhCredentialHelper=true but the gh-credential-helper module is inactive for this profile (GitHub HTTPS credential helper not managed — dangling capability)"
     elif [[ -f "$gh_cred_file" ]]; then
       gh_cred_managed="$(git config --file "$gh_cred_file" --get-urlmatch credential.helper https://github.com 2>/dev/null || true)"
-      gh_cred_effective="$(git config --global --includes --get-urlmatch credential.helper https://github.com 2>/dev/null || true)"
+      gh_cred_first=""
+      gh_cred_count=0
+      gh_cred_unmatched=0
+      while IFS= read -r gh_cred_line; do
+        gh_cred_key="${gh_cred_line%% *}"
+        gh_cred_value=""
+        [[ "$gh_cred_line" != *" "* ]] || gh_cred_value="${gh_cred_line#* }"
+        if [[ "$gh_cred_key" != credential.helper ]]; then
+          gh_cred_url="${gh_cred_key#credential.}"
+          gh_cred_url="$(printf '%s' "${gh_cred_url%.helper}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${gh_cred_url%/}" != https://github.com ]]; then
+            # Another URL counts only when its host could be github.com: the
+            # host itself with a path, a user or a port, or a wildcard that
+            # matches it (git's `*` stands for one dot-separated part).
+            gh_cred_host="${gh_cred_url#*://}"
+            gh_cred_host="${gh_cred_host%%/*}"
+            gh_cred_host="${gh_cred_host##*@}"
+            gh_cred_host="${gh_cred_host%:*}"
+            gh_cred_part1="" gh_cred_part2="" gh_cred_part3=""
+            IFS=. read -r gh_cred_part1 gh_cred_part2 gh_cred_part3 <<< "$gh_cred_host"
+            # shellcheck disable=SC2053 # the parts are git's host patterns: glob on purpose
+            if [[ "$gh_cred_host" == github.com ]] \
+              || [[ "$gh_cred_host" == *'*'* && -z "$gh_cred_part3" && -n "$gh_cred_part2" && github == $gh_cred_part1 && com == $gh_cred_part2 ]]; then
+              gh_cred_unmatched=1
+            fi
+            continue
+          fi
+        fi
+        if [[ -z "$gh_cred_value" ]]; then
+          gh_cred_first=""
+          gh_cred_count=0
+        else
+          [[ "$gh_cred_count" -gt 0 ]] || gh_cred_first="$gh_cred_value"
+          gh_cred_count=$((gh_cred_count + 1))
+        fi
+      done < <(git config --global --includes --get-regexp '^credential\.(.*\.)?helper$' 2>/dev/null || true)
       # The managed line is `!<gh path> auth git-credential`, rendered with the
       # gh found at apply time: a gh moved or removed since then leaves git
       # running a command that is not there.
       gh_cred_bin="${gh_cred_managed#!}"
       gh_cred_bin="${gh_cred_bin% auth git-credential}"
-      if [[ -n "$gh_cred_managed" && "$gh_cred_effective" == "$gh_cred_managed" ]]; then
+      if [[ "$gh_cred_unmatched" -eq 1 ]]; then
+        warn "GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)"
+      elif [[ -n "$gh_cred_managed" && "$gh_cred_first" == "$gh_cred_managed" ]]; then
         if [[ -f "$gh_cred_bin" && -x "$gh_cred_bin" ]]; then
           ok "GitHub HTTPS credential helper -> gh (managed $gh_cred_file)"
         else
@@ -140,7 +185,7 @@ if command -v git >/dev/null 2>&1; then
             "\$ chezmoi apply"
         fi
       else
-        warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (another global setting wins, or the file has no helper for https://github.com; value not shown)"
+        warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (a later global setting clears the list or the file has no helper for https://github.com, so git asks another helper first; value not shown)"
       fi
     elif gh_cred_path="$(command -v gh 2>/dev/null)" && [[ "$gh_cred_path" =~ $gh_cred_plain ]]; then
       action "GitHub HTTPS credential helper not managed yet: $gh_cred_file missing (gh-credential-helper module)" \

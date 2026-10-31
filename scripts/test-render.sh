@@ -765,14 +765,22 @@ gc_render() {
   env PATH="$2" "$chezmoi_bin" --config "$1/chezmoi.toml" --source "$3" --destination "$1/home" apply >/dev/null 2>&1
 }
 # gc_fill HOST — `git credential fill` for https://HOST on the rendered home,
-# with the fixture system helper and no terminal prompt.
+# with the fixture system helper and no terminal prompt, run in a fixture
+# repo of its own: a repo's .git/config is read too, so running where the
+# suite was started would let that checkout's credential settings in (Codex
+# review R1, PR #495).
 gc_fill() {
   printf 'protocol=https\nhost=%s\n\n' "$1" | fixture_git_env "$root/home" "$root/home/.gitconfig" \
-    GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM="$gc_bins/system.gitconfig" GIT_TERMINAL_PROMPT=0 -- git credential fill 2>/dev/null
+    GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM="$gc_bins/system.gitconfig" GIT_TERMINAL_PROMPT=0 -- git -C "$root/repo" credential fill 2>/dev/null
 }
 gc_want=$'\n'"!$gc_bins/gh/gh auth git-credential"
 
 make_root
+if ! fixture_git_env "$root/home" "$root/home/.gitconfig" -- git init -q --template= "$root/repo" \
+  || [[ -n "$(git config --file "$root/repo/.git/config" --get-regexp '^credential\.' || true)" ]]; then
+  fail "test failed: the fixture repo for git credential fill could not be made, or carries credential settings"
+  status=1
+fi
 if gc_render "$root" "$gc_bins/gh" "$DOTFILES_ROOT" && [[ -f "$root/home/$gc_file" ]] \
   && [[ "$(head -n 1 "$root/home/$gc_file")" == "# Managed by chezmoi from kosako/dotfiles (gh-credential-helper, #492)." ]] \
   && [[ "$(git config --file "$root/home/$gc_file" --get-all credential.https://github.com.helper)" == "$gc_want" ]] \
