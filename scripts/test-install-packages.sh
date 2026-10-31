@@ -20,11 +20,6 @@ source "$SCRIPT_DIR/lib-policy.sh"
 source "$SCRIPT_DIR/test-lib.sh"
 
 status=0
-pass() { ok "test passed: $*"; }
-miss() {
-  fail "test failed: $*"
-  status=1
-}
 
 # 1. source -> install capability mapping.
 check_cap() {
@@ -113,22 +108,10 @@ fi
 #      素通りした entry は catalog を入れ終えた host でも記録として現れる。
 fake_chezmoi() {
   # $1 = chezmoi data payload, $2 = exit code
-  cat > "$fixture_bin/chezmoi" <<SH
-#!/bin/sh
-printf '%s\n' '$1'
-exit ${2:-0}
-SH
-  chmod +x "$fixture_bin/chezmoi"
+  write_fake_chezmoi "$fixture_bin" "$1" "$2"
 }
 manager_calls="$fixture_bin/manager-calls"
-for manager in brew npm go mas; do
-  cat > "$fixture_bin/$manager" <<SH
-#!/bin/sh
-printf '%s %s\n' "\${0##*/}" "\$*" >> "$manager_calls"
-exit 0
-SH
-  chmod +x "$fixture_bin/$manager"
-done
+write_call_recorders "$fixture_bin" "$manager_calls" 0 brew npm go mas
 
 # 5a. chezmoi resolves a valid profile but exits non-zero -> refuse. With yq
 #     and bash present (only chezmoi fails), this reaches and pins
@@ -283,19 +266,8 @@ mkdir -p "$ek_root" "$ek_bin" "$ek_home"
 copy_repo_fixture "$ek_root"
 set_capability_all "$ek_root" installPackages true
 set_capability_all "$ek_root" installGuiApps true
-for manager in brew npm go mas; do
-  cat > "$ek_bin/$manager" <<SH
-#!/bin/sh
-printf '%s %s\n' "\${0##*/}" "\$*" >> "$ek_calls"
-exit 0
-SH
-  chmod +x "$ek_bin/$manager"
-done
-cat > "$ek_bin/chezmoi" <<'SH'
-#!/bin/sh
-printf '%s\n' '{"profile":"work"}'
-SH
-chmod +x "$ek_bin/chezmoi"
+write_call_recorders "$ek_bin" "$ek_calls" 0 brew npm go mas
+write_fake_chezmoi "$ek_bin" '{"profile":"work"}' 0
 ek_rc=0
 ek_out="$("$ek_root/scripts/validate-policy.sh" work 2>&1)" || ek_rc=$?
 if [[ "$ek_rc" -eq 1 ]] && grep -Fxq "[fail] environmentKind work forbids installPackages=true (profile work)" <<< "$ek_out" \
@@ -421,11 +393,7 @@ ek_typed_read='.profiles[strenv(p)].capabilities[strenv(c)] | ((tag == "!!bool")
   printf 'exec %s "$@"\n' "$(shell_single_quote "$(command -v yq)")"
 } > "$ek_shim/yq"
 chmod +x "$ek_shim/yq"
-cat > "$ek_shim/chezmoi" <<'SH'
-#!/bin/sh
-printf '%s\n' '{"profile":"personal"}'
-SH
-chmod +x "$ek_shim/chezmoi"
+write_fake_chezmoi "$ek_shim" '{"profile":"personal"}' 0
 if env FIXTURE_LIB="$ek_root/scripts/lib-policy.sh" PATH="$ek_shim:$PATH" bash -c '
   source "$FIXTURE_LIB" || exit 2
   if profile_capability_bool personal allowSecretsAccess >/dev/null 2>&1; then exit 1; fi
