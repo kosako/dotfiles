@@ -129,8 +129,9 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 
 - doctor profile / policy / modules / capabilities: 対象 profile を表示し、policy validation を実行する(失敗時は exit 1)。続けて environmentKind、profile の module、capability の値を列挙する。
 - chezmoi: chezmoi の version と source directory。
-- Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 2 つを見る。
+- Git: `user.useConfigOnly` / `transfer.credentialsInUrl` に加えて、次の 3 つを見る。
   - Git signing: `enableGitSigning` の SSH 署名 mechanism が managed か、capability true で module inactive の dangling か。
+  - GitHub の HTTPS の credential helper(#492): `enableGhCredentialHelper` が true で `gh-credential-helper` module が active なら、managed な `~/.config/git/gh-credential.gitconfig` が在り、git と同じく system と global の entry(`--includes` 付き。macOS の Command Line Tools の gitconfig も含め、repo の設定は読まない)を設定の順に辿って helper の list を作り(空の値で空にする)、最初に聞かれる helper がその file の helper か、その gh が今も実行できるか(値は出さない。消えていれば `chezmoi apply` の action。path・user・wildcard を含む github.com の section が helper を持てば、確かめられないとして warn。後ろの reset で無効になる section は数えない。値の無い `helper` は、照合できない section にあっても git が error で止まるので warn。protocol を明示した URL は https だけを数え、protocol を省いた `github.com` は https と同じに、host を省いた `https://` は一般の section と同じに数える。host を省いて path だけを持つ URL は確かめられない側に入れ、443 以外の port の URL は数えない。repo の外から見た machine 全体の設定の近似で、context の local file(includeIf gitdir)は辿らないことを item の 1 行で示す)。file が無いときは、doctor の PATH に gh があれば action(`chezmoi apply`)、無いか引用の要る path なら warn(system の helper のまま)。capability true で module inactive なら dangling の warn。false のときに file が残っていれば、無条件の include が gh を効かせ続けるので action(module が active なら `chezmoi apply`、別の profile の残りなら手で消す)。
   - global gitignore: `git-ignore` module が active な profile で managed `~/.config/git/ignore` の presence、git が実際に読む excludes path との一致 — `core.excludesFile` は global が system に勝ち、`GIT_CONFIG_NOSYSTEM` なら system を飛ばす。明示的に空なら「global excludes を読まない」、config が読めなければ「不明」で、どちらも ok にしない。無ければ XDG 既定(末尾の `/` はすべて落とし、`-ef` でも同じ file と判定する、#309)— と、`.agent-packets/` と `**/.claude/settings.local.json` の pattern 行の drift。行の exact 一致で見る — `git check-ignore` は repository を要し doctor は何も作らない(#248)。
 - git hook gates(report-only): `enableGitHookGates` が true で module が active なら、modules.yaml が宣言する shim(`~/.config/git-hook-gates/hooks/` の 23 本。#361)がすべて実行可能に置かれているか(欠けたものを 1 本ずつ warn し、そろっていれば 1 行の ok)、global `core.hooksPath`(`--includes` 付きで読む)が managed shim directory を指すか(別の値なら値は出さずに warn)、agent-tools deploy 4 本(dispatcher + gate 3 本)が揃っているかを report する。配線済みなのに deploy が欠けていれば commit が fail-closed で止まる旨を warn し、`core.hooksPath` が未設定なら action。capability true で module inactive なら dangling として warn。capability=false で宣言されたどれかの shim / hooksPath が残っていれば action(lingering)。git-hook-gates module が active な profile では apply で除去する手順、module が非 active な profile(profile 切替後の残置。#201)では apply が触れないので、残っている file を `rm -i` で消す手順と、`core.hooksPath` が managed shim directory を指さなくなったかの確認(まだ指すなら表示された設定元の行を消す)を出す(managed file が無く `core.hooksPath` だけが残るときは設定元を探す手順。#258)。repo-local `core.hooksPath` で外れ、`--no-verify` は prepare-commit-msg の identity の検査を除いて gate を飛ばし、`git am` と apply backend の rebase ではどの gate も走らない best-effort である旨も表示する(#196 / #239 / #431。詳細は `docs/git-hook-gates.md`)。
 - Git identity contexts: `git-profile` module が active な profile では、managed な identity reset `~/.config/git-profile/identity-reset.gitconfig` の presence を見る — 中身は見ない。無ければ、context file の無い非 personal repo で personal pattern に一致する remote が personal identity を継承して commit 拒否にならないので、`mkdir -p ~/.config` → `chezmoi apply`(dir と file)を action にする(#241)。各 context の identity file が存在するか、意図的に未設定かも見る。存在する file は `user.name` / `user.email` の有無だけを見て partial を action 化し、値の無い key(`=` なし。git が identity 全体を拒否する)は別の action、git が parse できない file は warn — 値は出さない。partial は managed な identity reset が塞げない唯一の状態なので doctor が主な検出手段になる(#202)。
@@ -444,7 +445,7 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 
 - source に `user.useConfigOnly = true` と `transfer.credentialsInUrl = die` が含まれること。
 - 全 context(personal / work / client / sandbox / agent)の `includeIf`・include path(identity reset・signing・
-  git-hook-gates の include も含む)と、その**順序**が exact pin と一致すること(#202: personal の hasconfig 3 本 →
+  gh の credential helper・git-hook-gates の include も含む)と、その**順序**が exact pin と一致すること(#202: personal の hasconfig 3 本 →
   personal gitdir → 非 personal 4 context それぞれで identity reset → context file の隣接 2 段 → mechanism の無条件
   include)。header は行頭、path の行は comment でないことまで見る(comment にした行は存在の grep なら通ってしまう)。
 - hasconfig の rule が public な personal の 3 pattern だけであること(comment の行も含めて、ほかの org の URL を書かない)。
@@ -505,8 +506,9 @@ throwaway destination に実 render し、生成された `~/.npmrc` の内容(h
 ## test-doctor.sh
 
 fixture HOME(+ repo copy の capability flip・PATH 先頭の fake command)で doctor の各 section を
-検証する。実 home には触れない。op / herdr / codex / opencode と、package manager の brew / npm は、冒頭で PATH の先頭に
-置く stub が受け、実機の tool は起動しない(#306、#458)。stub は PATH 上に在り、実行すると記録して exit 1 になる(在るが
+検証する。実 home には触れない。op / herdr / codex / opencode / gh と、package manager の brew / npm は、冒頭で PATH の先頭に
+置く stub が受け、実機の tool は起動しない(#306、#458。gh は #492 の doctor が PATH の上の有無だけを見るので、host の gh で
+結果が変わらないように置く)。stub は PATH 上に在り、実行すると記録して exit 1 になる(在るが
 使えない側の分岐。たとえば op は「not found」ではなく「サインインしていない」、software catalog と npm hardening は warn に
 なる)。brew と npm を stub にするのは、本物が fixture の HOME に書く(brew は新しい HOME ごとに formula の API を取って cache
 に書き、npm は log を書く)うえ、doctor の 1 回を倍近く遅くするため。fake が要る section(npm の NPM・DS など)は、その前に
@@ -999,8 +1001,14 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   依らない。chezmoi はこの dir を作らない)では、statusLine・各 hook の command・instructions が引用符なしの
   以前と同じ文字列であること。test-claude-settings / test-codex-settings の hook の期待値は、test-lib の
   `shell_word` / `shell_single_quote`(template と同じ規則)で host の `$HOME` から作る。
+- GitHub の HTTPS の credential helper(#492): work の apply は、chezmoi の PATH に gh があり、その path が引用の要らない
+  絶対 path のときだけ `~/.config/git/gh-credential.gitconfig` を出し、github.com と gist.github.com の helper の list を
+  「空にしてから gh」にすること。gh が無い・空白を含む path・`enableGhCredentialHelper=false` では空に render し、前の
+  apply の file を消すこと。chezmoi は絶対 path で起動し、PATH は fake の gh だけか空にする(host の gh を見つけない)。
+  render した home で `git credential fill` を回し、github.com では gh だけが、別の host では system の helper だけが
+  呼ばれること(system の helper は、呼び出しを記録する fixture の file を `GIT_CONFIG_SYSTEM` で渡す)。
 
-chezmoi と jq が必要(chezmoi は CI では version pin して導入する)。
+chezmoi と jq と git が必要(chezmoi は CI では version pin して導入する)。
 
 ## test-claude-settings.sh
 

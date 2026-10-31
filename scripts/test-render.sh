@@ -63,7 +63,7 @@ expected_managed() {
       printf '%s\n' .claude .claude/settings.json .codex .codex/agent-tools-review.config.toml .codex/agent-tools-worker.config.toml .codex/hooks.json .codex/rules .codex/rules/default.rules .config .config/agent-tools .config/agent-tools/usage-reader.json .config/git .config/git-hook-gates .config/git-hook-gates/hooks .config/git-hook-gates/hooks.gitconfig .config/git-hook-gates/hooks/applypatch-msg .config/git-hook-gates/hooks/commit-msg .config/git-hook-gates/hooks/p4-changelist .config/git-hook-gates/hooks/p4-post-changelist .config/git-hook-gates/hooks/p4-pre-submit .config/git-hook-gates/hooks/p4-prepare-changelist .config/git-hook-gates/hooks/post-applypatch .config/git-hook-gates/hooks/post-checkout .config/git-hook-gates/hooks/post-commit .config/git-hook-gates/hooks/post-merge .config/git-hook-gates/hooks/post-receive .config/git-hook-gates/hooks/post-rewrite .config/git-hook-gates/hooks/post-update .config/git-hook-gates/hooks/pre-applypatch .config/git-hook-gates/hooks/pre-auto-gc .config/git-hook-gates/hooks/pre-commit .config/git-hook-gates/hooks/pre-merge-commit .config/git-hook-gates/hooks/pre-push .config/git-hook-gates/hooks/pre-rebase .config/git-hook-gates/hooks/pre-receive .config/git-hook-gates/hooks/prepare-commit-msg .config/git-hook-gates/hooks/sendemail-validate .config/git-hook-gates/hooks/update .config/git-profile .config/git-profile/identity-reset.gitconfig .config/git/ignore .config/git/signing.gitconfig .config/herdr .config/herdr/config.toml .config/mise .config/mise/config.toml .config/opencode .config/opencode/opencode.json .config/starship.toml .gitconfig .npmrc .ssh .ssh/config .zprofile .zshenv .zshrc
       ;;
     work)
-      printf '%s\n' .config .config/git-profile .config/git-profile/identity-reset.gitconfig .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .zprofile .zshenv .zshrc
+      printf '%s\n' .config .config/git .config/git-profile .config/git-profile/identity-reset.gitconfig .config/git/gh-credential.gitconfig .config/mise .config/mise/config.toml .config/starship.toml .gitconfig .zprofile .zshenv .zshrc
       ;;
     *)
       return 1
@@ -720,6 +720,118 @@ if HOME="$odd_home" throwaway_chezmoi apply >/dev/null 2>&1; then
   check_home_render "$root" "$odd_home"
 else
   fail "test failed: personal apply with an unusual home path did not render"
+  status=1
+fi
+
+section "GitHub HTTPS credential helper (gh-credential-helper, #492)"
+
+# The work profile renders ~/.config/git/gh-credential.gitconfig only while
+# gh is on chezmoi's PATH at an absolute path that needs no quoting, and only
+# while enableGhCredentialHelper is true; either key missing renders it empty
+# and apply prunes a file left from before (template self-gate). chezmoi runs
+# by absolute path with a PATH holding only a fake gh (or nothing), so the
+# host's gh is never found (no template runs another command). git then runs
+# on the rendered home with a fixture system config whose helper records its
+# calls: GitHub's HTTPS must reach gh alone (the managed list starts with
+# `helper =`), another host the system helper alone.
+chezmoi_bin="$(command -v chezmoi)"
+gc_bins="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-render-test.XXXXXX")"
+tmp_roots+=("$gc_bins")
+# The physical path, so the expected helper line does not depend on whether
+# lookPath resolves a symlinked TMPDIR (macOS: /var -> /private/var).
+gc_bins="$(cd -P "$gc_bins" && pwd)"
+mkdir -p "$gc_bins/gh" "$gc_bins/none" "$gc_bins/sp ace" "$gc_bins/sys"
+gc_calls="$gc_bins/calls"
+cat > "$gc_bins/gh/gh" <<SH
+#!/bin/sh
+printf '%s %s\n' gh "\$*" >> $(shell_single_quote "$gc_calls")
+cat > /dev/null
+[ "\$3" != get ] || printf 'username=x-access-token\npassword=fake-gh-token\n'
+SH
+cat > "$gc_bins/sys/system-helper" <<SH
+#!/bin/sh
+printf '%s %s\n' system-helper "\$*" >> $(shell_single_quote "$gc_calls")
+cat > /dev/null
+SH
+chmod +x "$gc_bins/gh/gh" "$gc_bins/sys/system-helper"
+cp "$gc_bins/gh/gh" "$gc_bins/sp ace/gh"
+printf '[credential]\n\thelper = !%s\n' "$gc_bins/sys/system-helper" > "$gc_bins/system.gitconfig"
+gc_file=".config/git/gh-credential.gitconfig"
+# gc_render ROOT PATH SOURCE — apply the work profile from SOURCE into
+# ROOT/home, chezmoi seeing only PATH.
+gc_render() {
+  mkdir -p "$1/home"
+  printf '[data]\nprofile = "work"\n' > "$1/chezmoi.toml"
+  env PATH="$2" "$chezmoi_bin" --config "$1/chezmoi.toml" --source "$3" --destination "$1/home" apply >/dev/null 2>&1
+}
+# gc_fill HOST — `git credential fill` for https://HOST on the rendered home,
+# with the fixture system helper and no terminal prompt, run in a fixture
+# repo of its own: a repo's .git/config is read too, so running where the
+# suite was started would let that checkout's credential settings in (Codex
+# review R1, PR #495).
+gc_fill() {
+  printf 'protocol=https\nhost=%s\n\n' "$1" | fixture_git_env "$root/home" "$root/home/.gitconfig" \
+    GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM="$gc_bins/system.gitconfig" GIT_TERMINAL_PROMPT=0 -- git -C "$root/repo" credential fill 2>/dev/null
+}
+gc_want=$'\n'"!$gc_bins/gh/gh auth git-credential"
+
+make_root
+if ! fixture_git_env "$root/home" "$root/home/.gitconfig" -- git init -q --template= "$root/repo" \
+  || [[ -n "$(git config --file "$root/repo/.git/config" --get-regexp '^credential\.' || true)" ]]; then
+  fail "test failed: the fixture repo for git credential fill could not be made, or carries credential settings"
+  status=1
+fi
+if gc_render "$root" "$gc_bins/gh" "$DOTFILES_ROOT" && [[ -f "$root/home/$gc_file" ]] \
+  && [[ "$(head -n 1 "$root/home/$gc_file")" == "# Managed by chezmoi from kosako/dotfiles (gh-credential-helper, #492)." ]] \
+  && [[ "$(git config --file "$root/home/$gc_file" --get-all credential.https://github.com.helper)" == "$gc_want" ]] \
+  && [[ "$(git config --file "$root/home/$gc_file" --get-all credential.https://gist.github.com.helper)" == "$gc_want" ]]; then
+  ok "test passed: work with gh on PATH renders the helper list (reset, then gh at that path) for github.com and gist.github.com"
+else
+  [[ ! -f "$root/home/$gc_file" ]] || cat "$root/home/$gc_file" >&2
+  fail "test failed: work with gh on PATH must render the gh helper for github.com and gist.github.com"
+  status=1
+fi
+: > "$gc_calls"
+gc_out="$(gc_fill github.com || true)"
+if grep -Fxq 'password=fake-gh-token' <<< "$gc_out" && [[ "$(cat "$gc_calls")" == "gh auth git-credential get" ]]; then
+  ok "test passed: git asks only gh for https://github.com (the system helper is reset for it)"
+else
+  printf 'calls:\n%s\n' "$(cat "$gc_calls")" >&2
+  fail "test failed: https://github.com must reach gh alone"
+  status=1
+fi
+: > "$gc_calls"
+gc_fill example.com >/dev/null || true
+if [[ "$(cat "$gc_calls")" == "system-helper get" ]]; then
+  ok "test passed: another host keeps the system helper (gh is not asked)"
+else
+  printf 'calls:\n%s\n' "$(cat "$gc_calls")" >&2
+  fail "test failed: https://example.com must reach the system helper alone"
+  status=1
+fi
+if gc_render "$root" "$gc_bins/none" "$DOTFILES_ROOT" && [[ ! -e "$root/home/$gc_file" ]]; then
+  ok "test passed: without gh on PATH the render is empty and apply prunes the file left from before"
+else
+  fail "test failed: without gh on PATH, apply must prune $gc_file"
+  status=1
+fi
+
+make_root
+if gc_render "$root" "$gc_bins/sp ace" "$DOTFILES_ROOT" && [[ ! -e "$root/home/$gc_file" ]]; then
+  ok "test passed: gh at a path that needs quoting renders nothing (the helper line carries it unquoted)"
+else
+  fail "test failed: gh at a path with a space must not render $gc_file"
+  status=1
+fi
+
+make_root
+make_flipped_source "$root"
+set_capability_all "$root/src" enableGhCredentialHelper false
+if gc_render "$root" "$gc_bins/gh" "$DOTFILES_ROOT" && [[ -f "$root/home/$gc_file" ]] \
+  && gc_render "$root" "$gc_bins/gh" "$root/src" && [[ ! -e "$root/home/$gc_file" ]]; then
+  ok "test passed: enableGhCredentialHelper=false renders nothing and apply prunes the file left from before, gh on PATH or not"
+else
+  fail "test failed: enableGhCredentialHelper=false must prune $gc_file"
   status=1
 fi
 

@@ -48,8 +48,9 @@ check_contains "transfer.credentialsInUrl die" "credentialsInUrl = die"
 # the three personal hasconfig rules come first, then the personal gitdir
 # rule, then for EACH non-personal context the managed identity reset
 # immediately followed by that context's local file, then the unconditional
-# mechanism includes (signing, #196's git hook gates; a missing file is a
-# silent no-op). A presence grep would also pass on a commented-out line and
+# mechanism includes (signing, #492's gh credential helper, #196's git hook
+# gates; a missing file is a silent no-op). A presence grep would also pass on
+# a commented-out line and
 # cannot catch a reordering or a reset that drifted away from its context, so
 # the exact sequence is pinned: "<condition>|<path>" per include, in source
 # order. This pin is the static check for every include line: header at
@@ -68,6 +69,7 @@ expected_include_order="$(printf '%s\n' \
   'gitdir:~/src/agent/|~/.config/git-profile/identity-reset.gitconfig' \
   'gitdir:~/src/agent/|~/.config/git/agent.gitconfig' \
   'include|~/.config/git/signing.gitconfig' \
+  'include|~/.config/git/gh-credential.gitconfig' \
   'include|~/.config/git-hook-gates/hooks.gitconfig')"
 actual_include_order="$(awk '
   /^\[includeIf "/ { cond = $0; sub(/^\[includeIf "/, "", cond); sub(/"\]$/, "", cond); next }

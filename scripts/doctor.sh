@@ -109,6 +109,151 @@ if command -v git >/dev/null 2>&1; then
   else
     ok "Git signing mechanism not managed (enableGitSigning=false)"
   fi
+  # enableGhCredentialHelper (#492) gates the managed gh credential helper for
+  # GitHub's HTTPS (~/.config/git/gh-credential.gitconfig, read via the
+  # unconditional include in ~/.gitconfig). The template renders only while
+  # gh is on PATH at apply time at an absolute path that needs no quoting, so
+  # a missing file is told apart with doctor's own gh lookup. The include is
+  # unconditional, so a file left after the capability was turned off keeps
+  # GitHub on gh until it is removed. The helper value is a command line and
+  # is not shown.
+  # Git builds the helper list for a URL from every matching entry in config
+  # order (an empty value clears it) and asks the helpers in that order, so
+  # the check walks the same entries the same way and compares the FIRST
+  # helper left with the managed one. A most-specific lookup (--get-urlmatch)
+  # would miss a later generic reset (Codex review R1, PR #495). The entries
+  # are every scope git reads, not only the global one: the managed
+  # `helper =` normally clears the system helper (osxkeychain), but a file
+  # that lost its reset leaves that helper first (R4). On macOS that helper
+  # comes from the Command Line Tools' own gitconfig, which `--system` does
+  # not read, so the read names no scope; it runs from / with the repository
+  # variables dropped, so no repository's config is read. Only the generic
+  # section and https://github.com itself are matched; a github.com section
+  # with a path, a user or a wildcard is not, and leaves the result
+  # unconfirmed until a later reset that every github.com URL sees clears it. An entry with no
+  # value at all (`helper`, no `=`) is not a reset: git stops its credential
+  # lookup with an error wherever it sits, so a later reset does not clear it
+  # (Codex review R2), in an unmatched section too (R3). Git matches the
+  # protocol too, so a section for another scheme (http://github.com) does
+  # not count (R5). The check is an approximation of the machine-wide
+  # settings: reading from outside any repository, it does not follow a
+  # context's local file (an includeIf gitdir), which only a repository under
+  # that context would load; doctor says so in an item line (R5, by the
+  # user's decision).
+  gh_cred_file="$HOME/.config/git/gh-credential.gitconfig"
+  gh_cred_path=""
+  gh_cred_plain='^/[A-Za-z0-9_@%+=:,./-]+$'
+  if [[ "$(capability_value "$profile" enableGhCredentialHelper)" == "true" ]]; then
+    if ! module_active_for_profile "$profile" gh-credential-helper; then
+      warn "enableGhCredentialHelper=true but the gh-credential-helper module is inactive for this profile (GitHub HTTPS credential helper not managed — dangling capability)"
+    elif [[ -f "$gh_cred_file" ]]; then
+      gh_cred_managed="$(git config --file "$gh_cred_file" --get-urlmatch credential.helper https://github.com 2>/dev/null || true)"
+      gh_cred_first=""
+      gh_cred_count=0
+      gh_cred_unmatched=0
+      gh_cred_valueless=0
+      while IFS= read -r gh_cred_line; do
+        # `--get-regexp` prints `KEY VALUE`, `KEY ` for an empty value and a
+        # bare `KEY` for an entry without `=`.
+        gh_cred_key="${gh_cred_line%% *}"
+        gh_cred_value=""
+        gh_cred_has_value=0
+        if [[ "$gh_cred_line" == *" "* ]]; then
+          gh_cred_value="${gh_cred_line#* }"
+          gh_cred_has_value=1
+        fi
+        if [[ "$gh_cred_key" != credential.helper ]]; then
+          gh_cred_url="${gh_cred_key#credential.}"
+          gh_cred_url="$(printf '%s' "${gh_cred_url%.helper}" | tr '[:upper:]' '[:lower:]')"
+          # A URL that names its protocol counts only for https; a partial one
+          # without a protocol (`github.com`) matches https too (Codex review
+          # R6), so both are compared from the host on. One without a host
+          # (`https://`) covers every https URL, like the generic section (R7).
+          if [[ "$gh_cred_url" == *://* ]]; then
+            [[ "$gh_cred_url" == https://* ]] || continue
+            gh_cred_url="${gh_cred_url#*://}"
+          fi
+          if [[ -n "${gh_cred_url%/}" && "${gh_cred_url%/}" != github.com ]]; then
+            # Another URL counts only when its host could be github.com: the
+            # host itself with a path, a user or the default port, no host
+            # but a path (it applies to that path on every host, R8), or a
+            # wildcard that matches it (git's `*` stands for one dot-separated
+            # part). Another port is another URL, which https://github.com
+            # never matches (R8).
+            gh_cred_host="${gh_cred_url%%/*}"
+            gh_cred_host="${gh_cred_host##*@}"
+            if [[ "$gh_cred_host" == *:* ]]; then
+              # Git compares the port without its leading zeros, and an empty
+              # one is the default (R9).
+              gh_cred_port="${gh_cred_host##*:}"
+              while [[ "$gh_cred_port" == 0?* ]]; do gh_cred_port="${gh_cred_port#0}"; done
+              [[ -z "$gh_cred_port" || "$gh_cred_port" == 443 ]] || continue
+              gh_cred_host="${gh_cred_host%:*}"
+            fi
+            gh_cred_part1="" gh_cred_part2="" gh_cred_part3=""
+            IFS=. read -r gh_cred_part1 gh_cred_part2 gh_cred_part3 <<< "$gh_cred_host"
+            # shellcheck disable=SC2053 # the parts are git's host patterns: glob on purpose
+            if [[ -z "$gh_cred_host" || "$gh_cred_host" == github.com ]] \
+              || [[ "$gh_cred_host" == *'*'* && -z "$gh_cred_part3" && -n "$gh_cred_part2" && github == $gh_cred_part1 && com == $gh_cred_part2 ]]; then
+              if [[ "$gh_cred_has_value" -eq 0 ]]; then
+                gh_cred_valueless=1
+              else
+                gh_cred_unmatched=1
+              fi
+            fi
+            continue
+          fi
+        fi
+        if [[ "$gh_cred_has_value" -eq 0 ]]; then
+          gh_cred_valueless=1
+        elif [[ -z "$gh_cred_value" ]]; then
+          gh_cred_first=""
+          gh_cred_count=0
+          gh_cred_unmatched=0
+        else
+          [[ "$gh_cred_count" -gt 0 ]] || gh_cred_first="$gh_cred_value"
+          gh_cred_count=$((gh_cred_count + 1))
+        fi
+      done < <(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git -C / config --includes --get-regexp '^credential\.(.*\.)?helper$' 2>/dev/null || true)
+      # The managed line is `!<gh path> auth git-credential`, rendered with the
+      # gh found at apply time: a gh moved or removed since then leaves git
+      # running a command that is not there.
+      gh_cred_bin="${gh_cred_managed#!}"
+      gh_cred_bin="${gh_cred_bin% auth git-credential}"
+      if [[ "$gh_cred_valueless" -eq 1 ]]; then
+        warn "GitHub HTTPS credential helper broken: a global credential helper entry for github.com (or a URL under it) has no value (\`helper\` without \`=\`), and git stops its credential lookup there with an error"
+      elif [[ "$gh_cred_unmatched" -eq 1 ]]; then
+        warn "GitHub HTTPS credential helper not confirmed: a global credential section whose URL may cover github.com (a path, a user, the default port, no host or a wildcard) also sets a helper, which doctor does not match (value not shown)"
+      elif [[ -n "$gh_cred_managed" && "$gh_cred_first" == "$gh_cred_managed" ]]; then
+        if [[ -f "$gh_cred_bin" && -x "$gh_cred_bin" ]]; then
+          ok "GitHub HTTPS credential helper -> gh (managed $gh_cred_file)"
+        else
+          action "GitHub HTTPS credential helper in $gh_cred_file runs a gh that is no longer there (value not shown); git cannot get GitHub's token from it — run chezmoi apply to render the gh on PATH now" \
+            "\$ chezmoi apply"
+        fi
+      else
+        warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)"
+      fi
+      item "approximate check: doctor reads the machine-wide settings from outside any repository, so a context's local file read by an includeIf gitdir (~/.config/git/<context>.gitconfig) is not followed, and only https URLs count (docs/git-identity.md)"
+    elif gh_cred_path="$(command -v gh 2>/dev/null)" && [[ "$gh_cred_path" =~ $gh_cred_plain ]]; then
+      action "GitHub HTTPS credential helper not managed yet: $gh_cred_file missing (gh-credential-helper module)" \
+        "\$ chezmoi apply"
+    elif [[ -n "$gh_cred_path" ]]; then
+      warn "gh is on PATH at a path the managed helper line cannot carry unquoted (value not shown); GitHub HTTPS uses the system credential helper"
+    else
+      warn "gh not on PATH: GitHub HTTPS uses the system credential helper (once gh is installed, chezmoi apply renders the managed one)"
+    fi
+  elif [[ -e "$gh_cred_file" || -L "$gh_cred_file" ]]; then
+    if module_active_for_profile "$profile" gh-credential-helper; then
+      action "enableGhCredentialHelper=false but $gh_cred_file lingers; the ~/.gitconfig include still sends GitHub HTTPS to gh — run chezmoi apply to prune it" \
+        "\$ chezmoi apply"
+    else
+      action "enableGhCredentialHelper=false but $gh_cred_file lingers, left by another profile; the ~/.gitconfig include still sends GitHub HTTPS to gh, and this profile does not manage the file, so chezmoi apply will NOT remove it; remove it by hand" \
+        "\$ rm -i $(shell_quote_safe "$gh_cred_file")"
+    fi
+  else
+    ok "GitHub HTTPS credential helper not managed (enableGhCredentialHelper=false)"
+  fi
   # git-ignore module (#248): the managed global gitignore sits at git's
   # DEFAULT excludes location (~/.config/git/ignore), which git reads only
   # while core.excludesFile is unset — in the global AND the system scope

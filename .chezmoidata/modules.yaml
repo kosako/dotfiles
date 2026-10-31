@@ -67,6 +67,10 @@ modules:
       - .config/git/signing.gitconfig
     requires:
       enableGitSigning: true
+  gh-credential-helper:
+    description: GitHub(github.com / gist.github.com)の HTTPS の credential helper を gh にする(#492)。managed な ~/.config/git/gh-credential.gitconfig を dot_gitconfig の無条件 include が読む(missing なら git が無視 = signing.gitconfig と同型)。`gh auth setup-git` は同じ行を ~/.gitconfig に書くが、そこは chezmoi apply が上書きするので消える。render は 2 段 gate(enableGhCredentialHelper が intent、apply の時点で PATH に gh があり、その path が引用の要らない文字だけでできていることが readiness)で、両方が揃ったときだけ。どちらかが欠けると空 render で、chezmoi が既存 file も消し、git は system の helper に戻る(doctor が報告)。cap gate は module の requires ではなく template 自己 gate(git-hook-gates と同じ理由。requires だと capability を切ったときに既存 file が残り、無条件 include が gh の helper を効かせ続ける)。token は gh が持ち、この file には置かない。
+    paths:
+      - .config/git/gh-credential.gitconfig
   ai-policy:
     description: AI agent 権限方針。
   claude-settings:

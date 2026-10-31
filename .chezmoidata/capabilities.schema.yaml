@@ -18,6 +18,9 @@ capabilities:
   enableGitSigning:
     type: boolean
     implemented: true
+  enableGhCredentialHelper:
+    type: boolean
+    implemented: true
   enableDirenv:
     type: boolean
     implemented: true

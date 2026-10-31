@@ -38,7 +38,9 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     同じ repo でも起動した path で読む file が変わりうる(実体が `~/src` の外にある repo に `~/src/work/` の下の
     symlink から入り、work tree の top で起動すると work の identity file を読み、実体の path からでは読まない)。
     remote URL による二次判定(`hasconfig`)は、`--global` の照会では repo の remote が見えないので当たらない。
-    `core.hooksPath` の値は出さないが、managed な `~/.config/git/ignore` が在り、`core.excludesFile` が
+    GitHub の `credential.helper` の照会(`gh-credential-helper` module が active で managed な file が在るとき)は
+    repo の外(`/`)から行うので、identity file は読まない。
+    `core.hooksPath` と `credential.helper` の値は出さないが、managed な `~/.config/git/ignore` が在り、`core.excludesFile` が
     それと別の file を指すときは、git が読む file としてその path を表示する
     ([git-ignore](git-ignore.md) の「doctor / preflight」)。
 - 命名は managed file に `.local` を付ける(`~/.zshrc.local`、`~/.zprofile.local`、`~/.ssh/config.local`)。
@@ -223,7 +225,17 @@ file が無い**。agent-tools の wrapper `personal-usage-reader` は `${XDG_CO
   実行しない(値も表示しない)。
   preflight は存在だけを見る。詳細は [agent-tools-usage-reader](agent-tools-usage-reader.md)。
 
+## Git の credential helper: managed(capability、local 無し、#492)
+
+`~/.gitconfig` には machine ごとの local file を include する口を作らない。GitHub の HTTPS の credential helper を gh に
+する設定は、capability(`enableGhCredentialHelper`)で gate した managed な file に置く([git-identity](git-identity.md)
+の「GitHub の HTTPS の credential helper」)。credential helper は token の出どころを決める設定なので、SSH と同じく
+managed の設定が勝つ側に置く。context に固有の git の設定は、その context の local file
+(`~/.config/git/<context>.gitconfig`)か、repo の `.git/config` に置く。
+
 ## 決定記録
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で
   local-wins、SSH = 末尾 Include で managed-wins。
+- 2026-10-31: `~/.gitconfig` に local の include の口を作らず、GitHub の credential helper は capability で
+  gate した managed な file に置く(#492。local の include の案は採らない)。
