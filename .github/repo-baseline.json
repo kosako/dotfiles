@@ -1,0 +1,12 @@
+{
+  "required_checks": [
+    "validate",
+    "render",
+    "bash32 (doctor-1)",
+    "bash32 (doctor-2)",
+    "bash32 (doctor-3)",
+    "bash32 (private-backup)",
+    "bash32 (others)",
+    "bash32 (render)"
+  ]
+}
