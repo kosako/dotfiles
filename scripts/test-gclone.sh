@@ -20,11 +20,6 @@ if ! command -v zsh >/dev/null 2>&1; then
 fi
 
 status=0
-pass() { ok "test passed: $*"; }
-miss() {
-  fail "test failed: $*"
-  status=1
-}
 
 # All cases exercise a fixture path containing both whitespace and a quote.
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gclone-test space's.XXXXXX")"

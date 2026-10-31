@@ -14,11 +14,6 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 PB="$SCRIPT_DIR/private-backup.sh"
 status=0
-pass() { ok "test passed: $*"; }
-miss() {
-  fail "test failed: $*"
-  status=1
-}
 
 # Without age the suite cannot run. Locally that stays a skip; on CI (CI=true,
 # set by GitHub Actions) it is a failure, so a dropped install step or a
@@ -107,11 +102,7 @@ printf 'Host private\n  User me\n' > "$fixture_home/.ssh/config.local"
 # Fake chezmoi: prints a chosen profile so require_secrets_access resolves
 # it without a real chezmoi. set_profile() rewrites it.
 set_profile() {
-  cat > "$fixture_home/fakebin/chezmoi" <<SH
-#!/bin/sh
-printf '%s\n' '{"profile":"$1"}'
-SH
-  chmod +x "$fixture_home/fakebin/chezmoi"
+  write_fake_chezmoi "$fixture_home/fakebin" "{\"profile\":\"$1\"}" 0
 }
 set_profile personal
 

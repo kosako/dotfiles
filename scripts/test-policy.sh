@@ -1125,6 +1125,41 @@ if [[ "$gate_ci" != fail || "$gate_local" != skip || "$gate_run" != run || "$gat
 fi
 ok "test passed: ci_gate runs on a passing probe, fails on CI and skips elsewhere on a failing one, and keeps the probe's output and stdin out"
 
+# pass / miss (#485), checked once here for the suites that use them: the
+# exact case lines, and miss sets the suite's status (a miss that forgot it
+# would let a suite exit 0 over a failed case).
+pm_out="$(status=0; pass "self-check case" 2>&1; miss "self-check case" 2>&1; printf 'status=%s\n' "$status")"
+if [[ "$pm_out" != $'[ok] test passed: self-check case\n[fail] test failed: self-check case\nstatus=1' ]]; then
+  printf '%s\n' "$pm_out" >&2
+  fail "test failed: pass / miss must print the case lines and miss must set the suite's status to 1"
+  exit 1
+fi
+ok "test passed: pass / miss print the case lines and miss sets the suite's status"
+
+# write_fake_chezmoi / write_call_recorders (#485): a payload with a quote is
+# printed as given, the exit code is the one asked for and must be digits,
+# and a spy appends "NAME ARGS" to a log that does not exist until it runs.
+stub_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-stubs.XXXXXX")"
+tmp_roots+=("$stub_bin")
+stub_payload=$'{"profile":"it\'s $HOME `x`"}'
+write_fake_chezmoi "$stub_bin" "$stub_payload" 3
+write_call_recorders "$stub_bin" "$stub_bin/calls" 4 brew npm
+stub_rc=0
+stub_out="$("$stub_bin/chezmoi" data --format json)" || stub_rc=$?
+stub_log_before="absent"
+[[ ! -e "$stub_bin/calls" ]] || stub_log_before="present"
+spy_rc=0
+"$stub_bin/brew" install "a b" || spy_rc=$?
+"$stub_bin/npm" >/dev/null 2>&1 || true
+if [[ "$stub_out" != "$stub_payload" || "$stub_rc" -ne 3 || "$stub_log_before" != absent || "$spy_rc" -ne 4 ]] \
+  || [[ "$(cat "$stub_bin/calls")" != $'brew install a b\nnpm ' ]] \
+  || write_fake_chezmoi "$stub_bin" x '1;x' 2>/dev/null \
+  || write_call_recorders "$stub_bin" "$stub_bin/calls" '' brew 2>/dev/null; then
+  fail "test failed: the stub helpers printed '$stub_out' (exit $stub_rc), the log was $stub_log_before before the spies ran, the spy exited $spy_rc, or a non-digit exit code was accepted"
+  exit 1
+fi
+ok "test passed: write_fake_chezmoi prints a quoted payload as given with its exit code, and write_call_recorders logs NAME ARGS only once called"
+
 # Capability registry (#151): a capability without implemented: true|false
 # fails closed, and implemented: false without a doctor disclosure (the
 # static proxy: doctor.sh mentions the name) fails. The mutations are

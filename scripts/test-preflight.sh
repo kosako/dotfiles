@@ -15,11 +15,6 @@ source "$SCRIPT_DIR/lib-policy.sh"
 source "$SCRIPT_DIR/test-lib.sh"
 
 status=0
-pass() { ok "test passed: $*"; }
-miss() {
-  fail "test failed: $*"
-  status=1
-}
 
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-preflight-test.XXXXXX")"
 trap 'rm -rf "$fixture_home"' EXIT

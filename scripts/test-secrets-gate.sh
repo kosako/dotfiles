@@ -15,12 +15,6 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 status=0
 
-pass() { ok "test passed: $*"; }
-miss() {
-  fail "test failed: $*"
-  status=1
-}
-
 # 1. profile_allows_secrets_access: only allowSecretsAccess=true profiles
 #    pass. personal grants it; work does not.
 if profile_allows_secrets_access personal; then
@@ -67,12 +61,7 @@ fixture_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gate-test.XXXXXX")"
 trap 'rm -rf "$fixture_bin"' EXIT
 fake_chezmoi() {
   # $1 = stdout payload, $2 = exit code
-  cat > "$fixture_bin/chezmoi" <<SH
-#!/bin/sh
-printf '%s\n' '$1'
-exit $2
-SH
-  chmod +x "$fixture_bin/chezmoi"
+  write_fake_chezmoi "$fixture_bin" "$1" "$2"
 }
 with_fixture() { ( PATH="$fixture_bin:$PATH"; "$@" >/dev/null 2>&1 ); }
 # The must case must be exercised with pipefail OFF: this test file runs

@@ -196,6 +196,52 @@ ci_gate() {
   fi
 }
 
+# pass MESSAGE... / miss MESSAGE... — a case's "[ok] test passed: ..." /
+# "[fail] test failed: ..." line, for the suites that report every case and
+# exit with the status they collected (test-gclone, test-install-packages,
+# test-preflight, test-private-backup, test-secrets-gate, #485). miss also
+# sets the sourcing suite's status to 1. The fail-fast suites (test-policy
+# and the like) stop at the first failure instead and do not use these.
+# test-policy.sh checks both.
+pass() { ok "test passed: $*"; }
+miss() {
+  fail "test failed: $*"
+  # shellcheck disable=SC2034 # status belongs to the sourcing suite
+  status=1
+}
+
+# write_fake_chezmoi DIR PAYLOAD RC — DIR/chezmoi as a stand-in that prints
+# PAYLOAD (a `chezmoi data` answer) and a newline and exits RC, whatever it
+# is asked. PAYLOAD is written single-quoted, so a quote in it stays data;
+# RC must be digits. The suites that answer per subcommand (doctor's
+# chezmoi) keep their own stubs.
+write_fake_chezmoi() {
+  local fc_dir="$1" fc_payload="$2" fc_rc="$3"
+  if [[ ! "$fc_rc" =~ ^[0-9]+$ ]]; then
+    fail "write_fake_chezmoi: the exit code must be digits: $fc_rc"
+    return 1
+  fi
+  printf '#!/bin/sh\nprintf %s %s\nexit %s\n' "'%s\n'" "$(shell_single_quote "$fc_payload")" "$fc_rc" > "$fc_dir/chezmoi"
+  chmod +x "$fc_dir/chezmoi"
+}
+
+# write_call_recorders DIR LOG RC NAME... — for each NAME, DIR/NAME as a spy
+# that appends "NAME ARGS" to LOG and exits RC, so a case can tell whether
+# (and how) the tool was reached. LOG is not created here: a case that
+# checks "never called" looks for its absence. RC must be digits.
+write_call_recorders() {
+  local cr_dir="$1" cr_log="$2" cr_rc="$3" cr_name
+  shift 3
+  if [[ ! "$cr_rc" =~ ^[0-9]+$ ]]; then
+    fail "write_call_recorders: the exit code must be digits: $cr_rc"
+    return 1
+  fi
+  for cr_name in "$@"; do
+    printf '#!/bin/sh\nprintf %s %s "$*" >> %s\nexit %s\n' "'%s %s\n'" "$(shell_single_quote "$cr_name")" "$(shell_single_quote "$cr_log")" "$cr_rc" > "$cr_dir/$cr_name"
+    chmod +x "$cr_dir/$cr_name"
+  done
+}
+
 # set_environment_kind ROOT PROFILE KIND
 # Retag PROFILE in ROOT/.chezmoidata/profiles.yaml to environmentKind KIND,
 # for the rows of the forbidden table that have no profile of their own

@@ -235,6 +235,16 @@ CI で飛ばしてはいけない case の gate(#484): `ci_gate PROBE...` は、
 のは呼び出し側(test-codex-settings.sh の codex は item、test-private-backup.sh と test-starship.sh の python3 は warn)。
 gate 自体は test-policy.sh が 1 回だけ確かめる。
 
+case の行と stub の helper(#485。5 つの suite の写しをまとめた): `pass MESSAGE...` / `miss MESSAGE...` は、case ごとに
+`[ok] test passed: ...` / `[fail] test failed: ...` を出し、`miss` は読み込む側の suite の `status` を 1 にする。全部の case を
+報告してから集めた status で終わる suite(test-gclone・test-install-packages・test-preflight・test-private-backup・
+test-secrets-gate)が使い、最初の失敗で止まる suite(test-policy など)は使わない。`write_fake_chezmoi DIR PAYLOAD RC` は、
+何を聞かれても PAYLOAD(`chezmoi data` の答え)と改行を出して RC で終わる `DIR/chezmoi` を作る。PAYLOAD は single quote で
+引用して書くので、quote を含んでも壊れない。`write_call_recorders DIR LOG RC NAME...` は、NAME ごとに、`NAME 引数` を LOG に
+足して RC で終わる `DIR/NAME` を作る。LOG は先に作らないので、「呼ばれなかった」は LOG が無いことで確かめられる。どちらも RC は
+数字だけを受け付ける。subcommand ごとに答える stub(doctor の chezmoi や manager)は、それぞれの suite に残す。4 つとも
+test-policy.sh が確かめる。
+
 report の照合の helper(#483): `expect_report OUTPUT EXPECT... [! ABSENT...]` は、手元にある出力を照合する。各 EXPECT が
 exact な行として(先頭が `~` なら部分一致で)あり、`!` のあとの文字列がどこにも無いことを確かめる(2 つ目からの `!` は区切り
 だけ)。外れたときは出力と、外れた期待ごとの 1 行(`expected line:` / `expected text:` / `unexpected:`)を stderr に出し、1 を

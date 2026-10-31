@@ -9,6 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
 source "$SCRIPT_DIR/lib-policy.sh"
+# shellcheck source=scripts/test-lib.sh
+source "$SCRIPT_DIR/test-lib.sh"
 
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-inventory-test.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
@@ -38,10 +40,7 @@ WORK
 printf '#!/bin/sh\nexit 0\n' > "$fixture/gobin/fixture-go"
 chmod +x "$fixture/gobin/fixture-go"
 
-cat > "$fixture/bin/chezmoi" <<'FAKE'
-#!/bin/sh
-printf '{"profile":"personal"}\n'
-FAKE
+write_fake_chezmoi "$fixture/bin" '{"profile":"personal"}' 0
 for manager in brew npm mas; do
   cat > "$fixture/bin/$manager" <<'FAKE'
 #!/bin/sh
@@ -116,7 +115,7 @@ case "$2:${INVENTORY_TEST_GO_STATE:-gobin}" in
   *) exit 97 ;;
 esac
 FAKE
-chmod +x "$fixture/bin/go" "$fixture/bin/chezmoi"
+chmod +x "$fixture/bin/go"
 for tool in bash sh dirname cat grep find basename awk mktemp rm yq; do
   ln -s "$(command -v "$tool")" "$fixture/bin/$tool"
 done

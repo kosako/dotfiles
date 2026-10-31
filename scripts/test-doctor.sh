@@ -137,11 +137,7 @@ fi
 fi
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
-for host_tool in op herdr codex opencode brew npm; do
-  printf '#!/bin/sh\nprintf "%%s\\n" %q >> %q\nexit 1\n' "$host_tool" "$host_stub_dir/calls" \
-    > "$host_stub_dir/bin/$host_tool"
-  chmod +x "$host_stub_dir/bin/$host_tool"
-done
+write_call_recorders "$host_stub_dir/bin" "$host_stub_dir/calls" 1 op herdr codex opencode brew npm
 PATH="$host_stub_dir/bin:$PATH"
 export PATH
 # The go install target check (#305) reads `go env GOBIN` / `GOPATH`: a GOBIN
