@@ -119,14 +119,18 @@ if command -v git >/dev/null 2>&1; then
   # is not shown.
   # Git builds the helper list for a URL from every matching entry in config
   # order (an empty value clears it) and asks the helpers in that order, so
-  # the check walks the global entries (includes followed) the same way and
-  # compares the FIRST helper left with the managed one. A most-specific
-  # lookup (--get-urlmatch) would miss a later generic reset (Codex review
-  # R1, PR #495). The system scope comes first and the managed `helper =`
-  # clears it, so the global entries are enough. Only the generic section and
-  # https://github.com itself are matched; a github.com section with a path,
-  # a user or a wildcard is not, and leaves the result unconfirmed until a
-  # later reset that every github.com URL sees clears it. An entry with no
+  # the check walks the same entries the same way and compares the FIRST
+  # helper left with the managed one. A most-specific lookup (--get-urlmatch)
+  # would miss a later generic reset (Codex review R1, PR #495). The entries
+  # are every scope git reads, not only the global one: the managed
+  # `helper =` normally clears the system helper (osxkeychain), but a file
+  # that lost its reset leaves that helper first (R4). On macOS that helper
+  # comes from the Command Line Tools' own gitconfig, which `--system` does
+  # not read, so the read names no scope; it runs from / with the repository
+  # variables dropped, so no repository's config is read. Only the generic
+  # section and https://github.com itself are matched; a github.com section
+  # with a path, a user or a wildcard is not, and leaves the result
+  # unconfirmed until a later reset that every github.com URL sees clears it. An entry with no
   # value at all (`helper`, no `=`) is not a reset: git stops its credential
   # lookup with an error wherever it sits, so a later reset does not clear it
   # (Codex review R2), in an unmatched section too (R3).
@@ -187,7 +191,7 @@ if command -v git >/dev/null 2>&1; then
           [[ "$gh_cred_count" -gt 0 ]] || gh_cred_first="$gh_cred_value"
           gh_cred_count=$((gh_cred_count + 1))
         fi
-      done < <(git config --global --includes --get-regexp '^credential\.(.*\.)?helper$' 2>/dev/null || true)
+      done < <(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git -C / config --includes --get-regexp '^credential\.(.*\.)?helper$' 2>/dev/null || true)
       # The managed line is `!<gh path> auth git-credential`, rendered with the
       # gh found at apply time: a gh moved or removed since then leaves git
       # running a command that is not there.
@@ -205,7 +209,7 @@ if command -v git >/dev/null 2>&1; then
             "\$ chezmoi apply"
         fi
       else
-        warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (a later global setting clears the list or the file has no helper for https://github.com, so git asks another helper first; value not shown)"
+        warn "GitHub HTTPS credential helper is not the managed gh helper in $gh_cred_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)"
       fi
     elif gh_cred_path="$(command -v gh 2>/dev/null)" && [[ "$gh_cred_path" =~ $gh_cred_plain ]]; then
       action "GitHub HTTPS credential helper not managed yet: $gh_cred_file missing (gh-credential-helper module)" \

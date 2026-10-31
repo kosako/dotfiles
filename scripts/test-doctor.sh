@@ -716,9 +716,11 @@ ln -sf /usr/bin/* "$gc_sysbin/"
 rm -f "$gc_sysbin/gh"
 ln -sf "$host_stub_dir/bin/gh" "$gc_space_bin/gh"
 gc_nogh_path="$gc_nogh_bin:$gc_sysbin"
-# gc_doctor ROOT PROFILE PATH — one hermetic doctor run of ROOT's doctor.
+# gc_doctor ROOT PROFILE PATH [VAR=VALUE...] — one hermetic doctor run of
+# ROOT's doctor; the extra words override GIT_CONFIG_NOSYSTEM=1 (a system
+# config of the case's own through GIT_CONFIG_SYSTEM).
 gc_doctor() {
-  env -i PATH="$3" HOME="$gc_home" GIT_CONFIG_NOSYSTEM=1 "$1/scripts/doctor.sh" "$2"
+  env -i PATH="$3" HOME="$gc_home" GIT_CONFIG_NOSYSTEM=1 "${@:4}" "$1/scripts/doctor.sh" "$2"
 }
 # gc_action_listed OUTPUT REASON STEP — REASON is a numbered entry of the
 # next actions summary, followed by STEP.
@@ -762,12 +764,25 @@ gc_write_managed "!$gc_home/moved/gh auth git-credential"
 gc_action_check "gh credential helper running a gh that is gone -> action chezmoi apply" "$gc_root" work "$PATH" \
   "GitHub HTTPS credential helper in $gc_file runs a gh that is no longer there (value not shown); git cannot get GitHub's token from it — run chezmoi apply to render the gh on PATH now" "\$ chezmoi apply"
 gc_write_managed "$gc_helper"
+# GH-1c) ... with a system helper of the case's own (as osxkeychain is on
+#        macOS): the managed reset clears it -> ok.
+printf '[credential]\n\thelper = !/bin/echo system-helper\n' > "$gc_home/system.gitconfig"
+doctor_expect "gh credential helper in effect over a system helper -> ok (the managed reset clears it)" gc_doctor "$gc_root" work "$PATH" GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM="$gc_home/system.gitconfig" -- \
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
+# GH-1d) ... but a managed file that lost its `helper =` leaves the system
+#        helper first: git asks it before gh -> warn (Codex review R4).
+printf '[credential "https://github.com"]\n\thelper = %s\n' "$gc_helper" > "$gc_file"
+doctor_expect "gh credential helper file without its reset, behind a system helper -> warn" gc_doctor "$gc_root" work "$PATH" GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM="$gc_home/system.gitconfig" -- \
+  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)" \
+  ! "system-helper"
+gc_write_managed "$gc_helper"
+rm -f "$gc_home/system.gitconfig"
 # GH-2) ... but a later GENERIC section clears the list and sets another
 #       helper: git asks that one first, though a most-specific lookup still
 #       answers gh (Codex review R1, PR #495) -> warn, value not shown.
 printf '[credential]\n\thelper =\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
 doctor_expect "gh credential helper cleared by a later generic section -> warn" gc_doctor "$gc_root" work "$PATH" -- \
-  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (a later global setting clears the list or the file has no helper for https://github.com, so git asks another helper first; value not shown)" \
+  "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)" \
   ! "other-helper"
 # GH-2b) a later helper WITHOUT a reset only follows gh in the list: git
 #        still asks gh first -> ok.

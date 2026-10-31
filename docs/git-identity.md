@@ -239,7 +239,7 @@ organization が SAML SSO を求める repo では、SSO を許可した gh の 
 - gh を入れ直して path が変わったときは、`chezmoi apply` で書き直す。`gh auth setup-git` は今後も `~/.gitconfig` に
   同じ行を足すが、次の apply で消える。managed な file が同じ設定を持つので、影響はない。
 - 検査(doctor): git は、URL に合う entry を設定の順に辿って helper の list を作り(空の値で list を空にする)、その順に
-  helper を聞く。doctor も global の entry(include を辿る)を同じ順に辿り、最初に聞かれる helper が file の helper で、
+  helper を聞く。doctor も git が読む entry(system・global、include を辿る。repo の設定は読まない)を同じ順に辿り、最初に聞かれる helper が file の helper で、
   その gh が今も実行できれば ok。gh がその path から消えていれば(入れ直しで path が変わったなど)、`chezmoi apply` の
   action。ほかの helper が先に聞かれるなら warn(後の global の設定が list を空にしている)。照合するのは一般の
   `[credential]` と `https://github.com` だけで、path・user・wildcard を含む github.com の section が helper を持つときは、
