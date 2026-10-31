@@ -797,14 +797,14 @@ doctor_expect "gh credential helper followed by a later helper without a reset -
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 printf '[credential "https://github.com/some-org"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
 doctor_expect "gh credential helper with an unmatched github.com section -> warn (not confirmed)" gc_doctor "$gc_root" work "$PATH" -- \
-  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)" \
+  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section whose URL may cover github.com (a path, a user, the default port, no host or a wildcard) also sets a helper, which doctor does not match (value not shown)" \
   ! "other-helper"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-2d) ... the same for a wildcard host that matches github.com (`*`
 #        stands for one dot-separated part, so *.com does).
 printf '[credential "https://*.com"]\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
 doctor_expect "gh credential helper with a wildcard section matching github.com -> warn (not confirmed)" gc_doctor "$gc_root" work "$PATH" -- \
-  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)" \
+  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section whose URL may cover github.com (a path, a user, the default port, no host or a wildcard) also sets a helper, which doctor does not match (value not shown)" \
   ! "other-helper"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-2h) a value-less `helper` for http://github.com: git matches the
@@ -828,6 +828,21 @@ printf '[credential "https://"]\n\thelper =\n\thelper = !/bin/echo other-helper\
 doctor_expect "gh credential helper cleared by a later https:// section without a host -> warn" gc_doctor "$gc_root" work "$PATH" -- \
   "[warn] GitHub HTTPS credential helper is not the managed gh helper in $gc_file (git asks another helper first: a later setting clears the list, or the file lost its reset or its helper for https://github.com; value not shown)" \
   ! "other-helper"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2k) a later https URL with a path but no host applies to that path on
+#        every host, github.com included -> warn: not confirmed (Codex
+#        review R8).
+printf '[credential "https:///some-org/repo.git"]\n\thelper =\n\thelper = !/bin/echo other-helper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a later host-less path section -> warn (not confirmed)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[warn] GitHub HTTPS credential helper not confirmed: a global credential section whose URL may cover github.com (a path, a user, the default port, no host or a wildcard) also sets a helper, which doctor does not match (value not shown)" \
+  ! "other-helper"
+cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
+# GH-2l) a value-less `helper` for github.com on ANOTHER port: that URL is
+#        never https://github.com, so git's lookup is fine -> ok, not broken
+#        (Codex review R8).
+printf '[credential "https://github.com:8443"]\n\thelper\n' >> "$gc_home/.gitconfig"
+doctor_expect "gh credential helper with a value-less entry for github.com on another port -> ok (another URL)" gc_doctor "$gc_root" work "$PATH" -- \
+  "[ok] GitHub HTTPS credential helper -> gh (managed $gc_file)"
 cp "$DOTFILES_ROOT/dot_gitconfig" "$gc_home/.gitconfig"
 # GH-2e) ... but the same path section BEFORE the include (as a context
 #        identity file would carry it) is cleared by the managed reset, which

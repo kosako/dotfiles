@@ -175,15 +175,21 @@ if command -v git >/dev/null 2>&1; then
           fi
           if [[ -n "${gh_cred_url%/}" && "${gh_cred_url%/}" != github.com ]]; then
             # Another URL counts only when its host could be github.com: the
-            # host itself with a path, a user or a port, or a wildcard that
-            # matches it (git's `*` stands for one dot-separated part).
+            # host itself with a path, a user or the default port, no host
+            # but a path (it applies to that path on every host, R8), or a
+            # wildcard that matches it (git's `*` stands for one dot-separated
+            # part). Another port is another URL, which https://github.com
+            # never matches (R8).
             gh_cred_host="${gh_cred_url%%/*}"
             gh_cred_host="${gh_cred_host##*@}"
-            gh_cred_host="${gh_cred_host%:*}"
+            if [[ "$gh_cred_host" == *:* ]]; then
+              [[ "${gh_cred_host##*:}" == 443 ]] || continue
+              gh_cred_host="${gh_cred_host%:*}"
+            fi
             gh_cred_part1="" gh_cred_part2="" gh_cred_part3=""
             IFS=. read -r gh_cred_part1 gh_cred_part2 gh_cred_part3 <<< "$gh_cred_host"
             # shellcheck disable=SC2053 # the parts are git's host patterns: glob on purpose
-            if [[ "$gh_cred_host" == github.com ]] \
+            if [[ -z "$gh_cred_host" || "$gh_cred_host" == github.com ]] \
               || [[ "$gh_cred_host" == *'*'* && -z "$gh_cred_part3" && -n "$gh_cred_part2" && github == $gh_cred_part1 && com == $gh_cred_part2 ]]; then
               if [[ "$gh_cred_has_value" -eq 0 ]]; then
                 gh_cred_valueless=1
@@ -213,7 +219,7 @@ if command -v git >/dev/null 2>&1; then
       if [[ "$gh_cred_valueless" -eq 1 ]]; then
         warn "GitHub HTTPS credential helper broken: a global credential helper entry for github.com (or a URL under it) has no value (\`helper\` without \`=\`), and git stops its credential lookup there with an error"
       elif [[ "$gh_cred_unmatched" -eq 1 ]]; then
-        warn "GitHub HTTPS credential helper not confirmed: a global credential section for github.com with a path, a user or a wildcard in its URL also sets a helper, which doctor does not match (value not shown)"
+        warn "GitHub HTTPS credential helper not confirmed: a global credential section whose URL may cover github.com (a path, a user, the default port, no host or a wildcard) also sets a helper, which doctor does not match (value not shown)"
       elif [[ -n "$gh_cred_managed" && "$gh_cred_first" == "$gh_cred_managed" ]]; then
         if [[ -f "$gh_cred_bin" && -x "$gh_cred_bin" ]]; then
           ok "GitHub HTTPS credential helper -> gh (managed $gh_cred_file)"
