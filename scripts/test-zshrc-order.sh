@@ -4,7 +4,9 @@ set -euo pipefail
 # dot_zshenv / dot_zshrc の PATH の順序と読込順の test (#333 F39)。managed file を
 # そのまま、fixture の HOME・fake の mise・fixture の HOMEBREW_PREFIX を持つ隔離 zsh
 # (`zsh -f`、`env -i`) で対話 login shell の起動順 (~/.zshenv → brew shellenv →
-# ~/.zshrc) どおりに source し、各時点で `command -v claude` がどこに解決するかと、
+# ~/.zshrc) どおりに source し、各時点で claude が PATH のどこに解決するか (`whence -p`。
+# ~/.zshrc は claude を起動場所の guard の関数で包むので (#491)、`command -v` は関数の名前を返す。
+# 関数は `command claude` で PATH の claude を起動するので、見るのは PATH の解決先) と、
 # ~/.zshrc の source の順序を order log で確かめる。実 HOME・実 mise・実 brew・
 # 実 ~/.zshrc.local には触れない。固定する契約:
 #   - ~/.zshenv は ~/.local/bin を mise の shims より前に置く (非対話 shell でも
@@ -85,7 +87,7 @@ printf 'print -r -- syntax-highlighting >> "$ZSHRC_TEST_OUT/order"\n' \
 # PATH entry を前置して Ctrl-O を自分の widget に付け替える。
 cat > "$home/.zshrc.local" <<'ZSH'
 print -r -- local >> "$ZSHRC_TEST_OUT/order"
-command -v claude > "$ZSHRC_TEST_OUT/claude-at-local"
+whence -p claude > "$ZSHRC_TEST_OUT/claude-at-local"
 export PATH="$ZSHRC_TEST_LOCAL_BIN:$PATH"
 bindkey '^O' > "$ZSHRC_TEST_OUT/ctrl-o-at-local"
 _zshrc_test_local_accept_line() { zle accept-line }
@@ -97,11 +99,11 @@ ZSH
 cat > "$fixture/driver.zsh" <<'ZSH'
 source "$ZSHRC_TEST_SOURCE/dot_zshenv"
 print -r -- "$PATH" > "$ZSHRC_TEST_OUT/path-after-zshenv"
-command -v claude > "$ZSHRC_TEST_OUT/claude-after-zshenv"
+whence -p claude > "$ZSHRC_TEST_OUT/claude-after-zshenv"
 export PATH="$HOMEBREW_PREFIX/bin:$HOMEBREW_PREFIX/sbin:$PATH"
-command -v claude > "$ZSHRC_TEST_OUT/claude-before-zshrc"
+whence -p claude > "$ZSHRC_TEST_OUT/claude-before-zshrc"
 source "$ZSHRC_TEST_SOURCE/dot_zshrc"
-command -v claude > "$ZSHRC_TEST_OUT/claude-after-zshrc"
+whence -p claude > "$ZSHRC_TEST_OUT/claude-after-zshrc"
 print -r -- "$PATH" > "$ZSHRC_TEST_OUT/path-after-zshrc"
 bindkey '^O' > "$ZSHRC_TEST_OUT/ctrl-o-after-zshrc"
 ZSH
@@ -272,7 +274,7 @@ cd "$ZPROFILE_TEST_DIR" || exit 1
 source "$ZSHRC_TEST_SOURCE/dot_zshenv"
 export PATH="$ZPROFILE_TEST_DIR/system-bin:$PATH"
 source "$ZPROFILE_TEST_DIR/zprofile.zsh"
-print -r -- "$(command -v claude)|$(command -v node)" > "$ZPROFILE_TEST_OUT/login"
+print -r -- "$(whence -p claude)|$(command -v node)" > "$ZPROFILE_TEST_OUT/login"
 ZSH
 mkdir -p "$zp/out-login"
 if ! env -i PATH="$fixture/bin" HOME="$login_home" ZPROFILE_TEST_DIR="$zp" \
@@ -306,7 +308,7 @@ source "$ZSHRC_TEST_SOURCE/dot_zshenv"
 export PATH="$ZPROFILE_TEST_DIR/system-bin:$PATH"
 source "$ZPROFILE_TEST_DIR/zprofile.zsh"
 source "$ZSHRC_TEST_SOURCE/dot_zshrc"
-print -r -- "$(command -v claude)|$(command -v node)" > "$ZSHRC_TEST_OUT/login-i"
+print -r -- "$(whence -p claude)|$(command -v node)" > "$ZSHRC_TEST_OUT/login-i"
 ZSH
 login_i_out="$zp/out-login-i"
 mkdir -p "$login_i_out"

@@ -27,6 +27,10 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     active な profile のとき、標準の project root の下の repo(HOME の下にあればこの repo も)にあるものを読み、
     permission の allow / deny / ask が外向きの probe を承認なしに通すかを評価する(#334。読む repo の範囲は
     [claude-settings](claude-settings.md) の「project 側の allow の堆積」)。
+  - agent の起動 root の file(`~/.config/dotfiles/agent-launch-roots.local`)は、`shell-extra` module が active で、
+    deploy された `~/.zshrc` に guard があるとき、その guard の関数(doctor が `zsh -f` で実行する)が読む。出すのは
+    root の出どころ(既定か file か、使える root が無いか)と数、HOME と download の directory を断るかの判定だけで、
+    root の path は出さない(#491。[shell](shell.md) の「agent の起動場所」)。
   - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
     `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
     ただし doctor を repo の中で実行すると、global の `core.hooksPath` と(`git-ignore` module が active な
@@ -165,6 +169,22 @@ local 値は、managed file に焼かず **`~/.config/dotfiles/clone-contexts.lo
   fail-closed 中断に倒れる)。
 - **`backup-paths.yaml`(category `git`)に載せ**、暗号化バックアップ(#60)の対象にする。
 
+## agent の起動 root(#491)
+
+managed な `~/.zshrc` が `claude` / `codex` / `opencode` の起動を許す root(既定は `~/src` と `~/dotfiles`)を、machine
+ごとに変える local 値は **`~/.config/dotfiles/agent-launch-roots.local`**(chezmoi 管理外・非コミット)に置く。会社機で
+project の置き場が違うときの seam で、その path を public repo に入れない。
+
+- 行形式: 1 行に root を 1 つ。絶対 path か `~/` で始まる path(`~` だけなら HOME)。`#` 行と空行は飛ばし、それ以外の
+  行(相対 path、`~user` など)は root にしない。
+- file があると既定を**置き換える**(追記ではない)。既定の root も使うなら、その行も書く。
+- 使える root が 1 つも無い file(空の file、通常の file でない、読めない)では、guard はどこでも起動を断る
+  (fail-closed)。途中の directory を検索できず、file の有無を確かめられないときも同じ。途中の symlink が directory
+  に届かないとき(壊れている、検索できない directory を指す)も、確かめられない扱いにする。file が無いと確かめられた
+  ときだけ、既定の root を使う。
+- **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
+- 振る舞いと限界は [shell](shell.md) の「agent の起動場所」。
+
 ## agent-tools の checkout path(#73)
 
 `dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`
@@ -237,5 +257,7 @@ managed の設定が勝つ側に置く。context に固有の git の設定は�
 
 - 2026-06-13: 本規約を確定(中間レビュー 2026-06-12 の提案に基づく)。zsh = 末尾 source で
   local-wins、SSH = 末尾 Include で managed-wins。
+- 2026-11-01: agent の起動 root の local file は、既定の root を置き換える形にする(#491)。既定に足す形にすると、
+  会社機で `~/src` を root から外せないため。
 - 2026-10-31: `~/.gitconfig` に local の include の口を作らず、GitHub の credential helper は capability で
   gate した managed な file に置く(#492。local の include の案は採らない)。

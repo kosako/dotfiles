@@ -120,6 +120,7 @@ main 直 commit は例外扱いにする。
 ./scripts/test-ssh.sh
 ./scripts/test-preflight.sh
 ./scripts/test-gclone.sh
+./scripts/test-agent-launch-guard.sh
 ./scripts/test-shell-syntax.sh
 ./scripts/test-ai-clip.sh
 ./scripts/test-zshrc-compinit.sh

@@ -48,6 +48,11 @@ backup_paths:
   # carries it so a new machine keeps the same clone discipline. Absent =>
   # gclone falls back to ask-or-abort (fail closed).
   - { path: .config/dotfiles/clone-contexts.local, type: file, category: git }
+  # Agent launch roots (#491): where the managed ~/.zshrc lets claude / codex /
+  # opencode start. A machine may keep its projects somewhere of its own, and
+  # that path stays out of the public repo; the encrypted archive carries it.
+  # Absent => the default roots (~/src, ~/dotfiles).
+  - { path: .config/dotfiles/agent-launch-roots.local, type: file, category: ai-tools }
   # GitHub injection-guard trust list (#119). Holds the self trust basis only
   # (GitHub login + numeric id); the trust basis is is_self and there are no
   # opt-in trusted accounts (docs/ai-policy.md). Read by agent-tools'

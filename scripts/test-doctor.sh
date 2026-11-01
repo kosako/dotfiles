@@ -152,10 +152,6 @@ for host_tool in op herdr codex opencode brew npm gh; do
   fi
 done
 
-# ---- part 1 of 3 (TEST_DOCTOR_PART=1): from here to the herdr integration
-# cases (HI) ----
-if doctor_part 1; then
-
 # doctor_expect LABEL ARGV... -- EXPECT... [! ABSENT_SUBSTRING...]
 # One run of ARGV (a doctor command line, or a function that runs one) with
 # stderr folded in. It must exit 0 (else doctor_exit_fail); the rest is
@@ -163,9 +159,9 @@ if doctor_part 1; then
 # leading "~" a substring; after a "!" no ABSENT_SUBSTRING may appear (a
 # further "!" only separates); a failure shows the output and every miss.
 # The checks are expanded with the ${a[@]+"${a[@]}"} guard: bash 3.2 under
-# set -u calls an empty "${a[@]}" unbound. Only part 1 uses it (C, D, F, G
-# and the gi / hc / ur wrappers below), so it is defined here rather than in
-# the shared setup.
+# set -u calls an empty "${a[@]}" unbound. Part 1 (C, D, F, G and the gi /
+# hc / ur wrappers) and part 3's agent launch guard cases (AL) use it, so it
+# is defined in the shared setup.
 doctor_expect() {
   local label="$1" run_args=() checks=() mode=run arg out rc=0
   shift
@@ -186,6 +182,10 @@ doctor_expect() {
     status=1
   fi
 }
+
+# ---- part 1 of 3 (TEST_DOCTOR_PART=1): from here to the herdr integration
+# cases (HI) ----
+if doctor_part 1; then
 
 # A leftover enforce-mode .npmrc, as after switching personal -> work.
 printf '# Managed by chezmoi from kosako/dotfiles (npmHardeningMode=enforce).\nignore-scripts=true\n' \
@@ -4103,6 +4103,129 @@ fi # end of part 2
 # ---- part 3 of 3 (TEST_DOCTOR_PART=3): from the AI policy cases (AIP) to
 # the end ----
 if doctor_part 3; then
+
+# AL) agent launch guard (#491). doctor finds the guard block in the
+#     deployed ~/.zshrc and runs the block's own _agent_launch_allowed under
+#     `zsh -f` on HOME and the Downloads / Desktop that exist. A HOME of its
+#     own per case, the managed dot_zshrc as its ~/.zshrc. The roots read from
+#     the local file are never shown (a canary root checks it).
+al_home="$fixture_home/al"
+al_roots="$al_home/.config/dotfiles/agent-launch-roots.local"
+al_item="[info] - the guard covers interactive zsh started after the apply; \`command claude\` starts once anyway, and scripts (codex exec run by agent-tools) do not go through it (docs/shell.md)"
+mkdir -p "$al_home/Downloads" "$al_home/.config/dotfiles"
+cp "$DOTFILES_ROOT/dot_zshrc" "$al_home/.zshrc"
+# al_doctor PATH [ROOT] — one hermetic personal doctor run in the AL HOME.
+al_doctor() {
+  env -i PATH="$1" HOME="$al_home" GIT_CONFIG_NOSYSTEM=1 "${2:-$DOTFILES_ROOT}/scripts/doctor.sh" personal
+}
+# AL-1) default roots, ~/Downloads present (no Desktop): both refused -> ok.
+doctor_expect "agent launch guard with the default roots -> ok" al_doctor "$PATH" -- \
+  "[ok] agent launch guard in ~/.zshrc: claude / codex / opencode start only under ~/src and ~/dotfiles (refused in: ~, ~/Downloads)" \
+  "$al_item"
+# AL-2) a roots file with two roots (one a canary), Desktop present too ->
+#       ok with the count, the canary never shown.
+mkdir -p "$al_home/Desktop"
+printf '# roots\n~/work-place\n/al-canary-root\n' > "$al_roots"
+doctor_expect "agent launch guard with a roots file -> ok with the count, no root shown" al_doctor "$PATH" -- \
+  "[ok] agent launch guard in ~/.zshrc: claude / codex / opencode start only under the 2 root(s) in ~/.config/dotfiles/agent-launch-roots.local (refused in: ~, ~/Downloads, ~/Desktop)" \
+  "$al_item" ! "al-canary-root" ! "work-place"
+# AL-3) a root of ~ covers every probe directory -> warn naming them.
+printf '~\n' > "$al_roots"
+doctor_expect "agent launch guard with ~ as a root -> warn (HOME and the download dirs allowed)" al_doctor "$PATH" -- \
+  "[warn] agent launch guard lets claude / codex / opencode start in ~, ~/Downloads, ~/Desktop (a launch root covers it; the roots file is ~/.config/dotfiles/agent-launch-roots.local, docs/shell.md)" \
+  "$al_item"
+# AL-4) a root of ~/Downloads alone -> warn naming only it.
+# shellcheck disable=SC2088 # a line of the roots file, not a shell path
+printf '~/Downloads\n' > "$al_roots"
+doctor_expect "agent launch guard with ~/Downloads as a root -> warn naming it" al_doctor "$PATH" -- \
+  "[warn] agent launch guard lets claude / codex / opencode start in ~/Downloads (a launch root covers it; the roots file is ~/.config/dotfiles/agent-launch-roots.local, docs/shell.md)"
+# AL-5) a roots file with no usable root -> warn (refused everywhere).
+printf 'relative/only\n' > "$al_roots"
+doctor_expect "agent launch guard with a roots file of no usable root -> warn" al_doctor "$PATH" -- \
+  "[warn] agent launch roots file ~/.config/dotfiles/agent-launch-roots.local names no usable root: the guard refuses claude / codex / opencode in every directory (one absolute or ~/ path per line; docs/shell.md)" \
+  "$al_item" ! "relative/only"
+rm -f "$al_roots"
+# AL-6) the managed block plus a line that prints a roots line of another
+#       form when the block is loaded -> warn "could not be checked", not ok.
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | awk '/^# --- agent-launch-guard end ---$/ { print "print -r -- \"roots default x\"" } { print }' > "$al_home/.zshrc"
+doctor_expect "agent launch guard block answering in another form -> warn not checked" al_doctor "$PATH" -- \
+  "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
+  ! "[ok] agent launch guard"
+# AL-6b) a block that keeps _agent_launch_roots but lost _agent_launch_allowed:
+#        command not found is not "refused", and the block is incomplete ->
+#        action chezmoi apply, not ok (Codex review R2, PR #496).
+al_incomplete="agent launch guard in ~/.zshrc is incomplete (a function it needs, or a wrapper of claude / codex / opencode that calls it, is missing): those commands may start in any directory"
+al_step="        \$ chezmoi apply $(printf '%q' "$al_home/.zshrc")   # then open a new shell"
+{ printf '# --- agent-launch-guard begin ---\n'; sed -n '/^_agent_launch_roots() {$/,/^}$/p' "$DOTFILES_ROOT/dot_zshrc"; printf '# --- agent-launch-guard end ---\n'; } > "$al_home/.zshrc"
+doctor_expect "agent launch guard block without _agent_launch_allowed -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
+# AL-6d) the managed block without the codex wrapper: the guard is not on
+#        codex's way -> the same action (Codex review R3).
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | grep -v '^function codex ' > "$al_home/.zshrc"
+doctor_expect "agent launch guard block without the codex wrapper -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
+# AL-6e) ... and a claude wrapper that does not call the guard -> the same.
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | sed 's/^function claude .*/function claude { command claude "$@" }/' > "$al_home/.zshrc"
+doctor_expect "agent launch guard with a claude wrapper that skips the guard -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
+# AL-6c) ... and a judge that fails with another status (2) -> the same.
+#        The managed block with a redefinition just before its end marker.
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | awk '/^# --- agent-launch-guard end ---$/ { print "_agent_launch_allowed() { return 2 }" } { print }' > "$al_home/.zshrc"
+doctor_expect "agent launch guard judge failing with status 2 -> warn not checked" al_doctor "$PATH" -- \
+  "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
+  ! "[ok] agent launch guard"
+# AL-7) ~/.zshrc without the block, and with two begin markers -> action
+#       chezmoi apply ~/.zshrc.
+al_missing="agent launch guard missing from ~/.zshrc (or its markers are not one pair, begin before end): claude / codex / opencode start in any directory, ~/Downloads included"
+printf '# an unmanaged zshrc\n' > "$al_home/.zshrc"
+doctor_expect "agent launch guard missing from ~/.zshrc -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_missing" "~. $al_missing" "$al_step"
+{ printf '# --- agent-launch-guard begin ---\n'; cat "$DOTFILES_ROOT/dot_zshrc"; } > "$al_home/.zshrc"
+doctor_expect "agent launch guard markers not one pair -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_missing" "$al_step"
+# AL-7b) one pair, the end first, with a line after the begin that leaves a
+#        mark when run: doctor must not run what follows the begin marker
+#        (Codex review R1, PR #496).
+al_mark="$fixture_home/al-ran-past-the-block"
+printf '# --- agent-launch-guard end ---\n# --- agent-launch-guard begin ---\n: > %s\n' "$(shell_single_quote "$al_mark")" > "$al_home/.zshrc"
+doctor_expect "agent launch guard markers in the wrong order -> action, the rest of ~/.zshrc not run" al_doctor "$PATH" -- \
+  "[warn] $al_missing" "$al_step"
+if [[ -e "$al_mark" ]]; then
+  fail "test failed: doctor ran ~/.zshrc past the guard block (markers in the wrong order)"
+  status=1
+else
+  ok "test passed: doctor does not run ~/.zshrc past the guard block (markers in the wrong order)"
+fi
+# AL-8) no ~/.zshrc -> item, no action.
+rm -f "$al_home/.zshrc"
+doctor_expect "agent launch guard without ~/.zshrc -> item" al_doctor "$PATH" -- \
+  "[info] - agent launch guard not checked: no ~/.zshrc here (chezmoi apply renders it)" ! "$al_missing"
+cp "$DOTFILES_ROOT/dot_zshrc" "$al_home/.zshrc"
+# AL-9) zsh not on PATH -> item. The PATH: the host stubs, yq and git, and a
+#       copy of the system dirs without zsh.
+al_nozsh_bin="$fixture_home/al-nozsh-bin"
+al_sysbin="$fixture_home/al-sysbin"
+mkdir -p "$al_nozsh_bin" "$al_sysbin"
+ln -sf "$(command -v yq)" "$al_nozsh_bin/yq"
+ln -sf "$(command -v git)" "$al_nozsh_bin/git"
+for host_tool in op herdr codex opencode brew npm gh; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$al_nozsh_bin/$host_tool"
+done
+ln -s /bin/* "$al_sysbin/"
+ln -sf /usr/bin/* "$al_sysbin/"
+rm -f "$al_sysbin/zsh"
+doctor_expect "agent launch guard with no zsh on PATH -> item" al_doctor "$al_nozsh_bin:$al_sysbin" -- \
+  "[info] - agent launch guard not checked: zsh not on PATH" ! "[ok] agent launch guard"
+# AL-10) a profile without shell-extra -> item "not managed".
+al_nomod="$fixture_home/.dotfiles-al-nomod"
+copy_repo_fixture "$al_nomod"
+remove_module_all "$al_nomod" shell-extra
+doctor_expect "agent launch guard on a profile without shell-extra -> item not managed" al_doctor "$PATH" "$al_nomod" -- \
+  "[info] - agent launch guard not managed for this profile (shell-extra module inactive)" ! "[ok] agent launch guard"
 
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/
