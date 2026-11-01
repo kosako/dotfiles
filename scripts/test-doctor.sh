@@ -4151,6 +4151,20 @@ printf '# --- agent-launch-guard begin ---\nprint -r -- "roots default x"\n# ---
 doctor_expect "agent launch guard block answering in another form -> warn not checked" al_doctor "$PATH" -- \
   "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
   ! "[ok] agent launch guard"
+# AL-6b) a block that keeps _agent_launch_roots but lost _agent_launch_allowed:
+#        command not found is not "refused" -> warn not checked, not ok
+#        (Codex review R2, PR #496).
+{ printf '# --- agent-launch-guard begin ---\n'; sed -n '/^_agent_launch_roots() {$/,/^}$/p' "$DOTFILES_ROOT/dot_zshrc"; printf '# --- agent-launch-guard end ---\n'; } > "$al_home/.zshrc"
+doctor_expect "agent launch guard block without _agent_launch_allowed -> warn not checked" al_doctor "$PATH" -- \
+  "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
+  ! "[ok] agent launch guard"
+# AL-6c) ... and a judge that fails with another status (2) -> the same.
+#        The managed block with a redefinition just before its end marker.
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | awk '/^# --- agent-launch-guard end ---$/ { print "_agent_launch_allowed() { return 2 }" } { print }' > "$al_home/.zshrc"
+doctor_expect "agent launch guard judge failing with status 2 -> warn not checked" al_doctor "$PATH" -- \
+  "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
+  ! "[ok] agent launch guard"
 # AL-7) ~/.zshrc without the block, and with two begin markers -> action
 #       chezmoi apply ~/.zshrc.
 al_missing="agent launch guard missing from ~/.zshrc (or its markers are not one pair, begin before end): claude / codex / opencode start in any directory, ~/Downloads included"

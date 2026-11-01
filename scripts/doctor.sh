@@ -1876,12 +1876,23 @@ report_agent_launch_guard() {
       dirs+=("$HOME/$name")
     fi
   done
+  # Only the statuses the functions define (0 and 1) are answers: a block
+  # without one of them (command not found, 127) or one that fails another
+  # way ends the probe with a status, read as "not checked" (Codex review R2,
+  # PR #496).
   bounded_probe zsh -f -c 'eval "$1" || exit 90
 shift
+(( $+functions[_agent_launch_roots] && $+functions[_agent_launch_allowed] )) || exit 91
 _agent_launch_roots
+(( $? <= 1 )) || exit 92
 print -r -- "roots $REPLY ${#reply}"
 for d in "$@"; do
-  if _agent_launch_allowed "$d"; then print -r -- allowed; else print -r -- refused; fi
+  _agent_launch_allowed "$d"
+  case $? in
+    0) print -r -- allowed ;;
+    1) print -r -- refused ;;
+    *) exit 93 ;;
+  esac
 done' zsh "$block" "${dirs[@]}"
   roots_from=""
   roots_count=""

@@ -67,7 +67,8 @@
 - machine ごとの root は、非追跡の `~/.config/dotfiles/agent-launch-roots.local` に 1 行 1 つ書く
   ([local-overrides](local-overrides.md))。file があると既定を置き換える(`~/src` も使うなら、その行も書く)。
   読むのは絶対 path と `~/` で始まる path だけで、`#` の行と空行は飛ばす。それ以外の行(相対 path など)は root に
-  ならない。使える root が 1 つも無い file では、どこでも起動しない。
+  ならない。使える root が 1 つも無い file では、どこでも起動しない。途中の directory を検索できず、file の
+  有無を確かめられないときも同じ。
 - 一度だけ外すときは `command claude` のように素の command を呼ぶ(関数を通らない)。machine 全体で外すなら、
   `~/.zshrc.local` で `unfunction claude codex opencode` するか、関数を定義し直す(local が勝つ)。
 - 限界: 誤って起動するのを防ぐ guard で、user 自身に対する強制の境界ではない。効くのは対話の zsh から起動したとき

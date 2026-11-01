@@ -356,16 +356,16 @@ gclone() {
 # --- agent-launch-guard begin ---
 # _agent_launch_roots — set reply to the physical roots and REPLY to where
 # they came from: default, file, or unusable (the file is there but cannot be
-# read or names no root: reply is empty, every directory is refused, and the
-# status is 1).
+# read or names no root, or it cannot be told whether the file is there:
+# reply is empty, every directory is refused, and the status is 1).
 _agent_launch_roots() {
   emulate -L zsh
   setopt extended_glob
-  local file="$HOME/.config/dotfiles/agent-launch-roots.local" line root
+  local file="$HOME/.config/dotfiles/agent-launch-roots.local" line root dir
   local -a roots
   reply=()
+  REPLY=unusable
   if [[ -e "$file" || -L "$file" ]]; then
-    REPLY=unusable
     [[ -f "$file" && -r "$file" ]] || return 1
     # A last line without a newline still counts (the gclone map reads the
     # same way, #281).
@@ -384,6 +384,15 @@ _agent_launch_roots() {
     (( ${#roots} )) || return 1
     REPLY=file
   else
+    # -e is false also when a directory on the way cannot be searched, and
+    # the file may be there all the same: the default applies only when the
+    # nearest ancestor that is there is a directory that can be searched, or
+    # is not a directory (nothing can be under it) (Codex review R2, PR #496).
+    dir="${file:h}"
+    while [[ ! -e "$dir" && ! -L "$dir" && "$dir" != / && "$dir" != . ]]; do
+      dir="${dir:h}"
+    done
+    [[ -d "$dir" && ! -x "$dir" ]] && return 1
     REPLY=default
     roots=("$HOME/src" "$HOME/dotfiles")
   fi

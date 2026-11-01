@@ -10,7 +10,9 @@ set -euo pipefail
 # current directory is a launch
 # root or under one; the default roots (~/src, ~/dotfiles); the roots file
 # (~/ and absolute lines, comments, a last line without a newline, ignored
-# relative lines, no usable root refuses everywhere); a symlink under a root
+# relative lines, no usable root refuses everywhere, and so does a file that
+# cannot be told apart from absent: an unsearchable directory on its way); a
+# symlink under a root
 # that points outside is refused, and so is a directory whose name ends in a
 # newline next to a root; a root reached through a symlink still covers its
 # real directory; the one-line refusal; `command NAME` bypasses.
@@ -31,7 +33,9 @@ status=0
 # A fixture path with whitespace and a quote, made physical (cd -P): macOS's
 # TMPDIR sits under the /var symlink, and the guard compares physical paths.
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-agent-guard-test space's.XXXXXX")"
-trap 'rm -rf "$fixture_root"' EXIT
+# Case 7 makes a directory unsearchable: open the modes again first, or
+# rm -rf could not enter it.
+trap 'chmod -R u+rwX "$fixture_root" 2>/dev/null || true; rm -rf "$fixture_root"' EXIT
 fixture_root="$(cd -P "$fixture_root" && pwd)"
 h="$fixture_root/home"
 outside="$fixture_root/outside"
@@ -216,6 +220,29 @@ ln -s "$h/missing-roots" "$roots_file"
 expect_refused "roots file that is a dangling symlink: refused under ~/src" "$h/src/personal/repo" claude \
   "$(unusable_line claude)"
 rm -f "$roots_file"
+# A roots file that leaves ~/src out, behind a directory that cannot be
+# searched: -e reads it as absent, which must not bring the default (and
+# ~/src) back (Codex review R2, PR #496). Root reads through any mode.
+if [[ "$(id -u)" == 0 ]]; then
+  ok "skipped (running as root): unsearchable directories before the roots file"
+else
+  printf '~/elsewhere\n' > "$roots_file"
+  chmod 000 "$h/.config/dotfiles"
+  expect_refused "roots file behind an unsearchable ~/.config/dotfiles: refused under ~/src" "$h/src/personal/repo" claude \
+    "$(unusable_line claude)"
+  chmod 755 "$h/.config/dotfiles"
+  chmod 000 "$h/.config"
+  expect_refused "roots file behind an unsearchable ~/.config: refused under ~/src" "$h/src/personal/repo" codex \
+    "$(unusable_line codex)"
+  chmod 755 "$h/.config"
+  rm -f "$roots_file"
+  # Absent for sure: ~/.config/dotfiles is there and searchable, or missing
+  # under a searchable ~/.config -> the default roots.
+  expect_started "no roots file in a searchable ~/.config/dotfiles: the default roots" "$h/src/personal/repo" claude
+  rmdir "$h/.config/dotfiles"
+  expect_started "no ~/.config/dotfiles under a searchable ~/.config: the default roots" "$h/src/personal/repo" opencode
+  mkdir "$h/.config/dotfiles"
+fi
 
 # 8. _agent_launch_allowed (what doctor calls): a relative directory is not
 #    allowed, an absolute one is judged like the current directory.
