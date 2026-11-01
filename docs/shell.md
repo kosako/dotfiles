@@ -54,6 +54,31 @@
   (context の解決順・local mapping・ghq 不採用の経緯は
   [directory-convention](directory-convention.md) の「clone(gclone)」)。
 
+### agent の起動場所(#491)
+
+- `claude` / `codex` / `opencode` は、agent の起動 root の下でだけ起動する。managed な `~/.zshrc` の関数が 3 つの
+  command を包む。これらの CLI は、起動した directory の指示 file(`CLAUDE.md`・`AGENTS.md`)を project の指示として
+  読む。web page が `~/Downloads` に保存した file を、user の指示と同じように読ませないための guard。
+- 既定の root は `~/src`([directory-convention](directory-convention.md))と `~/dotfiles`(この repo の置き場、README)。
+  root そのものと、その下のすべての directory で起動できる。
+- 判定は物理 path で行う(今の directory は `pwd -P`、root は zsh の `:A` で symlink を解く)。`~/src` の下に置いた
+  symlink が外の directory を指していても、通さない。
+- root の外では起動せず、command 名・今の directory・root を stderr の 1 行で示し、exit status 1 で戻る。
+- machine ごとの root は、非追跡の `~/.config/dotfiles/agent-launch-roots.local` に 1 行 1 つ書く
+  ([local-overrides](local-overrides.md))。file があると既定を置き換える(`~/src` も使うなら、その行も書く)。
+  読むのは絶対 path と `~/` で始まる path だけで、`#` の行と空行は飛ばす。それ以外の行(相対 path など)は root に
+  ならない。使える root が 1 つも無い file では、どこでも起動しない。
+- 一度だけ外すときは `command claude` のように素の command を呼ぶ(関数を通らない)。machine 全体で外すなら、
+  `~/.zshrc.local` で `unfunction claude codex opencode` するか、関数を定義し直す(local が勝つ)。
+- 限界: 誤って起動するのを防ぐ guard で、user 自身に対する強制の境界ではない。効くのは対話の zsh から起動したとき
+  だけで、script から起動する `codex exec`(agent-tools の review・監査・worker)と、desktop app や IDE からの起動は
+  通らない。root の下でも、他人の repo を clone した directory では、その repo の `AGENTS.md` / `CLAUDE.md` を読む。
+  Claude Code は親の directory の `CLAUDE.md` も読むので、root より上(`~/CLAUDE.md` など)に置かれた file も防げない。
+- 確かめ方: `scripts/doctor.sh <profile>` の「agent launch guard」の section が、deploy された `~/.zshrc` の guard を
+  `zsh -f` で動かし、HOME と(在れば)`~/Downloads`・`~/Desktop` で断ることを確かめる。今の shell に関数が
+  あるかは `whence -w claude`(`claude: function` と出る)で見る。`scripts/test-agent-launch-guard.sh` が隔離した zsh で
+  振る舞いを固定する。
+
 ### 出力のコピー(AI 連携)
 
 - `Ctrl-O` … **Enter の代わりに**押すと、そのコマンドを実行しつつ「`$ コマンド` + 出力 + `[exit status]`」をクリップボードへコピーする(AI チャットに貼って相談する用途)。普段は今までどおり Enter、コピーしたいコマンドだけ Ctrl-O。`&&` 連結 / pipe / 複数行コマンドも行全体を捕捉する。

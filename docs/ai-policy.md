@@ -90,6 +90,10 @@ AI agent の既定は、上記「原則」(#139)と secret floor(#119)に従う:
 - `~/src/sandbox`: 実験用。secret access は原則禁止。
 - `~/src/agent`: agent 用。最小権限で運用する。
 
+対話の zsh から起動する `claude` / `codex` / `opencode` は、`~/src` と `~/dotfiles`(machine ごとの local file で変更可)の
+下でだけ起動する(#491)。`~/Downloads` などに置かれた指示 file を project の指示として読ませないための guard で、
+境界ではない([shell](shell.md) の「agent の起動場所」)。
+
 ## Prohibited By Default
 
 - secret store への直接アクセス

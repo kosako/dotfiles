@@ -92,6 +92,9 @@ jobs:
       - name: gclone helper tests
         run: ./scripts/test-gclone.sh
 
+      - name: agent launch guard tests
+        run: ./scripts/test-agent-launch-guard.sh
+
       - name: shellcheck (warning and above)
         run: shellcheck -S warning scripts/*.sh
 
@@ -161,7 +164,8 @@ jobs:
           - group: others
             suites: >-
               test-shell-syntax.sh test-ai-clip.sh test-zshrc-compinit.sh
-              test-zshrc-order.sh test-gclone.sh test-policy.sh test-gitconfig.sh
+              test-zshrc-order.sh test-gclone.sh test-agent-launch-guard.sh
+              test-policy.sh test-gitconfig.sh
               test-npmrc.sh test-install-packages.sh test-preflight.sh
           # The render job's suites (test-npmrc again: its rendered-content
           # section needs chezmoi, which only this group installs).

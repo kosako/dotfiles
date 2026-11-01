@@ -1833,6 +1833,104 @@ else
   ok "AI tool install/sync not managed (enableAiTools=false)"
 fi
 
+section "agent launch guard (report-only)"
+# The managed ~/.zshrc wraps claude / codex / opencode so an interactive shell
+# starts them only under an agent launch root (#491, docs/shell.md). doctor
+# cannot see the user's shell, so it checks the deployed ~/.zshrc: the block
+# is there once, and the block's own _agent_launch_allowed, run by `zsh -f`
+# (no startup file is read), refuses HOME and the Downloads / Desktop
+# directories that exist. doctor runs the block rather than re-reading the
+# roots file itself, so there is one implementation of the check. It shows
+# where the roots came from and how many there are, never a root read from
+# the local file.
+report_agent_launch_guard() {
+  local zshrc="$HOME/.zshrc" begin_count end_count block line roots_from roots_count allowed bad seen name
+  local -a labels dirs
+  if [[ ! -e "$zshrc" ]]; then
+    item "agent launch guard not checked: no ~/.zshrc here (chezmoi apply renders it)"
+    return 0
+  fi
+  begin_count="$(grep -c '^# --- agent-launch-guard begin ---$' "$zshrc" 2>/dev/null)" || true
+  end_count="$(grep -c '^# --- agent-launch-guard end ---$' "$zshrc" 2>/dev/null)" || true
+  if [[ "$begin_count" != 1 || "$end_count" != 1 ]]; then
+    action "agent launch guard missing from ~/.zshrc (or its markers are not one pair): claude / codex / opencode start in any directory, ~/Downloads included" \
+      "\$ chezmoi apply $(shell_quote_safe "$zshrc")   # then open a new shell"
+    return 0
+  fi
+  if ! command -v zsh >/dev/null 2>&1; then
+    item "agent launch guard not checked: zsh not on PATH"
+    return 0
+  fi
+  block="$(awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$zshrc" 2>/dev/null)" || block=""
+  labels=("~")
+  dirs=("$HOME")
+  for name in Downloads Desktop; do
+    if [[ -d "$HOME/$name" ]]; then
+      # shellcheck disable=SC2088 # a label for the report, not a path
+      labels+=("~/$name")
+      dirs+=("$HOME/$name")
+    fi
+  done
+  bounded_probe zsh -f -c 'eval "$1" || exit 90
+shift
+_agent_launch_roots
+print -r -- "roots $REPLY ${#reply}"
+for d in "$@"; do
+  if _agent_launch_allowed "$d"; then print -r -- allowed; else print -r -- refused; fi
+done' zsh "$block" "${dirs[@]}"
+  roots_from=""
+  roots_count=""
+  allowed=""
+  bad=0
+  seen=0
+  if [[ "$probe_rc" == 0 ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      if [[ -z "$roots_from" && "$bad" == 0 && "$seen" == 0 ]]; then
+        case "$line" in
+          "roots default "* | "roots file "* | "roots unusable "*)
+            roots_from="${line#roots }"
+            roots_count="${roots_from#* }"
+            roots_from="${roots_from%% *}"
+            [[ "$roots_count" =~ ^[0-9]+$ ]] || bad=1
+            ;;
+          *) bad=1 ;;
+        esac
+        continue
+      fi
+      seen=$((seen + 1))
+      if (( seen > ${#dirs[@]} )); then
+        bad=1
+        continue
+      fi
+      case "$line" in
+        allowed) allowed="$allowed, ${labels[seen - 1]}" ;;
+        refused) ;;
+        *) bad=1 ;;
+      esac
+    done <<< "$probe_lines"
+  fi
+  if [[ "$probe_rc" != 0 || "$bad" != 0 || -z "$roots_from" || "$seen" != "${#dirs[@]}" ]]; then
+    warn "agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)"
+    return 0
+  fi
+  if [[ "$roots_from" == unusable ]]; then
+    warn "agent launch roots file ~/.config/dotfiles/agent-launch-roots.local names no usable root: the guard refuses claude / codex / opencode in every directory (one absolute or ~/ path per line; docs/shell.md)"
+  elif [[ -n "$allowed" ]]; then
+    warn "agent launch guard lets claude / codex / opencode start in ${allowed#, } (a launch root covers it; the roots file is ~/.config/dotfiles/agent-launch-roots.local, docs/shell.md)"
+  elif [[ "$roots_from" == file ]]; then
+    ok "agent launch guard in ~/.zshrc: claude / codex / opencode start only under the $roots_count root(s) in ~/.config/dotfiles/agent-launch-roots.local (refused in: $(IFS=,; printf '%s' "${labels[*]}" | sed 's/,/, /g'))"
+  else
+    ok "agent launch guard in ~/.zshrc: claude / codex / opencode start only under ~/src and ~/dotfiles (refused in: $(IFS=,; printf '%s' "${labels[*]}" | sed 's/,/, /g'))"
+  fi
+  item "the guard covers interactive zsh started after the apply; \`command claude\` starts once anyway, and scripts (codex exec run by agent-tools) do not go through it (docs/shell.md)"
+}
+if module_active_for_profile "$profile" shell-extra; then
+  report_agent_launch_guard
+else
+  item "agent launch guard not managed for this profile (shell-extra module inactive)"
+fi
+
 section "OpenCode (report-only)"
 # Third AI harness (#234). Its permission floor is a managed file under the
 # opencode-settings module (personal only). Presence-level report: the binary

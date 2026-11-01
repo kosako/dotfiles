@@ -232,7 +232,7 @@ claude-update() {
     return 1
   fi
   node "$installer" || return
-  command -v claude >/dev/null 2>&1 && claude --version
+  command -v claude >/dev/null 2>&1 && command claude --version
 }
 
 # Clone into the directory convention (~/src/<context>/<repo>, #140) without
@@ -336,6 +336,106 @@ gclone() {
   mkdir -p -- "${dest:h}" && git clone -- "$url" "$dest"
 }
 # --- gclone end ---
+
+# Agent launch guard (#491): start claude / codex / opencode from this shell
+# only in a directory under an agent launch root. These CLIs read instruction
+# files (CLAUDE.md, AGENTS.md) in the directory they start in as the
+# project's own, so a file a web page saved into ~/Downloads would be read
+# like the user's instructions. The roots are ~/src (the directory
+# convention) and ~/dotfiles (where this repo lives, README.md), or the lines
+# of ~/.config/dotfiles/agent-launch-roots.local when that file exists (one
+# absolute or ~/ path per line, # comments; machine-local, never committed).
+# A root covers itself and everything under it. Both sides are compared as
+# physical paths (pwd -P, roots through :A), so a symlink under a root that
+# points outside does not pass. This stops a start by mistake, not the user:
+# `command claude` starts it once anyway, and ~/.zshrc.local may redefine
+# the wrappers (local wins). Scripts (codex exec run by agent-tools) do not
+# read this file and are not covered. doctor runs _agent_launch_allowed on a
+# few directories, and scripts/test-agent-launch-guard.sh drives the block in
+# an isolated zsh. See docs/shell.md.
+# --- agent-launch-guard begin ---
+# _agent_launch_roots — set reply to the physical roots and REPLY to where
+# they came from: default, file, or unusable (the file is there but cannot be
+# read or names no root: reply is empty, every directory is refused, and the
+# status is 1).
+_agent_launch_roots() {
+  emulate -L zsh
+  setopt extended_glob
+  local file="$HOME/.config/dotfiles/agent-launch-roots.local" line root
+  local -a roots
+  reply=()
+  if [[ -e "$file" || -L "$file" ]]; then
+    REPLY=unusable
+    [[ -f "$file" && -r "$file" ]] || return 1
+    # A last line without a newline still counts (the gclone map reads the
+    # same way, #281).
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${${line##[[:space:]]##}%%[[:space:]]##}"
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      if [[ "$line" == "~" ]]; then
+        line="$HOME"
+      elif [[ "$line" == "~/"* ]]; then
+        line="$HOME/${line#\~/}"
+      fi
+      # Anything else that is not absolute (a relative path, ~user) is not
+      # a root.
+      [[ "$line" == /* ]] && roots+=("$line")
+    done < "$file"
+    (( ${#roots} )) || return 1
+    REPLY=file
+  else
+    REPLY=default
+    roots=("$HOME/src" "$HOME/dotfiles")
+  fi
+  for root in "${roots[@]}"; do
+    reply+=("${root:A}")
+  done
+  return 0
+}
+# _agent_launch_allowed DIR — DIR (an absolute path, resolved through :A) is
+# a launch root or under one. Sets reply / REPLY as _agent_launch_roots does.
+_agent_launch_allowed() {
+  emulate -L zsh
+  local dir root
+  _agent_launch_roots || return 1
+  [[ "$1" == /* ]] || return 1
+  dir="${1:A}"
+  for root in "${reply[@]}"; do
+    # A root of / covers everything: drop the trailing slash so the pattern
+    # below becomes /*.
+    root="${root%/}"
+    [[ "$dir" == "$root" || "$dir" == "$root"/* ]] && return 0
+  done
+  return 1
+}
+# _agent_launch_guard NAME — status 0 when NAME may start in the current
+# directory; otherwise say why on one line and return 1.
+_agent_launch_guard() {
+  emulate -L zsh
+  local REPLY cwd home_a
+  local -a reply shown
+  cwd="$(pwd -P 2>/dev/null)" || cwd=""
+  if [[ -n "$cwd" ]]; then
+    _agent_launch_allowed "$cwd" && return 0
+  else
+    _agent_launch_roots
+  fi
+  if [[ "$REPLY" == unusable ]]; then
+    print -u2 -r -- "$1: not started: ~/.config/dotfiles/agent-launch-roots.local names no usable root, so every directory is refused (one absolute or ~/ path per line; docs/shell.md)"
+  else
+    home_a="${HOME:A}"
+    shown=("${reply[@]/#$home_a\//~/}")
+    [[ -n "$cwd" ]] && cwd="${cwd/#$home_a\//~/}"
+    print -u2 -r -- "$1: not started in ${cwd:-this directory}: outside the agent launch roots (${(j:, :)shown}); cd into a project under them, or run \`command $1\` to start it once (docs/shell.md)"
+  fi
+  return 1
+}
+# `function NAME` keeps an alias of the same name from rewriting the name
+# while this is parsed.
+function claude { _agent_launch_guard claude || return; command claude "$@" }
+function codex { _agent_launch_guard codex || return; command codex "$@" }
+function opencode { _agent_launch_guard opencode || return; command opencode "$@" }
+# --- agent-launch-guard end ---
 
 # Local overrides win: machine-specific PATH, tool env, secrets, keybindings.
 # Sourced before the widget-wrapping plugins so any local keybindings are wrapped.
