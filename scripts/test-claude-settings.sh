@@ -819,7 +819,9 @@ hooks_off_src="$flip_src"
 # on-render with DEL_FILTER applied (that capability's entries removed).
 check_hook_flip_off() {
   local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
-  events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')"
+  # A render without a hooks key makes yq fail; under pipefail that must
+  # become a reported mismatch, not an abort of the whole suite.
+  events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')" || events=""
   norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
   on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
   if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
@@ -877,7 +879,9 @@ ja_only_file="$flip_file"
 # check_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
 check_hook_single_on() {
   local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
-  events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')"
+  # A render without a hooks key makes yq fail; under pipefail that must
+  # become a reported mismatch, not an abort of the whole suite.
+  events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')" || events=""
   norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
   on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
   if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
