@@ -4145,19 +4145,32 @@ doctor_expect "agent launch guard with a roots file of no usable root -> warn" a
   "[warn] agent launch roots file ~/.config/dotfiles/agent-launch-roots.local names no usable root: the guard refuses claude / codex / opencode in every directory (one absolute or ~/ path per line; docs/shell.md)" \
   "$al_item" ! "relative/only"
 rm -f "$al_roots"
-# AL-6) a block that answers in another form (not the managed one) -> warn
-#       "could not be checked", not ok.
-printf '# --- agent-launch-guard begin ---\nprint -r -- "roots default x"\n# --- agent-launch-guard end ---\n' > "$al_home/.zshrc"
+# AL-6) the managed block plus a line that prints a roots line of another
+#       form when the block is loaded -> warn "could not be checked", not ok.
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | awk '/^# --- agent-launch-guard end ---$/ { print "print -r -- \"roots default x\"" } { print }' > "$al_home/.zshrc"
 doctor_expect "agent launch guard block answering in another form -> warn not checked" al_doctor "$PATH" -- \
   "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
   ! "[ok] agent launch guard"
 # AL-6b) a block that keeps _agent_launch_roots but lost _agent_launch_allowed:
-#        command not found is not "refused" -> warn not checked, not ok
-#        (Codex review R2, PR #496).
+#        command not found is not "refused", and the block is incomplete ->
+#        action chezmoi apply, not ok (Codex review R2, PR #496).
+al_incomplete="agent launch guard in ~/.zshrc is incomplete (a function it needs, or a wrapper of claude / codex / opencode that calls it, is missing): those commands may start in any directory"
+al_step="        \$ chezmoi apply $(printf '%q' "$al_home/.zshrc")   # then open a new shell"
 { printf '# --- agent-launch-guard begin ---\n'; sed -n '/^_agent_launch_roots() {$/,/^}$/p' "$DOTFILES_ROOT/dot_zshrc"; printf '# --- agent-launch-guard end ---\n'; } > "$al_home/.zshrc"
-doctor_expect "agent launch guard block without _agent_launch_allowed -> warn not checked" al_doctor "$PATH" -- \
-  "[warn] agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)" \
-  ! "[ok] agent launch guard"
+doctor_expect "agent launch guard block without _agent_launch_allowed -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
+# AL-6d) the managed block without the codex wrapper: the guard is not on
+#        codex's way -> the same action (Codex review R3).
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | grep -v '^function codex ' > "$al_home/.zshrc"
+doctor_expect "agent launch guard block without the codex wrapper -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
+# AL-6e) ... and a claude wrapper that does not call the guard -> the same.
+awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
+  | sed 's/^function claude .*/function claude { command claude "$@" }/' > "$al_home/.zshrc"
+doctor_expect "agent launch guard with a claude wrapper that skips the guard -> action chezmoi apply" al_doctor "$PATH" -- \
+  "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
 # AL-6c) ... and a judge that fails with another status (2) -> the same.
 #        The managed block with a redefinition just before its end marker.
 awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
@@ -4168,7 +4181,6 @@ doctor_expect "agent launch guard judge failing with status 2 -> warn not checke
 # AL-7) ~/.zshrc without the block, and with two begin markers -> action
 #       chezmoi apply ~/.zshrc.
 al_missing="agent launch guard missing from ~/.zshrc (or its markers are not one pair, begin before end): claude / codex / opencode start in any directory, ~/Downloads included"
-al_step="        \$ chezmoi apply $(printf '%q' "$al_home/.zshrc")   # then open a new shell"
 printf '# an unmanaged zshrc\n' > "$al_home/.zshrc"
 doctor_expect "agent launch guard missing from ~/.zshrc -> action chezmoi apply" al_doctor "$PATH" -- \
   "[warn] $al_missing" "~. $al_missing" "$al_step"

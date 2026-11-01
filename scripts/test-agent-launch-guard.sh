@@ -11,7 +11,8 @@ set -euo pipefail
 # root or under one; the default roots (~/src, ~/dotfiles); the roots file
 # (~/ and absolute lines, comments, a last line without a newline, ignored
 # relative lines, no usable root refuses everywhere, and so does a file that
-# cannot be told apart from absent: an unsearchable directory on its way); a
+# cannot be told apart from absent: an unsearchable directory on its way, or
+# a symlink on its way that does not reach a directory); a
 # symlink under a root
 # that points outside is refused, and so is a directory whose name ends in a
 # newline next to a root; a root reached through a symlink still covers its
@@ -241,6 +242,22 @@ else
   expect_started "no roots file in a searchable ~/.config/dotfiles: the default roots" "$h/src/personal/repo" claude
   rmdir "$h/.config/dotfiles"
   expect_started "no ~/.config/dotfiles under a searchable ~/.config: the default roots" "$h/src/personal/repo" opencode
+  # ~/.config/dotfiles a symlink into a directory that cannot be searched
+  # (the roots file is behind it), then a dangling one: neither can be told
+  # apart from absent, so neither brings the default back (Codex review R3).
+  mkdir -p "$h/locked/dotfiles"
+  printf '~/elsewhere\n' > "$h/locked/dotfiles/agent-launch-roots.local"
+  ln -s "$h/locked/dotfiles" "$h/.config/dotfiles"
+  chmod 000 "$h/locked"
+  expect_refused "~/.config/dotfiles a symlink into an unsearchable directory: refused under ~/src" "$h/src/personal/repo" claude \
+    "$(unusable_line claude)"
+  chmod 755 "$h/locked"
+  expect_started "~/.config/dotfiles a symlink into a searchable directory: the file's roots" "$h/elsewhere/proj" claude
+  rm -f "$h/.config/dotfiles"
+  ln -s "$h/no-such-dir" "$h/.config/dotfiles"
+  expect_refused "~/.config/dotfiles a dangling symlink: refused under ~/src" "$h/src/personal/repo" codex \
+    "$(unusable_line codex)"
+  rm -f "$h/.config/dotfiles"
   mkdir "$h/.config/dotfiles"
 fi
 

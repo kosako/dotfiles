@@ -1876,13 +1876,17 @@ report_agent_launch_guard() {
       dirs+=("$HOME/$name")
     fi
   done
-  # Only the statuses the functions define (0 and 1) are answers: a block
-  # without one of them (command not found, 127) or one that fails another
-  # way ends the probe with a status, read as "not checked" (Codex review R2,
-  # PR #496).
+  # Only the statuses the functions define (0 and 1) are answers: a judge
+  # that fails another way ends the probe with a status, read as "not
+  # checked" (Codex review R2, PR #496). A block that lacks a function the
+  # guard needs, or a wrapper that calls the guard, ends it with 91: the
+  # commands may start anywhere, as with no block (R2, R3).
   bounded_probe zsh -f -c 'eval "$1" || exit 90
 shift
-(( $+functions[_agent_launch_roots] && $+functions[_agent_launch_allowed] )) || exit 91
+(( $+functions[_agent_launch_roots] && $+functions[_agent_launch_allowed] && $+functions[_agent_launch_guard] )) || exit 91
+for w in claude codex opencode; do
+  [[ "$functions[$w]" == *"_agent_launch_guard $w"* ]] || exit 91
+done
 _agent_launch_roots
 (( $? <= 1 )) || exit 92
 print -r -- "roots $REPLY ${#reply}"
@@ -1925,6 +1929,11 @@ done' zsh "$block" "${dirs[@]}"
         *) bad=1 ;;
       esac
     done <<< "$probe_lines"
+  fi
+  if [[ "$probe_rc" == 91 ]]; then
+    action "agent launch guard in ~/.zshrc is incomplete (a function it needs, or a wrapper of claude / codex / opencode that calls it, is missing): those commands may start in any directory" \
+      "\$ chezmoi apply $(shell_quote_safe "$zshrc")   # then open a new shell"
+    return 0
   fi
   if [[ "$probe_rc" != 0 || "$bad" != 0 || -z "$roots_from" || "$seen" != "${#dirs[@]}" ]]; then
     warn "agent launch guard in ~/.zshrc could not be checked (its zsh probe failed, timed out, or answered in an unexpected form)"

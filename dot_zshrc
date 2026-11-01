@@ -385,14 +385,26 @@ _agent_launch_roots() {
     REPLY=file
   else
     # -e is false also when a directory on the way cannot be searched, and
-    # the file may be there all the same: the default applies only when the
-    # nearest ancestor that is there is a directory that can be searched, or
-    # is not a directory (nothing can be under it) (Codex review R2, PR #496).
+    # the file may be there all the same (Codex review R2, PR #496). The
+    # default applies only once the file is known to be absent: going up from
+    # its directory, the first one that is a directory can be searched, or the
+    # first one that is there is not a directory (nothing can be under it).
+    # A symlink on the way that does not reach a directory (dangling, or into
+    # a directory that cannot be searched) cannot be told apart, so it counts
+    # as unusable (R3).
     dir="${file:h}"
-    while [[ ! -e "$dir" && ! -L "$dir" && "$dir" != / && "$dir" != . ]]; do
+    while :; do
+      if [[ -d "$dir" ]]; then
+        [[ -x "$dir" ]] || return 1
+        break
+      elif [[ -L "$dir" ]]; then
+        return 1
+      elif [[ -e "$dir" ]]; then
+        break
+      fi
+      [[ "$dir" == / || "$dir" == . ]] && break
       dir="${dir:h}"
     done
-    [[ -d "$dir" && ! -x "$dir" ]] && return 1
     REPLY=default
     roots=("$HOME/src" "$HOME/dotfiles")
   fi

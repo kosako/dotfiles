@@ -179,7 +179,8 @@ project の置き場が違うときの seam で、その path を public repo �
   行(相対 path、`~user` など)は root にしない。
 - file があると既定を**置き換える**(追記ではない)。既定の root も使うなら、その行も書く。
 - 使える root が 1 つも無い file(空の file、通常の file でない、読めない)では、guard はどこでも起動を断る
-  (fail-closed)。途中の directory を検索できず、file の有無を確かめられないときも同じ。file が無いと確かめられた
+  (fail-closed)。途中の directory を検索できず、file の有無を確かめられないときも同じ。途中の symlink が directory
+  に届かないとき(壊れている、検索できない directory を指す)も、確かめられない扱いにする。file が無いと確かめられた
   ときだけ、既定の root を使う。
 - **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
 - 振る舞いと限界は [shell](shell.md) の「agent の起動場所」。
