@@ -5,13 +5,15 @@ set -euo pipefail
 # Behavior tests for the agent launch guard in dot_zshrc (#491). The block is
 # extracted by its begin/end markers and run under `zsh -f` in a fixture HOME
 # whose claude / codex / opencode are call recorders, so no real agent CLI
-# starts. Contract under test: the wrappers start the command (arguments and
-# exit status intact) only when the physical current directory is a launch
+# starts. Contract under test: the wrappers start the command (each argument,
+# an empty one included, and the exit status intact) only when the physical
+# current directory is a launch
 # root or under one; the default roots (~/src, ~/dotfiles); the roots file
 # (~/ and absolute lines, comments, a last line without a newline, ignored
 # relative lines, no usable root refuses everywhere); a symlink under a root
-# that points outside is refused; a root reached through a symlink still
-# covers its real directory; the one-line refusal; `command NAME` bypasses.
+# that points outside is refused, and so is a directory whose name ends in a
+# newline next to a root; a root reached through a symlink still covers its
+# real directory; the one-line refusal; `command NAME` bypasses.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
@@ -39,6 +41,9 @@ mkdir -p "$h/src/personal/repo" "$h/src/work/org/repo" "$h/dotfiles/scripts" \
 # A directory that looks like it is under ~/src, but its real path is not.
 ln -s "$h/Downloads/site" "$h/src/personal/planted"
 ln -s "$h/realroot" "$h/linkroot"
+# A sibling of ~/src whose name is "src" and a newline: a command substitution
+# that drops trailing newlines would read it as ~/src (Codex review R1, PR #496).
+mkdir "$h/src"$'\n'
 roots_file="$h/.config/dotfiles/agent-launch-roots.local"
 
 # Extract exactly one marker-delimited block; a missing end marker would sweep
@@ -66,7 +71,16 @@ fi
 stub_bin="$fixture_root/bin"
 calls="$fixture_root/calls"
 mkdir -p "$stub_bin"
-write_call_recorders "$stub_bin" "$calls" 3 claude codex opencode
+# Stubs that record the name and each argument in brackets, one call per
+# line, and exit 3: "-p" "a b" and "-p a b" (or a dropped empty argument)
+# record differently (Codex review R1). Not write_call_recorders, which
+# records "$*".
+for name in claude codex opencode; do
+  printf '#!/bin/sh\nprintf %%s %s >> %s\nfor a in "$@"; do printf " [%%s]" "$a" >> %s; done\necho >> %s\nexit 3\n' \
+    "$(shell_single_quote "$name")" "$(shell_single_quote "$calls")" \
+    "$(shell_single_quote "$calls")" "$(shell_single_quote "$calls")" > "$stub_bin/$name"
+  chmod +x "$stub_bin/$name"
+done
 
 # guard_run DIR WORD... — run WORD... in DIR (a zsh `cd`, so a symlink in DIR
 # stays in the logical path) with the block loaded. Sets run_rc, run_out
@@ -86,12 +100,13 @@ guard_run() {
   fi
 }
 
-# expect_started LABEL DIR NAME — NAME starts in DIR with its arguments and
-# exit status intact, and the guard says nothing.
+# expect_started LABEL DIR NAME — NAME starts in DIR with its arguments (one
+# with a space, an empty one) and exit status intact, and the guard says
+# nothing.
 expect_started() {
   local label="$1" dir="$2" name="$3"
-  guard_run "$dir" "$name" -p "a b"
-  if [[ "$run_rc" == 3 && "$run_calls" == "$name -p a b" && -z "$run_err" && -z "$run_out" ]]; then
+  guard_run "$dir" "$name" -p "a b" ""
+  if [[ "$run_rc" == 3 && "$run_calls" == "$name [-p] [a b] []" && -z "$run_err" && -z "$run_out" ]]; then
     pass "$label"
   else
     miss "$label (rc=$run_rc calls=$run_calls err=$run_err)"
@@ -145,10 +160,13 @@ expect_refused "default roots: a directory outside HOME is refused" "$outside/pr
 # The logical path is under ~/src, the physical one is ~/Downloads/site.
 expect_refused "default roots: a symlink under ~/src pointing outside is refused" "$h/src/personal/planted" claude \
   "$(refused_line claude "~/Downloads/site" "$default_roots")"
+# Refused, and the newline is shown as \n so the refusal stays one line.
+expect_refused "default roots: a sibling named src and a newline is refused, shown on one line" "$h/src"$'\n' claude \
+  "$(refused_line claude '~/src\n' "$default_roots")"
 
 # 3. `command NAME` bypasses the wrapper (the documented way to start once).
 guard_run "$h/Downloads/site" command claude --version
-if [[ "$run_rc" == 3 && "$run_calls" == "claude --version" && -z "$run_err" ]]; then
+if [[ "$run_rc" == 3 && "$run_calls" == "claude [--version]" && -z "$run_err" ]]; then
   pass "command claude starts outside the roots (bypass)"
 else
   miss "command claude starts outside the roots (bypass) (rc=$run_rc calls=$run_calls err=$run_err)"

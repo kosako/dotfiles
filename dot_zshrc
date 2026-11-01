@@ -414,7 +414,16 @@ _agent_launch_guard() {
   emulate -L zsh
   local REPLY cwd home_a
   local -a reply shown
-  cwd="$(pwd -P 2>/dev/null)" || cwd=""
+  # A command substitution drops every trailing newline, so a directory
+  # named "src<newline>" next to ~/src would read as ~/src: pwd's output
+  # ends with a mark that is cut off again with its own newline (Codex
+  # review R1, PR #496). No mark means pwd failed.
+  cwd="$(pwd -P 2>/dev/null && print -rn -- .)"
+  if [[ "$cwd" == *$'\n.' ]]; then
+    cwd="${cwd%$'\n.'}"
+  else
+    cwd=""
+  fi
   if [[ -n "$cwd" ]]; then
     _agent_launch_allowed "$cwd" && return 0
   else
@@ -424,8 +433,10 @@ _agent_launch_guard() {
     print -u2 -r -- "$1: not started: ~/.config/dotfiles/agent-launch-roots.local names no usable root, so every directory is refused (one absolute or ~/ path per line; docs/shell.md)"
   else
     home_a="${HOME:A}"
-    shown=("${reply[@]/#$home_a\//~/}")
-    [[ -n "$cwd" ]] && cwd="${cwd/#$home_a\//~/}"
+    # (V) shows a control character visibly (a newline in a name as \n), so
+    # the message stays one line.
+    shown=("${(@V)reply[@]/#$home_a\//~/}")
+    [[ -n "$cwd" ]] && cwd="${(V)cwd/#$home_a\//~/}"
     print -u2 -r -- "$1: not started in ${cwd:-this directory}: outside the agent launch roots (${(j:, :)shown}); cd into a project under them, or run \`command $1\` to start it once (docs/shell.md)"
   fi
   return 1

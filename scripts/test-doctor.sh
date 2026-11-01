@@ -4153,7 +4153,7 @@ doctor_expect "agent launch guard block answering in another form -> warn not ch
   ! "[ok] agent launch guard"
 # AL-7) ~/.zshrc without the block, and with two begin markers -> action
 #       chezmoi apply ~/.zshrc.
-al_missing="agent launch guard missing from ~/.zshrc (or its markers are not one pair): claude / codex / opencode start in any directory, ~/Downloads included"
+al_missing="agent launch guard missing from ~/.zshrc (or its markers are not one pair, begin before end): claude / codex / opencode start in any directory, ~/Downloads included"
 al_step="        \$ chezmoi apply $(printf '%q' "$al_home/.zshrc")   # then open a new shell"
 printf '# an unmanaged zshrc\n' > "$al_home/.zshrc"
 doctor_expect "agent launch guard missing from ~/.zshrc -> action chezmoi apply" al_doctor "$PATH" -- \
@@ -4161,6 +4161,19 @@ doctor_expect "agent launch guard missing from ~/.zshrc -> action chezmoi apply"
 { printf '# --- agent-launch-guard begin ---\n'; cat "$DOTFILES_ROOT/dot_zshrc"; } > "$al_home/.zshrc"
 doctor_expect "agent launch guard markers not one pair -> action chezmoi apply" al_doctor "$PATH" -- \
   "[warn] $al_missing" "$al_step"
+# AL-7b) one pair, the end first, with a line after the begin that leaves a
+#        mark when run: doctor must not run what follows the begin marker
+#        (Codex review R1, PR #496).
+al_mark="$fixture_home/al-ran-past-the-block"
+printf '# --- agent-launch-guard end ---\n# --- agent-launch-guard begin ---\n: > %s\n' "$(shell_single_quote "$al_mark")" > "$al_home/.zshrc"
+doctor_expect "agent launch guard markers in the wrong order -> action, the rest of ~/.zshrc not run" al_doctor "$PATH" -- \
+  "[warn] $al_missing" "$al_step"
+if [[ -e "$al_mark" ]]; then
+  fail "test failed: doctor ran ~/.zshrc past the guard block (markers in the wrong order)"
+  status=1
+else
+  ok "test passed: doctor does not run ~/.zshrc past the guard block (markers in the wrong order)"
+fi
 # AL-8) no ~/.zshrc -> item, no action.
 rm -f "$al_home/.zshrc"
 doctor_expect "agent launch guard without ~/.zshrc -> item" al_doctor "$PATH" -- \

@@ -1844,7 +1844,7 @@ section "agent launch guard (report-only)"
 # where the roots came from and how many there are, never a root read from
 # the local file.
 report_agent_launch_guard() {
-  local zshrc="$HOME/.zshrc" begin_count end_count block line roots_from roots_count allowed bad seen name
+  local zshrc="$HOME/.zshrc" begin_count end_count marker_order block line roots_from roots_count allowed bad seen name
   local -a labels dirs
   if [[ ! -e "$zshrc" ]]; then
     item "agent launch guard not checked: no ~/.zshrc here (chezmoi apply renders it)"
@@ -1852,8 +1852,13 @@ report_agent_launch_guard() {
   fi
   begin_count="$(grep -c '^# --- agent-launch-guard begin ---$' "$zshrc" 2>/dev/null)" || true
   end_count="$(grep -c '^# --- agent-launch-guard end ---$' "$zshrc" 2>/dev/null)" || true
-  if [[ "$begin_count" != 1 || "$end_count" != 1 ]]; then
-    action "agent launch guard missing from ~/.zshrc (or its markers are not one pair): claude / codex / opencode start in any directory, ~/Downloads included" \
+  # One pair, begin before end: with the end first, the extraction would run
+  # from begin to the end of the file, and the eval below would run the rest
+  # of ~/.zshrc (~/.zshrc.local, plugins), which doctor must not (Codex
+  # review R1, PR #496).
+  marker_order="$(awk '/^# --- agent-launch-guard begin ---$/ { b = NR } /^# --- agent-launch-guard end ---$/ { e = NR } END { print ((b && e && b < e) ? "ok" : "bad") }' "$zshrc" 2>/dev/null)" || marker_order=bad
+  if [[ "$begin_count" != 1 || "$end_count" != 1 || "$marker_order" != ok ]]; then
+    action "agent launch guard missing from ~/.zshrc (or its markers are not one pair, begin before end): claude / codex / opencode start in any directory, ~/Downloads included" \
       "\$ chezmoi apply $(shell_quote_safe "$zshrc")   # then open a new shell"
     return 0
   fi
