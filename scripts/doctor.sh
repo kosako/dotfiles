@@ -2246,6 +2246,30 @@ else
   ok "enableToolCallRecordHook not active (false)"
 fi
 
+section "Japanese reply guard (report-only)"
+# enableJaReplyGuardHook (#497, agent-tools#588) registers, in the managed
+# ~/.claude/settings.json, agent-tools' personal-ja-reply-guard on Stop (no
+# matcher, timeout 10), after changed-scope-qa as a second entry. It stops a
+# turn whose final answer drifted into English once and asks for a Japanese
+# rewrite; never when stop_hook_active, fail-open otherwise. Claude only (the
+# body targets claude-code). Report registration + body presence; the live
+# settings file is not probed here.
+if [[ "$(capability_value "$profile" enableJaReplyGuardHook)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    ja_guard_body="$HOME/.claude/agent-tools/scripts/personal-ja-reply-guard"
+    if [[ -f "$ja_guard_body" && -x "$ja_guard_body" ]]; then
+      ok "enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop (one rewrite request per turn, fail-open, Claude Code only, not a boundary); body present"
+    else
+      warn "enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $ja_guard_body (agent-tools sync deploys it) — fail-open no-op until deployed"
+    fi
+    item "a session that should answer in English sets AGENT_TOOLS_JA_GUARD_DISABLE (any non-empty value) to turn the guard off"
+  else
+    warn "enableJaReplyGuardHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Japanese reply guard (dangling capability)"
+  fi
+else
+  ok "enableJaReplyGuardHook not active (false)"
+fi
+
 section "GitHub injection guard (report-only)"
 # gateGitHubMcp / enableGitHubIsolatedReader are safety-hardening capabilities for
 # the GitHub runtime prompt-injection defense (epic #119). Like enforceAiSandbox

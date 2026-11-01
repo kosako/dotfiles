@@ -1556,6 +1556,99 @@ else
   status=1
 fi
 
+# JA) Japanese reply guard (#497): committed personal has enableJaReplyGuardHook
+#     ON with claude-settings active. The section reports the registration and
+#     whether the deployed body is executable (absent in the shared fixture
+#     HOME, a stub that is or is not executable in its own HOME), with the
+#     opt-out env named; flipped off it reports the declared-off state. Every
+#     run stays exit 0 (report-only).
+ja_disable_item='[info] - a session that should answer in English sets AGENT_TOOLS_JA_GUARD_DISABLE (any non-empty value) to turn the guard off'
+#     JA-a) no body in the fixture HOME -> the body-absent warn naming the path.
+if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $fixture_home/.claude/agent-tools/scripts/personal-ja-reply-guard (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$gh_out" \
+  && grep -Fxq "$ja_disable_item" <<< "$gh_out"; then
+  ok "test passed: enableJaReplyGuardHook=true with no deployed body warns body-absent (fail-open) and names the opt-out env"
+else
+  fail "test failed: enableJaReplyGuardHook=true body-absent state not reported"
+  status=1
+fi
+#     JA-b / JA-c) a stub body in its own HOME: executable -> ok with "body
+#     present"; the same file without the execute bit -> the body-absent warn.
+ja_home="$fixture_home/ja"
+ja_body="$ja_home/.claude/agent-tools/scripts/personal-ja-reply-guard"
+mkdir -p "${ja_body%/*}"
+printf '#!/bin/sh\nexit 0\n' > "$ja_body"
+chmod +x "$ja_body"
+ja_ok='[ok] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop (one rewrite request per turn, fail-open, Claude Code only, not a boundary); body present'
+if ja_out="$(HOME="$ja_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "$ja_ok" <<< "$ja_out" && grep -Fxq "$ja_disable_item" <<< "$ja_out" \
+    && ! grep -Fq "registers personal-ja-reply-guard on Stop but the body is absent" <<< "$ja_out"; then
+    ok "test passed: enableJaReplyGuardHook=true with an executable body reports the registration with the body present"
+  else
+    printf '%s\n' "$ja_out" >&2
+    fail "test failed: enableJaReplyGuardHook=true with a deployed body not reported as present"
+    status=1
+  fi
+else
+  printf '%s\n' "$ja_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableJaReplyGuardHook, body present)"
+  status=1
+fi
+chmod -x "$ja_body"
+if ja_out="$(HOME="$ja_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $ja_body (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$ja_out" \
+    && ! grep -Fxq "$ja_ok" <<< "$ja_out"; then
+    ok "test passed: enableJaReplyGuardHook=true with a non-executable body warns like an absent one"
+  else
+    printf '%s\n' "$ja_out" >&2
+    fail "test failed: enableJaReplyGuardHook=true with a non-executable body not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$ja_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableJaReplyGuardHook, non-executable body)"
+  status=1
+fi
+#     JA-e) a searchable directory under the body's name passes -x but is no
+#     body -> the same warn.
+rm -f "$ja_body"
+mkdir "$ja_body"
+chmod 755 "$ja_body"
+if ja_out="$(HOME="$ja_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $ja_body (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$ja_out" \
+    && ! grep -Fxq "$ja_ok" <<< "$ja_out"; then
+    ok "test passed: enableJaReplyGuardHook=true with a directory in the body's place warns like an absent body"
+  else
+    printf '%s\n' "$ja_out" >&2
+    fail "test failed: enableJaReplyGuardHook=true with a directory in the body's place not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$ja_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableJaReplyGuardHook, directory in the body's place)"
+  status=1
+fi
+rmdir "$ja_body"
+#     JA-d) capability off -> the declared-off ok, and neither the registration
+#     nor the opt-out item.
+ja_root="$fixture_home/.dotfiles-jaguard"
+copy_repo_fixture "$ja_root"
+set_capability_all "$ja_root" enableJaReplyGuardHook false
+if ja_out="$(HOME="$fixture_home" "$ja_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] enableJaReplyGuardHook not active (false)" <<< "$ja_out" \
+    && ! grep -Fq "registers personal-ja-reply-guard" <<< "$ja_out" \
+    && ! grep -Fxq "$ja_disable_item" <<< "$ja_out"; then
+    ok "test passed: enableJaReplyGuardHook=false reported as not active"
+  else
+    printf '%s\n' "$ja_out" >&2
+    fail "test failed: enableJaReplyGuardHook=false not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$ja_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableJaReplyGuardHook=false)"
+  status=1
+fi
+
 # DR) enableDirenv selects the doctor check only (#401): with it false, the
 #     report says the check is skipped and that the shell hook still runs,
 #     not that direnv is off (the managed ~/.zshrc registers the hook
@@ -1812,6 +1905,7 @@ fi
 for ql_dangling in \
   "gateUnusedClaudeMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
   "enableToolCallRecordHook=true but the claude-settings module is inactive for this profile; no managed settings carry the record hook (dangling capability)" \
+  "enableJaReplyGuardHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Japanese reply guard (dangling capability)" \
   "gateGitHubMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
   "enableGitHubIsolatedReader=true but the claude-settings module is inactive for this profile; no managed settings carry the hook registration (dangling capability)"; do
   if grep -Fxq "[warn] $ql_dangling" <<< "$ql_out"; then

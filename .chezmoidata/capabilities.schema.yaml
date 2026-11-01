@@ -80,6 +80,9 @@ capabilities:
   enableToolCallRecordHook:
     type: boolean
     implemented: true
+  enableJaReplyGuardHook:
+    type: boolean
+    implemented: true
   codexReviewEffort:
     type: enum
     implemented: true

@@ -67,7 +67,7 @@ trap cleanup EXIT
 # root and registers it in tmp_roots, then inspects ROOT/home
 # (caller-creates-root contract; see the #150 leak note in test-lib.sh).
 
-section "codex settings hook registration (#181 / #199 / #225)"
+section "codex settings hook registration (#181 / #199 / #225 / #497)"
 
 # 1) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks and
 #    enableHerdrIntegration are ON, so ~/.codex/hooks.json exists and registers
@@ -279,6 +279,26 @@ check_codex_hook_single_on() {
 check_codex_hook_single_on "only enableGitHubIsolatedReader" "$reader_only_hooks" '["PreToolUse"]' 'del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart)'
 check_codex_hook_single_on "only enableQualityLoopHooks" "$quality_only_hooks" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.SessionStart)'
 check_codex_hook_single_on "only enableHerdrIntegration" "$herdr_only_hooks" '["SessionStart"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop)'
+
+# 2d) enableJaReplyGuardHook (#497, agent-tools#588) is Claude-only: the
+#     agent-tools body targets claude-code, so the Codex render must not carry
+#     it and must not change with it. Committed personal (the guard ON) names
+#     no personal-ja-reply-guard, flipping the guard off leaves hooks.json
+#     byte-identical, and the guard alone (the three Codex hook capabilities
+#     off) renders no ~/.codex/hooks.json at all.
+render_codex_hook_flip ja-off enableJaReplyGuardHook
+ja_off_hooks="$hook_flip_file"
+render_codex_hook_flip ja-alone enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration
+ja_alone_hooks="$hook_flip_file"
+if [[ -f "$hooks_file" && -f "$ja_off_hooks" ]] \
+  && ! grep -Fq "personal-ja-reply-guard" "$hooks_file" \
+  && cmp -s "$hooks_file" "$ja_off_hooks" \
+  && [[ ! -e "$ja_alone_hooks" && ! -L "$ja_alone_hooks" ]]; then
+  ok "test passed: enableJaReplyGuardHook never reaches ~/.codex/hooks.json (absent from the committed render, byte-identical when flipped off, no file when it is the only one on)"
+else
+  fail "test failed: enableJaReplyGuardHook leaked into the Codex render (named in hooks.json, the render changed with it, or the guard alone rendered a file)"
+  status=1
+fi
 
 # 3) ALL hook capabilities false REMOVES an ALREADY-APPLIED ~/.codex/hooks.json
 #    on the next apply — not just "does not newly create it". This is the exact

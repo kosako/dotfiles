@@ -1061,6 +1061,15 @@ run_ok \
   "enableToolCallRecordHook=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
+# enableJaReplyGuardHook (#497) only registers agent-tools' Stop hook that asks
+# for a Japanese rewrite once, and grants no install / secret / network
+# privilege, so it must NOT be in the forbidden table either.
+make_fixture
+set_capability_all "$fixture" enableJaReplyGuardHook true
+run_ok \
+  "enableJaReplyGuardHook=true is allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 # codexReviewEffort / codexWorkerEffort (#264) only pick the reasoning effort
 # agent-tools' Codex review / worker run with and grant no install / secret /
 # network privilege, so no value is forbidden for any environmentKind.

@@ -146,6 +146,15 @@
        entry and the existing entry is byte-identical (herdr matches its
        WHOLE entry, so the extra array element does not disturb it).
 
+       enableJaReplyGuardHook (#497, agent-tools#588) registers agent-tools'
+       personal-ja-reply-guard on Stop (no matcher, timeout 10), after
+       changed-scope-qa as a second entry. It stops once when the turn's
+       final answer drifted into English and asks for a Japanese rewrite;
+       never when stop_hook_active, fail-open otherwise, Claude only (the
+       Codex hooks.json is unchanged). AGENT_TOOLS_JA_GUARD_DISABLE (any
+       non-empty value) turns it off for a session that should answer in
+       English.
+
        The whole "hooks" object is shared with the Codex registration via
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
        it is included only when at least one hook capability is on, so an
@@ -211,7 +220,7 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
       "mcp__pencil"
     ]
   },
-{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") }}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") (index $caps "enableJaReplyGuardHook") }}
 {{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
   "model": "opus[1m]",

@@ -187,8 +187,8 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   `.chezmoitemplates/agent-hooks-json` で両 home 共有(`enableGitHubIsolatedReader` の
   PreToolUse・`enableHerdrIntegration` の SessionStart と同居。各 capability は自分の event だけを
   足し、hook capability が全部 false のとき、Claude は `hooks` キー自体を出さず、Codex は file ごと
-  消える。全部の数は Claude が `enableToolCallRecordHook`(#353。Claude だけ)を含む 4 つ、Codex は
-  それを除く 3 つ)。
+  消える。全部の数は Claude が `enableToolCallRecordHook`(#353)と `enableJaReplyGuardHook`(#497)の
+  Claude だけの 2 つを含む 5 つ、Codex はそれを除く 3 つ)。
   - `PostToolUse` / matcher `Edit|Write` → `personal-fast-edit-check`(steering。失敗要約を
     `additionalContext` で返すだけで block しない・自動 fix しない)。
   - `Stop`(matcher なし。Claude Code は非対応・Codex は無視)→ `personal-changed-scope-qa`
@@ -300,6 +300,17 @@ Claude Code の tool 呼び出しを 1 件 1 行の JSON で記録する agent-t
 - **Claude だけ**。Codex の `hooks.json` には出さない(agent-tools#454 の scope 外。必要になったら別 Issue)。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
 - **極性は `enableQualityLoopHooks` と同じ**(権限を付与しない)。`environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。
 - **状態**: personal=true、work=false(会社の Mac での記録の扱いは別に決める)。body が未配備(agent-tools の `sync --apply` 前)でも hook の欠落は non-blocking なので、先に登録しても安全。dangling は doctor が report。
+
+## 日本語の答えの guard(`enableJaReplyGuardHook`、#497)
+
+turn の最後の答えが英語に逸れたとき、1 回だけ止めて日本語で書き直させる agent-tools の Stop hook の body `personal-ja-reply-guard`(agent-tools#588)を、managed `~/.claude/settings.json` に登録する capability。
+
+- `enableJaReplyGuardHook`(boolean): on のとき `Stop`(matcher なし)に body を `timeout: 10` で登録する。値は agent-tools の `docs/ja-reply-guard.md` の「登録 (dotfiles)」と同じ。`enableQualityLoopHooks` の `personal-changed-scope-qa` の entry の後ろに 2 つ目の entry として足し、既存の entry は変えない。off のときの出力が従来と JSON として同じことは `test-claude-settings.sh` が pin する。
+- body の契約は agent-tools の `docs/ja-reply-guard.md` が正本。逸れていたら stderr に書き直しの依頼を書いて exit 2 で止める。`stop_hook_active` が true なら止めないので、changed-scope-qa と並べても止め直しの loop にならない。入力が読めない・例外・body が無いときは turn を通す(fail-open)。英語で答えてほしい session は env の `AGENT_TOOLS_JA_GUARD_DISABLE` を空でない値にして止める。
+- **強度ラベル**: steering / fail-open。答えの言語の判定は body の heuristic で、enforcement boundary ではない。
+- **Claude だけ**。agent-tools の manifest の target が claude-code だけなので、Codex の `hooks.json` には出さない。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
+- **極性は `enableQualityLoopHooks` と同じ**(権限を付与しない)。`environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。
+- **状態**: personal=true、work=false(work は claude-settings を管理しない)。body が未配備でも hook の欠落は non-blocking なので、先に登録しても安全。body の有無と dangling は doctor が report。
 
 ## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264 / #299)
 
