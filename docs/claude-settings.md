@@ -84,7 +84,7 @@ project 自身の deny / ask が止めないものを warn する(rule の
   - managed の JSON の top-level の key は、値が違えば template の値にする(jq の `==` は object の key の
     順を見ないので、意味が同じなら live の byte のまま残る)。
   - ただし `model` は、live に在ればそのまま残す(`/model` の選択)。template の値は file に無いときの既定。
-  - capability で出し入れする `sandbox`(`enforceAiSandbox`)と `hooks`(hook の 4 capability)は、template が
+  - capability で出し入れする `sandbox`(`enforceAiSandbox`)と `hooks`(hook の 5 capability)は、template が
     出さないときは live からも消す。capability で出し入れする top-level の key を足すときは、script の
     この一覧にも足す(`test-claude-settings.sh` が、全 on と全 off の render の key の差がこの一覧と同じことを
     固定する)。template から top-level の key を消すときも、live に残したくなければこの一覧に足す。

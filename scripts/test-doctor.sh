@@ -1564,7 +1564,7 @@ fi
 #     run stays exit 0 (report-only).
 ja_disable_item='[info] - a session that should answer in English sets AGENT_TOOLS_JA_GUARD_DISABLE (any non-empty value) to turn the guard off'
 #     JA-a) no body in the fixture HOME -> the body-absent warn naming the path.
-if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or non-executable: $fixture_home/.claude/agent-tools/scripts/personal-ja-reply-guard (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$gh_out" \
+if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $fixture_home/.claude/agent-tools/scripts/personal-ja-reply-guard (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$gh_out" \
   && grep -Fxq "$ja_disable_item" <<< "$gh_out"; then
   ok "test passed: enableJaReplyGuardHook=true with no deployed body warns body-absent (fail-open) and names the opt-out env"
 else
@@ -1595,7 +1595,7 @@ else
 fi
 chmod -x "$ja_body"
 if ja_out="$(HOME="$ja_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or non-executable: $ja_body (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$ja_out" \
+  if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $ja_body (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$ja_out" \
     && ! grep -Fxq "$ja_ok" <<< "$ja_out"; then
     ok "test passed: enableJaReplyGuardHook=true with a non-executable body warns like an absent one"
   else
@@ -1608,6 +1608,26 @@ else
   fail "test failed: doctor must stay exit 0 (enableJaReplyGuardHook, non-executable body)"
   status=1
 fi
+#     JA-e) a searchable directory under the body's name passes -x but is no
+#     body -> the same warn.
+rm -f "$ja_body"
+mkdir "$ja_body"
+chmod 755 "$ja_body"
+if ja_out="$(HOME="$ja_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $ja_body (agent-tools sync deploys it) — fail-open no-op until deployed" <<< "$ja_out" \
+    && ! grep -Fxq "$ja_ok" <<< "$ja_out"; then
+    ok "test passed: enableJaReplyGuardHook=true with a directory in the body's place warns like an absent body"
+  else
+    printf '%s\n' "$ja_out" >&2
+    fail "test failed: enableJaReplyGuardHook=true with a directory in the body's place not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$ja_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableJaReplyGuardHook, directory in the body's place)"
+  status=1
+fi
+rmdir "$ja_body"
 #     JA-d) capability off -> the declared-off ok, and neither the registration
 #     nor the opt-out item.
 ja_root="$fixture_home/.dotfiles-jaguard"

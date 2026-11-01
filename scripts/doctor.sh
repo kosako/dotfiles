@@ -2257,10 +2257,10 @@ section "Japanese reply guard (report-only)"
 if [[ "$(capability_value "$profile" enableJaReplyGuardHook)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
     ja_guard_body="$HOME/.claude/agent-tools/scripts/personal-ja-reply-guard"
-    if [[ -x "$ja_guard_body" ]]; then
+    if [[ -f "$ja_guard_body" && -x "$ja_guard_body" ]]; then
       ok "enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop (one rewrite request per turn, fail-open, Claude Code only, not a boundary); body present"
     else
-      warn "enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or non-executable: $ja_guard_body (agent-tools sync deploys it) — fail-open no-op until deployed"
+      warn "enableJaReplyGuardHook=true; managed ~/.claude/settings.json registers personal-ja-reply-guard on Stop but the body is absent or not an executable file: $ja_guard_body (agent-tools sync deploys it) — fail-open no-op until deployed"
     fi
     item "a session that should answer in English sets AGENT_TOOLS_JA_GUARD_DISABLE (any non-empty value) to turn the guard off"
   else

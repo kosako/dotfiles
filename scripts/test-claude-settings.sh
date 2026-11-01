@@ -822,7 +822,13 @@ check_hook_flip_off() {
   # A render without a hooks key makes yq fail; under pipefail that must
   # become a reported mismatch, not an abort of the whole suite.
   events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')" || events=""
-  norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
+  # yq takes a stray leading comma that the hand-joined template could emit;
+  # jq does not (test-lib.sh strict_json_object).
+  if strict_json_object "$file"; then
+    norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
+  else
+    norm=""
+  fi
   on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
   if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
     ok "test passed: $label keeps exactly $expected_events and differs from the on-render by exactly its own entries"
@@ -882,7 +888,13 @@ check_hook_single_on() {
   # A render without a hooks key makes yq fail; under pipefail that must
   # become a reported mismatch, not an abort of the whole suite.
   events="$(yq -p json -o json '.hooks | keys | sort' "$file" 2>/dev/null | tr -d ' \n')" || events=""
-  norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
+  # yq takes a stray leading comma that the hand-joined template could emit;
+  # jq does not (test-lib.sh strict_json_object).
+  if strict_json_object "$file"; then
+    norm="$(yq -p json -o json '.' "$file" 2>/dev/null)"
+  else
+    norm=""
+  fi
   on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
   if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
     ok "test passed: $label keeps exactly $expected_events and differs from the on-render by exactly the other capabilities' events"
