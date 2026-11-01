@@ -6,8 +6,9 @@
        ".codex"), optional timeout (number; applied to the safe-gh hook only —
        Codex passes 10).
 
-       Four capabilities contribute events, each self-gated here (the fourth,
-       enableToolCallRecordHook, is Claude-only; see the note at the body):
+       Five capabilities contribute events, each self-gated here (the last
+       two, enableToolCallRecordHook and enableJaReplyGuardHook, are
+       Claude-only; see the notes at the body):
        - enableGitHubIsolatedReader: PreToolUse / matcher Bash ->
          personal-safe-gh-hook (GitHub read steering, #137 / #181).
        - enableQualityLoopHooks: PostToolUse / matcher Edit|Write ->
@@ -49,6 +50,16 @@
          unchanged. Where an event already has an entry it is appended as
          the SECOND element and the first stays byte-identical (herdr's
          whole-entry match is unaffected by a sibling element).
+       - enableJaReplyGuardHook (#497, agent-tools#588): Stop (no matcher)
+         -> personal-ja-reply-guard, timeout 10 (the value agent-tools
+         docs/ja-reply-guard.md registers). It stops a turn whose final
+         answer drifted into English once (exit 2 + a Japanese rewrite
+         request on stderr) and never when stop_hook_active, so it sits
+         beside changed-scope-qa without a re-block loop; fail-open on
+         unreadable input, an exception or a missing body. CLAUDE ONLY —
+         the agent-tools manifest targets claude-code, so on agentDir
+         ".codex" it contributes nothing. It is appended as the SECOND
+         entry of Stop after changed-scope-qa, which stays byte-identical.
        The home path reaches each command string through the shell-word
        template (quoted only when it holds a character a shell would act
        on; the herdr path is always single-quoted, as herdr writes it, with
@@ -62,7 +73,7 @@
        is a non-blocking hook error in both harnesses), so rendering before
        agent-tools has synced or herdr has installed is a safe no-op.
 
-       Callers include this only when at least one of the four capabilities
+       Callers include this only when at least one of the five capabilities
        is on (an empty "hooks": {} is never rendered; the Codex caller keeps
        gating on the three it renders). Renders at two-space
        indent with NO trailing comma and NO trailing newline — the caller
@@ -85,6 +96,9 @@
        rendering (pinned by test-claude-settings.sh). */ -}}
 {{- $record := and (index .caps "enableToolCallRecordHook") $herdrClaude -}}
 {{- $recordCmd := includeTemplate "shell-word" (printf "%s/personal-tool-call-record-hook" $scripts) | toJson -}}
+{{- /* enableJaReplyGuardHook (#497) is Claude-only for the same reason: the
+       agent-tools body targets claude-code only (agent-tools#588). */ -}}
+{{- $jaGuard := and (index .caps "enableJaReplyGuardHook") $herdrClaude -}}
 {{- /* The record entry itself lives in agent-hooks-record-entry (a define
        inside this file is not visible to chezmoi's template action). */ -}}
 {{- $sep := "" -}}
@@ -132,8 +146,9 @@
     ]
 {{- $sep = "," -}}
 {{- end }}
-{{- if $quality }}{{ $sep }}
+{{- if or $quality $jaGuard }}{{ $sep }}
     "Stop": [
+{{- if $quality }}
       {
         "hooks": [
           {
@@ -142,6 +157,19 @@
           }
         ]
       }
+{{- end }}
+{{- if and $quality $jaGuard }},{{ end }}
+{{- if $jaGuard }}
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": {{ includeTemplate "shell-word" (printf "%s/personal-ja-reply-guard" $scripts) | toJson }},
+            "timeout": 10
+          }
+        ]
+      }
+{{- end }}
     ]
 {{- $sep = "," -}}
 {{- end }}

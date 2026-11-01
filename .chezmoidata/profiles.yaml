@@ -157,6 +157,17 @@ profiles:
       # above: registration=dotfiles, body=agent-tools (sync --apply deploys it;
       # a missing body is a non-blocking hook error, so registering first is safe).
       enableToolCallRecordHook: true
+      # #497 (agent-tools#588): register agent-tools' personal-ja-reply-guard
+      # in the managed ~/.claude/settings.json on Stop (no matcher, timeout 10),
+      # after changed-scope-qa as a second entry. When the turn's final answer
+      # drifted into English it stops once and asks for a Japanese rewrite;
+      # never when stop_hook_active, so the two Stop hooks do not re-block each
+      # other. Fail-open (unreadable input, an exception or a missing body let
+      # the turn through) and Claude only: the agent-tools body targets
+      # claude-code, so the Codex hooks.json is unchanged. A session that should
+      # answer in English sets AGENT_TOOLS_JA_GUARD_DISABLE. Same split as the
+      # hooks above: registration=dotfiles, body=agent-tools.
+      enableJaReplyGuardHook: true
       # #264 (agent-tools#339 hand-off): reasoning effort for agent-tools'
       # Codex review / worker, rendered by codex-settings into the Codex
       # profile files ~/.codex/agent-tools-review.config.toml and
@@ -228,6 +239,9 @@ profiles:
       # herdr's own view there).
       enableHerdrIntegration: false
       enableToolCallRecordHook: false
+      # #497: off — claude-settings is not part of work, so no managed file
+      # could carry the registration.
+      enableJaReplyGuardHook: false
       # #264: off — codex-settings is not part of work, and whether (and at
       # which values) a work machine gets the profile files is decided
       # separately (plan / billing differ). A hand-placed file still works:

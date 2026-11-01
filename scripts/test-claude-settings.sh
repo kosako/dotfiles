@@ -26,8 +26,10 @@ set -euo pipefail
 # shape herdr's installer emits (matcher ^(startup|resume|clear|compact|fork)$, herdr 0.9.3 / #274) (bash '<home>/.claude/hooks/herdr-agent-state.sh'
 # session, timeout 10); enableToolCallRecordHook (ON for personal, #353) ->
 # the record hook on SessionStart and PreToolUse / PostToolUse /
-# PostToolUseFailure / PermissionDenied (Claude only); each capability adds
-# exactly its own events, and all four false -> no hooks key at all.
+# PostToolUseFailure / PermissionDenied (Claude only); enableJaReplyGuardHook
+# (ON for personal, #497) -> personal-ja-reply-guard as a second Stop entry
+# (timeout 10, Claude only); each capability adds exactly its own entries,
+# and all five false -> no hooks key at all.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -705,11 +707,12 @@ if [[ "$bypass_hit" -eq 0 ]]; then
   ok "test passed: known equivalent read/exfil paths are NOT covered (matchers are steering, not a boundary)"
 fi
 
-section "claude settings hook registration (#137 / #199 / #225 / #353)"
+section "claude settings hook registration (#137 / #199 / #225 / #353 / #497)"
 
 # 8a) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks,
-#     enableHerdrIntegration AND enableToolCallRecordHook are ON, so the
-#     managed settings.json registers EXACTLY six events:
+#     enableHerdrIntegration, enableToolCallRecordHook AND
+#     enableJaReplyGuardHook are ON, so the managed settings.json registers
+#     EXACTLY six events:
 #     PreToolUse / matcher Bash / one command hook -> personal-safe-gh-hook
 #     (#137); PostToolUse / matcher Edit|Write / one command hook ->
 #     personal-fast-edit-check and a matcher-less Stop / one command hook ->
@@ -726,6 +729,9 @@ section "claude settings hook registration (#137 / #199 / #225 / #353)"
 #     (no matcher), and adds PostToolUseFailure / PermissionDenied (matcher
 #     "*") — every record entry "async": true, timeout 10 — so the three
 #     pre-existing entries stay at index 0, byte-identical (8e pins that).
+#     #497 (agent-tools#588) appends personal-ja-reply-guard as the SECOND
+#     entry of Stop (no matcher, timeout 10, no async: it must be able to
+#     stop the turn), after scope-qa at index 0.
 #     Every agent-tools body is the agent-tools-deployed absolute path
 #     (agent-tools#146 stable-path contract). Pinned as the WHOLE hooks
 #     object (key-sorted; entry order kept), not just "a hooks key exists":
@@ -738,15 +744,16 @@ expected_edit_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-fast
 expected_stop_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa")"
 expected_session_cmd="bash $(shell_single_quote "$HOME/.claude/hooks/herdr-agent-state.sh") session"
 expected_record_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-tool-call-record-hook")"
+expected_ja_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-ja-reply-guard")"
 expected_hooks="$(jq -n -S --arg gh "$expected_hook_cmd" --arg edit "$expected_edit_cmd" \
   --arg stop "$expected_stop_cmd" --arg session "$expected_session_cmd" \
-  --arg record "$expected_record_cmd" '
+  --arg record "$expected_record_cmd" --arg ja "$expected_ja_cmd" '
   def hook($cmd): {type: "command", command: $cmd};
   def record: {hooks: [hook($record) + {async: true, timeout: 10}]};
   {
     PreToolUse: [{matcher: "Bash", hooks: [hook($gh)]}, record + {matcher: "*"}],
     PostToolUse: [{matcher: "Edit|Write", hooks: [hook($edit)]}, record + {matcher: "*"}],
-    Stop: [{hooks: [hook($stop)]}],
+    Stop: [{hooks: [hook($stop)]}, {hooks: [hook($ja) + {timeout: 10}]}],
     SessionStart: [{matcher: "^(startup|resume|clear|compact|fork)$",
       hooks: [hook($session) + {timeout: 10}]}, record],
     PostToolUseFailure: [record + {matcher: "*"}],
@@ -754,7 +761,7 @@ expected_hooks="$(jq -n -S --arg gh "$expected_hook_cmd" --arg edit "$expected_e
   }')"
 actual_hooks="$(jq -S '.hooks' "$off_file" 2>/dev/null)" || actual_hooks=""
 if [[ -n "$actual_hooks" && "$actual_hooks" == "$expected_hooks" ]]; then
-  ok "test passed: committed personal registers exactly the pinned hooks object (six events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; absolute paths; no other key)"
+  ok "test passed: committed personal registers exactly the pinned hooks object (six events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
 else
   fail "test failed: hook registration differs from the pinned hooks object (diff on stderr: expected, then rendered)"
   diff <(printf '%s\n' "$expected_hooks") <(printf '%s\n' "$actual_hooks") >&2 || true
@@ -772,6 +779,7 @@ if [[ ! -e "$off_home/.claude/agent-tools/scripts/personal-safe-gh-hook" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-fast-edit-check" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-changed-scope-qa" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-tool-call-record-hook" \
+  && ! -e "$off_home/.claude/agent-tools/scripts/personal-ja-reply-guard" \
   && ! -e "$off_home/.claude/hooks/herdr-agent-state.sh" ]]; then
   ok "test passed: registration renders without any hook body present (agent-tools sync / herdr integration install can come later; runtime is fail-open)"
 else
@@ -787,7 +795,8 @@ fi
 #     test, without a fixture that drifts). Since #353 three events hold two
 #     entries, so "that capability's events" means its ENTRIES: the first
 #     element of PreToolUse / PostToolUse / SessionStart belongs to the
-#     pre-existing capability and the second to the record hook. All four
+#     pre-existing capability and the second to the record hook; since
+#     #497 the second element of Stop belongs to the ja guard. All five
 #     false -> no hooks key at all (an empty "hooks": {} must never be
 #     emitted), and the all-off render is the all-on render minus the whole
 #     hooks key.
@@ -799,8 +808,10 @@ render_flip herdr-off enableHerdrIntegration=false
 herdr_off_file="$flip_file"
 render_flip record-off enableToolCallRecordHook=false
 record_off_file="$flip_file"
+render_flip ja-off enableJaReplyGuardHook=false
+ja_off_file="$flip_file"
 render_flip hooks-off enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
-  enableHerdrIntegration=false enableToolCallRecordHook=false
+  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
 both_off_file="$flip_file"
 hooks_off_src="$flip_src"
 # check_hook_flip_off LABEL FILE EXPECTED_EVENTS DEL_FILTER
@@ -822,19 +833,22 @@ check_hook_flip_off "enableGitHubIsolatedReader=false" "$reader_off_file" \
   '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.PreToolUse[0])'
 check_hook_flip_off "enableQualityLoopHooks=false" "$quality_off_file" \
-  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart"]' \
-  'del(.hooks.PostToolUse[0]) | del(.hooks.Stop)'
+  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
+  'del(.hooks.PostToolUse[0]) | del(.hooks.Stop[0])'
 check_hook_flip_off "enableHerdrIntegration=false" "$herdr_off_file" \
   '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.SessionStart[0])'
 check_hook_flip_off "enableToolCallRecordHook=false" "$record_off_file" \
   '["PostToolUse","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse[1]) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
+check_hook_flip_off "enableJaReplyGuardHook=false" "$ja_off_file" \
+  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
+  'del(.hooks.Stop[1])'
 on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
 both_off_norm="$(yq -p json -o json '.' "$both_off_file")"
 if [[ "$(yq -p json -o yaml '.hooks // "absent"' "$both_off_file")" == "absent" ]] \
   && [[ -n "$both_off_norm" && "$on_minus_hooks" == "$both_off_norm" ]]; then
-  ok "test passed: all four hook capabilities false emits no hooks key (no empty object) and differs from the on-render by exactly the hooks key"
+  ok "test passed: all five hook capabilities false emits no hooks key (no empty object) and differs from the on-render by exactly the hooks key"
 else
   fail "test failed: all-off render is not the on-render minus the hooks key (gate leaked another change, emitted an empty hooks object, or invalid JSON)"
   status=1
@@ -847,15 +861,19 @@ fi
 #     other combination exercises (Codex review, PR #226); record-only is
 #     the path where every record entry is the FIRST (and only) element of
 #     its event and PostToolUseFailure / PermissionDenied are preceded by a
-#     separator from SessionStart (#353).
-render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false
+#     separator from SessionStart (#353); ja-only is the path where the ja
+#     entry is the FIRST (and only) element of Stop and Stop is the first
+#     event emitted (#497).
+render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
 reader_only_file="$flip_file"
-render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false
+render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
 quality_only_file="$flip_file"
-render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false
+render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
 herdr_only_file="$flip_file"
-render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false
+render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableJaReplyGuardHook=false
 record_only_file="$flip_file"
+render_flip ja-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false
+ja_only_file="$flip_file"
 # check_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
 check_hook_single_on() {
   local label="$1" file="$2" expected_events="$3" del_filter="$4" events norm on_minus
@@ -870,9 +888,10 @@ check_hook_single_on() {
   fi
 }
 check_hook_single_on "only enableGitHubIsolatedReader" "$reader_only_file" '["PreToolUse"]' 'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
-check_hook_single_on "only enableQualityLoopHooks" "$quality_only_file" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse[1]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
+check_hook_single_on "only enableQualityLoopHooks" "$quality_only_file" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse[1]) | del(.hooks.Stop[1]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
 check_hook_single_on "only enableHerdrIntegration" "$herdr_only_file" '["SessionStart"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
 check_hook_single_on "only enableToolCallRecordHook" "$record_only_file" '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart"]' 'del(.hooks.PreToolUse[0]) | del(.hooks.PostToolUse[0]) | del(.hooks.Stop) | del(.hooks.SessionStart[0])'
+check_hook_single_on "only enableJaReplyGuardHook" "$ja_only_file" '["Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop[0]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
 
 # 8e) #353 must not disturb the pre-existing registrations: with the record
 #     hook flipped false, the rendered file is BYTE-identical to what the
@@ -888,6 +907,16 @@ if [[ "$(yq -p json -o yaml '.hooks.PreToolUse | length' "$record_off_file")" ==
   ok "test passed: enableToolCallRecordHook=false leaves one entry in PreToolUse / PostToolUse / SessionStart (the pre-#353 shape)"
 else
   fail "test failed: enableToolCallRecordHook=false render still carries a second entry in PreToolUse / PostToolUse / SessionStart"
+  status=1
+fi
+# 8f) The same for #497: with the ja guard flipped false, Stop is back to the
+#     single scope-qa entry of the pre-#497 shape (the normalized compare in
+#     8c covers the rest).
+if [[ "$(yq -p json -o yaml '.hooks.Stop | length' "$ja_off_file")" == "1" \
+  && "$(yq -p json -o yaml '.hooks.Stop[0].hooks[0].command' "$ja_off_file")" == "$expected_stop_cmd" ]]; then
+  ok "test passed: enableJaReplyGuardHook=false leaves Stop with the one scope-qa entry (the pre-#497 shape)"
+else
+  fail "test failed: enableJaReplyGuardHook=false render does not leave Stop with only the scope-qa entry"
   status=1
 fi
 
@@ -993,7 +1022,7 @@ else
   status=1
 fi
 
-# 9e) All four hook capabilities false: the live hooks key goes (it would
+# 9e) All five hook capabilities false: the live hooks key goes (it would
 #     otherwise keep a hook the capabilities turned off), the rest equals the
 #     all-off render plus the hand-kept key. The source is 8c's hooks-off
 #     copy (a render leaves its source as it was).
