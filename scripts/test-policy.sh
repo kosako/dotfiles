@@ -1689,4 +1689,39 @@ for script in doctor preflight validate-policy install-packages private-backup; 
 done
 ok "test passed: the reporting scripts end a report write in flight from their traps"
 
+# node_without_corepack (#500): succeeds with the major only for one
+# `vMAJOR[.rest]` word whose major is 25 or more (read in base 10); a node
+# that is missing, fails or prints anything else gives no answer. PATH holds
+# only the fake node's directory (the function runs nothing else).
+nwc_bin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-policy-nwc.XXXXXX")"
+tmp_roots+=("$nwc_bin")
+nwc_case() {
+  local label="$1" body="$2" expected="$3" got rc=0
+  if [[ -n "$body" ]]; then
+    printf '#!/bin/sh\n%s\n' "$body" > "$nwc_bin/node"
+    chmod +x "$nwc_bin/node"
+  else
+    rm -f "$nwc_bin/node"
+  fi
+  got="$(PATH="$nwc_bin" node_without_corepack)" || rc=$?
+  if [[ "$expected" == fail && "$rc" -ne 0 && -z "$got" ]] \
+    || [[ "$expected" != fail && "$rc" -eq 0 && "$got" == "$expected" ]]; then
+    ok "test passed: node_without_corepack $label"
+  else
+    fail "test failed: node_without_corepack $label: expected $expected, got rc=$rc '$got'"
+    exit 1
+  fi
+}
+nwc_case "Node 26 -> 26" "echo v26.13.0" 26
+nwc_case "Node 25 (major only) -> 25" "echo v25" 25
+nwc_case "a leading zero is base 10 -> 25" "echo v025.1.0" 25
+nwc_case "a pre-release Node 27 -> 27" "echo v27.0.0-alpha.0" 27
+nwc_case "Node 24 still bundles corepack -> fail" "echo v24.22.1" fail
+nwc_case "no leading v -> fail" "echo 26.13.0" fail
+nwc_case "a second line -> fail" "printf 'v26.13.0\nv24.22.1\n'" fail
+nwc_case "a second word -> fail" "echo v26.13.0 x" fail
+nwc_case "empty output -> fail" ":" fail
+nwc_case "node fails -> fail" "echo v26.13.0; exit 1" fail
+nwc_case "no node on PATH -> fail" "" fail
+
 ok "policy tests passed"

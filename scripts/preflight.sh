@@ -279,7 +279,21 @@ section "commands"
 # prerequisite outside it — git (Xcode Command Line Tools), brew (the
 # bootstrap), node / npm / corepack (runtime via mise). test-preflight.sh
 # pins that, so a tool dropped from the catalog cannot keep warning here (#259).
+# corepack comes with node only up to Node 24: a node that ships without it
+# (Node 25 on, #500) makes its absence the normal state, not a missing tool,
+# except under corepackMode=enable, whose pnpm / yarn shims need it (as in
+# doctor's Corepack section).
+corepack_mode="$(capability_value "$profile" corepackMode)"
 for command_name in git chezmoi brew op node npm corepack mise direnv yq shellcheck; do
+  if [[ "$command_name" == corepack ]] && ! command -v corepack >/dev/null 2>&1 \
+    && corepack_node_major="$(node_without_corepack)"; then
+    if [[ "$corepack_mode" == "enable" ]]; then
+      warn "corepack: not found, and corepackMode=enable needs it: Node $corepack_node_major ships without it (since Node 25); install it with 'npm i -g corepack', then run 'corepack enable' manually"
+    else
+      ok "corepack: not on PATH, as Node $corepack_node_major ships without it (since Node 25); install it with 'npm i -g corepack' if a project needs it"
+    fi
+    continue
+  fi
   command_status "$command_name" || true
 done
 

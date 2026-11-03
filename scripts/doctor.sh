@@ -786,7 +786,17 @@ ok "corepackMode=$corepack_mode"
 if [[ "$corepack_mode" == "off" ]]; then
   ok "corepack intentionally unmanaged"
 elif ! command -v corepack >/dev/null 2>&1; then
-  warn "corepack not found"
+  # Node 25 ships without corepack (#500): there, report mode has nothing to
+  # report, while enable mode still needs it for the pnpm / yarn shims.
+  if corepack_node_major="$(node_without_corepack)"; then
+    if [[ "$corepack_mode" == "enable" ]]; then
+      warn "corepackMode=enable but corepack not found: Node $corepack_node_major ships without it (since Node 25); install it with 'npm i -g corepack', then run 'corepack enable' manually"
+    else
+      ok "corepack not on PATH: Node $corepack_node_major ships without it (since Node 25); install it with 'npm i -g corepack' if a project needs it"
+    fi
+  else
+    warn "corepack not found"
+  fi
 else
   ok "corepack: $(display_safe "$(corepack --version 2>/dev/null || true)")"
   if [[ "$corepack_mode" == "enable" ]]; then

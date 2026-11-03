@@ -853,8 +853,9 @@ profile_installs_source() {
 # signal is deliberately weak ("not in S's inventory but on PATH") because
 # it never guesses which other manager owns the tool. Undeclared detection
 # uses `brew leaves` (top-level installs) so dependencies are not flagged,
-# excludes node-bundled npm globals (npm, corepack: runtime domain, like
-# node/go/uv), and is skipped for mas (the App Store carries many apps
+# excludes the runtime's npm globals (npm, and corepack: bundled with node
+# up to Node 24, `npm i -g corepack` from Node 25 on, #500; runtime domain,
+# like node/go/uv), and is skipped for mas (the App Store carries many apps
 # unrelated to the dev catalog; flagging them all would be noise).
 
 # Probe the selected local Go without accepting a toolchain request from the
@@ -1126,7 +1127,7 @@ report_catalog_drift() {
       # they can land in the scanned bin dir next to `go install` packages.
       # They are not catalog-managed go_install sprawl -- they cannot be
       # declared or removed via the catalog -- so exclude them from undeclared
-      # detection, the same way npm's node-bundled npm/corepack are excluded.
+      # detection, the same way npm's runtime npm/corepack are excluded.
       case "$b" in
         go|gofmt) continue ;;
       esac
@@ -1377,6 +1378,22 @@ command_status() {
   fi
   warn "$command_name: not found"
   return 1
+}
+
+# node_without_corepack — print the major version of the node on PATH and
+# succeed when that node is one that ships without corepack (Node 25 dropped
+# it from the bundle, #500), so a missing corepack is the normal state there.
+# Fails when node is missing, not runnable or prints anything but one
+# `vMAJOR[.rest]` version word:
+# then nothing says corepack is meant to be absent, and the caller keeps its
+# "not found" warn. The major is read in base 10 (a leading zero is not octal).
+node_without_corepack() {
+  local version major
+  version="$(node --version 2>/dev/null </dev/null)" || return 1
+  [[ "$version" =~ ^v([0-9]+)(\.[^[:space:]]*)?$ ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  (( 10#$major >= 25 )) || return 1
+  printf '%s\n' "$((10#$major))"
 }
 
 # Pure check that an npm `before` cutoff reflects the configured min-release-age

@@ -5862,6 +5862,56 @@ else
   status=1
 fi
 
+# COREPACK-C..F) corepack absent, by what the node on PATH says (#500): a
+# node that ships without it (Node 25 on) makes the absence the normal state
+# under report mode (ok with the install hint, no warn), while Node 24, a node
+# whose version cannot be read, and enable mode (the pnpm / yarn shims need
+# corepack) still warn. Hermetic PATH: the host stubs, yq and git, a fake node
+# that answers --version only, and the system dirs without node or corepack.
+cp_bin="$fixture_home/cp-bin"
+cp_sysbin="$fixture_home/cp-sysbin"
+mkdir -p "$cp_bin" "$cp_sysbin"
+ln -sf "$(command -v yq)" "$cp_bin/yq"
+ln -sf "$(command -v git)" "$cp_bin/git"
+for host_tool in op herdr codex opencode brew npm gh; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$cp_bin/$host_tool"
+done
+ln -s /bin/* "$cp_sysbin/"
+ln -sf /usr/bin/* "$cp_sysbin/"
+rm -f "$cp_sysbin/corepack" "$cp_sysbin/node"
+cp_path="$cp_bin:$cp_sysbin"
+# cp_node VERSION_LINE — the fake node's answer to --version (exit 0).
+cp_node() {
+  printf '#!/bin/sh\n[ "$1" = --version ] && printf "%%s\\n" %s && exit 0\nexit 1\n' "$(printf '%q' "$1")" \
+    > "$cp_bin/node"
+  chmod +x "$cp_bin/node"
+}
+cp_doctor() {
+  env -i PATH="$cp_path" HOME="$fixture_home" "$1/doctor.sh" personal
+}
+cp_report_ok="[ok] corepack not on PATH: Node 26 ships without it (since Node 25); install it with 'npm i -g corepack' if a project needs it"
+if [[ -n "$(PATH="$cp_path"; hash -r; command -v corepack || true)" ]]; then
+  fail "test failed: corepack fixture: corepack still resolves on the hermetic PATH"
+  status=1
+else
+  cp_node v26.13.0
+  doctor_expect "corepackMode=report + Node 26 without corepack -> ok with the install hint, no warn" \
+    cp_doctor "$SCRIPT_DIR" -- "$cp_report_ok" ! "corepack not found"
+  cp_node v24.22.1
+  doctor_expect "corepackMode=report + Node 24 without corepack -> warn" \
+    cp_doctor "$SCRIPT_DIR" -- "[warn] corepack not found" ! "corepack not on PATH"
+  cp_node not-a-version
+  doctor_expect "corepackMode=report + unreadable node version without corepack -> warn" \
+    cp_doctor "$SCRIPT_DIR" -- "[warn] corepack not found" ! "corepack not on PATH"
+  cp_node v26.13.0
+  set_capability_all "$cp_root" corepackMode enable
+  doctor_expect "corepackMode=enable + Node 26 without corepack -> warn with the install hint" \
+    cp_doctor "$cp_root/scripts" -- \
+    "[warn] corepackMode=enable but corepack not found: Node 26 ships without it (since Node 25); install it with 'npm i -g corepack', then run 'corepack enable' manually" \
+    ! "corepack not on PATH" ! "[warn] corepack not found"
+fi
+rm -rf "$cp_bin" "$cp_sysbin"
+
 # DRIFT-A) A token-shaped line in ~/.npmrc is warned by name only (the value
 # never appears in the output), doctor stays exit 0 (#148); the managed-by
 # header on its line 1 is ok'd. The status check itself must skip — as
