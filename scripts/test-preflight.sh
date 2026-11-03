@@ -462,8 +462,9 @@ fi
 
 # Commands section, corepack (#500): a node that ships without corepack (Node
 # 25 on) makes its absence the normal state, so the line is an ok with the
-# install hint; Node 24 and a node whose version cannot be read keep the
-# "not found" warn. Hermetic PATH: yq and git, a fake node that answers
+# install hint; Node 24, a node whose version cannot be read, and
+# corepackMode=enable (the pnpm / yarn shims need corepack; a repo copy with
+# the capability set) keep a warn. Hermetic PATH: yq and git, a fake node that answers
 # --version only, and the system dirs without node or corepack.
 pf_cp_home="$fixture_home/corepack"
 pf_cp_bin="$fixture_home/corepack-bin"
@@ -476,14 +477,16 @@ ln -sf /usr/bin/* "$pf_cp_sysbin/"
 rm -f "$pf_cp_sysbin/corepack" "$pf_cp_sysbin/node"
 pf_cp_path="$pf_cp_bin:$pf_cp_sysbin"
 # pf_cp_case LABEL NODE_VERSION_LINE EXPECT... [! ABSENT...] — one preflight
-# run with a fake node answering NODE_VERSION_LINE to --version.
+# run (of $pf_cp_preflight) with a fake node answering NODE_VERSION_LINE to
+# --version.
+pf_cp_preflight="$SCRIPT_DIR/preflight.sh"
 pf_cp_case() {
   local label="$1" out rc=0
   printf '#!/bin/sh\n[ "$1" = --version ] && printf "%%s\\n" %s && exit 0\nexit 1\n' "$(printf '%q' "$2")" \
     > "$pf_cp_bin/node"
   chmod +x "$pf_cp_bin/node"
   shift 2
-  out="$(env -i PATH="$pf_cp_path" HOME="$pf_cp_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/preflight.sh" personal 2>&1)" || rc=$?
+  out="$(env -i PATH="$pf_cp_path" HOME="$pf_cp_home" GIT_CONFIG_NOSYSTEM=1 "$pf_cp_preflight" personal 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     printf '%s\n' "$out" >&2
     miss "corepack: $label: preflight must stay exit 0, exited $rc"
@@ -502,6 +505,14 @@ else
   pf_cp_case "Node 24 without corepack -> warn" v24.22.1 "[warn] corepack: not found" ! "corepack: not on PATH"
   pf_cp_case "unreadable node version without corepack -> warn" not-a-version \
     "[warn] corepack: not found" ! "corepack: not on PATH"
+  pf_cp_root="$fixture_home/corepack-enable-repo"
+  copy_repo_fixture "$pf_cp_root"
+  set_capability_all "$pf_cp_root" corepackMode enable
+  pf_cp_preflight="$pf_cp_root/scripts/preflight.sh"
+  pf_cp_case "corepackMode=enable + Node 26 without corepack -> warn with the install hint" v26.13.0 \
+    "[warn] corepack: not found, and corepackMode=enable needs it: Node 26 ships without it (since Node 25); install it with 'npm i -g corepack', then run 'corepack enable' manually" \
+    ! "corepack: not on PATH"
+  pf_cp_preflight="$SCRIPT_DIR/preflight.sh"
 fi
 
 # Commands section (#259): every tool preflight checks is declared in the

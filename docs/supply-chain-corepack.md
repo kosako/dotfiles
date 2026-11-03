@@ -46,7 +46,7 @@ corepack enable
 - corepack が PATH に無いときは、PATH の node の版で分ける(#500)。Node 25 から corepack は node に同梱されないので、Node 25 以降では無いのが普通の状態になる。
   - `report`: Node 25 以降なら warning にせず、「使うなら `npm i -g corepack`」と案内する。Node 24 以下、または node の版を読めないときは warning。
   - `enable`: Node 25 以降でも warning (pnpm / yarn の shim には corepack が要る)。`npm i -g corepack` の後に `corepack enable` を手動で実行するよう案内する。
-- preflight の必要 command の一覧でも、Node 25 以降の node では corepack が無くても warning にしない。
+- preflight の必要 command の一覧も同じに扱う。Node 25 以降の node では、corepack が無くても `report` / `off` では warning にせず、`enable` では warning を残す。
 
 ## Node 25 以降で corepack を使う
 
