@@ -13,6 +13,15 @@
        per-invocation approval.
        `gh auth status` is not allowed: prefix matching cannot exclude flags
        that display tokens, so even the bare command stays behind approval.
+       Read-only herdr / GitHub reads every session uses (#502, kept out of
+       the accumulated grants a reset would drop): herdr status, agent list
+       and pane current / list / process-info / read only look at herdr's
+       state and pane output; personal-safe-gh only reads GitHub (the
+       deployed path, built from the home here so no local path is
+       committed); `gh repo view` only in the --json nameWithOwner,
+       defaultBranchRef form (the bare command prints any repo's README into
+       the session). herdr pane split / rename / run / close are NOT
+       allowed: they change panes, and `pane run` executes any command.
 
        Why this file is chezmoi-managed (#139 decision): Codex approval grants
        accumulate ("don't ask again" piles up in local state) and the permission
@@ -78,6 +87,11 @@ prefix_rule(pattern=["gh", "pr", "diff"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "checks"], decision="allow")
 prefix_rule(pattern=["gh", "issue", "view"], decision="allow")
 prefix_rule(pattern=["gh", "issue", "list"], decision="allow")
+prefix_rule(pattern=["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"], decision="allow")
+prefix_rule(pattern=[{{ printf "%q" (joinPath .chezmoi.homeDir ".codex/agent-tools/scripts/personal-safe-gh") }}], decision="allow")
+prefix_rule(pattern=["herdr", "status"], decision="allow")
+prefix_rule(pattern=["herdr", "agent", "list"], decision="allow")
+prefix_rule(pattern=["herdr", "pane", ["current", "list", "process-info", "read"]], decision="allow")
 prefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")
 prefix_rule(pattern=["git", "clean"], decision="prompt")
 prefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")
