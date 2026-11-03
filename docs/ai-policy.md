@@ -19,8 +19,13 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 原則(全 tool 共通):
 
 - **read(ローカル完結・読み取り)は無確認で許可してよい**。Codex baseline の allow は
-  read 系サブコマンド(`gh pr view/list/diff/checks`、`gh issue view/list`)と
-  ローカル git 操作(`commit/add/checkout`)のみ。`gh auth status` は prefix 一致の allow では
+  read 系サブコマンド(`gh pr view/list/diff/checks`、`gh issue view/list`)、GitHub を読むだけの wrapper(配備した
+  `personal-safe-gh` の絶対 path)、herdr の状態と pane の出力を読む command(`herdr status` /
+  `agent list` / `pane current`・`list`・`process-info`・`read`)と、ローカル git 操作
+  (`commit/add/checkout`)のみ(#502)。pane を作る・変える・閉じる `herdr pane split` / `rename` /
+  `close` と、任意の command を実行する `herdr pane run` は allow に入れない。`gh repo view` は
+  どの形も入れない。prefix は後ろの `--jq env` / `--template` を止められず、環境変数(`GH_TOKEN` を
+  含む)を表示できるため(#503 の review)。上の gh の read の allow にも同じ穴がある(#504)。`gh auth status` は prefix 一致の allow では
   token を表示する flag を除外できないため、引数なしも含めて allow から外し都度承認とする。
   `git clone` も allow に**入れない**
   (任意 remote への network 取得で、URL 自体が injection 下では covert channel になる —
