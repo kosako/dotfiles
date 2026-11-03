@@ -98,7 +98,7 @@ CI の `bash32` job(macOS の runner)が、`/bin/bash` を PATH の先頭に置�
 
 ## preflight.sh
 
-導入前の危険検知を行う。確認する内容は次のとおり: system(arch・macOS version・Xcode Command Line Tools)、既存 home file(`~/.gitconfig` / `~/.npmrc`)、shell config の apply impact(`shell-extra` module が active な profile で `~/.zshenv` / `~/.zshrc` / `~/.zprofile` / `~/.config/starship.toml` が既にあれば apply が置換する warn と退避先の案内)、ssh config の apply impact(`ssh-1password` module が active な profile で `~/.ssh/config` が既にあれば apply が置換する warn。`~/.ssh/config.local` は存在のみで中身は読まない)、`~/.config` の権限(0700 でなければ apply が 0700 に変える warn)、既存 Git config(`~/.config/git/config`、context 別 identity file の有無、global identity の設定有無。値は表示しない)、global gitignore(`git-ignore` module が active な profile で `~/.config/git/ignore` が既にあれば apply が置換する warn — git は global excludes を 1 file しか読まないので host 固有 pattern は `.git/info/exclude` へ。`core.excludesFile` が global / system に設定済みなら managed file が読まれない warn、明示的に空なら「global excludes を読まない」warn。値は表示しない、#248)、herdr config の apply impact(`herdr-config` module が active な profile で `~/.config/herdr/config.toml` が既にあれば apply が置換する warn — herdr は config を 1 file しか読まず `.local` が無いので、host 固有の設定は managed file に入れる。中身は読まない、#261)、agent-tools の残量の読み取り口の apply impact(`agent-tools-usage-reader` module が active な profile で `~/.config/agent-tools/usage-reader.json` が既にあれば apply が置換する warn — wrapper は 1 file しか読まず `.local` が無いので diff してから。中身は読まない、#301)、git hook gates の apply impact(`enableGitHookGates=true` の profile で agent-tools deploy の 4 script が揃っているか — 欠けていれば apply は commit gate を武装しない warn — と、global `core.hooksPath` が managed 以外に設定済みかどうか。値は表示しない)、必要 command(catalog に宣言された tool と、catalog 外の前提 git / brew / node / npm / corepack だけ。#259)、Homebrew、dotfiles root の存在と書き込み可否、標準 project root。
+導入前の危険検知を行う。確認する内容は次のとおり: system(arch・macOS version・Xcode Command Line Tools)、既存 home file(`~/.gitconfig` / `~/.npmrc`)、shell config の apply impact(`shell-extra` module が active な profile で `~/.zshenv` / `~/.zshrc` / `~/.zprofile` / `~/.config/starship.toml` が既にあれば apply が置換する warn と退避先の案内)、ssh config の apply impact(`ssh-1password` module が active な profile で `~/.ssh/config` が既にあれば apply が置換する warn。`~/.ssh/config.local` は存在のみで中身は読まない)、`~/.config` の権限(0700 でなければ apply が 0700 に変える warn)、既存 Git config(`~/.config/git/config`、context 別 identity file の有無、global identity の設定有無。値は表示しない)、global gitignore(`git-ignore` module が active な profile で `~/.config/git/ignore` が既にあれば apply が置換する warn — git は global excludes を 1 file しか読まないので host 固有 pattern は `.git/info/exclude` へ。`core.excludesFile` が global / system に設定済みなら managed file が読まれない warn、明示的に空なら「global excludes を読まない」warn。値は表示しない、#248)、herdr config の apply impact(`herdr-config` module が active な profile で `~/.config/herdr/config.toml` が既にあれば apply が置換する warn — herdr は config を 1 file しか読まず `.local` が無いので、host 固有の設定は managed file に入れる。中身は読まない、#261)、agent-tools の残量の読み取り口の apply impact(`agent-tools-usage-reader` module が active な profile で `~/.config/agent-tools/usage-reader.json` が既にあれば apply が置換する warn — wrapper は 1 file しか読まず `.local` が無いので diff してから。中身は読まない、#301)、git hook gates の apply impact(`enableGitHookGates=true` の profile で agent-tools deploy の 4 script が揃っているか — 欠けていれば apply は commit gate を武装しない warn — と、global `core.hooksPath` が managed 以外に設定済みかどうか。値は表示しない)、必要 command(catalog に宣言された tool と、catalog 外の前提 git / brew / node / npm / corepack だけ。#259。corepack を同梱しない node(Node 25 以降)では、corepack が無くても install の案内つきの ok。#500)、Homebrew、dotfiles root の存在と書き込み可否、標準 project root。
 副作用は持たない。既存 file や command 不足の warning は report-only として exit 0 のままにする。
 
 ```sh
@@ -211,6 +211,8 @@ herdr config の apply impact(既存 `~/.config/herdr/config.toml` の置換 war
 agent-tools の残量の読み取り口の apply impact(既存 `~/.config/agent-tools/usage-reader.json` の置換 warn、work の left-as-is、不在時の ok、#301)/
 policy validation 失敗時のみ非 0 / commands 節が確認する tool がすべて catalog(name / pkg / bin)か
 catalog 外の前提(git / brew / node / npm / corepack)であること(catalog から外れた tool が毎回 warn しない、#259)/
+corepack が PATH に無いとき、Node 26 の node なら install の案内つきの ok で warn を出さず、Node 24 と版を読めない node なら
+not found の warn(fake の node と、node と corepack を除いた hermetic な PATH、#500)/
 git hook gates の deploy 4 本の readiness(完全な deploy は script ごとと武装と hooksPath が ok。hooksPath は `~/.gitconfig` に直接書いた形と、
 apply が配線する形(`~/.gitconfig` の `[include]` が読む `hooks.gitconfig` に書く。読むには `--includes` が要る、#196)の両方で確かめる。identity gate が欠けた旧 deploy は
 その script と「武装しない」の warn、script の path が directory でも不完全とする、#307 / #392)/ global の identity・hooksPath・excludesFile、usage-reader.json、herdr config の
@@ -432,6 +434,9 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   `report_write_stop` が書き手を残さず、書きかけの行が届かず、その後に書き進めないこと。trap の `report_write_stop` の
   最中に 2 回目の signal(pgrep の shim から HUP)が来ても書き手が終わること。signal で終わるのは期待どおりなので、
   bash 3.2 が pipeline を回収するときに出す `Terminated: 15` / `Hangup: 1` は表示しない。
+- `node_without_corepack`(#500): PATH の node の `--version` が 1 語の `vMAJOR[.残り]` で major が 25 以上のときだけ、
+  major を出して成功すること(先頭の 0 は 8 進にしない)。Node 24、`v` の無い版、2 行目や 2 語目のある出力、空の出力、
+  失敗する node、PATH に無い node は、何も出さずに失敗すること。
 - doctor / preflight / validate-policy / install-packages / private-backup の EXIT trap(doctor と private-backup は
   INT / TERM の trap も)が `report_write_stop` を呼ぶこと(静的検査)。
 
@@ -720,6 +725,9 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   JSON として読めない listing・npm の error の object・失敗する count・読めない listing は warn で exit 0。#443)。7 日の待ちと
   exclude の数は fake の別の応答を読むので、1 回の run でそれぞれの状態を 1 つずつ確かめる。
 - Corepack(#150): `corepackMode=off` なら intentionally unmanaged、report なら fake corepack の version 行を表示すること。
+  corepack が PATH に無いとき(#500): Node 26 の node なら report は install の案内つきの ok で warn を出さず、Node 24 と
+  版を読めない node は `corepack not found` の warn、`corepackMode=enable` は Node 26 でも install と `corepack enable` の
+  案内つきの warn。fake の node と、node と corepack を除いた hermetic な PATH で回す。
 - いずれの場合も doctor が exit 0 を維持すること(report-only)。
 
 ## install-packages.sh
