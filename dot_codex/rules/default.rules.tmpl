@@ -18,10 +18,12 @@
        and pane current / list / process-info / read only look at herdr's
        state and pane output; personal-safe-gh only reads GitHub (the
        deployed path, built from the home here so no local path is
-       committed); `gh repo view` only in the --json nameWithOwner,
-       defaultBranchRef form (the bare command prints any repo's README into
-       the session). herdr pane split / rename / run / close are NOT
+       committed). herdr pane split / rename / run / close are NOT
        allowed: they change panes, and `pane run` executes any command.
+       `gh repo view` is NOT allowed in any form: a prefix cannot stop a
+       later `--jq env` / `--template`, which prints the environment (a
+       GH_TOKEN in it included; Codex review R1, PR #503). The gh read
+       allows above share that gap (#504).
 
        Why this file is chezmoi-managed (#139 decision): Codex approval grants
        accumulate ("don't ask again" piles up in local state) and the permission
@@ -87,7 +89,6 @@ prefix_rule(pattern=["gh", "pr", "diff"], decision="allow")
 prefix_rule(pattern=["gh", "pr", "checks"], decision="allow")
 prefix_rule(pattern=["gh", "issue", "view"], decision="allow")
 prefix_rule(pattern=["gh", "issue", "list"], decision="allow")
-prefix_rule(pattern=["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"], decision="allow")
 prefix_rule(pattern=[{{ printf "%q" (joinPath .chezmoi.homeDir ".codex/agent-tools/scripts/personal-safe-gh") }}], decision="allow")
 prefix_rule(pattern=["herdr", "status"], decision="allow")
 prefix_rule(pattern=["herdr", "agent", "list"], decision="allow")

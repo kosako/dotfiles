@@ -348,26 +348,28 @@ section "codex approval-rules baseline (#139)"
 #    `security -q` / `-v`; prompt for the whole security program, the whole
 #    `gh auth` and the 1Password CLI). They only tighten:
 #    no new allow. #502 adds read-only allows after the gh reads: the
-#    nameWithOwner,defaultBranchRef form of `gh repo view`, the deployed
-#    personal-safe-gh (absolute path) and herdr status / agent list / pane
-#    current / list / process-info / read. Pinned as the EXACT ordered file
+#    deployed personal-safe-gh (absolute path) and herdr status / agent
+#    list / pane current / list / process-info / read. Pinned as the EXACT ordered file
 #    content (same spirit as the settings.json deny exact-set test): this is a
 #    security baseline, so an outward/escalation/credential-display allow
 #    sneaking in — or a read rule silently swapped — must fail the test, not
 #    just "some rules exist".
 rules_file="${home:-}/.codex/rules/default.rules"
-expected_rules_head=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")\nprefix_rule(pattern=["gh", "repo", "view", "--json", "nameWithOwner,defaultBranchRef"], decision="allow")'
+expected_rules_head=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")'
 expected_rules_tail=$'prefix_rule(pattern=["herdr", "status"], decision="allow")\nprefix_rule(pattern=["herdr", "agent", "list"], decision="allow")\nprefix_rule(pattern=["herdr", "pane", ["current", "list", "process-info", "read"]], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu", "--mirror", "--delete", "-d"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd", "-M"]], decision="prompt")\nprefix_rule(pattern=["git", "stash", ["drop", "clear"]], decision="prompt")\nprefix_rule(pattern=["git", "worktree", "remove", ["--force", "-f"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")\nprefix_rule(pattern=["env"], decision="forbidden")\nprefix_rule(pattern=["printenv"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")\nprefix_rule(pattern=["gh", "auth"], decision="prompt")\nprefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security"], decision="prompt")\nprefix_rule(pattern=["op"], decision="prompt")'
 # The safe-gh allow names the deployed wrapper by its absolute path, built
-# from the home the template renders with (#502).
+# from the home the template renders with (#502), as a rules string literal
+# (the template's printf "%q": a backslash or a double quote in the home is
+# escaped; Codex review R2, PR #503).
 safe_gh_path="$HOME/.codex/agent-tools/scripts/personal-safe-gh"
-safe_gh_rule="prefix_rule(pattern=[\"$safe_gh_path\"], decision=\"allow\")"
+safe_gh_literal="$(printf '%s' "$safe_gh_path" | sed 's/[\\"]/\\&/g')"
+safe_gh_rule="prefix_rule(pattern=[\"$safe_gh_literal\"], decision=\"allow\")"
 expected_rules="$expected_rules_head"$'\n'"$safe_gh_rule"$'\n'"$expected_rules_tail"
 if [[ ! -f "$rules_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
   status=1
 elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
-  ok "test passed: committed personal renders exactly the rules baseline (14 read-only / local allow rules, then #304 / #334's 10 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, ordered; no outward/escalation/credential-display allow, no git clone)"
+  ok "test passed: committed personal renders exactly the rules baseline (13 read-only / local allow rules, then #304 / #334's 10 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, ordered; no outward/escalation/credential-display allow, no git clone)"
 else
   fail "test failed: rules baseline content mismatch; rendered was:"
   cat "$rules_file" >&2
@@ -450,8 +452,14 @@ else
   policy_misses=""
   while IFS='|' read -r want cmd; do
     [[ -n "$want" ]] || continue
-    [[ "$cmd" != @SAFE_GH@* ]] || cmd="$safe_gh_path${cmd#@SAFE_GH@}"
-    read -r -a policy_argv <<< "$cmd"
+    # @SAFE_GH@ stands for the deployed wrapper's path, put in as one argv
+    # element (a home with a space stays one word; Codex review R2, PR #503).
+    if [[ "$cmd" == @SAFE_GH@* ]]; then
+      read -r -a policy_rest <<< "${cmd#@SAFE_GH@}"
+      policy_argv=("$safe_gh_path" ${policy_rest[@]+"${policy_rest[@]}"})
+    else
+      read -r -a policy_argv <<< "$cmd"
+    fi
     policy_rc=0
     policy_out="$(codex execpolicy check --rules "$rules_file" "${policy_argv[@]}" </dev/null 2>/dev/null)" || policy_rc=$?
     if [[ "$policy_rc" -ne 0 ]]; then
@@ -530,8 +538,8 @@ none|git push origin :feat
 allow|git commit -m x --no-verify
 none|git reset HEAD~1 --hard
 none|git -C /tmp/x reset --hard
-allow|gh repo view --json nameWithOwner,defaultBranchRef
-allow|gh repo view --json nameWithOwner,defaultBranchRef kosako/dotfiles
+none|gh repo view --json nameWithOwner,defaultBranchRef
+none|gh repo view --json nameWithOwner,defaultBranchRef --jq env
 none|gh repo view
 none|gh repo view kosako/dotfiles
 none|gh repo view --json description

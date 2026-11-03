@@ -1064,12 +1064,12 @@ Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、既定と各 capability を切った render の
 `hooks.json` がちょうど 1 つの JSON の object であること(Codex は厳格に parse する。手で comma を組む template の
 区切りの誤りを、寛容な yq ではなく jq で捕まえる)、hook capability が全部 false のとき
-apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content(read-only / local の allow 14 と、
+apply 済み file が **削除される**こと(template 自己 gate)、rules baseline の exact content(read-only / local の allow 13 と、
 #304 / #334 の作業を捨てる git の prompt 10・commit / push 直後の hook の skip の forbidden 2・merge / rebase / am / pull 直後の
 `--no-verify` の prompt 1、#334 の secret の床の forbidden 6・prompt 3)と gate の独立性(#139)を確認する。`codex` が install されていれば、render した rules を
 `codex execpolicy check`(rules を評価するだけで何も実行しない)に当て、subcommand の直後の作業を捨てる形は prompt、
 直後の hook の skip は forbidden(`git commit` の allow に勝つ)、日常の形は allow か一致なし、prefix で拾えない形
-(後ろの option・global option)は拾われないことを確かめる(#304)。#502 の読み取りの allow(`herdr status` / `agent list` / `pane current`・`list`・`process-info`・`read`、配備した `personal-safe-gh` の絶対 path、`gh repo view --json nameWithOwner,defaultBranchRef`)は allow で、`herdr pane run` / `split` / `rename` / `close`・`herdr tab list`・ほかの形の `gh repo view`・名前だけの `personal-safe-gh` は一致なしであることも確かめる。CI の render job は version と sha256 を固定した
+(後ろの option・global option)は拾われないことを確かめる(#304)。#502 の読み取りの allow(`herdr status` / `agent list` / `pane current`・`list`・`process-info`・`read`、配備した `personal-safe-gh` の絶対 path)は allow で、`herdr pane run` / `split` / `rename` / `close`・`herdr tab list`・どの形の `gh repo view`・名前だけの `personal-safe-gh` も一致なしであることも確かめる。safe-gh の path は argv の 1 要素として渡し、pin の期待値は `\` と `"` を escape した rules の文字列で組む。CI の render job は version と sha256 を固定した
 codex(release の Linux 用 binary。npm は通さない)を入れてこの評価を回す(#332 F36)。CI の codex は手元の版と同じとは限らないので、
 手元の codex の版が変わったときの解釈の変化は、手元でのこの test と doctor の rules の意味の検査が受け持つ。rules を変える PR は、
 codex の入った手元でもこの test を回す。`codex` が無いと、
