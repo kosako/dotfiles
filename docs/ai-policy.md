@@ -14,7 +14,7 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
 | Claude Code | permissions deny/ask(secret floor ほか)+ hooks 登録 | managed `~/.claude/settings.json`([policy-model](policy-model.md)・#136/#137) | 動的許可は project の `settings.local.json`(管理外)に隔離。managed 側は apply で戻る。project 側に溜まった allow が外向きの操作を承認なしにしていないかを doctor が report-only で監視(#334) |
 | Codex | 承認 rules(コマンド allowlist と、作業を捨てる git の prompt・hook の skip の forbidden(#304)) | managed `~/.codex/rules/default.rules`(read-only baseline・#139) | 堆積 grant は drift として可視化 → `chezmoi apply` が baseline へ**リセット**(棚卸しのリセット操作を機械化。apply は手動実行で、定期実行までは仕組み化していない) |
 | Codex | projects trust / approval_policy(`config.toml`) | **管理不可**(codex 所有 live ファイル・#181) | doctor が report-only で監視: home root への trust と実在しない path の残骸を warn |
-| OpenCode | `permission`(read / bash / edit の pattern rule: secret floor は deny、外向き・昇格と 1Password の CLI(`op`)は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240)、作業を捨てる git は ask で hook の skip と参照先 note への edit は deny(#304)、bash の既定は ask で、local で完結する読み取りと git の操作だけを allow に戻す(#381)。OpenCode 自身の既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
+| OpenCode | `permission`(read / bash / edit の pattern rule: secret floor は deny、外向き・昇格と 1Password の CLI(`op`)は ask、`gh` は既定 ask で read 系 subcommand だけ allow(#240。env を読む jq を含む形は ask、#504)、作業を捨てる git は ask で hook の skip と参照先 note への edit は deny(#304)、bash の既定は ask で、local で完結する読み取りと git の操作だけを allow に戻す(#381)。OpenCode 自身の既定は allow all なので床が要る。read の deny は grep / glob に効かないので、project の外は `external_directory` を ask に固定(#315)) | managed `~/.config/opencode/opencode.json`([opencode-settings](opencode-settings.md)・#234) | 設定は global → local → project の merge・後勝ちなので、project / local 側の緩和は床を上書きできる(boundary ではない)。managed 側の乖離は drift として apply で戻る |
 
 原則(全 tool 共通):
 
@@ -24,8 +24,12 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
   `agent list` / `pane current`・`list`・`process-info`・`read`)と、ローカル git 操作
   (`commit/add/checkout`)のみ(#502)。pane を作る・変える・閉じる `herdr pane split` / `rename` /
   `close` と、任意の command を実行する `herdr pane run` は allow に入れない。`gh repo view` は
-  どの形も入れない。prefix は後ろの `--jq env` / `--template` を止められず、環境変数(`GH_TOKEN` を
-  含む)を表示できるため(#503 の review)。上の gh の read の allow にも同じ穴がある(#504)。`gh auth status` は prefix 一致の allow では
+  どの形も入れない。prefix は後ろの `--jq env` を止められず、環境変数(`GH_TOKEN` を
+  含む)を表示できるため(#503 の review)。上の gh の read の allow にも同じ穴があり、ユーザーの判断で
+  allow のまま残している(#504)。prefix で塞ぐには、その gh の read を毎回の承認にするしかないため。
+  `gh pr diff` は `--jq` を持たず、`--template` は env を読む関数を持たないので、どちらも環境変数に届かない。
+  OpenCode の床は command 全体に glob を当てられるので、`env` / `ENV` を含む gh を ask にする(#504)。
+  Claude の床は gh の read を allow にしていない。`gh auth status` は prefix 一致の allow では
   token を表示する flag を除外できないため、引数なしも含めて allow から外し都度承認とする。
   `git clone` も allow に**入れない**
   (任意 remote への network 取得で、URL 自体が injection 下では covert channel になる —

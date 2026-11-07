@@ -78,6 +78,14 @@
          (~/.codex/config.toml, ~/.zshrc.local, ~/.zprofile.local — #381 — and
          the local opencode.local.json),
          like the Claude floor's Read asks.
+         #504: the gh read allows also pass a later `--jq` expression, and
+         gh's jq reads the environment (`env`, `$ENV`; a GH_TOKEN in it
+         included). Reading it takes those letters in the command, so `gh
+         *env*` and `gh *ENV*` ask, after the allows and before the denies
+         (placed after them, the ask would weaken the deny on `gh secret
+         list --env x`). Over-matching asks more (`gh search code dotenv`).
+         Text the shell builds (`$(...)`, a variable) is not seen: steering.
+         `--template` has no env function and needs no rule.
        - edit (#304): allow-all, but the user-owned reference note
          .agent-context.local.md is deny (agents read it, never write it):
          the bare name for a path relative to the start directory, and the
@@ -200,6 +208,8 @@
       {{ printf "git *%s* %s *" (index . 0) (index . 1) | toJson }}: "ask",
 {{- end }}
       "git *--no-verify*": "ask",
+      "gh *env*": "ask",
+      "gh *ENV*": "ask",
       "cat ~/.ssh/*": "deny",
       "gh secret *": "deny",
       "gh api *secrets*": "deny",

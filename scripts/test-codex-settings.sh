@@ -383,7 +383,9 @@ fi
 #     -> forbidden (outranking the git commit allow: the strictest match
 #     wins), the everyday forms -> allow or no match, and the documented
 #     prefix gaps (an option after other arguments, global options) -> not
-#     caught. The render job and the bash32 job's render group (macOS, #382)
+#     caught. The gh read allows' gap is pinned the same way: a later
+#     `--jq env` stays allow by the user's decision (#504), so a change
+#     to that is a deliberate one. The render job and the bash32 job's render group (macOS, #382)
 #     install a pinned codex for this (#332 F36);
 #     where codex is not installed this is reported and skipped locally (the
 #     exact pin above still holds the content) and fails on CI (ci_gate).
@@ -543,6 +545,19 @@ none|gh repo view --json nameWithOwner,defaultBranchRef --jq env
 none|gh repo view
 none|gh repo view kosako/dotfiles
 none|gh repo view --json description
+allow|gh pr view 1
+allow|gh pr list --state open
+allow|gh pr diff 1
+allow|gh pr checks 1
+allow|gh issue view 1
+allow|gh issue list
+allow|gh pr view 1 --json number --jq env
+allow|gh pr list --json number --jq env
+allow|gh pr checks 1 --json name --jq env
+allow|gh issue view 1 --json body -q env
+allow|gh issue list --json number --jq $ENV.GH_TOKEN
+none|gh pr create
+none|gh issue comment 1 --body x
 allow|@SAFE_GH@ pr view 1
 allow|@SAFE_GH@ issue comments 1
 none|personal-safe-gh pr view 1
