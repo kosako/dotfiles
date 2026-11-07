@@ -74,7 +74,7 @@ modules:
   ai-policy:
     description: AI agent 権限方針。
   claude-settings:
-    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。hooks 登録は 5 capability が同じ hooks object(.chezmoitemplates/agent-hooks-json、Codex と共有)に出す — enableGitHubIsolatedReader(PreToolUse safe-gh 誘導・#137)、enableQualityLoopHooks(PostToolUse fast-edit-check + Stop changed-scope-qa・#199)、enableHerdrIntegration(SessionStart herdr-agent-state.sh・#225)、enableToolCallRecordHook(SessionStart と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied の tool-call-record-hook・#353。Claude だけ)、enableJaReplyGuardHook(Stop の 2 つ目の entry の ja-reply-guard・#497。Claude だけ)。5 つとも false なら hooks キーを出さない。registration=dotfiles / body=agent-tools(herdr hook の body は herdr の installer)。
+    description: Claude Code harness 設定。personal の public-safe な settings.json のみ管理(settings.local.json は管理しない)。hooks 登録は 5 capability が同じ hooks object(.chezmoitemplates/agent-hooks-json、Codex と共有)に出す — enableGitHubIsolatedReader(PreToolUse safe-gh 誘導・#137)、enableQualityLoopHooks(PostToolUse fast-edit-check + Stop changed-scope-qa・#199)、enableHerdrIntegration(SessionStart herdr-agent-state.sh・#225)、enableToolCallRecordHook(SessionStart と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest の tool-call-record-hook・#353 / #505。Claude だけ)、enableJaReplyGuardHook(Stop の 2 つ目の entry の ja-reply-guard・#497。Claude だけ)。5 つとも false なら hooks キーを出さない。registration=dotfiles / body=agent-tools(herdr hook の body は herdr の installer)。
     paths:
       - .claude/settings.json
   opencode-settings:

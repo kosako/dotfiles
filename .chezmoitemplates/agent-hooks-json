@@ -41,7 +41,8 @@
          content, which the next apply restores).
        - enableToolCallRecordHook (#353, agent-tools#454): SessionStart (no
          matcher) and PreToolUse / PostToolUse / PostToolUseFailure /
-         PermissionDenied (matcher "*") -> personal-tool-call-record-hook,
+         PermissionDenied / PermissionRequest (#505, agent-tools#639: counts
+         the permission prompts) (matcher "*") -> personal-tool-call-record-hook,
          "async": true, timeout 10 (record / fail-open: one JSON line per
          event, argument keys only, never blocks; an async hook cannot
          block, Claude Code 2.1.295 hooks docs, 2026-10-09). CLAUDE ONLY —
@@ -91,7 +92,7 @@
        appended AFTER an existing entry of the same event (PreToolUse: safe-gh,
        PostToolUse: fast-edit-check, SessionStart: herdr) without touching it,
        and so that an event only the recorder uses (PostToolUseFailure,
-       PermissionDenied) is emitted only when the recorder is on. With the
+       PermissionDenied, PermissionRequest) is emitted only when the recorder is on. With the
        recorder off the output is byte-identical to the previous per-capability
        rendering (pinned by test-claude-settings.sh). */ -}}
 {{- $record := and (index .caps "enableToolCallRecordHook") $herdrClaude -}}
@@ -201,6 +202,9 @@
 {{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
     ],
     "PermissionDenied": [
+{{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
+    ],
+    "PermissionRequest": [
 {{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
     ]
 {{- end }}

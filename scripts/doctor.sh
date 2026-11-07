@@ -2239,8 +2239,8 @@ fi
 section "tool call record hook (report-only)"
 # enableToolCallRecordHook (#353, agent-tools#454) registers, in the managed
 # ~/.claude/settings.json, agent-tools' personal-tool-call-record-hook on
-# SessionStart / PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied
-# (matcher "*", async, timeout 10) so each Claude Code tool call leaves one JSON
+# SessionStart / PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied /
+# PermissionRequest (matcher "*", async, timeout 10) so each Claude Code tool call leaves one JSON
 # line (argument keys only) in the user state dir. Record / fail-open: a missing
 # body is a non-blocking hook error, the subject is the client self-report and
 # the JSONL is writable by the same OS user — a guardrail, not a boundary. Claude
@@ -2248,7 +2248,7 @@ section "tool call record hook (report-only)"
 # not probed here).
 if [[ "$(capability_value "$profile" enableToolCallRecordHook)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
-    ok "enableToolCallRecordHook=true; managed ~/.claude/settings.json registers personal-tool-call-record-hook on SessionStart / PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied (record / fail-open, Claude Code only, not a boundary)"
+    ok "enableToolCallRecordHook=true; managed ~/.claude/settings.json registers personal-tool-call-record-hook on SessionStart / PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest (record / fail-open, Claude Code only, not a boundary)"
   else
     warn "enableToolCallRecordHook=true but the claude-settings module is inactive for this profile; no managed settings carry the record hook (dangling capability)"
   fi
