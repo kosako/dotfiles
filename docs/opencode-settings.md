@@ -60,6 +60,11 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     option を挟む形も。#315))は **map の末尾**に置く(last-match-wins で、
     後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
+    read の allow に戻した gh は、後ろに置いた `--jq` の式も通す。gh の jq は環境変数(`env` / `$ENV`。`GH_TOKEN` を含む)を
+    読めるので、`env` か `ENV` の文字を含む gh の command(`gh *env*` / `gh *ENV*`)を **ask** にする(#504)。read の
+    allow より後ろ、deny の前に置く(後ろに置くと `gh secret list --env x` の deny を弱める)。`--jq .number` のような普通の
+    jq は allow のまま。`gh search code dotenv` のような過剰一致は承認が増えるだけで安全側。shell が組み立てる文字
+    (`$(...)` や変数)は見えないので steering。`--template` は env を読む関数を持たないので rule は要らない。
     `gh *` は space 付きなので `ghq` 等は対象外、bare `gh` は help 表示で既定の ask に落ちる(#381 までは allow-all)。read の allow は原則
     「完全一致」と「`… *`(space 付き)」の 2 本 1 組で命令名を区切る(`gh status*` のような space なしの allow だと
     `gh status-token` のような alias 名まで通る。ask / deny は過剰一致しても安全側なので space なし `*` のまま)。
