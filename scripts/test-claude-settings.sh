@@ -26,7 +26,8 @@ set -euo pipefail
 # shape herdr's installer emits (matcher ^(startup|resume|clear|compact|fork)$, herdr 0.9.3 / #274) (bash '<home>/.claude/hooks/herdr-agent-state.sh'
 # session, timeout 10); enableToolCallRecordHook (ON for personal, #353) ->
 # the record hook on SessionStart and PreToolUse / PostToolUse /
-# PostToolUseFailure / PermissionDenied (Claude only); enableJaReplyGuardHook
+# PostToolUseFailure / PermissionDenied / PermissionRequest (Claude only);
+# enableJaReplyGuardHook
 # (ON for personal, #497) -> personal-ja-reply-guard as a second Stop entry
 # (timeout 10, Claude only); each capability adds exactly its own entries,
 # and all five false -> no hooks key at all.
@@ -218,7 +219,8 @@ section "claude settings GitHub injection guard (#119)"
 #    and the git asks of #304 / #334 (71): the work-discarding git forms,
 #    each option as a word of its own after its subcommand, and the hook
 #    skips in any other position. Beside the two lists, permissions holds
-#    only allow, and allow is exactly mcp__pencil (an added "Bash(*)" would
+#    only allow, and allow is exactly mcp__pencil and the merged-branch
+#    cleanup script of #505 (an added "Bash(*)" would
 #    approve every Bash command neither list catches); that pin does not
 #    depend on the key order under permissions (9c reorders it).
 #    We pin the EXACT ordered
@@ -226,6 +228,7 @@ section "claude settings GitHub injection guard (#119)"
 #    regression test, so it must catch a floor matcher being swapped for
 #    another (which would keep the length). What the rules decide for real
 #    commands is pinned separately (4c).
+expected_allow='{"allow":["mcp__pencil","Bash(~/.claude/agent-tools/scripts/personal-merged-branch-cleanup *)"]}'
 expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
 expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :**)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
 expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp__claude_ai_Google_Drive\nmcp__claude_ai_Claude_Docs'
@@ -237,8 +240,8 @@ actual_deny="$(yq -p json -o yaml '.permissions.deny[]' "$off_file")"
 expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
 ask_default="$(yq -p json -o yaml '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 rest_default="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$off_file" 2>/dev/null || true)"
-if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" && "$rest_default" == '{"allow":["mcp__pencil"]}' ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (76, ordered); allow is exactly mcp__pencil and permissions holds nothing else (enforceAiSandbox off)"
+if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" && "$rest_default" == "$expected_allow" ]]; then
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + github MCP + #341's unused MCP (56, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (76, ordered); allow is exactly mcp__pencil and the merged-branch cleanup script, and permissions holds nothing else (enforceAiSandbox off)"
 else
   fail "test failed: committed personal permissions unexpected (allow and the rest=$rest_default ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -472,12 +475,52 @@ none|git worktree add -f ../wt main
 none|git branch -m old new
 none|git push origin main:main
 none|git -C /tmp/x status
+none|~/.claude/agent-tools/scripts/personal-merged-branch-cleanup --remote feat/x
 CASES
 if [[ -z "$decision_misses" ]]; then
   ok "test passed: the committed rules ask for work-discarding git, deny hook skips right after commit / push and ask elsewhere, and leave everyday git alone (per the documented matching)"
 else
   fail "test failed: committed rules decide git commands unexpectedly:"
   printf '%s' "$decision_misses" >&2
+  status=1
+fi
+
+# 4c-allow) The one Bash rule in allow (#505, agent-tools#640), read the same
+#     way. Ask comes before allow, so the deny / ask rules must leave the
+#     script's own invocation alone (the last case above). The rule itself
+#     must reach the deployed path only, up to a word boundary: not a longer
+#     file name, not another copy of the script, and not the git forms it
+#     replaces, which stay ask (cases above). Compound commands are outside
+#     this reading: Claude Code splits them first and each part has to be
+#     allowed (code.claude.com/docs/en/permissions, "Compound commands").
+allow_bash_body=""
+while IFS= read -r rule; do
+  [[ "$rule" == 'Bash('*')' ]] || continue
+  allow_bash_body="${rule#Bash(}"
+  allow_bash_body="${allow_bash_body%)}"
+done < <(yq -p json -o yaml '.permissions.allow[]' "$off_file")
+allow_misses=""
+while IFS='|' read -r want cmd; do
+  [[ -n "$want" ]] || continue
+  got=no
+  claude_rule_matches "$allow_bash_body" "$cmd" && got=yes
+  [[ "$got" == "$want" ]] || allow_misses+="  Bash($allow_bash_body) vs '$cmd' -> $got (expected $want)"$'\n'
+done <<'CASES'
+yes|~/.claude/agent-tools/scripts/personal-merged-branch-cleanup feat/x
+yes|~/.claude/agent-tools/scripts/personal-merged-branch-cleanup --remote --dry-run feat/x
+yes|~/.claude/agent-tools/scripts/personal-merged-branch-cleanup
+no|~/.claude/agent-tools/scripts/personal-merged-branch-cleanup-other feat/x
+no|~/.claude/agent-tools/scripts/personal-merged-branch-cleanupx feat/x
+no|./personal-merged-branch-cleanup feat/x
+no|/tmp/x/.claude/agent-tools/scripts/personal-merged-branch-cleanup feat/x
+no|git branch -D feat/x
+no|git push origin --delete feat/x
+CASES
+if [[ -n "$allow_bash_body" && -z "$allow_misses" ]]; then
+  ok "test passed: the allow rule reaches only the deployed merged-branch cleanup script, up to a word boundary (not a longer name, another copy, or the git forms it replaces)"
+else
+  fail "test failed: the allow rule decides commands unexpectedly (body='$allow_bash_body'):"
+  printf '%s' "$allow_misses" >&2
   status=1
 fi
 
@@ -610,8 +653,8 @@ expected_ask_on="$expected_ask"$'\nBash(gh release create *)\nBash(gh release de
 actual_deny_on="$(yq -p json -o yaml '.permissions.deny[]' "$on_file")"
 actual_ask_on="$(yq -p json -o yaml '.permissions.ask[]' "$on_file" 2>/dev/null || true)"
 actual_rest_on="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$on_file" 2>/dev/null || true)"
-if [[ "$actual_deny_on" == "$expected_deny_on" && "$actual_ask_on" == "$expected_ask_on" && "$actual_rest_on" == '{"allow":["mcp__pencil"]}' ]]; then
-  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the whole 1Password CLI + release/protection as ask (ordered), and allow is exactly mcp__pencil"
+if [[ "$actual_deny_on" == "$expected_deny_on" && "$actual_ask_on" == "$expected_ask_on" && "$actual_rest_on" == "$expected_allow" ]]; then
+  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the whole 1Password CLI + release/protection as ask (ordered), and allow is exactly mcp__pencil and the merged-branch cleanup script"
 else
   fail "test failed: enforceAiSandbox=true permissions unexpected; deny / ask / allow and the rest were:"
   printf '%s\n' "$actual_deny_on" "---" "$actual_ask_on" "---" "$actual_rest_on" >&2
@@ -712,7 +755,7 @@ section "claude settings hook registration (#137 / #199 / #225 / #353 / #497)"
 # 8a) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks,
 #     enableHerdrIntegration, enableToolCallRecordHook AND
 #     enableJaReplyGuardHook are ON, so the managed settings.json registers
-#     EXACTLY six events:
+#     EXACTLY seven events:
 #     PreToolUse / matcher Bash / one command hook -> personal-safe-gh-hook
 #     (#137); PostToolUse / matcher Edit|Write / one command hook ->
 #     personal-fast-edit-check and a matcher-less Stop / one command hook ->
@@ -727,7 +770,8 @@ section "claude settings hook registration (#137 / #199 / #225 / #353 / #497)"
 #     #353 (agent-tools#454) appends personal-tool-call-record-hook as the
 #     SECOND entry of PreToolUse / PostToolUse (matcher "*") and SessionStart
 #     (no matcher), and adds PostToolUseFailure / PermissionDenied (matcher
-#     "*") — every record entry "async": true, timeout 10 — so the three
+#     "*"), and #505 (agent-tools#639) PermissionRequest (matcher "*")
+#     — every record entry "async": true, timeout 10 — so the three
 #     pre-existing entries stay at index 0, byte-identical (8e pins that).
 #     #497 (agent-tools#588) appends personal-ja-reply-guard as the SECOND
 #     entry of Stop (no matcher, timeout 10, no async: it must be able to
@@ -757,11 +801,12 @@ expected_hooks="$(jq -n -S --arg gh "$expected_hook_cmd" --arg edit "$expected_e
     SessionStart: [{matcher: "^(startup|resume|clear|compact|fork)$",
       hooks: [hook($session) + {timeout: 10}]}, record],
     PostToolUseFailure: [record + {matcher: "*"}],
-    PermissionDenied: [record + {matcher: "*"}]
+    PermissionDenied: [record + {matcher: "*"}],
+    PermissionRequest: [record + {matcher: "*"}]
   }')"
 actual_hooks="$(jq -S '.hooks' "$off_file" 2>/dev/null)" || actual_hooks=""
 if [[ -n "$actual_hooks" && "$actual_hooks" == "$expected_hooks" ]]; then
-  ok "test passed: committed personal registers exactly the pinned hooks object (six events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
+  ok "test passed: committed personal registers exactly the pinned hooks object (seven events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
 else
   fail "test failed: hook registration differs from the pinned hooks object (diff on stderr: expected, then rendered)"
   diff <(printf '%s\n' "$expected_hooks") <(printf '%s\n' "$actual_hooks") >&2 || true
@@ -838,19 +883,19 @@ check_hook_flip_off() {
   fi
 }
 check_hook_flip_off "enableGitHubIsolatedReader=false" "$reader_off_file" \
-  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
+  '["PermissionDenied","PermissionRequest","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.PreToolUse[0])'
 check_hook_flip_off "enableQualityLoopHooks=false" "$quality_off_file" \
-  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
+  '["PermissionDenied","PermissionRequest","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.PostToolUse[0]) | del(.hooks.Stop[0])'
 check_hook_flip_off "enableHerdrIntegration=false" "$herdr_off_file" \
-  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
+  '["PermissionDenied","PermissionRequest","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.SessionStart[0])'
 check_hook_flip_off "enableToolCallRecordHook=false" "$record_off_file" \
   '["PostToolUse","PreToolUse","SessionStart","Stop"]' \
-  'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse[1]) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
+  'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse[1]) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied) | del(.hooks.PermissionRequest)'
 check_hook_flip_off "enableJaReplyGuardHook=false" "$ja_off_file" \
-  '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
+  '["PermissionDenied","PermissionRequest","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.Stop[1])'
 on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
 both_off_norm="$(yq -p json -o json '.' "$both_off_file")"
@@ -868,7 +913,8 @@ fi
 #     SessionStart is the FIRST event emitted (empty separator), which no
 #     other combination exercises (Codex review, PR #226); record-only is
 #     the path where every record entry is the FIRST (and only) element of
-#     its event and PostToolUseFailure / PermissionDenied are preceded by a
+#     its event and PostToolUseFailure / PermissionDenied / PermissionRequest
+#     are preceded by a
 #     separator from SessionStart (#353); ja-only is the path where the ja
 #     entry is the FIRST (and only) element of Stop and Stop is the first
 #     event emitted (#497).
@@ -903,11 +949,11 @@ check_hook_single_on() {
     status=1
   fi
 }
-check_hook_single_on "only enableGitHubIsolatedReader" "$reader_only_file" '["PreToolUse"]' 'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
-check_hook_single_on "only enableQualityLoopHooks" "$quality_only_file" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse[1]) | del(.hooks.Stop[1]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
-check_hook_single_on "only enableHerdrIntegration" "$herdr_only_file" '["SessionStart"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
-check_hook_single_on "only enableToolCallRecordHook" "$record_only_file" '["PermissionDenied","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart"]' 'del(.hooks.PreToolUse[0]) | del(.hooks.PostToolUse[0]) | del(.hooks.Stop) | del(.hooks.SessionStart[0])'
-check_hook_single_on "only enableJaReplyGuardHook" "$ja_only_file" '["Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop[0]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied)'
+check_hook_single_on "only enableGitHubIsolatedReader" "$reader_only_file" '["PreToolUse"]' 'del(.hooks.PreToolUse[1]) | del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied) | del(.hooks.PermissionRequest)'
+check_hook_single_on "only enableQualityLoopHooks" "$quality_only_file" '["PostToolUse","Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse[1]) | del(.hooks.Stop[1]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied) | del(.hooks.PermissionRequest)'
+check_hook_single_on "only enableHerdrIntegration" "$herdr_only_file" '["SessionStart"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop) | del(.hooks.SessionStart[1]) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied) | del(.hooks.PermissionRequest)'
+check_hook_single_on "only enableToolCallRecordHook" "$record_only_file" '["PermissionDenied","PermissionRequest","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart"]' 'del(.hooks.PreToolUse[0]) | del(.hooks.PostToolUse[0]) | del(.hooks.Stop) | del(.hooks.SessionStart[0])'
+check_hook_single_on "only enableJaReplyGuardHook" "$ja_only_file" '["Stop"]' 'del(.hooks.PreToolUse) | del(.hooks.PostToolUse) | del(.hooks.Stop[0]) | del(.hooks.SessionStart) | del(.hooks.PostToolUseFailure) | del(.hooks.PermissionDenied) | del(.hooks.PermissionRequest)'
 
 # 8e) #353 must not disturb the pre-existing registrations: with the record
 #     hook flipped false, the rendered file is BYTE-identical to what the

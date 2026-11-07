@@ -1533,7 +1533,7 @@ fi
 #      enableToolCallRecordHook ON with claude-settings active, so doctor reports
 #      the registration; flipped off it reports the declared-off state. Both
 #      stay exit 0 (report-only).
-if grep -Fq "enableToolCallRecordHook=true; managed ~/.claude/settings.json registers personal-tool-call-record-hook" <<< "$gh_out"; then
+if grep -Fq "enableToolCallRecordHook=true; managed ~/.claude/settings.json registers personal-tool-call-record-hook on SessionStart / PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest" <<< "$gh_out"; then
   ok "test passed: enableToolCallRecordHook=true reported as wired in managed settings.json"
 else
   fail "test failed: enableToolCallRecordHook=true not reported"

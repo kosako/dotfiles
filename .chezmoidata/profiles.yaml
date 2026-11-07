@@ -147,7 +147,8 @@ profiles:
       enableHerdrIntegration: true
       # #353 (agent-tools#454): register agent-tools' personal-tool-call-record-hook
       # in the managed ~/.claude/settings.json on SessionStart and on PreToolUse /
-      # PostToolUse / PostToolUseFailure / PermissionDenied (matcher "*", async,
+      # PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest
+      # (#505, agent-tools#639: counts the permission prompts) (matcher "*", async,
       # timeout 10) so every Claude Code tool call leaves one JSON line (argument
       # keys only, never values) in the user state dir. Record / fail-open: the
       # body never blocks, an async hook cannot block, the subject is the client

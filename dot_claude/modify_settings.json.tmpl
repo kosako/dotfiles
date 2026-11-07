@@ -134,8 +134,10 @@
 
        enableToolCallRecordHook (#353, agent-tools#454) registers agent-tools'
        personal-tool-call-record-hook on SessionStart (no matcher) and on
-       PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied
-       (matcher "*"), each with "async": true and timeout 10, so every Claude
+       PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied /
+       PermissionRequest (matcher "*"; PermissionRequest since #505,
+       agent-tools#639, to count the permission prompts), each with
+       "async": true and timeout 10, so every Claude
        Code tool call leaves one JSON line (argument KEYS only, never values)
        in the user's state dir. Record / fail-open, Claude only (the Codex
        hooks.json is unchanged): the body never blocks, an async hook cannot
@@ -154,6 +156,15 @@
        Codex hooks.json is unchanged). AGENT_TOOLS_JA_GUARD_DISABLE (any
        non-empty value) turns it off for a session that should answer in
        English.
+
+       permissions.allow holds one Bash rule beside mcp__pencil (#505,
+       agent-tools#640): personal-merged-branch-cleanup, the deployed script
+       that checks a branch is merged (tip = the merged PR's head, personal
+       repo, not the default branch) and deletes it by compare. Written with
+       `~` because a Bash rule matches the command text as written. The ask
+       rules for `git branch -D` / `git push --delete` stay, and ask comes
+       before allow, so only the script skips the prompt. The same OS user
+       can rewrite the script: a procedure, not a boundary.
 
        The whole "hooks" object is shared with the Codex registration via
        .chezmoitemplates/agent-hooks-json (#181 parity — edit it once there);
@@ -217,7 +228,8 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
     "ask": {{ $ask | toJson }},
 {{- end }}
     "allow": [
-      "mcp__pencil"
+      "mcp__pencil",
+      "Bash(~/.claude/agent-tools/scripts/personal-merged-branch-cleanup *)"
     ]
   },
 {{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") (index $caps "enableJaReplyGuardHook") }}

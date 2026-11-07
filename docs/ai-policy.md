@@ -31,7 +31,9 @@ AI tool の導入は software catalog の capability(`installPackages` / `instal
   (任意 remote への network 取得で、URL 自体が injection 下では covert channel になる —
   都度承認)。
 - **マシン外に出る操作(push・PR/issue/comment 作成・release・外部送信)と昇格系
-  (sudo・auth login)は無確認 allow にしない**。都度承認を通す。将来は write-gate hook
+  (sudo・auth login)は無確認 allow にしない**。都度承認を通す。例外は Claude の managed な allow の
+  `personal-merged-branch-cleanup` の 1 本(#505)。`--remote` で remote の branch を消すが、個人の repo で、merge 済みで、
+  失う commit が無いことを script が確かめてから比較つきで消す。将来は write-gate hook
   (未実装。#131 はこれを実装せずに close。現在は追跡 issue なし)で「untrusted がセッションに
   無ければ自律許可」の context-gated に置き換える(下記 #119 節の write 規則が目標形)。
 - **一時許可は堆積させず棚卸しする**。Codex rules はリセット操作を機械化済み
