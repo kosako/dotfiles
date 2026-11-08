@@ -29,7 +29,8 @@ set -euo pipefail
 # PostToolUseFailure / PermissionDenied / PermissionRequest (Claude only);
 # enableJaReplyGuardHook
 # (ON for personal, #497) -> personal-ja-reply-guard as a second Stop entry
-# (timeout 10, Claude only); enableBridgeOneHook (OFF for personal, #508) ->
+# (timeout 10, Claude only); enableBridgeOneHook (#508; ON for personal since
+# #510, and the cases take either committed value) ->
 # Bridge One's launcher as a second PermissionRequest entry (timeout 600, no
 # async, the only decision-capable PermissionRequest hook, Claude only); each
 # capability adds exactly its own entries, and all six false -> no hooks key
@@ -786,6 +787,11 @@ section "claude settings hook registration (#137 / #199 / #225 / #353 / #497 / #
 #     entry, or a key added to an entry (an "async" on safe-gh would take its
 #     steer out of the pre-call path; a "timeout" on it is Codex-only) must
 #     fail the test (#129 lesson).
+#     enableBridgeOneHook (#508) is pinned in 8g; the shape above is the one
+#     with it OFF. The committed value may be either (#510 turned it on for
+#     personal), so the matrix below renders it OFF explicitly (hook_base)
+#     and the committed render must be hook_base, or hook_base plus exactly
+#     Bridge One's entry, as the committed profile says.
 expected_hook_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook")"
 expected_edit_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-fast-edit-check")"
 expected_stop_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa")"
@@ -807,12 +813,45 @@ expected_hooks="$(jq -n -S --arg gh "$expected_hook_cmd" --arg edit "$expected_e
     PermissionDenied: [record + {matcher: "*"}],
     PermissionRequest: [record + {matcher: "*"}]
   }')"
-actual_hooks="$(jq -S '.hooks' "$off_file" 2>/dev/null)" || actual_hooks=""
-if [[ -n "$actual_hooks" && "$actual_hooks" == "$expected_hooks" ]]; then
-  ok "test passed: committed personal registers exactly the pinned hooks object (seven events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
+expected_bridge_cmd="$(shell_single_quote "$HOME/.local/share/bridge-one/hook/current/bin/permission-request") 2>/dev/null"
+expected_bridge_entry="$(jq -n -S --arg cmd "$expected_bridge_cmd" '{matcher: "*", hooks: [{type: "command", command: $cmd, timeout: 600}]}')"
+committed_bridge="$(yq '.profiles.personal.capabilities.enableBridgeOneHook' "$DOTFILES_ROOT/.chezmoidata/profiles.yaml" 2>/dev/null)" || committed_bridge=""
+case "$committed_bridge" in
+  true) expected_committed_hooks="$(jq -S --argjson e "$expected_bridge_entry" '.PermissionRequest += [$e]' <<< "$expected_hooks")" ;;
+  false) expected_committed_hooks="$expected_hooks" ;;
+  *)
+    fail "test failed: the committed personal enableBridgeOneHook is neither true nor false ('$committed_bridge')"
+    exit 1
+    ;;
+esac
+render_flip hook-base enableBridgeOneHook=false
+hook_base_file="$flip_file"
+render_flip bridge-on enableBridgeOneHook=true
+bridge_on_file="$flip_file"
+base_hooks="$(jq -S '.hooks' "$hook_base_file" 2>/dev/null)" || base_hooks=""
+if [[ -n "$base_hooks" && "$base_hooks" == "$expected_hooks" ]]; then
+  ok "test passed: personal with enableBridgeOneHook off registers exactly the pinned hooks object (seven events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
 else
-  fail "test failed: hook registration differs from the pinned hooks object (diff on stderr: expected, then rendered)"
-  diff <(printf '%s\n' "$expected_hooks") <(printf '%s\n' "$actual_hooks") >&2 || true
+  fail "test failed: hook registration (enableBridgeOneHook off) differs from the pinned hooks object (diff on stderr: expected, then rendered)"
+  diff <(printf '%s\n' "$expected_hooks") <(printf '%s\n' "$base_hooks") >&2 || true
+  status=1
+fi
+actual_hooks="$(jq -S '.hooks' "$off_file" 2>/dev/null)" || actual_hooks=""
+if [[ -n "$actual_hooks" && "$actual_hooks" == "$expected_committed_hooks" ]]; then
+  ok "test passed: committed personal (enableBridgeOneHook=$committed_bridge) registers exactly the pinned hooks object"
+else
+  fail "test failed: committed hook registration (enableBridgeOneHook=$committed_bridge) differs from the pinned hooks object (diff on stderr: expected, then rendered)"
+  diff <(printf '%s\n' "$expected_committed_hooks") <(printf '%s\n' "$actual_hooks") >&2 || true
+  status=1
+fi
+# The committed render is hook_base or bridge_on as a whole, not only in its
+# hooks (normalized compare; 8i compares bytes).
+committed_whole="$(jq -S '.' "$off_file" 2>/dev/null)" || committed_whole=""
+if [[ "$committed_bridge" == true ]]; then committed_twin="$bridge_on_file"; else committed_twin="$hook_base_file"; fi
+if [[ -n "$committed_whole" && "$committed_whole" == "$(jq -S '.' "$committed_twin" 2>/dev/null)" ]]; then
+  ok "test passed: the committed personal render equals the render with enableBridgeOneHook=$committed_bridge set explicitly"
+else
+  fail "test failed: the committed personal render differs from the render with enableBridgeOneHook=$committed_bridge set explicitly"
   status=1
 fi
 
@@ -845,21 +884,24 @@ fi
 #     element of PreToolUse / PostToolUse / SessionStart belongs to the
 #     pre-existing capability and the second to the record hook; since
 #     #497 the second element of Stop belongs to the ja guard. All five
-#     false (and enableBridgeOneHook, off in the committed profile, #508) ->
-#     no hooks key at all (an empty "hooks": {} must never be emitted), and
-#     the all-off render is the all-on render minus the whole hooks key.
-render_flip reader-off enableGitHubIsolatedReader=false
+#     false (and enableBridgeOneHook, #508) -> no hooks key at all (an empty
+#     "hooks": {} must never be emitted), and the all-off render is the
+#     all-on render minus the whole hooks key. Here and in 8d every render
+#     sets enableBridgeOneHook=false and the "on-render" is 8a's hook_base,
+#     so the matrix holds whatever the committed value is (8g covers the
+#     Bridge One entry).
+render_flip reader-off enableGitHubIsolatedReader=false enableBridgeOneHook=false
 reader_off_file="$flip_file"
-render_flip quality-off enableQualityLoopHooks=false
+render_flip quality-off enableQualityLoopHooks=false enableBridgeOneHook=false
 quality_off_file="$flip_file"
-render_flip herdr-off enableHerdrIntegration=false
+render_flip herdr-off enableHerdrIntegration=false enableBridgeOneHook=false
 herdr_off_file="$flip_file"
-render_flip record-off enableToolCallRecordHook=false
+render_flip record-off enableToolCallRecordHook=false enableBridgeOneHook=false
 record_off_file="$flip_file"
-render_flip ja-off enableJaReplyGuardHook=false
+render_flip ja-off enableJaReplyGuardHook=false enableBridgeOneHook=false
 ja_off_file="$flip_file"
 render_flip hooks-off enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
-  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
+  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
 both_off_file="$flip_file"
 hooks_off_src="$flip_src"
 # check_hook_flip_off LABEL FILE EXPECTED_EVENTS DEL_FILTER
@@ -877,7 +919,7 @@ check_hook_flip_off() {
   else
     norm=""
   fi
-  on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
+  on_minus="$(yq -p json -o json "$del_filter" "$hook_base_file")"
   if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
     ok "test passed: $label keeps exactly $expected_events and differs from the on-render by exactly its own entries"
   else
@@ -900,7 +942,7 @@ check_hook_flip_off "enableToolCallRecordHook=false" "$record_off_file" \
 check_hook_flip_off "enableJaReplyGuardHook=false" "$ja_off_file" \
   '["PermissionDenied","PermissionRequest","PostToolUse","PostToolUseFailure","PreToolUse","SessionStart","Stop"]' \
   'del(.hooks.Stop[1])'
-on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$off_file")"
+on_minus_hooks="$(yq -p json -o json 'del(.hooks)' "$hook_base_file")"
 both_off_norm="$(yq -p json -o json '.' "$both_off_file")"
 if [[ "$(yq -p json -o yaml '.hooks // "absent"' "$both_off_file")" == "absent" ]] \
   && [[ -n "$both_off_norm" && "$on_minus_hooks" == "$both_off_norm" ]]; then
@@ -921,15 +963,15 @@ fi
 #     separator from SessionStart (#353); ja-only is the path where the ja
 #     entry is the FIRST (and only) element of Stop and Stop is the first
 #     event emitted (#497).
-render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
+render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
 reader_only_file="$flip_file"
-render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
+render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
 quality_only_file="$flip_file"
-render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
+render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
 herdr_only_file="$flip_file"
-render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableJaReplyGuardHook=false
+render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableJaReplyGuardHook=false enableBridgeOneHook=false
 record_only_file="$flip_file"
-render_flip ja-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false
+render_flip ja-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableBridgeOneHook=false
 ja_only_file="$flip_file"
 # check_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
 check_hook_single_on() {
@@ -944,7 +986,7 @@ check_hook_single_on() {
   else
     norm=""
   fi
-  on_minus="$(yq -p json -o json "$del_filter" "$off_file")"
+  on_minus="$(yq -p json -o json "$del_filter" "$hook_base_file")"
   if [[ "$events" == "$expected_events" && -n "$norm" && "$on_minus" == "$norm" ]]; then
     ok "test passed: $label keeps exactly $expected_events and differs from the on-render by exactly the other capabilities' events"
   else
@@ -985,22 +1027,19 @@ else
   status=1
 fi
 
-# 8g) enableBridgeOneHook (#508) is OFF in the committed personal, so 8a's pin
-#     holds. Flipped on, PermissionRequest gains Bridge One's launcher as the
+# 8g) enableBridgeOneHook (#508): set explicitly in both directions (8a renders
+#     hook_base with it off and bridge_on with it on; the committed render is
+#     one of the two). On, PermissionRequest gains Bridge One's launcher as the
 #     SECOND entry after the record hook: matcher "*", timeout 600, no "async"
 #     and no "onFailure" (it must be able to return a decision, and a failure
 #     must leave the prompt in the terminal); the command is the launcher path
 #     ALWAYS single-quoted plus " 2>/dev/null", the exact string Bridge One's
-#     tools/hook-deploy/deploy.mjs prints. The render is the committed one plus
-#     exactly that entry. With the record hook off it is the only
+#     tools/hook-deploy/deploy.mjs prints. The on render is the off render
+#     plus exactly that entry. With the record hook off it is the only
 #     PermissionRequest entry; alone (the other five off) PermissionRequest is
 #     the only event. Bridge One's design forbids a second decision-capable
 #     PermissionRequest hook, so in every render at most one PermissionRequest
 #     hook lacks "async": true, and that one is Bridge One's.
-expected_bridge_cmd="$(shell_single_quote "$HOME/.local/share/bridge-one/hook/current/bin/permission-request") 2>/dev/null"
-expected_bridge_entry="$(jq -n -S --arg cmd "$expected_bridge_cmd" '{matcher: "*", hooks: [{type: "command", command: $cmd, timeout: 600}]}')"
-render_flip bridge-on enableBridgeOneHook=true
-bridge_on_file="$flip_file"
 render_flip bridge-record-off enableBridgeOneHook=true enableToolCallRecordHook=false
 bridge_record_off_file="$flip_file"
 render_flip bridge-only enableBridgeOneHook=true enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
@@ -1013,14 +1052,14 @@ json_or_empty() {
     jq -S "$1" "$2" 2>/dev/null || true
   fi
 }
-committed_norm="$(json_or_empty '.' "$off_file")"
-if [[ -n "$committed_norm" \
+base_norm="$(json_or_empty '.' "$hook_base_file")"
+if [[ -n "$base_norm" \
   && "$(json_or_empty '.hooks.PermissionRequest | length' "$bridge_on_file")" == "2" \
   && "$(json_or_empty '.hooks.PermissionRequest[1]' "$bridge_on_file")" == "$expected_bridge_entry" \
-  && "$(json_or_empty 'del(.hooks.PermissionRequest[1])' "$bridge_on_file")" == "$committed_norm" ]]; then
+  && "$(json_or_empty 'del(.hooks.PermissionRequest[1])' "$bridge_on_file")" == "$base_norm" ]]; then
   ok "test passed: enableBridgeOneHook=true adds exactly Bridge One's launcher as the second PermissionRequest entry (quoted path + 2>/dev/null, timeout 600, no async / onFailure) and nothing else"
 else
-  fail "test failed: enableBridgeOneHook=true render is not the committed render plus the one Bridge One PermissionRequest entry"
+  fail "test failed: enableBridgeOneHook=true render is not the enableBridgeOneHook=false render plus the one Bridge One PermissionRequest entry"
   diff <(printf '%s\n' "$expected_bridge_entry") <(json_or_empty '.hooks.PermissionRequest[1]' "$bridge_on_file") >&2 || true
   status=1
 fi
@@ -1035,15 +1074,15 @@ else
 fi
 if [[ "$(json_or_empty '.hooks | keys' "$bridge_only_file" | tr -d ' \n')" == '["PermissionRequest"]' \
   && "$(json_or_empty '.hooks.PermissionRequest' "$bridge_only_file")" == "$(jq -S -n --argjson e "$expected_bridge_entry" '[$e]')" \
-  && -n "$committed_norm" \
-  && "$(json_or_empty 'del(.hooks)' "$bridge_only_file")" == "$(json_or_empty 'del(.hooks)' "$off_file")" ]]; then
+  && -n "$base_norm" \
+  && "$(json_or_empty 'del(.hooks)' "$bridge_only_file")" == "$(json_or_empty 'del(.hooks)' "$hook_base_file")" ]]; then
   ok "test passed: Bridge One's hook alone renders PermissionRequest as the only event (valid JSON, nothing else changes)"
 else
   fail "test failed: enableBridgeOneHook as the only hook capability does not render PermissionRequest alone (or the JSON is broken)"
   status=1
 fi
 bridge_decision_misses=""
-for bridge_file in "$off_file" "$bridge_on_file" "$bridge_record_off_file" "$bridge_only_file"; do
+for bridge_file in "$off_file" "$hook_base_file" "$bridge_on_file" "$bridge_record_off_file" "$bridge_only_file"; do
   if ! strict_json_object "$bridge_file" \
     || ! jq -e --arg cmd "$expected_bridge_cmd" \
       '[.hooks.PermissionRequest[]?.hooks[] | select(.async != true)] | length <= 1 and all(.command == $cmd)' \
@@ -1088,44 +1127,31 @@ fi
 # 8i) Byte-exact render (#508): the compares above normalize the JSON (key
 #     order, whitespace, line breaks), so a template change that only
 #     reformats the output would still pass them. For a fixed plain home (the
-#     one test-render.sh uses) the committed personal render must equal
-#     scripts/testdata/claude-settings.personal.json BYTE for byte. That file
-#     was rendered from main's template before #508; enableBridgeOneHook is
-#     off in the committed profile and off must leave the output unchanged.
-#     With the Bridge hook on, the render must equal that file with exactly
-#     the Bridge One entry's lines inserted after the record hook's
-#     PermissionRequest entry (built here as text, not by a JSON tool). To
-#     update the file after an INTENDED template change, render personal as
-#     this case does (HOME=/dotfiles-render-test-home, a throwaway destination)
-#     and copy its .claude/settings.json over the file.
+#     one test-render.sh uses) the personal render with enableBridgeOneHook
+#     OFF must equal scripts/testdata/claude-settings.personal.json BYTE for
+#     byte. That file was rendered from main's template before #508, and off
+#     must leave the output unchanged. With the Bridge hook ON, the render
+#     must equal that file with exactly the Bridge One entry's lines inserted
+#     after the record hook's PermissionRequest entry (built here as text, not
+#     by a JSON tool). The committed render must equal the one of the two its
+#     profile selects (on for personal since #510). To update the file after
+#     an INTENDED template change, render personal as this case does
+#     (HOME=/dotfiles-render-test-home, enableBridgeOneHook=false, a throwaway
+#     destination) and copy its .claude/settings.json over the file.
 golden_home="/dotfiles-render-test-home"
 golden_settings="$DOTFILES_ROOT/scripts/testdata/claude-settings.personal.json"
-golden_hint="if the template change is intended, render personal with HOME=$golden_home into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json (see 8i)"
-golden_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-tmp_roots+=("$golden_root")
-if HOME="$golden_home" render_personal_into "$DOTFILES_ROOT" "$golden_root" \
-  && cmp -s "$golden_settings" "$golden_root/home/.claude/settings.json"; then
-  ok "test passed: the committed personal render equals scripts/testdata/claude-settings.personal.json byte for byte (no reformatting, enableBridgeOneHook off changes nothing)"
-else
-  fail "test failed: the committed personal render differs byte-wise from scripts/testdata/claude-settings.personal.json ($golden_hint)"
-  diff "$golden_settings" "$golden_root/home/.claude/settings.json" >&2 || true
-  status=1
-fi
-golden_bridge_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-golden-bridge.XXXXXX")"
-tmp_roots+=("$golden_bridge_src")
-make_flipped_source "$golden_bridge_src"
-flip_personal_capability "$golden_bridge_src/src" enableBridgeOneHook true
-golden_bridge_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
-tmp_roots+=("$golden_bridge_root")
-golden_bridge_expected="$golden_bridge_root/expected.json"
+golden_hint="if the template change is intended, render personal with HOME=$golden_home and enableBridgeOneHook=false into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json (see 8i)"
+golden_bridge_expected_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$golden_bridge_expected_root")
+golden_bridge_expected="$golden_bridge_expected_root/expected.json"
 # The expected file plus the Bridge entry: the record entry's closing "}" gets
 # a comma and the entry's lines follow it, before PermissionRequest's "]". The
 # command is written as chezmoi's toJson writes it: Go's JSON encoder escapes
-# ">" as \u003e (the decoded string is the same; 8g compares decoded values).
+# ">" as > (the decoded string is the same; 8g compares decoded values).
 # It reaches awk through the environment, which awk does not escape-process
 # (an -v value would turn the backslash into an escape sequence).
 golden_bridge_cmd="'$golden_home/.local/share/bridge-one/hook/current/bin/permission-request' 2\\u003e/dev/null"
-if BRIDGE_CMD="$golden_bridge_cmd" awk '
+if ! BRIDGE_CMD="$golden_bridge_cmd" awk '
   NR > 1 {
     if (in_pr && $0 == "    ]") {
       print prev ","
@@ -1147,15 +1173,37 @@ if BRIDGE_CMD="$golden_bridge_cmd" awk '
   }
   { if ($0 == "    \"PermissionRequest\": [") in_pr = 1; prev = $0 }
   END { print prev; if (!inserted) exit 1 }
-' "$golden_settings" > "$golden_bridge_expected" \
-  && HOME="$golden_home" render_personal_into "$golden_bridge_src/src" "$golden_bridge_root" \
-  && cmp -s "$golden_bridge_expected" "$golden_bridge_root/home/.claude/settings.json"; then
-  ok "test passed: with enableBridgeOneHook on, the render is the expected file plus exactly the Bridge One entry's lines, byte for byte"
-else
-  fail "test failed: with enableBridgeOneHook on, the render is not the expected file plus the Bridge One entry byte for byte ($golden_hint)"
-  diff "$golden_bridge_expected" "$golden_bridge_root/home/.claude/settings.json" >&2 || true
+' "$golden_settings" > "$golden_bridge_expected"; then
+  fail "test failed: could not build the expected enableBridgeOneHook=true file from scripts/testdata/claude-settings.personal.json (no PermissionRequest record entry to follow; $golden_hint)"
   status=1
+  : > "$golden_bridge_expected"
 fi
+# golden_case LABEL SRC EXPECTED — render personal from SRC with the golden
+# home and compare it byte for byte with EXPECTED.
+golden_case() {
+  local label="$1" src="$2" expected="$3" root
+  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+  tmp_roots+=("$root")
+  if [[ -s "$expected" ]] \
+    && HOME="$golden_home" render_personal_into "$src" "$root" \
+    && cmp -s "$expected" "$root/home/.claude/settings.json"; then
+    ok "test passed: the $label personal render equals the expected file byte for byte (no reformatting)"
+  else
+    fail "test failed: the $label personal render differs byte-wise from the expected file ($golden_hint)"
+    diff "$expected" "$root/home/.claude/settings.json" >&2 || true
+    status=1
+  fi
+}
+for golden_value in false true; do
+  golden_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-golden-$golden_value.XXXXXX")"
+  tmp_roots+=("$golden_src")
+  make_flipped_source "$golden_src"
+  flip_personal_capability "$golden_src/src" enableBridgeOneHook "$golden_value"
+  if [[ "$golden_value" == true ]]; then golden_expected="$golden_bridge_expected"; else golden_expected="$golden_settings"; fi
+  golden_case "enableBridgeOneHook=$golden_value" "$golden_src/src" "$golden_expected"
+done
+if [[ "$committed_bridge" == true ]]; then golden_expected="$golden_bridge_expected"; else golden_expected="$golden_settings"; fi
+golden_case "committed (enableBridgeOneHook=$committed_bridge)" "$DOTFILES_ROOT" "$golden_expected"
 
 section "claude settings keep the keys the template does not manage (#360)"
 

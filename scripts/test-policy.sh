@@ -906,7 +906,7 @@ run_fail_contains \
 # environmentKind cross-check. work / client / agent の deny 表 (lib-policy の
 # environment_kind_forbidden_capabilities) の 6 つが kind ごとに全部発火することを
 # 確かめる: personal (元から elevated) を各 kind に付け替え、false の enableAiTools と
-# enableBridgeOneHook (#508) も true にして、6 つすべての文言を assert する。client / agent に profile はまだ無い
+# enableBridgeOneHook (#508。commit された値に依らないよう personal を名指しで替える。#510) も true にして、6 つすべての文言を assert する。client / agent に profile はまだ無い
 # ので、この付け替えが表の行の証明になる。cap 名は表から導かず test に固定する (表から
 # 行が落ちる退行を検出するため)。docs/policy-model.md の契約は hard fail なので、
 # 文言だけでなく exit code も pin する。
@@ -914,7 +914,7 @@ for ek_kind in work client agent; do
   make_fixture
   replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
   replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
-  replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableBridgeOneHook: false" "      enableBridgeOneHook: true"
+  flip_personal_capability "$fixture" enableBridgeOneHook true
   ek_rc=0
   ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || ek_rc=$?
   if [[ "$ek_rc" -eq 0 ]]; then
@@ -1082,7 +1082,7 @@ for bridge_kind in personal sandbox; do
     replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $bridge_kind"
     replace_once "$fixture/.chezmoidata/profiles.yaml" "      allowSecretsAccess: true" "      allowSecretsAccess: false"
   fi
-  replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableBridgeOneHook: false" "      enableBridgeOneHook: true"
+  flip_personal_capability "$fixture" enableBridgeOneHook true
   run_ok \
     "enableBridgeOneHook=true is allowed for the $bridge_kind environmentKind" \
     "$fixture/scripts/validate-policy.sh" personal
