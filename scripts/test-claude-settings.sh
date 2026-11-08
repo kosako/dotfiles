@@ -1085,6 +1085,78 @@ else
   status=1
 fi
 
+# 8i) Byte-exact render (#508): the compares above normalize the JSON (key
+#     order, whitespace, line breaks), so a template change that only
+#     reformats the output would still pass them. For a fixed plain home (the
+#     one test-render.sh uses) the committed personal render must equal
+#     scripts/testdata/claude-settings.personal.json BYTE for byte. That file
+#     was rendered from main's template before #508; enableBridgeOneHook is
+#     off in the committed profile and off must leave the output unchanged.
+#     With the Bridge hook on, the render must equal that file with exactly
+#     the Bridge One entry's lines inserted after the record hook's
+#     PermissionRequest entry (built here as text, not by a JSON tool). To
+#     update the file after an INTENDED template change, render personal as
+#     this case does (HOME=/dotfiles-render-test-home, a throwaway destination)
+#     and copy its .claude/settings.json over the file.
+golden_home="/dotfiles-render-test-home"
+golden_settings="$DOTFILES_ROOT/scripts/testdata/claude-settings.personal.json"
+golden_hint="if the template change is intended, render personal with HOME=$golden_home into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json (see 8i)"
+golden_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$golden_root")
+if HOME="$golden_home" render_personal_into "$DOTFILES_ROOT" "$golden_root" \
+  && cmp -s "$golden_settings" "$golden_root/home/.claude/settings.json"; then
+  ok "test passed: the committed personal render equals scripts/testdata/claude-settings.personal.json byte for byte (no reformatting, enableBridgeOneHook off changes nothing)"
+else
+  fail "test failed: the committed personal render differs byte-wise from scripts/testdata/claude-settings.personal.json ($golden_hint)"
+  diff "$golden_settings" "$golden_root/home/.claude/settings.json" >&2 || true
+  status=1
+fi
+golden_bridge_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-golden-bridge.XXXXXX")"
+tmp_roots+=("$golden_bridge_src")
+make_flipped_source "$golden_bridge_src"
+flip_personal_capability "$golden_bridge_src/src" enableBridgeOneHook true
+golden_bridge_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
+tmp_roots+=("$golden_bridge_root")
+golden_bridge_expected="$golden_bridge_root/expected.json"
+# The expected file plus the Bridge entry: the record entry's closing "}" gets
+# a comma and the entry's lines follow it, before PermissionRequest's "]". The
+# command is written as chezmoi's toJson writes it: Go's JSON encoder escapes
+# ">" as \u003e (the decoded string is the same; 8g compares decoded values).
+# It reaches awk through the environment, which awk does not escape-process
+# (an -v value would turn the backslash into an escape sequence).
+golden_bridge_cmd="'$golden_home/.local/share/bridge-one/hook/current/bin/permission-request' 2\\u003e/dev/null"
+if BRIDGE_CMD="$golden_bridge_cmd" awk '
+  NR > 1 {
+    if (in_pr && $0 == "    ]") {
+      print prev ","
+      print "      {"
+      print "        \"matcher\": \"*\","
+      print "        \"hooks\": ["
+      print "          {"
+      print "            \"type\": \"command\","
+      print "            \"command\": \"" ENVIRON["BRIDGE_CMD"] "\","
+      print "            \"timeout\": 600"
+      print "          }"
+      print "        ]"
+      print "      }"
+      in_pr = 0
+      inserted = 1
+    } else {
+      print prev
+    }
+  }
+  { if ($0 == "    \"PermissionRequest\": [") in_pr = 1; prev = $0 }
+  END { print prev; if (!inserted) exit 1 }
+' "$golden_settings" > "$golden_bridge_expected" \
+  && HOME="$golden_home" render_personal_into "$golden_bridge_src/src" "$golden_bridge_root" \
+  && cmp -s "$golden_bridge_expected" "$golden_bridge_root/home/.claude/settings.json"; then
+  ok "test passed: with enableBridgeOneHook on, the render is the expected file plus exactly the Bridge One entry's lines, byte for byte"
+else
+  fail "test failed: with enableBridgeOneHook on, the render is not the expected file plus the Bridge One entry byte for byte ($golden_hint)"
+  diff "$golden_bridge_expected" "$golden_bridge_root/home/.claude/settings.json" >&2 || true
+  status=1
+fi
+
 section "claude settings keep the keys the template does not manage (#360)"
 
 # 9) ~/.claude/settings.json is a chezmoi modify script: with no live file it

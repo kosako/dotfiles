@@ -343,6 +343,42 @@ else
   status=1
 fi
 
+# 2f) Byte-exact render (#508): 2e compares within this branch, so a template
+#     change that reformats hooks.json in both renders would pass it. For a
+#     fixed plain home (the one test-render.sh uses) the committed personal
+#     ~/.codex/hooks.json must equal scripts/testdata/codex-hooks.personal.json
+#     BYTE for byte, and so must the render with enableBridgeOneHook on
+#     (Claude-only). The file was rendered from main's template before #508.
+#     To update it after an INTENDED template change, render personal as this
+#     case does (HOME=/dotfiles-render-test-home, a throwaway destination) and
+#     copy its .codex/hooks.json over the file.
+golden_home="/dotfiles-render-test-home"
+golden_hooks="$DOTFILES_ROOT/scripts/testdata/codex-hooks.personal.json"
+golden_hint="if the template change is intended, render personal with HOME=$golden_home into a throwaway destination and copy its .codex/hooks.json over scripts/testdata/codex-hooks.personal.json (see 2f)"
+golden_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
+tmp_roots+=("$golden_root")
+golden_bridge_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-golden-bridge.XXXXXX")"
+tmp_roots+=("$golden_bridge_src")
+make_flipped_source "$golden_bridge_src"
+flip_personal_capability "$golden_bridge_src/src" enableBridgeOneHook true
+golden_bridge_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
+tmp_roots+=("$golden_bridge_root")
+for golden_case in committed bridge-on; do
+  if [[ "$golden_case" == committed ]]; then
+    golden_src="$DOTFILES_ROOT" golden_case_root="$golden_root"
+  else
+    golden_src="$golden_bridge_src/src" golden_case_root="$golden_bridge_root"
+  fi
+  if HOME="$golden_home" render_personal_into "$golden_src" "$golden_case_root" \
+    && cmp -s "$golden_hooks" "$golden_case_root/home/.codex/hooks.json"; then
+    ok "test passed: the $golden_case personal ~/.codex/hooks.json equals scripts/testdata/codex-hooks.personal.json byte for byte"
+  else
+    fail "test failed: the $golden_case personal ~/.codex/hooks.json differs byte-wise from scripts/testdata/codex-hooks.personal.json ($golden_hint)"
+    diff "$golden_hooks" "$golden_case_root/home/.codex/hooks.json" >&2 || true
+    status=1
+  fi
+done
+
 # 3) ALL hook capabilities false REMOVES an ALREADY-APPLIED ~/.codex/hooks.json
 #    on the next apply — not just "does not newly create it". This is the exact
 #    lingering scenario a `requires:` module gate would miss (chezmoiignore drops

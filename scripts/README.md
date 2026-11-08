@@ -1057,11 +1057,17 @@ live の file への `chezmoi diff` は通常の `TMPDIR` のときと同じ差�
 mktemp が走らず(BSD の mktemp は `TMPDIR` が無いと別の dir に作る)、jq が live の file を pipe から読む(/bin/sh の bash は
 here-document を一時 file に置く)ことも見る。決まった path への書き込みまでは見ない。PATH の先頭に置いた jq の shim が
 記録する引数に、live の file の `autoMode` だけにある値が diff・apply・2 回目の diff のどこでも出ない(見るのは jq の引数
-だけ)。chezmoi と jq が必要(render job)。
+だけ)。固定の home(`/dotfiles-render-test-home`)の personal の render は、`scripts/testdata/claude-settings.personal.json` と
+正規化せずに byte で同じで、`enableBridgeOneHook` を on にした render は、その file に Bridge One の entry の行だけを足したものと
+byte で同じ(#508。正規化した比較では整形だけの変化を捕まえられないため)。template を意図して変えたときは、同じ home で personal を
+使い捨ての destination に render し、その `.claude/settings.json` で期待値の file を置き換える。chezmoi と jq が必要(render job)。
 
 ## test-codex-settings.sh
 
-managed `~/.codex/hooks.json` と `~/.codex/rules/default.rules` の rendered content を検証する。hooks 登録は
+managed `~/.codex/hooks.json` と `~/.codex/rules/default.rules` の rendered content を検証する。固定の home
+(`/dotfiles-render-test-home`)の personal の `hooks.json` は、`enableBridgeOneHook` の on / off のどちらでも
+`scripts/testdata/codex-hooks.personal.json` と byte で同じこと(#508。template を意図して変えたときの期待値の作り直しは
+test-claude-settings.sh と同じ手順で、`.codex/hooks.json` を写す)。hooks 登録は
 Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は timeout なし、SessionStart は herdr installer と同一形の
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、既定と各 capability を切った render の
