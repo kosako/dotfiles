@@ -150,6 +150,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 - Claude MCP exposure(report-only): `gateUnusedClaudeMcp` の deny(claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs の connector と、利用の無いかまれな Notion の書込 tool)の wired 状態。live の file は読まない(#341)。
 - tool call record hook(report-only): `enableToolCallRecordHook` の登録(SessionStart と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest に `personal-tool-call-record-hook`)の wired 状態。live の file は読まない(#353)。
 - 日本語の答えの guard(report-only): `enableJaReplyGuardHook` の登録(Stop に `personal-ja-reply-guard`)の wired 状態と、配備された body の有無。live の file は読まない(#497)。
+- Bridge One の hook(report-only): `enableBridgeOneHook` の登録(PermissionRequest に Bridge One の起動用の script)の wired 状態と、配備された起動用の script が実行できる file かどうか。無ければ warn(承認は端末に戻るので fail にしない)。決定を返す hook を手で足さない旨の注記も出す。live の file は読まない(#508)。
 - GitHub injection guard(report-only): secret floor は managed settings.json の常時 deny 宣言として報告(live の状態は managed drift を参照)、`gateGitHubMcp` の MCP deny の wired 状態、`enableGitHubIsolatedReader` の PreToolUse hook 登録の wired 状態と hook body の presence — body は agent-tools 配布なので存在のみを contents-blind で見る(#137)。`enableGitHubIsolatedReader=false` でも live の `~/.claude/settings.json` / `~/.codex/hooks.json` に登録が残っていれば、file ごとに action にする(下の quality loop hooks と同じ検査。#201)。
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。capability=false でも live の `~/.claude/settings.json` / `~/.codex/hooks.json` に登録が残っていれば(apply 前の flip、または profile 切替の残置)、file ごとに action にする(`--actions-only` にも出る)。body の path (品質ループは PostToolUse と Stop の 2 本のどちらか) を固定文字列で探すだけで、中身は出さない。その profile が file を管理していれば(settings module が active)`chezmoi apply` を、管理していなければ hook の項目か file を手で消す手順(file を消したら herdr の登録を入れ直す)を出す。在るのに通常の file でない(FIFO なら読むと止まる)、または読めない file は、登録を確かめられないので warn にし、not-wired の ok は出さない(#200 / #201)。親の dir を辿れず在るかを確かめられない file も同じ(不在とするのは、親に入れてそこに file が無いときと、親が無い・dir でないと cd の errno で確かめたときだけ。#439)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。各 process を止めてから子を辿る `kill_tree`(`lib-policy.sh`)で、辿っている間に増える子も残さない、#423。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
@@ -409,7 +410,7 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
 - backup-paths(#60 / #246): 絶対 path / `..` / glob / unknown type / 重複 / 空 entry / 空 catalog に加え、
   共有 parser の構造検査として category の `|`・path 内の改行・非 string の type・list の代わりの scalar
   (`backup_paths: false`)を拒否。
-- environmentKind 制約: work / client / agent で権限付与型 capability の true、sandbox の
+- environmentKind 制約: work / client / agent で権限付与型 capability(#508 の `enableBridgeOneHook` を含む)の true、sandbox の
   allowSecretsAccess、`npmHardeningMode=off` を hard fail。`npmHardeningMode=off` は、禁止の boolean がすべて false の
   work の profile を各 kind に付け替えて enum の行だけの違反にし、exit code まで pin する。personal を各 kind に付け替えた
   fixture でも、boolean の行と同時に enum の行が報告されること。権限を与えない capability と値(安全強化型の
@@ -417,7 +418,7 @@ managed file から抽出し、fixture の TMPDIR と fake `pbcopy` を持つ隔
   `enableHerdrIntegration` / `enableToolCallRecordHook` / `enableJaReplyGuardHook` の true、`npmHardeningMode=enforce`、`codexReviewEffort` /
   `codexWorkerEffort` の `xhigh`)は、fixture の定義済み profile(personal / work)で許容されること(forbidden 表に
   入っていないことの、その 2 つの kind での pin。case ごとに別の fixture の `--all` で確かめる。ほかの kind の forbidden
-  表への追加は、この case では見ない)。forbidden-enum 表の不正行(schema に無い値・`=` の無い行)は fail closed。
+  表への追加は、この case では見ない)。`enableBridgeOneHook` の true は personal と sandbox で許容されること。forbidden-enum 表の不正行(schema に無い値・`=` の無い行)は fail closed。
 - capability registry(#151): `implemented:` 欠落は fail、`implemented: false` は doctor.sh がその名前に
   言及していなければ fail(undisclosed dormant)。
 - 単一 dash の option は usage error、非 mikefarah yq / v4 未満は fail closed、空の profiles / schema は fail closed。
@@ -567,6 +568,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   の wired 状態、hook body の presence(contents-blind)、`enforceAiSandbox` の human-legit gate 開示。claude-settings を外した
   run(QL-e)で `gateGitHubMcp` / `gateUnusedClaudeMcp` / `enableToolCallRecordHook` / `enableJaReplyGuardHook` / `enableGitHubIsolatedReader`(Claude 側)が
   dangling になり、claude-settings が非 active なら secret floor・human-legit gate・main-push の注記を出さないこと。
+- Bridge One の hook(#508): 既定の off の表示、on のときの起動用の script の不在・実行できない file・dir の warn と、
+  実行できる file の ok、手で足す hook の注記、claude-settings を外したときの dangling。どの run も exit 0。
 - quality loop hooks(#199): 両 home の登録 + body presence、`checks.local.json` は presence のみ(canary で
   中身を漏らさない)、cap off の not-wired、live file に残置した登録の lingering warn、module 除去の dangling。
   profile 切替の残置(#201): 両 hook の capability が off で claude-settings が非 active のとき、両 file に残った
@@ -1038,7 +1041,7 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 `cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
 として含む message は ask になりうる)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで、allow も exact pin。`gateGitHubMcp` / `gateUnusedClaudeMcp` を false にした render は既定の render から、`gateGitHubMcp=false` と `enforceAiSandbox=true` を合わせた render は `enforceAiSandbox=true` の render から、その gate の deny を除いたものと JSON 全体で一致すること)、#93 で
 取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
-PostToolUse + Stop / `enableHerdrIntegration` の SessionStart / `enableToolCallRecordHook` の記録の hook / `enableJaReplyGuardHook` の Stop の 2 つ目の entry。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225 / #353 / #497)を exact に確認する(personal 既定の render では `hooks` の object 全体を pin するので、entry に足された key(safe-gh の `async` や `timeout` など)も落ちる)。
+PostToolUse + Stop / `enableHerdrIntegration` の SessionStart / `enableToolCallRecordHook` の記録の hook / `enableJaReplyGuardHook` の Stop の 2 つ目の entry / `enableBridgeOneHook` の PermissionRequest の 2 つ目の entry(決定を返しうる PermissionRequest の hook はこれだけで、HOME が変わった path でも command は 1 語)。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225 / #353 / #497 / #508)を exact に確認する(personal 既定の render では `hooks` の object 全体を pin するので、entry に足された key(safe-gh の `async` や `timeout` など)も落ちる)。
 managed file は modify script(#360)なので、live の file がある home への apply も確かめる: `autoMode` / `modelSettings` /
 未知の key と `/model` の選択(`model`)が値も位置もそのまま残る、managed の key の古い値は render に戻り要らない
 `sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
@@ -1054,11 +1057,17 @@ live の file への `chezmoi diff` は通常の `TMPDIR` のときと同じ差�
 mktemp が走らず(BSD の mktemp は `TMPDIR` が無いと別の dir に作る)、jq が live の file を pipe から読む(/bin/sh の bash は
 here-document を一時 file に置く)ことも見る。決まった path への書き込みまでは見ない。PATH の先頭に置いた jq の shim が
 記録する引数に、live の file の `autoMode` だけにある値が diff・apply・2 回目の diff のどこでも出ない(見るのは jq の引数
-だけ)。chezmoi と jq が必要(render job)。
+だけ)。固定の home(`/dotfiles-render-test-home`)の personal の render は、`scripts/testdata/claude-settings.personal.json` と
+正規化せずに byte で同じで、`enableBridgeOneHook` を on にした render は、その file に Bridge One の entry の行だけを足したものと
+byte で同じ(#508。正規化した比較では整形だけの変化を捕まえられないため)。template を意図して変えたときは、同じ home で personal を
+使い捨ての destination に render し、その `.claude/settings.json` で期待値の file を置き換える。chezmoi と jq が必要(render job)。
 
 ## test-codex-settings.sh
 
-managed `~/.codex/hooks.json` と `~/.codex/rules/default.rules` の rendered content を検証する。hooks 登録は
+managed `~/.codex/hooks.json` と `~/.codex/rules/default.rules` の rendered content を検証する。固定の home
+(`/dotfiles-render-test-home`)の personal の `hooks.json` は、`enableBridgeOneHook` の on / off のどちらでも
+`scripts/testdata/codex-hooks.personal.json` と byte で同じこと(#508。template を意図して変えたときの期待値の作り直しは
+test-claude-settings.sh と同じ手順で、`.codex/hooks.json` を写す)。hooks 登録は
 Claude 側と同じ exact pin(PreToolUse は timeout 10、PostToolUse / Stop は timeout なし、SessionStart は herdr installer と同一形の
 `bash '<path>' session` + timeout 10。#181 / #199 / #225)に加え、
 top-level key が `{hooks}` だけであること(Codex 0.142.5 の parse 制約 #185)、既定と各 capability を切った render の

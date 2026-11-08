@@ -1649,6 +1649,84 @@ else
   status=1
 fi
 
+# BR) Bridge One hook (#508): committed personal has enableBridgeOneHook OFF,
+#     so the shared run reports the declared-off state. Flipped ON (personal
+#     only, in its own repo copy) with claude-settings active, the section
+#     reports the registration and whether the deployed launcher is an
+#     executable file (absent, a non-executable file, a directory in its place
+#     -> the warn; an executable stub -> ok), plus the note about hooks added
+#     by hand. With claude-settings removed it is dangling. Every run stays
+#     exit 0 (report-only; a missing launcher leaves prompts in the terminal).
+br_item='[info] - a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One'"'"'s design); dotfiles renders no other decision-capable PermissionRequest hook'
+br_ok='[ok] enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One'"'"'s PermissionRequest hook (returns a decision only when the Bridge One host answers; otherwise the prompt stays in the terminal; Claude Code only); launcher deployed'
+#     BR-a) committed: off.
+if grep -Fxq "[ok] enableBridgeOneHook not active (false)" <<< "$gh_out" \
+  && ! grep -Fq "registers Bridge One" <<< "$gh_out" \
+  && ! grep -Fxq "$br_item" <<< "$gh_out"; then
+  ok "test passed: enableBridgeOneHook=false (committed) reported as not active"
+else
+  fail "test failed: committed enableBridgeOneHook=false not reported as not active"
+  status=1
+fi
+br_root="$fixture_home/.dotfiles-bridge"
+copy_repo_fixture "$br_root"
+flip_personal_capability "$br_root" enableBridgeOneHook true
+br_home="$fixture_home/bridge"
+br_launcher="$br_home/.local/share/bridge-one/hook/current/bin/permission-request"
+br_warn="[warn] enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One's PermissionRequest hook but the launcher is absent or not an executable file: $br_launcher (deploy it from the Bridge One repo) — prompts stay in the terminal until deployed"
+# br_case LABEL WANT_LINE — doctor personal on br_root with HOME=br_home must
+# exit 0, print WANT_LINE and the hand-added-hook note, and print the other
+# of the ok / warn lines nowhere.
+br_case() {
+  local label="$1" want="$2" other out
+  if [[ "$want" == "$br_ok" ]]; then other="$br_warn"; else other="$br_ok"; fi
+  if out="$(HOME="$br_home" "$br_root/scripts/doctor.sh" personal 2>&1)"; then
+    if grep -Fxq "$want" <<< "$out" && grep -Fxq "$br_item" <<< "$out" && ! grep -Fxq "$other" <<< "$out"; then
+      ok "test passed: enableBridgeOneHook=true $label"
+    else
+      printf '%s\n' "$out" >&2
+      fail "test failed: enableBridgeOneHook=true $label not reported"
+      status=1
+    fi
+  else
+    printf '%s\n' "$out" >&2
+    fail "test failed: doctor must stay exit 0 (enableBridgeOneHook, $label)"
+    status=1
+  fi
+}
+#     BR-b) no launcher deployed -> warn naming the path.
+mkdir -p "$br_home"
+br_case "with no launcher warns launcher-absent (prompts stay in the terminal)" "$br_warn"
+#     BR-c) an executable stub -> ok; the same file without the execute bit,
+#           and a searchable directory in its place -> the warn.
+mkdir -p "${br_launcher%/*}"
+printf '#!/bin/sh\nexit 0\n' > "$br_launcher"
+chmod +x "$br_launcher"
+br_case "with an executable launcher reports it deployed" "$br_ok"
+chmod -x "$br_launcher"
+br_case "with a non-executable launcher warns like an absent one" "$br_warn"
+rm -f "$br_launcher"
+mkdir "$br_launcher"
+chmod 755 "$br_launcher"
+br_case "with a directory in the launcher's place warns like an absent one" "$br_warn"
+rmdir "$br_launcher"
+#     BR-d) claude-settings removed -> dangling.
+remove_module_all "$br_root" claude-settings
+if br_out="$(HOME="$br_home" "$br_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[warn] enableBridgeOneHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Bridge One hook (dangling capability)" <<< "$br_out" \
+    && ! grep -Fq "registers Bridge One" <<< "$br_out"; then
+    ok "test passed: enableBridgeOneHook=true with claude-settings inactive is reported as dangling"
+  else
+    printf '%s\n' "$br_out" >&2
+    fail "test failed: dangling enableBridgeOneHook not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$br_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableBridgeOneHook dangling)"
+  status=1
+fi
+
 # DR) enableDirenv selects the doctor check only (#401): with it false, the
 #     report says the check is skipped and that the shell hook still runs,
 #     not that direnv is off (the managed ~/.zshrc registers the hook

@@ -2280,6 +2280,31 @@ else
   ok "enableJaReplyGuardHook not active (false)"
 fi
 
+section "Bridge One hook (report-only)"
+# enableBridgeOneHook (#508) registers, in the managed ~/.claude/settings.json,
+# Bridge One's PermissionRequest hook (matcher "*", timeout 600, no async, no
+# onFailure) after the record hook as a second entry. Unlike the other hooks it
+# can return a decision (allow / deny) when the Bridge One host answers; with no
+# host running it prints nothing and the prompt goes back to the terminal
+# dialog. The Bridge One repo deploys the launcher (tools/hook-deploy/deploy.mjs);
+# a missing launcher also prints nothing, so this is a warn, not a fail. Report
+# registration + launcher presence; the live settings file is not probed here.
+if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    bridge_launcher="$HOME/.local/share/bridge-one/hook/current/bin/permission-request"
+    if [[ -f "$bridge_launcher" && -x "$bridge_launcher" ]]; then
+      ok "enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One's PermissionRequest hook (returns a decision only when the Bridge One host answers; otherwise the prompt stays in the terminal; Claude Code only); launcher deployed"
+    else
+      warn "enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One's PermissionRequest hook but the launcher is absent or not an executable file: $bridge_launcher (deploy it from the Bridge One repo) — prompts stay in the terminal until deployed"
+    fi
+    item "a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles renders no other decision-capable PermissionRequest hook"
+  else
+    warn "enableBridgeOneHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Bridge One hook (dangling capability)"
+  fi
+else
+  ok "enableBridgeOneHook not active (false)"
+fi
+
 section "GitHub injection guard (report-only)"
 # gateGitHubMcp / enableGitHubIsolatedReader are safety-hardening capabilities for
 # the GitHub runtime prompt-injection defense (epic #119). Like enforceAiSandbox

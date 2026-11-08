@@ -6,9 +6,9 @@
        ".codex"), optional timeout (number; applied to the safe-gh hook only —
        Codex passes 10).
 
-       Five capabilities contribute events, each self-gated here (the last
-       two, enableToolCallRecordHook and enableJaReplyGuardHook, are
-       Claude-only; see the notes at the body):
+       Six capabilities contribute events, each self-gated here (the last
+       three, enableToolCallRecordHook, enableJaReplyGuardHook and
+       enableBridgeOneHook, are Claude-only; see the notes at the body):
        - enableGitHubIsolatedReader: PreToolUse / matcher Bash ->
          personal-safe-gh-hook (GitHub read steering, #137 / #181).
        - enableQualityLoopHooks: PostToolUse / matcher Edit|Write ->
@@ -61,6 +61,23 @@
          the agent-tools manifest targets claude-code, so on agentDir
          ".codex" it contributes nothing. It is appended as the SECOND
          entry of Stop after changed-scope-qa, which stays byte-identical.
+       - enableBridgeOneHook (#508): PermissionRequest / matcher "*" ->
+         Bridge One's launcher <home>/.local/share/bridge-one/hook/current/
+         bin/permission-request, timeout 600, no "async" and no "onFailure".
+         Unlike every hook above it can RETURN a decision: when the Bridge
+         One host answers it prints allow / deny; with no host (or no
+         deployed launcher) it prints nothing and the prompt goes back to the
+         terminal dialog. The command is the launcher path ALWAYS
+         single-quoted (each `'` as '\''), followed by ` 2>/dev/null` —
+         exactly the string Bridge One's tools/hook-deploy/deploy.mjs prints
+         — so a failed start (no launcher, or the instant `current` is
+         swapped) writes nothing to stderr either. CLAUDE ONLY. It is
+         appended as the SECOND entry of PermissionRequest after the record
+         hook's, which stays byte-identical; with the record hook off it is
+         the only entry. The record hook is async and returns no decision,
+         so this is the only decision-capable PermissionRequest hook dotfiles
+         renders (Bridge One's design forbids a second one; a hook added by
+         hand is outside dotfiles).
        The home path reaches each command string through the shell-word
        template (quoted only when it holds a character a shell would act
        on; the herdr path is always single-quoted, as herdr writes it, with
@@ -74,7 +91,7 @@
        is a non-blocking hook error in both harnesses), so rendering before
        agent-tools has synced or herdr has installed is a safe no-op.
 
-       Callers include this only when at least one of the five capabilities
+       Callers include this only when at least one of the six capabilities
        is on (an empty "hooks": {} is never rendered; the Codex caller keeps
        gating on the three it renders). Renders at two-space
        indent with NO trailing comma and NO trailing newline — the caller
@@ -100,6 +117,10 @@
 {{- /* enableJaReplyGuardHook (#497) is Claude-only for the same reason: the
        agent-tools body targets claude-code only (agent-tools#588). */ -}}
 {{- $jaGuard := and (index .caps "enableJaReplyGuardHook") $herdrClaude -}}
+{{- /* enableBridgeOneHook (#508) is Claude-only: Bridge One connects to
+       Claude Code's PermissionRequest hook only. */ -}}
+{{- $bridge := and (index .caps "enableBridgeOneHook") $herdrClaude -}}
+{{- $bridgeHook := printf "%s/.local/share/bridge-one/hook/current/bin/permission-request" .homeDir -}}
 {{- /* The record entry itself lives in agent-hooks-record-entry (a define
        inside this file is not visible to chezmoi's template action). */ -}}
 {{- $sep := "" -}}
@@ -203,9 +224,27 @@
     ],
     "PermissionDenied": [
 {{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
-    ],
+    ]
+{{- $sep = "," -}}
+{{- end }}
+{{- if or $record $bridge }}{{ $sep }}
     "PermissionRequest": [
+{{- if $record }}
 {{ includeTemplate "agent-hooks-record-entry" (dict "cmd" $recordCmd "matcher" "*") }}
+{{- end }}
+{{- if and $record $bridge }},{{ end }}
+{{- if $bridge }}
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": {{ printf "'%s' 2>/dev/null" (replace "'" "'\\''" $bridgeHook) | toJson }},
+            "timeout": 600
+          }
+        ]
+      }
+{{- end }}
     ]
 {{- end }}
   }

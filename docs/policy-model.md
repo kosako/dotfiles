@@ -64,7 +64,7 @@ boolean の制約は静的な検証(`validate-policy.sh`)と、副作用のあ�
 
 | environmentKind | false 必須の capability |
 | --- | --- |
-| work / client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| work / client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools, enableBridgeOneHook |
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 
@@ -311,6 +311,17 @@ turn の最後の答えが英語に逸れたとき、1 回だけ止めて日本�
 - **Claude だけ**。agent-tools の manifest の target が claude-code だけなので、Codex の `hooks.json` には出さない。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
 - **極性は `enableQualityLoopHooks` と同じ**(権限を付与しない)。`environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。
 - **状態**: personal=true、work=false(work は claude-settings を管理しない)。body が未配備でも hook の欠落は non-blocking なので、先に登録しても安全。body の有無と dangling は doctor が report。
+
+## Bridge One の hook(`enableBridgeOneHook`、#508)
+
+Bridge One(個人用の Control Center。repo は kosako/BridgeOne)の PermissionRequest hook を、managed `~/.claude/settings.json` に登録する capability。hook の本体と配備は Bridge One の repo(`tools/hook-deploy/deploy.mjs`)が持ち、dotfiles は登録だけを行う。
+
+- `enableBridgeOneHook`(boolean): on のとき `PermissionRequest` / matcher `*` に、起動用の script `~/.local/share/bridge-one/hook/current/bin/permission-request` を `timeout: 600` で登録する。`async` と `onFailure` は付けない。command は path を single quote で囲み(`'` は `'\''`)、` 2>/dev/null` を付けた文字列で、Bridge One の配備の script が表示するものと同じ。HOME に空白や quote があっても 1 語の path になり、起動の失敗の error も stderr に出ない。記録 hook(`enableToolCallRecordHook`)の entry の後ろに 2 つ目の entry として足し、既存の entry は変えない。off のときの出力が従来と byte 単位で同じことは `test-claude-settings.sh` が pin する。
+- **ほかの hook と違い、決定 (allow / deny) を返しうる**。Bridge One の host が答えたときだけ返す。host が動いていない間・起動用の script が無いときは何も出力せず、承認は端末の dialog に戻る。Bridge One の設計は、決定を返す別の PermissionRequest hook と併存させない。dotfiles が出す PermissionRequest の hook で決定を返しうるのはこれだけで(記録 hook は async で決定を返さない。`test-claude-settings.sh` が pin)、利用者が手で足した hook との併存は dotfiles の範囲の外。
+- **強度ラベル**: 承認の経路の追加。enforcement boundary ではない(同じ uid の process は hook も host も書き換えられる。Bridge One の文書の前提)。
+- **Claude だけ**。Bridge One は Claude Code の PermissionRequest hook にだけ繋ぐので、Codex の `hooks.json` には出さない。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
+- **極性は権限付与型**。外の host が承認に答えられる経路を足すので、`environment_kind_forbidden_capabilities` の work / client / agent の行に入れる(個人の Bridge One が、仕事や client の環境の agent の承認に答えないため)。personal と sandbox は true にできる(`test-policy.sh` が pin)。
+- **状態**: personal=false、work=false。Bridge One の試験(K13)を始めるときに、利用者が personal で on にする。起動用の script が未配備でも承認は端末に戻るので、先に登録しても安全。登録と起動用の script の有無と dangling は doctor が report。
 
 ## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264 / #299)
 

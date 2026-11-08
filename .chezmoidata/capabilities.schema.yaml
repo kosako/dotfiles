@@ -83,6 +83,9 @@ capabilities:
   enableJaReplyGuardHook:
     type: boolean
     implemented: true
+  enableBridgeOneHook:
+    type: boolean
+    implemented: true
   codexReviewEffort:
     type: enum
     implemented: true
