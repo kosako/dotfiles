@@ -174,11 +174,12 @@ profiles:
       # onFailure), after the record hook as a second entry. Unlike the hooks
       # above it can RETURN a decision: when the Bridge One host answers, it
       # allows or denies the prompt; with no host running it prints nothing and
-      # the prompt goes back to the terminal dialog. Off until the user decides
-      # to run Bridge One's hook trial (K13). Registration=dotfiles, body and
-      # deployment=the Bridge One repo (tools/hook-deploy/deploy.mjs). Claude
-      # only.
-      enableBridgeOneHook: false
+      # the prompt goes back to the terminal dialog. #510: on since the user
+      # started Bridge One's hook trial (K13); the tests take either value, so
+      # turning it back off is this line plus the docs' state line.
+      # Registration=dotfiles, body and deployment=the Bridge One repo
+      # (tools/hook-deploy/deploy.mjs). Claude only.
+      enableBridgeOneHook: true
       # #264 (agent-tools#339 hand-off): reasoning effort for agent-tools'
       # Codex review / worker, rendered by codex-settings into the Codex
       # profile files ~/.codex/agent-tools-review.config.toml and

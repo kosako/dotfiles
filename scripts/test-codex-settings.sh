@@ -302,22 +302,23 @@ fi
 
 # 2e) enableBridgeOneHook (#508) is Claude-only: Bridge One connects to
 #     Claude Code's PermissionRequest hook only, so the Codex render must not
-#     carry it and must not change with it. It is OFF in the committed
-#     personal, so it is flipped ON here: hooks.json stays byte-identical to
-#     the committed render and names no Bridge One launcher, and the Bridge
-#     hook alone (the three Codex hook capabilities off) renders no
+#     carry it and must not change with it. It is set explicitly both ways
+#     (the committed value may be either; #510 turned it on for personal):
+#     hooks.json with it on and with it off is byte-identical to the
+#     committed render and names no Bridge One launcher, and the Bridge hook
+#     alone (the three Codex hook capabilities off) renders no
 #     ~/.codex/hooks.json at all.
-# render_codex_bridge_on LABEL CAP... — the personal render with
-# enableBridgeOneHook flipped true and each CAP flipped false; sets
+# render_codex_bridge LABEL VALUE CAP... — the personal render with
+# enableBridgeOneHook set to VALUE and each CAP flipped false; sets
 # bridge_flip_file to its ~/.codex/hooks.json (a plain statement, not $(...),
 # so the tmp_roots registrations reach the EXIT trap).
-render_codex_bridge_on() {
-  local label="$1" src root cap
-  shift
+render_codex_bridge() {
+  local label="$1" value="$2" src root cap
+  shift 2
   src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-$label.XXXXXX")"
   tmp_roots+=("$src")
   make_flipped_source "$src"
-  flip_personal_capability "$src/src" enableBridgeOneHook true
+  flip_personal_capability "$src/src" enableBridgeOneHook "$value"
   for cap in "$@"; do
     flip_personal_capability "$src/src" "$cap" false
   done
@@ -329,45 +330,48 @@ render_codex_bridge_on() {
   fi
   bridge_flip_file="$root/home/.codex/hooks.json"
 }
-render_codex_bridge_on bridge-on
+render_codex_bridge bridge-on true
 bridge_on_hooks="$bridge_flip_file"
-render_codex_bridge_on bridge-alone enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration
+render_codex_bridge bridge-off false
+bridge_off_hooks="$bridge_flip_file"
+render_codex_bridge bridge-alone true enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration
 bridge_alone_hooks="$bridge_flip_file"
-if [[ -f "$hooks_file" && -f "$bridge_on_hooks" ]] \
+if [[ -f "$hooks_file" && -f "$bridge_on_hooks" && -f "$bridge_off_hooks" ]] \
+  && ! grep -Fq "bridge-one" "$hooks_file" \
   && ! grep -Fq "bridge-one" "$bridge_on_hooks" \
   && cmp -s "$hooks_file" "$bridge_on_hooks" \
+  && cmp -s "$hooks_file" "$bridge_off_hooks" \
   && [[ ! -e "$bridge_alone_hooks" && ! -L "$bridge_alone_hooks" ]]; then
-  ok "test passed: enableBridgeOneHook never reaches ~/.codex/hooks.json (byte-identical when flipped on, no file when it is the only one on)"
+  ok "test passed: enableBridgeOneHook never reaches ~/.codex/hooks.json (byte-identical on and off, no file when it is the only one on)"
 else
   fail "test failed: enableBridgeOneHook leaked into the Codex render (named in hooks.json, the render changed with it, or the Bridge hook alone rendered a file)"
   status=1
 fi
 
 # 2f) Byte-exact render (#508): 2e compares within this branch, so a template
-#     change that reformats hooks.json in both renders would pass it. For a
+#     change that reformats hooks.json in every render would pass it. For a
 #     fixed plain home (the one test-render.sh uses) the committed personal
 #     ~/.codex/hooks.json must equal scripts/testdata/codex-hooks.personal.json
-#     BYTE for byte, and so must the render with enableBridgeOneHook on
-#     (Claude-only). The file was rendered from main's template before #508.
-#     To update it after an INTENDED template change, render personal as this
-#     case does (HOME=/dotfiles-render-test-home, a throwaway destination) and
-#     copy its .codex/hooks.json over the file.
+#     BYTE for byte, and so must the renders with enableBridgeOneHook on and
+#     off (Claude-only). The file was rendered from main's template before
+#     #508. To update it after an INTENDED template change, render personal as
+#     this case does (HOME=/dotfiles-render-test-home, a throwaway destination)
+#     and copy its .codex/hooks.json over the file.
 golden_home="/dotfiles-render-test-home"
 golden_hooks="$DOTFILES_ROOT/scripts/testdata/codex-hooks.personal.json"
 golden_hint="if the template change is intended, render personal with HOME=$golden_home into a throwaway destination and copy its .codex/hooks.json over scripts/testdata/codex-hooks.personal.json (see 2f)"
-golden_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
-tmp_roots+=("$golden_root")
-golden_bridge_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-golden-bridge.XXXXXX")"
-tmp_roots+=("$golden_bridge_src")
-make_flipped_source "$golden_bridge_src"
-flip_personal_capability "$golden_bridge_src/src" enableBridgeOneHook true
-golden_bridge_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
-tmp_roots+=("$golden_bridge_root")
-for golden_case in committed bridge-on; do
+for golden_case in committed bridge-on bridge-off; do
+  golden_case_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
+  tmp_roots+=("$golden_case_root")
   if [[ "$golden_case" == committed ]]; then
-    golden_src="$DOTFILES_ROOT" golden_case_root="$golden_root"
+    golden_src="$DOTFILES_ROOT"
   else
-    golden_src="$golden_bridge_src/src" golden_case_root="$golden_bridge_root"
+    golden_case_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-golden-$golden_case.XXXXXX")"
+    tmp_roots+=("$golden_case_src")
+    make_flipped_source "$golden_case_src"
+    if [[ "$golden_case" == bridge-on ]]; then golden_value=true; else golden_value=false; fi
+    flip_personal_capability "$golden_case_src/src" enableBridgeOneHook "$golden_value"
+    golden_src="$golden_case_src/src"
   fi
   if HOME="$golden_home" render_personal_into "$golden_src" "$golden_case_root" \
     && cmp -s "$golden_hooks" "$golden_case_root/home/.codex/hooks.json"; then

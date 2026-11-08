@@ -1649,9 +1649,11 @@ else
   status=1
 fi
 
-# BR) Bridge One hook (#508): committed personal has enableBridgeOneHook OFF,
-#     so the shared run reports the declared-off state. Flipped ON (personal
-#     only, in its own repo copy) with claude-settings active, the section
+# BR) Bridge One hook (#508): the committed value may be either (#510 turned
+#     it on for personal), so the shared run is checked against whatever the
+#     profile says, and OFF is checked in its own repo copy with the value set
+#     explicitly: the declared-off state. ON (personal only, in its own repo
+#     copy) with claude-settings active, the section
 #     reports the registration and whether the deployed launcher is an
 #     executable file (absent, a non-executable file, a directory in its place
 #     -> the warn; an executable stub -> ok), plus the note about hooks added
@@ -1659,13 +1661,41 @@ fi
 #     exit 0 (report-only; a missing launcher leaves prompts in the terminal).
 br_item='[info] - a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One'"'"'s design); dotfiles renders no other decision-capable PermissionRequest hook'
 br_ok='[ok] enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One'"'"'s PermissionRequest hook (returns a decision only when the Bridge One host answers; otherwise the prompt stays in the terminal; Claude Code only); launcher deployed'
-#     BR-a) committed: off.
-if grep -Fxq "[ok] enableBridgeOneHook not active (false)" <<< "$gh_out" \
+#     BR-a) off, set explicitly in its own copy.
+br_off_root="$fixture_home/.dotfiles-bridge-off"
+copy_repo_fixture "$br_off_root"
+flip_personal_capability "$br_off_root" enableBridgeOneHook false
+if br_off_out="$(HOME="$fixture_home" "$br_off_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] enableBridgeOneHook not active (false)" <<< "$br_off_out" \
+    && ! grep -Fq "registers Bridge One" <<< "$br_off_out" \
+    && ! grep -Fxq "$br_item" <<< "$br_off_out"; then
+    ok "test passed: enableBridgeOneHook=false reported as not active"
+  else
+    printf '%s\n' "$br_off_out" >&2
+    fail "test failed: enableBridgeOneHook=false not reported as not active"
+    status=1
+  fi
+else
+  printf '%s\n' "$br_off_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableBridgeOneHook=false)"
+  status=1
+fi
+#     BR-a2) the shared run (the committed profile, no launcher in its home)
+#            reports the committed value: not active when false, and the
+#            registration with the hand-added-hook note when true.
+br_committed="$(yq '.profiles.personal.capabilities.enableBridgeOneHook' "$gh_root/.chezmoidata/profiles.yaml" 2>/dev/null)" || br_committed=""
+if [[ "$br_committed" == false ]] \
+  && grep -Fxq "[ok] enableBridgeOneHook not active (false)" <<< "$gh_out" \
   && ! grep -Fq "registers Bridge One" <<< "$gh_out" \
   && ! grep -Fxq "$br_item" <<< "$gh_out"; then
-  ok "test passed: enableBridgeOneHook=false (committed) reported as not active"
+  ok "test passed: the committed enableBridgeOneHook=false reported as not active"
+elif [[ "$br_committed" == true ]] \
+  && grep -Fq "enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One's PermissionRequest hook but the launcher is absent" <<< "$gh_out" \
+  && grep -Fxq "$br_item" <<< "$gh_out" \
+  && ! grep -Fq "enableBridgeOneHook not active" <<< "$gh_out"; then
+  ok "test passed: the committed enableBridgeOneHook=true reported as registered (launcher absent in the fixture home)"
 else
-  fail "test failed: committed enableBridgeOneHook=false not reported as not active"
+  fail "test failed: the committed enableBridgeOneHook ('$br_committed') not reported as its value says"
   status=1
 fi
 br_root="$fixture_home/.dotfiles-bridge"

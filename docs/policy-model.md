@@ -321,7 +321,7 @@ Bridge One(個人用の Control Center。repo は kosako/BridgeOne)の Permissio
 - **強度ラベル**: 承認の経路の追加。enforcement boundary ではない(同じ uid の process は hook も host も書き換えられる。Bridge One の文書の前提)。
 - **Claude だけ**。Bridge One は Claude Code の PermissionRequest hook にだけ繋ぐので、Codex の `hooks.json` には出さない。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
 - **極性は権限付与型**。外の host が承認に答えられる経路を足すので、`environment_kind_forbidden_capabilities` の work / client / agent の行に入れる(個人の Bridge One が、仕事や client の環境の agent の承認に答えないため)。personal と sandbox は true にできる(`test-policy.sh` が pin)。
-- **状態**: personal=false、work=false。Bridge One の試験(K13)を始めるときに、利用者が personal で on にする。起動用の script が未配備でも承認は端末に戻るので、先に登録しても安全。登録と起動用の script の有無と dangling は doctor が report。
+- **状態**: personal=true(#510。利用者が Bridge One の試験(K13)を始めた 2026-11-08 に on にした)、work=false。起動用の script が未配備でも承認は端末に戻るので、先に登録しても安全。登録と起動用の script の有無と dangling は doctor が report。test は commit された値に依らないので、off に戻すときは profile の値とこの行を変える。
 
 ## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264 / #299)
 
