@@ -26,6 +26,8 @@
        file never changes with it (Codex registration is out of scope there).
        enableJaReplyGuardHook (#497, agent-tools#588) is Claude-only the same
        way: the agent-tools body targets claude-code only.
+       enableBridgeOneHook (#508) is Claude-only too: Bridge One connects to
+       Claude Code's PermissionRequest hook only.
        enableHerdrIntegration (#225) registers herdr's SessionStart hook
        (matcher-less on Codex) the same way; the body is herdr's, written by
        `herdr integration install codex` to ~/.codex/herdr-agent-state.sh.

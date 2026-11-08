@@ -67,7 +67,7 @@ trap cleanup EXIT
 # root and registers it in tmp_roots, then inspects ROOT/home
 # (caller-creates-root contract; see the #150 leak note in test-lib.sh).
 
-section "codex settings hook registration (#181 / #199 / #225 / #497)"
+section "codex settings hook registration (#181 / #199 / #225 / #497 / #508)"
 
 # 1) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks and
 #    enableHerdrIntegration are ON, so ~/.codex/hooks.json exists and registers
@@ -297,6 +297,49 @@ if [[ -f "$hooks_file" && -f "$ja_off_hooks" ]] \
   ok "test passed: enableJaReplyGuardHook never reaches ~/.codex/hooks.json (absent from the committed render, byte-identical when flipped off, no file when it is the only one on)"
 else
   fail "test failed: enableJaReplyGuardHook leaked into the Codex render (named in hooks.json, the render changed with it, or the guard alone rendered a file)"
+  status=1
+fi
+
+# 2e) enableBridgeOneHook (#508) is Claude-only: Bridge One connects to
+#     Claude Code's PermissionRequest hook only, so the Codex render must not
+#     carry it and must not change with it. It is OFF in the committed
+#     personal, so it is flipped ON here: hooks.json stays byte-identical to
+#     the committed render and names no Bridge One launcher, and the Bridge
+#     hook alone (the three Codex hook capabilities off) renders no
+#     ~/.codex/hooks.json at all.
+# render_codex_bridge_on LABEL CAP... — the personal render with
+# enableBridgeOneHook flipped true and each CAP flipped false; sets
+# bridge_flip_file to its ~/.codex/hooks.json (a plain statement, not $(...),
+# so the tmp_roots registrations reach the EXIT trap).
+render_codex_bridge_on() {
+  local label="$1" src root cap
+  shift
+  src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings-$label.XXXXXX")"
+  tmp_roots+=("$src")
+  make_flipped_source "$src"
+  flip_personal_capability "$src/src" enableBridgeOneHook true
+  for cap in "$@"; do
+    flip_personal_capability "$src/src" "$cap" false
+  done
+  root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-codex-settings.XXXXXX")"
+  tmp_roots+=("$root")
+  if ! render_personal_into "$src/src" "$root"; then
+    fail "test failed: personal apply ($label) did not render"
+    exit 1
+  fi
+  bridge_flip_file="$root/home/.codex/hooks.json"
+}
+render_codex_bridge_on bridge-on
+bridge_on_hooks="$bridge_flip_file"
+render_codex_bridge_on bridge-alone enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration
+bridge_alone_hooks="$bridge_flip_file"
+if [[ -f "$hooks_file" && -f "$bridge_on_hooks" ]] \
+  && ! grep -Fq "bridge-one" "$bridge_on_hooks" \
+  && cmp -s "$hooks_file" "$bridge_on_hooks" \
+  && [[ ! -e "$bridge_alone_hooks" && ! -L "$bridge_alone_hooks" ]]; then
+  ok "test passed: enableBridgeOneHook never reaches ~/.codex/hooks.json (byte-identical when flipped on, no file when it is the only one on)"
+else
+  fail "test failed: enableBridgeOneHook leaked into the Codex render (named in hooks.json, the render changed with it, or the Bridge hook alone rendered a file)"
   status=1
 fi
 

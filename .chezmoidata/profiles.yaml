@@ -169,6 +169,16 @@ profiles:
       # answer in English sets AGENT_TOOLS_JA_GUARD_DISABLE. Same split as the
       # hooks above: registration=dotfiles, body=agent-tools.
       enableJaReplyGuardHook: true
+      # #508: register Bridge One's PermissionRequest hook in the managed
+      # ~/.claude/settings.json (matcher "*", timeout 600, no async, no
+      # onFailure), after the record hook as a second entry. Unlike the hooks
+      # above it can RETURN a decision: when the Bridge One host answers, it
+      # allows or denies the prompt; with no host running it prints nothing and
+      # the prompt goes back to the terminal dialog. Off until the user decides
+      # to run Bridge One's hook trial (K13). Registration=dotfiles, body and
+      # deployment=the Bridge One repo (tools/hook-deploy/deploy.mjs). Claude
+      # only.
+      enableBridgeOneHook: false
       # #264 (agent-tools#339 hand-off): reasoning effort for agent-tools'
       # Codex review / worker, rendered by codex-settings into the Codex
       # profile files ~/.codex/agent-tools-review.config.toml and
@@ -243,6 +253,9 @@ profiles:
       # #497: off — claude-settings is not part of work, so no managed file
       # could carry the registration.
       enableJaReplyGuardHook: false
+      # #508: off and forbidden for work / client / agent — the hook lets a
+      # personal Bridge One host answer this machine's permission prompts.
+      enableBridgeOneHook: false
       # #264: off — codex-settings is not part of work, and whether (and at
       # which values) a work machine gets the profile files is decided
       # separately (plan / billing differ). A hand-placed file still works:

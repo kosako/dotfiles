@@ -157,6 +157,17 @@
        non-empty value) turns it off for a session that should answer in
        English.
 
+       enableBridgeOneHook (#508) registers Bridge One's PermissionRequest
+       hook (matcher "*", timeout 600, no async, no onFailure) after the
+       record hook as a second entry. Unlike the hooks above it can return a
+       decision: allow / deny when the Bridge One host answers, nothing when
+       no host runs (the prompt goes back to the terminal dialog). The
+       command is the launcher <home>/.local/share/bridge-one/hook/current/
+       bin/permission-request single-quoted plus ` 2>/dev/null`, the string
+       Bridge One's tools/hook-deploy/deploy.mjs prints; that repo deploys
+       the launcher. Off in every profile until the user runs the trial;
+       forbidden for work / client / agent. Claude only.
+
        permissions.allow holds one Bash rule beside mcp__pencil (#505,
        agent-tools#640): personal-merged-branch-cleanup, the deployed script
        that checks a branch is merged (tip = the merged PR's head, personal
@@ -232,7 +243,7 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
       "Bash(~/.claude/agent-tools/scripts/personal-merged-branch-cleanup *)"
     ]
   },
-{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") (index $caps "enableJaReplyGuardHook") }}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") (index $caps "enableJaReplyGuardHook") (index $caps "enableBridgeOneHook") }}
 {{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
   "model": "opus[1m]",

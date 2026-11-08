@@ -646,7 +646,9 @@ is_allowed_environment_kind() {
 # Boolean capabilities that must be false for a given environmentKind.
 # Encodes the policy that work / client / agent environments do not carry
 # elevated permissions (install, secrets, network, AI tooling) by default,
-# and that sandbox forbids secret access. personal
+# nor a personal Bridge One host answering their AI agent's permission
+# prompts (enableBridgeOneHook, #508), and that sandbox forbids secret
+# access. personal
 # is unconstrained; enum capabilities have their own forbidden-VALUE table
 # below (#45). See docs/policy-model.md. agent has no profile yet; the row
 # is defined so the constraint takes effect the moment an agent profile is
@@ -659,7 +661,8 @@ environment_kind_forbidden_capabilities() {
         installGuiApps \
         allowSecretsAccess \
         allowNetworkTunnels \
-        enableAiTools
+        enableAiTools \
+        enableBridgeOneHook
       ;;
     sandbox)
       printf '%s\n' allowSecretsAccess

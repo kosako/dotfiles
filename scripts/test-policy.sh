@@ -904,9 +904,9 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 # environmentKind cross-check. work / client / agent の deny 表 (lib-policy の
-# environment_kind_forbidden_capabilities) の 5 つが kind ごとに全部発火することを
-# 確かめる: personal (元から elevated) を各 kind に付け替え、唯一 false の enableAiTools
-# も true にして、5 つすべての文言を assert する。client / agent に profile はまだ無い
+# environment_kind_forbidden_capabilities) の 6 つが kind ごとに全部発火することを
+# 確かめる: personal (元から elevated) を各 kind に付け替え、false の enableAiTools と
+# enableBridgeOneHook (#508) も true にして、6 つすべての文言を assert する。client / agent に profile はまだ無い
 # ので、この付け替えが表の行の証明になる。cap 名は表から導かず test に固定する (表から
 # 行が落ちる退行を検出するため)。docs/policy-model.md の契約は hard fail なので、
 # 文言だけでなく exit code も pin する。
@@ -914,6 +914,7 @@ for ek_kind in work client agent; do
   make_fixture
   replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
   replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableBridgeOneHook: false" "      enableBridgeOneHook: true"
   ek_rc=0
   ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || ek_rc=$?
   if [[ "$ek_rc" -eq 0 ]]; then
@@ -922,7 +923,7 @@ for ek_kind in work client agent; do
     exit 1
   fi
   ek_missing=""
-  for cap in installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools; do
+  for cap in installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools enableBridgeOneHook; do
     grep -Fq "environmentKind $ek_kind forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
   done
   if [[ -z "$ek_missing" ]]; then
@@ -1069,6 +1070,23 @@ set_capability_all "$fixture" enableJaReplyGuardHook true
 run_ok \
   "enableJaReplyGuardHook=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
+
+# enableBridgeOneHook (#508) lets a personal Bridge One host answer the AI
+# agent's permission prompts (it can return allow / deny), so work / client /
+# agent forbid it (the loop above pins that). personal and sandbox may set it.
+# For sandbox the personal profile's allowSecretsAccess is turned off first:
+# sandbox forbids that one, and the case must fail only on the Bridge hook.
+for bridge_kind in personal sandbox; do
+  make_fixture
+  if [[ "$bridge_kind" != personal ]]; then
+    replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $bridge_kind"
+    replace_once "$fixture/.chezmoidata/profiles.yaml" "      allowSecretsAccess: true" "      allowSecretsAccess: false"
+  fi
+  replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableBridgeOneHook: false" "      enableBridgeOneHook: true"
+  run_ok \
+    "enableBridgeOneHook=true is allowed for the $bridge_kind environmentKind" \
+    "$fixture/scripts/validate-policy.sh" personal
+done
 
 # codexReviewEffort / codexWorkerEffort (#264) only pick the reasoning effort
 # agent-tools' Codex review / worker run with and grant no install / secret /
