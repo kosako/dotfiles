@@ -1147,7 +1147,7 @@ golden_bridge_expected="$golden_bridge_expected_root/expected.json"
 # The expected file plus the Bridge entry: the record entry's closing "}" gets
 # a comma and the entry's lines follow it, before PermissionRequest's "]". The
 # command is written as chezmoi's toJson writes it: Go's JSON encoder escapes
-# ">" as > (the decoded string is the same; 8g compares decoded values).
+# ">" as \u003e (the decoded string is the same; 8g compares decoded values).
 # It reaches awk through the environment, which awk does not escape-process
 # (an -v value would turn the backslash into an escape sequence).
 golden_bridge_cmd="'$golden_home/.local/share/bridge-one/hook/current/bin/permission-request' 2\\u003e/dev/null"
