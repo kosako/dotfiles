@@ -260,8 +260,12 @@ profiles:
       # cloud; Bridge One's session-host keeps that limit, not dotfiles).
       # claude-settings is not part of work, so true renders nothing: the
       # registration goes into the unmanaged ~/.claude/settings.json by hand,
-      # and doctor reports it. Turn it on only after Bridge One has shown it
-      # refuses decisions from the cloud (its K13, step 2).
+      # and doctor reports it. The user may set it true and register by hand
+      # for Bridge One's K13 step 2: a trial inside the work Mac whose host is
+      # on no network and no cloud, so decisions can come only from this Mac
+      # (the trial installs the registration, so it comes before the trial).
+      # Before the work Mac's session-host is connected to the cloud, Bridge
+      # One must show that it refuses decisions from the cloud.
       enableBridgeOneHook: false
       # #264: off — codex-settings is not part of work, and whether (and at
       # which values) a work machine gets the profile files is decided

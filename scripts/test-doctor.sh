@@ -1774,7 +1774,7 @@ flip_profile_capability "$brw_root" work enableBridgeOneHook true
 brw_reg_one="[ok] enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json registers Bridge One's launcher on PermissionRequest (made by hand: claude-settings is not part of work)"
 brw_reg_two="[warn] enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json names Bridge One's launcher in 2 PermissionRequest commands — keep exactly one"
 brw_reg_unread="[warn] enableBridgeOneHook=true (work); ~/.claude/settings.json could not be read as one strict JSON object (unreadable, not a regular file, not strict JSON, under a directory that cannot be entered, or jq unavailable), so whether it registers Bridge One's PermissionRequest hook is not checked"
-brw_scope="[info] - work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host refuses decisions from the cloud, and dotfiles neither enforces nor checks that"
+brw_scope="[info] - work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host must refuse decisions from the cloud, and dotfiles neither enforces nor checks that"
 brw_item="[info] - a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles does not manage this file on work"
 # brw_settings HOME COMMAND... — write HOME/.claude/settings.json with one
 # PermissionRequest entry per COMMAND (yq builds the JSON, so a quote or a

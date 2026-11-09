@@ -2380,7 +2380,7 @@ if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
     else
       warn "Bridge One's launcher is absent or not an executable file: $bridge_launcher (deploy it from the Bridge One repo) — prompts stay in the terminal until deployed"
     fi
-    item "work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host refuses decisions from the cloud, and dotfiles neither enforces nor checks that"
+    item "work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host must refuse decisions from the cloud, and dotfiles neither enforces nor checks that"
     item "a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles does not manage this file on work"
   else
     warn "enableBridgeOneHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Bridge One hook (dangling capability)"
