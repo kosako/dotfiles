@@ -2325,23 +2325,39 @@ if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
         bridge_count=0
       fi
     elif [[ -f "$bridge_settings" && -r "$bridge_settings" ]]; then
-      # jq, not yq: yq -p json is lenient (a missing comma, several
-      # documents, an empty file) and would turn a broken file into "no
-      # registration" (Codex review, PR #513; scripts/test-lib.sh's
-      # strict_json_object). jq -s takes the whole file, and anything but
-      # exactly one JSON object, a failing or missing jq included, stays
-      # "not checked". macOS ships /usr/bin/jq (docs/claude-settings.md
-      # relies on it too). 2>/dev/null before the < so a failing open is
-      # silent too.
-      bridge_count="$(jq -r -s --arg l "$bridge_launcher" --arg q "$bridge_quoted" '
-        if length == 1 and (.[0] | type) == "object" then
-          [.[0] | .hooks | select(type == "object") | .PermissionRequest
-            | select(type == "array") | .[] | select(type == "object") | .hooks
-            | select(type == "array") | .[] | select(type == "object") | .command
-            | select(type == "string") | select(contains($l) or contains($q))] | length
-        else
-          error("not one JSON object")
-        end
+      # Strict JSON, or "not checked" (Codex review, PR #513). yq -p json is
+      # lenient (a missing comma, several documents, an empty file), and so is
+      # jq's parser in its number literals (NaN, Infinity, 01, .5 and +1 in
+      # jq 1.7.1): either would turn a file Claude Code cannot load into "no
+      # registration" or "registered". So jq reads the file raw (-R -s) and
+      # takes it in two steps. First every bare token outside the strings
+      # must be true / false / null or a JSON number. The strings go first,
+      # and the split is on JSON's four whitespace characters and the six
+      # structural ones, so a BOM or a form feed is left as a bad token.
+      # Then fromjson parses the text, refusing a structural error and a
+      # second value, and the value must be one object. A failing or missing
+      # jq is "not checked" too. macOS ships /usr/bin/jq
+      # (docs/claude-settings.md relies on it). jq's error names part of the
+      # file, so stderr is dropped (2>/dev/null before the <, so a failing
+      # open is silent too).
+      bridge_count="$(jq -R -s -r --arg l "$bridge_launcher" --arg q "$bridge_quoted" '
+        . as $raw
+        | if ($raw
+            | gsub("\"(?:[^\"\\\\]|\\\\.)*\""; " ")
+            | [splits("[ \t\n\r{}\\[\\]:,]+")]
+            | map(select(. != ""))
+            | all(test("^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$")))
+          then $raw | fromjson
+          else error("not strict JSON")
+          end
+        | if type == "object" then
+            [.hooks | select(type == "object") | .PermissionRequest
+              | select(type == "array") | .[] | select(type == "object") | .hooks
+              | select(type == "array") | .[] | select(type == "object") | .command
+              | select(type == "string") | select(contains($l) or contains($q))] | length
+          else
+            error("not one JSON object")
+          end
       ' 2>/dev/null < "$bridge_settings")" || bridge_count=""
       [[ "$bridge_count" =~ ^[0-9]+$ ]] || bridge_count=""
     fi

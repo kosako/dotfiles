@@ -1763,8 +1763,9 @@ fi
 #           says dangling or "managed". No file, or none naming the launcher
 #           -> the not-registered warn; one bare -> ok; one single-quoted in
 #           a home with a quote -> ok; two -> the keep-one warn; invalid JSON
-#           (a missing comma and two documents too, which yq -p json takes),
-#           an empty file, a failing jq, a directory in its place or an
+#           (a missing comma and two documents too, which yq -p json takes,
+#           and NaN or a leading zero, which jq's parser takes), an empty
+#           file, a failing jq, a directory in its place or an
 #           unsearchable ~/.claude -> "not checked". Every run exit 0.
 #           The committed work profile (the flag off) says not active.
 brw_root="$fixture_home/.dotfiles-bridge-work"
@@ -1859,6 +1860,21 @@ printf '{}\n%s\n' "$brw_valid" > "$brw_home/.claude/settings.json"
 brw_case "with two JSON documents says not checked" "$brw_home" "$brw_reg_unread" ok
 : > "$brw_home/.claude/settings.json"
 brw_case "with an empty settings file says not checked" "$brw_home" "$brw_reg_unread" ok
+#            Number literals jq's parser takes but JSON does not (Codex
+#            review, PR #513): NaN next to the registration (a lenient read
+#            says ok) and without it (a lenient read says not registered),
+#            and a leading zero. All three are not checked.
+printf '{"n":NaN,%s\n' "${brw_valid#\{}" > "$brw_home/.claude/settings.json"
+brw_case "with NaN next to the registration says not checked" "$brw_home" "$brw_reg_unread" ok
+printf '{"model":"x","n":NaN}\n' > "$brw_home/.claude/settings.json"
+brw_case "with NaN and no registration says not checked" "$brw_home" "$brw_reg_unread" ok
+printf '{"n":01,%s\n' "${brw_valid#\{}" > "$brw_home/.claude/settings.json"
+brw_case "with a leading-zero number next to the registration says not checked" "$brw_home" "$brw_reg_unread" ok
+#            The contrast: valid JSON numbers jq would also take (an exponent,
+#            a negative fraction) and a string holding "NaN" next to the
+#            registration still count it.
+printf '{"a":1e1000,"b":-0.5E+3,"c":"NaN \\" 01",%s\n' "${brw_valid#\{}" > "$brw_home/.claude/settings.json"
+brw_case "with valid numbers and a string holding NaN next to the registration reports ok" "$brw_home" "$brw_reg_one" ok
 #            A valid file with the registration, but jq fails: not checked.
 brw_jqfake="$fixture_home/bridge-jqfake"
 mkdir -p "$brw_jqfake"
