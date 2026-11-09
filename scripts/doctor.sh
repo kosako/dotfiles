@@ -2288,16 +2288,100 @@ section "Bridge One hook (report-only)"
 # host running it prints nothing and the prompt goes back to the terminal
 # dialog. The Bridge One repo deploys the launcher (tools/hook-deploy/deploy.mjs);
 # a missing launcher also prints nothing, so this is a warn, not a fail. Report
-# registration + launcher presence; the live settings file is not probed here.
+# registration + launcher presence; the managed settings file is not probed.
+# work (#512) has no claude-settings module: its ~/.claude/settings.json is
+# unmanaged and the registration is made there by hand, outside dotfiles. So
+# on work the flag is the declared intent, and the section reads that file
+# for the one fact it can check: how many PermissionRequest commands name the
+# launcher (its absolute path, bare or single-quoted as the managed render and
+# Bridge One's deploy print it). The count is all it takes from the file;
+# nothing else is shown. A file that is not a readable regular file or not
+# exactly one strict JSON object (read by jq), or whose absence cannot be
+# confirmed (absence_confirmed), is "not checked", never "not registered".
+# That decisions come only
+# from inside the Mac is Bridge One's session-host's limit; doctor neither
+# checks nor enforces it. Elsewhere a missing claude-settings stays dangling.
+bridge_launcher="$HOME/.local/share/bridge-one/hook/current/bin/permission-request"
 if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
-    bridge_launcher="$HOME/.local/share/bridge-one/hook/current/bin/permission-request"
     if [[ -f "$bridge_launcher" && -x "$bridge_launcher" ]]; then
       ok "enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One's PermissionRequest hook (returns a decision only when the Bridge One host answers; otherwise the prompt stays in the terminal; Claude Code only); launcher deployed"
     else
       warn "enableBridgeOneHook=true; managed ~/.claude/settings.json registers Bridge One's PermissionRequest hook but the launcher is absent or not an executable file: $bridge_launcher (deploy it from the Bridge One repo) — prompts stay in the terminal until deployed"
     fi
     item "a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles renders no other decision-capable PermissionRequest hook"
+  elif [[ "$environment_kind" == work ]]; then
+    bridge_settings="$HOME/.claude/settings.json"
+    # The single-quoted form, as .chezmoitemplates/shell-word renders a path
+    # with a quote in it (sed: bash 3.2 keeps the quotes of a ${//} replacement).
+    bridge_quoted="'$(printf '%s' "$bridge_launcher" | sed "s/'/'\\\\''/g")'"
+    bridge_count=""
+    if [[ ! -e "$bridge_settings" && ! -L "$bridge_settings" ]]; then
+      # Both tests are false under a directory that cannot be entered too,
+      # where the file may exist (#414): only a confirmed absence counts as
+      # "no registration"; anything else stays "not checked" (Codex review,
+      # PR #513).
+      if absence_confirmed "$bridge_settings"; then
+        bridge_count=0
+      fi
+    elif [[ -f "$bridge_settings" && -r "$bridge_settings" ]]; then
+      # Strict JSON, or "not checked" (Codex review, PR #513). yq -p json is
+      # lenient (a missing comma, several documents, an empty file), and so is
+      # jq's parser in its number literals (NaN, Infinity, 01, .5 and +1 in
+      # jq 1.7.1): either would turn a file Claude Code cannot load into "no
+      # registration" or "registered". So jq reads the file raw (-R -s) and
+      # takes it in two steps. First every bare token outside the strings
+      # must be true / false / null or a JSON number. The strings go first,
+      # and the split is on JSON's four whitespace characters and the six
+      # structural ones, so a BOM or a form feed is left as a bad token.
+      # Then fromjson parses the text, refusing a structural error and a
+      # second value, and the value must be one object. A failing or missing
+      # jq is "not checked" too. macOS ships /usr/bin/jq
+      # (docs/claude-settings.md relies on it). jq's error names part of the
+      # file, so stderr is dropped (2>/dev/null before the <, so a failing
+      # open is silent too).
+      bridge_count="$(jq -R -s -r --arg l "$bridge_launcher" --arg q "$bridge_quoted" '
+        . as $raw
+        | if ($raw
+            | gsub("\"(?:[^\"\\\\]|\\\\.)*\""; " ")
+            | [splits("[ \t\n\r{}\\[\\]:,]+")]
+            | map(select(. != ""))
+            | all(test("^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$")))
+          then $raw | fromjson
+          else error("not strict JSON")
+          end
+        | if type == "object" then
+            [.hooks | select(type == "object") | .PermissionRequest
+              | select(type == "array") | .[] | select(type == "object") | .hooks
+              | select(type == "array") | .[] | select(type == "object") | .command
+              | select(type == "string") | select(contains($l) or contains($q))] | length
+          else
+            error("not one JSON object")
+          end
+      ' 2>/dev/null < "$bridge_settings")" || bridge_count=""
+      [[ "$bridge_count" =~ ^[0-9]+$ ]] || bridge_count=""
+    fi
+    case "$bridge_count" in
+      "")
+        warn "enableBridgeOneHook=true (work); ~/.claude/settings.json could not be read as one strict JSON object (unreadable, not a regular file, not strict JSON, under a directory that cannot be entered, or jq unavailable), so whether it registers Bridge One's PermissionRequest hook is not checked"
+        ;;
+      0)
+        warn "enableBridgeOneHook=true (work) but the unmanaged ~/.claude/settings.json has no PermissionRequest command naming Bridge One's launcher ($bridge_launcher) — register it there by hand with the string Bridge One's tools/hook-deploy/deploy.mjs prints; prompts stay in the terminal until then"
+        ;;
+      1)
+        ok "enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json registers Bridge One's launcher on PermissionRequest (made by hand: claude-settings is not part of work)"
+        ;;
+      *)
+        warn "enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json names Bridge One's launcher in $bridge_count PermissionRequest commands — keep exactly one"
+        ;;
+    esac
+    if [[ -f "$bridge_launcher" && -x "$bridge_launcher" ]]; then
+      ok "Bridge One's launcher deployed: $bridge_launcher"
+    else
+      warn "Bridge One's launcher is absent or not an executable file: $bridge_launcher (deploy it from the Bridge One repo) — prompts stay in the terminal until deployed"
+    fi
+    item "work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host must refuse decisions from the cloud, and dotfiles neither enforces nor checks that"
+    item "a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles does not manage this file on work"
   else
     warn "enableBridgeOneHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Bridge One hook (dangling capability)"
   fi

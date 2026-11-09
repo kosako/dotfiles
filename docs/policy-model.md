@@ -64,7 +64,8 @@ boolean の制約は静的な検証(`validate-policy.sh`)と、副作用のあ�
 
 | environmentKind | false 必須の capability |
 | --- | --- |
-| work / client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools, enableBridgeOneHook |
+| work | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools, enableBridgeOneHook |
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 
@@ -314,14 +315,16 @@ turn の最後の答えが英語に逸れたとき、1 回だけ止めて日本�
 
 ## Bridge One の hook(`enableBridgeOneHook`、#508)
 
-Bridge One(個人用の Control Center。repo は kosako/BridgeOne)の PermissionRequest hook を、managed `~/.claude/settings.json` に登録する capability。hook の本体と配備は Bridge One の repo(`tools/hook-deploy/deploy.mjs`)が持ち、dotfiles は登録だけを行う。
+Bridge One(個人用の Control Center。repo は kosako/BridgeOne)の PermissionRequest hook を、managed `~/.claude/settings.json` に登録する capability。hook の本体と配備は Bridge One の repo(`tools/hook-deploy/deploy.mjs`)が持ち、dotfiles は登録だけを行う。work では登録も dotfiles の外で行い、dotfiles は方針の表と docs と doctor の report だけを持つ(#512。下記)。
 
 - `enableBridgeOneHook`(boolean): on のとき `PermissionRequest` / matcher `*` に、起動用の script `~/.local/share/bridge-one/hook/current/bin/permission-request` を `timeout: 600` で登録する。`async` と `onFailure` は付けない。command は path を single quote で囲み(`'` は `'\''`)、` 2>/dev/null` を付けた文字列で、Bridge One の配備の script が表示するものと同じ。HOME に空白や quote があっても 1 語の path になり、起動の失敗の error も stderr に出ない。記録 hook(`enableToolCallRecordHook`)の entry の後ろに 2 つ目の entry として足し、既存の entry は変えない。off のときの出力が従来と byte 単位で同じことは `test-claude-settings.sh` が pin する。
 - **ほかの hook と違い、決定 (allow / deny) を返しうる**。Bridge One の host が答えたときだけ返す。host が動いていない間・起動用の script が無いときは何も出力せず、承認は端末の dialog に戻る。Bridge One の設計は、決定を返す別の PermissionRequest hook と併存させない。dotfiles が出す PermissionRequest の hook で決定を返しうるのはこれだけで(記録 hook は async で決定を返さない。`test-claude-settings.sh` が pin)、利用者が手で足した hook との併存は dotfiles の範囲の外。
-- **強度ラベル**: 承認の経路の追加。enforcement boundary ではない(同じ uid の process は hook も host も書き換えられる。Bridge One の文書の前提)。
+- **強度ラベル**: 承認の経路の追加。enforcement boundary ではない(同じ uid の process は hook も host も書き換えられる。Bridge One の文書の前提)。work の「決定はその Mac の中からだけ」(下記)も Bridge One の session-host が守る制限で、dotfiles は強制も確認もしない。
 - **Claude だけ**。Bridge One は Claude Code の PermissionRequest hook にだけ繋ぐので、Codex の `hooks.json` には出さない。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
-- **極性は権限付与型**。外の host が承認に答えられる経路を足すので、`environment_kind_forbidden_capabilities` の work / client / agent の行に入れる(個人の Bridge One が、仕事や client の環境の agent の承認に答えないため)。personal と sandbox は true にできる(`test-policy.sh` が pin)。
-- **状態**: personal=true(#510。利用者が Bridge One の試験(K13)を始めた 2026-11-08 に on にした)、work=false。起動用の script が未配備でも承認は端末に戻るので、先に登録しても安全。登録と起動用の script の有無と dangling は doctor が report。test は commit された値に依らないので、off に戻すときは profile の値とこの行を変える。
+- **極性は権限付与型**。外の host が承認に答えられる経路を足すので、`environment_kind_forbidden_capabilities` の client / agent の行に入れる(個人の Bridge One が、client や無人の agent の環境の承認に答えないため)。personal と sandbox は true にできる。work は #512 で行から外した(次の項目)。どの kind で禁じるかは `test-policy.sh` が pin する。
+- **work は、その Mac の中からだけ決定を受ける形に限って true にできる**(#512)。Bridge One は work の Mac の Claude Code の session も扱う方針に変えた(Bridge One 側の判断 D42)。ただし work の session の承認に答えるのは、その Mac の中の端末の dialog と、その Mac で動く Bridge One の端末の画面(TUI)だけにする。cloud からの決定は、その Mac の session-host と cloud の両方で拒む。work の Mac から外に出すのは、別名・状態・時刻などの最小限の情報だけにする。#508 が禁じた理由は「個人の Bridge One が仕事の環境の承認に答える」ことなので、答える場所が work の Mac の中に閉じるこの形とは両立する。この制限を守るのは Bridge One の側で、dotfiles の flag は local と cloud を区別しない。
+- **work の登録は dotfiles の外で行う**。work は claude-settings の module を持たず、`~/.claude/settings.json` は管理の外にある。work で true にしても dotfiles は何も render しない。登録は、Bridge One の配備の script が表示する文字列を、その Mac の `~/.claude/settings.json` の PermissionRequest に手で足す。flag は意図の宣言で、doctor は、管理外の `~/.claude/settings.json` の PermissionRequest の command に起動用の script の path が何回現れるかだけを読む(中身は表示しない)。読めない file、厳密な JSON の object 1 つでない file (jq で読む。jq が無い・失敗するときも)、不在を確かめられない file は、未登録ではなく未確認と report する。あわせて起動用の script の有無と、決定の出どころは Bridge One の側の制限であることを report する。personal や sandbox で claude-settings が無いときは、今までどおり dangling と report する。
+- **状態**: personal=true(#510。利用者が Bridge One の試験(K13)を始めた 2026-11-08 に on にした)、work=false。work は、Bridge One の K13 の 2 段目(cloud に繋がない、work の Mac の中だけの試験)で、利用者が true にして手で登録してよい。この試験の host は network に繋がないので、決定は Mac の中からしか来ない。試験の項目に登録が入るので、true にするのは試験の前になる。work の Mac の session-host を cloud に繋ぐ前に、cloud からの決定を拒むことを Bridge One の側で確かめる(dotfiles は確かめない)。起動用の script が未配備でも承認は端末に戻るので、先に登録しても安全。登録と起動用の script の有無と dangling は doctor が report。test は commit された値に依らないので、off に戻すときは profile の値とこの行を変える。
 
 ## Codex review / worker profile file(`codexReviewEffort` / `codexWorkerEffort`、#264 / #299)
 

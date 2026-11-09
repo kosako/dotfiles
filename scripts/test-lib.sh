@@ -117,23 +117,26 @@ make_flipped_source() {
 # fail-closed rule as set_capability_all (test-policy.sh pins both). The
 # `// {}` keeps has() from erroring when the profile or its capabilities
 # map is missing, so those cases fail here instead of in yq.
-flip_personal_capability() {
-  local src="$1" cap="$2" value="$3"
+# flip_profile_capability SRC PROFILE CAP VALUE is the same for any one named
+# profile (#512 flips work); flip_personal_capability is it with personal.
+flip_profile_capability() {
+  local src="$1" profile="$2" cap="$3" value="$4"
   local file="$src/.chezmoidata/profiles.yaml"
   if [[ ! -f "$file" ]]; then
-    fail "flip_personal_capability: missing $file"
+    fail "flip_profile_capability: missing $file"
     return 1
   fi
   local declared
-  declared="$(C="$cap" yq '.profiles.personal.capabilities // {} | has(strenv(C))' "$file")"
+  declared="$(P="$profile" C="$cap" yq '.profiles[strenv(P)].capabilities // {} | has(strenv(C))' "$file")"
   if [[ "$declared" != "true" ]]; then
-    fail "flip_personal_capability: capability '$cap' is not declared by the personal profile in $file"
+    fail "flip_profile_capability: capability '$cap' is not declared by the $profile profile in $file"
     return 1
   fi
-  C="$cap" V="$value" yq -i \
-    '.profiles.personal.capabilities[strenv(C)] = env(V)' \
+  P="$profile" C="$cap" V="$value" yq -i \
+    '.profiles[strenv(P)].capabilities[strenv(C)] = env(V)' \
     "$file"
 }
+flip_personal_capability() { flip_profile_capability "$1" personal "$2" "$3"; }
 
 # copy_repo_fixture DEST
 # Minimal repo-copy fixture: scripts/ plus the .chezmoidata data files —
