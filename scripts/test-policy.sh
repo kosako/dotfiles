@@ -904,12 +904,14 @@ run_fail_contains \
   "$fixture/scripts/validate-policy.sh" personal
 
 # environmentKind cross-check. work / client / agent の deny 表 (lib-policy の
-# environment_kind_forbidden_capabilities) の 6 つが kind ごとに全部発火することを
+# environment_kind_forbidden_capabilities) の行が kind ごとに全部発火することを
 # 確かめる: personal (元から elevated) を各 kind に付け替え、false の enableAiTools と
-# enableBridgeOneHook (#508。commit された値に依らないよう personal を名指しで替える。#510) も true にして、6 つすべての文言を assert する。client / agent に profile はまだ無い
+# enableBridgeOneHook (#508。commit された値に依らないよう personal を名指しで替える。#510) も true にして、行の文言をすべて assert する。client / agent に profile はまだ無い
 # ので、この付け替えが表の行の証明になる。cap 名は表から導かず test に固定する (表から
 # 行が落ちる退行を検出するため)。docs/policy-model.md の契約は hard fail なので、
-# 文言だけでなく exit code も pin する。
+# 文言だけでなく exit code も pin する。client / agent は 6 つ。work は enableBridgeOneHook を
+# 除く 5 つで (#512。Mac の中からだけ決定を受ける形を許す)、true にした enableBridgeOneHook が
+# work の違反として出ないことも pin する (行に戻る退行と、client / agent の行から落ちる退行の両方を見る)。
 for ek_kind in work client agent; do
   make_fixture
   replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
@@ -922,8 +924,13 @@ for ek_kind in work client agent; do
     fail "test unexpectedly passed: $ek_kind deny must hard-fail"
     exit 1
   fi
+  if [[ "$ek_kind" == work ]]; then
+    ek_caps="installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools"
+  else
+    ek_caps="installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools enableBridgeOneHook"
+  fi
   ek_missing=""
-  for cap in installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools enableBridgeOneHook; do
+  for cap in $ek_caps; do
     grep -Fq "environmentKind $ek_kind forbids $cap=true" <<< "$ek_output" || ek_missing="$ek_missing $cap"
   done
   if [[ -z "$ek_missing" ]]; then
@@ -932,6 +939,14 @@ for ek_kind in work client agent; do
     printf '%s\n' "$ek_output" >&2
     fail "test failed: $ek_kind deny not enforced for:$ek_missing"
     exit 1
+  fi
+  if [[ "$ek_kind" == work ]]; then
+    if grep -Fq "forbids enableBridgeOneHook" <<< "$ek_output"; then
+      printf '%s\n' "$ek_output" >&2
+      fail "test failed: work must not forbid enableBridgeOneHook (#512)"
+      exit 1
+    fi
+    ok "test passed: work does not forbid enableBridgeOneHook (#512)"
   fi
 done
 
@@ -1072,8 +1087,8 @@ run_ok \
   "$fixture/scripts/validate-policy.sh" --all
 
 # enableBridgeOneHook (#508) lets a personal Bridge One host answer the AI
-# agent's permission prompts (it can return allow / deny), so work / client /
-# agent forbid it (the loop above pins that). personal and sandbox may set it.
+# agent's permission prompts (it can return allow / deny), so client / agent
+# forbid it (the loop above pins that). personal and sandbox may set it.
 # For sandbox the personal profile's allowSecretsAccess is turned off first:
 # sandbox forbids that one, and the case must fail only on the Bridge hook.
 for bridge_kind in personal sandbox; do
@@ -1087,6 +1102,14 @@ for bridge_kind in personal sandbox; do
     "enableBridgeOneHook=true is allowed for the $bridge_kind environmentKind" \
     "$fixture/scripts/validate-policy.sh" personal
 done
+# work may set it too (#512: the hook takes decisions only from inside that
+# Mac; Bridge One's session-host keeps that limit). The committed work
+# profile, whose other forbidden booleans are false, validates with it on.
+make_fixture
+flip_profile_capability "$fixture" work enableBridgeOneHook true
+run_ok \
+  "enableBridgeOneHook=true is allowed for the committed work profile (#512)" \
+  "$fixture/scripts/validate-policy.sh" work
 
 # codexReviewEffort / codexWorkerEffort (#264) only pick the reasoning effort
 # agent-tools' Codex review / worker run with and grant no install / secret /

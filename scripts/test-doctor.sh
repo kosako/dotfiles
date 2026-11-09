@@ -1756,6 +1756,127 @@ else
   fail "test failed: doctor must stay exit 0 (enableBridgeOneHook dangling)"
   status=1
 fi
+#     BR-e) work (#512): claude-settings is not part of work, so with the flag
+#           on the section reads the unmanaged ~/.claude/settings.json for
+#           how many PermissionRequest commands name the launcher, reports
+#           the launcher on its own line plus the local-only note, and never
+#           says dangling or "managed". No file, or none naming the launcher
+#           -> the not-registered warn; one bare -> ok; one single-quoted in
+#           a home with a quote -> ok; two -> the keep-one warn; invalid JSON
+#           or a directory in its place -> "not checked". Every run exit 0.
+#           The committed work profile (the flag off) says not active.
+brw_root="$fixture_home/.dotfiles-bridge-work"
+copy_repo_fixture "$brw_root"
+flip_profile_capability "$brw_root" work enableBridgeOneHook true
+brw_reg_one="[ok] enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json registers Bridge One's launcher on PermissionRequest (made by hand: claude-settings is not part of work)"
+brw_reg_two="[warn] enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json names Bridge One's launcher in 2 PermissionRequest commands — keep exactly one"
+brw_reg_unread="[warn] enableBridgeOneHook=true (work); ~/.claude/settings.json is not a readable JSON file, so whether it registers Bridge One's PermissionRequest hook is not checked"
+brw_scope="[info] - work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host refuses decisions from the cloud, and dotfiles neither enforces nor checks that"
+brw_item="[info] - a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles does not manage this file on work"
+# brw_settings HOME COMMAND... — write HOME/.claude/settings.json with one
+# PermissionRequest entry per COMMAND (yq builds the JSON, so a quote or a
+# backslash in a command is escaped). No COMMAND: a file with no hooks.
+brw_settings() {
+  local home="$1" cmd
+  shift
+  mkdir -p "$home/.claude"
+  printf '{"model":"x"}\n' > "$home/.claude/settings.json"
+  for cmd in "$@"; do
+    C="$cmd" yq -i -p=json -o=json \
+      '.hooks.PermissionRequest += [{"matcher": "*", "hooks": [{"type": "command", "command": strenv(C), "timeout": 600}]}]' \
+      "$home/.claude/settings.json"
+  done
+}
+# brw_case LABEL HOME WANT_REG LAUNCHER — doctor work on brw_root with HOME
+# must exit 0 and print WANT_REG ("none" = the not-registered warn for HOME's
+# launcher), the launcher line for LAUNCHER (ok / warn) and both notes, and
+# none of the other registration lines, the dangling warn or the managed
+# wording.
+brw_case() {
+  local label="$1" home="$2" want="$3" launcher_state="$4" out
+  local launcher="$home/.local/share/bridge-one/hook/current/bin/permission-request"
+  local reg_none="[warn] enableBridgeOneHook=true (work) but the unmanaged ~/.claude/settings.json has no PermissionRequest command naming Bridge One's launcher ($launcher) — register it there by hand with the string Bridge One's tools/hook-deploy/deploy.mjs prints; prompts stay in the terminal until then"
+  local l_ok="[ok] Bridge One's launcher deployed: $launcher"
+  local l_warn="[warn] Bridge One's launcher is absent or not an executable file: $launcher (deploy it from the Bridge One repo) — prompts stay in the terminal until deployed"
+  local want_l other_l line others=""
+  [[ "$want" == none ]] && want="$reg_none"
+  if [[ "$launcher_state" == ok ]]; then want_l="$l_ok"; other_l="$l_warn"; else want_l="$l_warn"; other_l="$l_ok"; fi
+  if out="$(HOME="$home" "$brw_root/scripts/doctor.sh" work 2>&1)"; then
+    for line in "$reg_none" "$brw_reg_one" "$brw_reg_two" "$brw_reg_unread"; do
+      if [[ "$line" != "$want" ]] && grep -Fxq "$line" <<< "$out"; then
+        others="$others other-registration-line"
+      fi
+    done
+    if grep -Fxq "$other_l" <<< "$out"; then others="$others other-launcher-line"; fi
+    if grep -Fq "enableBridgeOneHook=true but the claude-settings module is inactive" <<< "$out"; then others="$others dangling"; fi
+    # The managed branch's wording; "unmanaged ..." in the work lines must not
+    # match, so the line's "=true; " prefix is part of the pattern.
+    if grep -Fq "enableBridgeOneHook=true; managed ~/.claude/settings.json" <<< "$out"; then others="$others managed"; fi
+    if grep -Fxq "$want" <<< "$out" && grep -Fxq "$want_l" <<< "$out" \
+      && grep -Fxq "$brw_scope" <<< "$out" && grep -Fxq "$brw_item" <<< "$out" \
+      && [[ -z "$others" ]]; then
+      ok "test passed: work enableBridgeOneHook=true $label"
+    else
+      printf '%s\n' "$out" >&2
+      fail "test failed: work enableBridgeOneHook=true $label not reported (unexpected:${others:- none})"
+      status=1
+    fi
+  else
+    printf '%s\n' "$out" >&2
+    fail "test failed: doctor must stay exit 0 (work enableBridgeOneHook, $label)"
+    status=1
+  fi
+}
+brw_home="$fixture_home/bridge-work"
+brw_launcher="$brw_home/.local/share/bridge-one/hook/current/bin/permission-request"
+mkdir -p "$brw_home"
+brw_case "with no ~/.claude/settings.json warns not registered" "$brw_home" none warn
+brw_settings "$brw_home"
+brw_case "with a settings file without hooks warns not registered" "$brw_home" none warn
+brw_settings "$brw_home" "/somewhere/else/permission-request 2>/dev/null"
+brw_case "with another PermissionRequest command only warns not registered" "$brw_home" none warn
+mkdir -p "${brw_launcher%/*}"
+printf '#!/bin/sh\nexit 0\n' > "$brw_launcher"
+chmod +x "$brw_launcher"
+brw_settings "$brw_home" "/somewhere/else/permission-request 2>/dev/null" "$brw_launcher 2>/dev/null"
+brw_case "with the launcher registered once (bare path) and deployed reports ok" "$brw_home" "$brw_reg_one" ok
+brw_settings "$brw_home" "$brw_launcher 2>/dev/null" "'$brw_launcher' 2>/dev/null"
+brw_case "with the launcher registered twice warns keep one" "$brw_home" "$brw_reg_two" ok
+printf '{bad\n' > "$brw_home/.claude/settings.json"
+brw_case "with settings that are not JSON says not checked" "$brw_home" "$brw_reg_unread" ok
+rm -f "$brw_home/.claude/settings.json"
+mkdir "$brw_home/.claude/settings.json"
+brw_case "with a directory in the settings file's place says not checked" "$brw_home" "$brw_reg_unread" ok
+rmdir "$brw_home/.claude/settings.json"
+#            A home with a space and a quote: the registration is the
+#            single-quoted form (the quote written '\''), as Bridge One's
+#            deploy prints it; the bare path is not a substring of it.
+brw_odd_home="$fixture_home/bridge work's home"
+brw_odd_launcher="$brw_odd_home/.local/share/bridge-one/hook/current/bin/permission-request"
+brw_settings "$brw_odd_home" "$(shell_single_quote "$brw_odd_launcher") 2>/dev/null"
+brw_case "with an unusual home and the single-quoted registration reports ok" "$brw_odd_home" "$brw_reg_one" warn
+#            Off, set explicitly in its own copy (the committed work value
+#            may change once Bridge One's step 2 is done): not active, even
+#            with the launcher registered in the unmanaged file.
+brw_off_root="$fixture_home/.dotfiles-bridge-work-off"
+copy_repo_fixture "$brw_off_root"
+flip_profile_capability "$brw_off_root" work enableBridgeOneHook false
+brw_settings "$brw_home" "$brw_launcher 2>/dev/null"
+if brw_off_out="$(HOME="$brw_home" "$brw_off_root/scripts/doctor.sh" work 2>&1)"; then
+  if grep -Fxq "[ok] enableBridgeOneHook not active (false)" <<< "$brw_off_out" \
+    && ! grep -Fxq "$brw_scope" <<< "$brw_off_out" \
+    && ! grep -Fq "Bridge One's launcher" <<< "$brw_off_out"; then
+    ok "test passed: work with enableBridgeOneHook=false reports it not active"
+  else
+    printf '%s\n' "$brw_off_out" >&2
+    fail "test failed: work with enableBridgeOneHook=false does not report it not active"
+    status=1
+  fi
+else
+  printf '%s\n' "$brw_off_out" >&2
+  fail "test failed: doctor must stay exit 0 (work, enableBridgeOneHook=false)"
+  status=1
+fi
 
 # DR) enableDirenv selects the doctor check only (#401): with it false, the
 #     report says the check is skipped and that the shell hook still runs,

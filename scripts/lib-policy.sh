@@ -646,16 +646,28 @@ is_allowed_environment_kind() {
 # Boolean capabilities that must be false for a given environmentKind.
 # Encodes the policy that work / client / agent environments do not carry
 # elevated permissions (install, secrets, network, AI tooling) by default,
-# nor a personal Bridge One host answering their AI agent's permission
-# prompts (enableBridgeOneHook, #508), and that sandbox forbids secret
-# access. personal
+# and that sandbox forbids secret access. client / agent also forbid
+# enableBridgeOneHook (#508): no Bridge One host answers their AI agent's
+# permission prompts. work does not (#512): there the hook may take
+# decisions only from inside that Mac (its terminal dialog and the Bridge
+# One TUI running on it), never from the cloud. Bridge One's session-host
+# keeps that limit, not dotfiles, and work has no managed settings file to
+# carry the registration (see docs/policy-model.md). personal
 # is unconstrained; enum capabilities have their own forbidden-VALUE table
 # below (#45). See docs/policy-model.md. agent has no profile yet; the row
 # is defined so the constraint takes effect the moment an agent profile is
 # added.
 environment_kind_forbidden_capabilities() {
   case "$1" in
-    work | client | agent)
+    work)
+      printf '%s\n' \
+        installPackages \
+        installGuiApps \
+        allowSecretsAccess \
+        allowNetworkTunnels \
+        enableAiTools
+      ;;
+    client | agent)
       printf '%s\n' \
         installPackages \
         installGuiApps \

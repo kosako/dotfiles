@@ -254,8 +254,14 @@ profiles:
       # #497: off — claude-settings is not part of work, so no managed file
       # could carry the registration.
       enableJaReplyGuardHook: false
-      # #508: off and forbidden for work / client / agent — the hook lets a
-      # personal Bridge One host answer this machine's permission prompts.
+      # #508 / #512: off. client / agent forbid it; work may set it true for
+      # Bridge One's local-only form (decisions only from inside this Mac:
+      # the terminal dialog and the Bridge One TUI running here, never the
+      # cloud; Bridge One's session-host keeps that limit, not dotfiles).
+      # claude-settings is not part of work, so true renders nothing: the
+      # registration goes into the unmanaged ~/.claude/settings.json by hand,
+      # and doctor reports it. Turn it on only after Bridge One has shown it
+      # refuses decisions from the cloud (its K13, step 2).
       enableBridgeOneHook: false
       # #264: off — codex-settings is not part of work, and whether (and at
       # which values) a work machine gets the profile files is decided
