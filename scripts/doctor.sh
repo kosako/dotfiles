@@ -2296,8 +2296,9 @@ section "Bridge One hook (report-only)"
 # launcher (its absolute path, bare or single-quoted as the managed render and
 # Bridge One's deploy print it). The count is all it takes from the file;
 # nothing else is shown. A file that is not a readable regular file or not
-# JSON, or whose absence cannot be confirmed (absence_confirmed), is "not
-# checked", never "not registered". That decisions come only
+# exactly one strict JSON object (read by jq), or whose absence cannot be
+# confirmed (absence_confirmed), is "not checked", never "not registered".
+# That decisions come only
 # from inside the Mac is Bridge One's session-host's limit; doctor neither
 # checks nor enforces it. Elsewhere a missing claude-settings stays dangling.
 bridge_launcher="$HOME/.local/share/bridge-one/hook/current/bin/permission-request"
@@ -2324,19 +2325,29 @@ if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
         bridge_count=0
       fi
     elif [[ -f "$bridge_settings" && -r "$bridge_settings" ]]; then
-      # 2>/dev/null before the < so a failing open is silent too.
-      bridge_count="$(L="$bridge_launcher" Q="$bridge_quoted" yq -p=json -o=json '
-        [select(tag == "!!map") | .hooks | select(tag == "!!map") |
-          .PermissionRequest | select(tag == "!!seq") | .[] | select(tag == "!!map") |
-          .hooks | select(tag == "!!seq") | .[] | select(tag == "!!map") |
-          .command | select(tag == "!!str") |
-          select(contains(strenv(L)) or contains(strenv(Q)))] | length
+      # jq, not yq: yq -p json is lenient (a missing comma, several
+      # documents, an empty file) and would turn a broken file into "no
+      # registration" (Codex review, PR #513; scripts/test-lib.sh's
+      # strict_json_object). jq -s takes the whole file, and anything but
+      # exactly one JSON object, a failing or missing jq included, stays
+      # "not checked". macOS ships /usr/bin/jq (docs/claude-settings.md
+      # relies on it too). 2>/dev/null before the < so a failing open is
+      # silent too.
+      bridge_count="$(jq -r -s --arg l "$bridge_launcher" --arg q "$bridge_quoted" '
+        if length == 1 and (.[0] | type) == "object" then
+          [.[0] | .hooks | select(type == "object") | .PermissionRequest
+            | select(type == "array") | .[] | select(type == "object") | .hooks
+            | select(type == "array") | .[] | select(type == "object") | .command
+            | select(type == "string") | select(contains($l) or contains($q))] | length
+        else
+          error("not one JSON object")
+        end
       ' 2>/dev/null < "$bridge_settings")" || bridge_count=""
       [[ "$bridge_count" =~ ^[0-9]+$ ]] || bridge_count=""
     fi
     case "$bridge_count" in
       "")
-        warn "enableBridgeOneHook=true (work); ~/.claude/settings.json could not be read as a JSON file (unreadable, not a regular file, not JSON, or under a directory that cannot be entered), so whether it registers Bridge One's PermissionRequest hook is not checked"
+        warn "enableBridgeOneHook=true (work); ~/.claude/settings.json could not be read as one strict JSON object (unreadable, not a regular file, not strict JSON, under a directory that cannot be entered, or jq unavailable), so whether it registers Bridge One's PermissionRequest hook is not checked"
         ;;
       0)
         warn "enableBridgeOneHook=true (work) but the unmanaged ~/.claude/settings.json has no PermissionRequest command naming Bridge One's launcher ($bridge_launcher) — register it there by hand with the string Bridge One's tools/hook-deploy/deploy.mjs prints; prompts stay in the terminal until then"
