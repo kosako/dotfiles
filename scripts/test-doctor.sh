@@ -1762,15 +1762,16 @@ fi
 #           the launcher on its own line plus the local-only note, and never
 #           says dangling or "managed". No file, or none naming the launcher
 #           -> the not-registered warn; one bare -> ok; one single-quoted in
-#           a home with a quote -> ok; two -> the keep-one warn; invalid JSON
-#           or a directory in its place -> "not checked". Every run exit 0.
+#           a home with a quote -> ok; two -> the keep-one warn; invalid JSON,
+#           a directory in its place or an unsearchable ~/.claude -> "not
+#           checked". Every run exit 0.
 #           The committed work profile (the flag off) says not active.
 brw_root="$fixture_home/.dotfiles-bridge-work"
 copy_repo_fixture "$brw_root"
 flip_profile_capability "$brw_root" work enableBridgeOneHook true
 brw_reg_one="[ok] enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json registers Bridge One's launcher on PermissionRequest (made by hand: claude-settings is not part of work)"
 brw_reg_two="[warn] enableBridgeOneHook=true (work); the unmanaged ~/.claude/settings.json names Bridge One's launcher in 2 PermissionRequest commands — keep exactly one"
-brw_reg_unread="[warn] enableBridgeOneHook=true (work); ~/.claude/settings.json is not a readable JSON file, so whether it registers Bridge One's PermissionRequest hook is not checked"
+brw_reg_unread="[warn] enableBridgeOneHook=true (work); ~/.claude/settings.json could not be read as a JSON file (unreadable, not a regular file, not JSON, or under a directory that cannot be entered), so whether it registers Bridge One's PermissionRequest hook is not checked"
 brw_scope="[info] - work (#512): decisions may come only from inside this Mac (its terminal dialog and the Bridge One TUI running on it); Bridge One's session-host refuses decisions from the cloud, and dotfiles neither enforces nor checks that"
 brw_item="[info] - a hook added by hand that returns allow / deny on PermissionRequest must not sit next to it (Bridge One's design); dotfiles does not manage this file on work"
 # brw_settings HOME COMMAND... — write HOME/.claude/settings.json with one
@@ -1848,6 +1849,17 @@ rm -f "$brw_home/.claude/settings.json"
 mkdir "$brw_home/.claude/settings.json"
 brw_case "with a directory in the settings file's place says not checked" "$brw_home" "$brw_reg_unread" ok
 rmdir "$brw_home/.claude/settings.json"
+#            ~/.claude without search permission, holding the registration:
+#            [[ -e ]] and [[ -L ]] are false there too, so only a confirmed
+#            absence may read as "not registered" (Codex review, PR #513).
+#            The first case above (no ~/.claude at all, ENOENT) is the
+#            contrast. Skipped as root (root searches a directory without x).
+if [[ "$(id -u)" != "0" ]]; then
+  brw_settings "$brw_home" "$brw_launcher 2>/dev/null"
+  chmod u-x "$brw_home/.claude"
+  brw_case "with ~/.claude not searchable says not checked (not 'not registered')" "$brw_home" "$brw_reg_unread" ok
+  chmod u+x "$brw_home/.claude"
+fi
 #            A home with a space and a quote: the registration is the
 #            single-quoted form (the quote written '\''), as Bridge One's
 #            deploy prints it; the bare path is not a substring of it.

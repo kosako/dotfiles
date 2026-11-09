@@ -2296,7 +2296,8 @@ section "Bridge One hook (report-only)"
 # launcher (its absolute path, bare or single-quoted as the managed render and
 # Bridge One's deploy print it). The count is all it takes from the file;
 # nothing else is shown. A file that is not a readable regular file or not
-# JSON is "not checked", never "not registered". That decisions come only
+# JSON, or whose absence cannot be confirmed (absence_confirmed), is "not
+# checked", never "not registered". That decisions come only
 # from inside the Mac is Bridge One's session-host's limit; doctor neither
 # checks nor enforces it. Elsewhere a missing claude-settings stays dangling.
 bridge_launcher="$HOME/.local/share/bridge-one/hook/current/bin/permission-request"
@@ -2315,7 +2316,13 @@ if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
     bridge_quoted="'$(printf '%s' "$bridge_launcher" | sed "s/'/'\\\\''/g")'"
     bridge_count=""
     if [[ ! -e "$bridge_settings" && ! -L "$bridge_settings" ]]; then
-      bridge_count=0
+      # Both tests are false under a directory that cannot be entered too,
+      # where the file may exist (#414): only a confirmed absence counts as
+      # "no registration"; anything else stays "not checked" (Codex review,
+      # PR #513).
+      if absence_confirmed "$bridge_settings"; then
+        bridge_count=0
+      fi
     elif [[ -f "$bridge_settings" && -r "$bridge_settings" ]]; then
       # 2>/dev/null before the < so a failing open is silent too.
       bridge_count="$(L="$bridge_launcher" Q="$bridge_quoted" yq -p=json -o=json '
@@ -2329,7 +2336,7 @@ if [[ "$(capability_value "$profile" enableBridgeOneHook)" == "true" ]]; then
     fi
     case "$bridge_count" in
       "")
-        warn "enableBridgeOneHook=true (work); ~/.claude/settings.json is not a readable JSON file, so whether it registers Bridge One's PermissionRequest hook is not checked"
+        warn "enableBridgeOneHook=true (work); ~/.claude/settings.json could not be read as a JSON file (unreadable, not a regular file, not JSON, or under a directory that cannot be entered), so whether it registers Bridge One's PermissionRequest hook is not checked"
         ;;
       0)
         warn "enableBridgeOneHook=true (work) but the unmanaged ~/.claude/settings.json has no PermissionRequest command naming Bridge One's launcher ($bridge_launcher) — register it there by hand with the string Bridge One's tools/hook-deploy/deploy.mjs prints; prompts stay in the terminal until then"
