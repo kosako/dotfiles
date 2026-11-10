@@ -1145,6 +1145,45 @@ rm -f "$hc_home/config-alias"
 hc_check "work -> not managed" "[ok] herdr config not managed (herdr-config module inactive for profile work)" work
 rm -rf "$hc_home" "$hc_fakebin"
 
+# otel backend report (otel-backend module, #514). doctor stays report-only
+# / exit 0 and must tell apart: the managed compose file present (ok, and the
+# line says the runtime state is not checked, so it cannot be read as "the
+# backend works"), missing (action naming mkdir + apply), and the
+# module-inactive profile (work). Presence only: doctor does not read the
+# file. Every run is hermetic (`env -i`).
+ob_home="$fixture_home/ob"
+ob_managed="$ob_home/.config/otel-lgtm/compose.yaml"
+# ob_doctor PROFILE — one hermetic doctor run.
+ob_doctor() {
+  env -i PATH="$PATH" HOME="$ob_home" "$SCRIPT_DIR/doctor.sh" "$1"
+}
+rm -rf "$ob_home"
+mkdir -p "$ob_home/.config/otel-lgtm"
+cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
+# OB-1) present -> ok, with the "not checked" disclosure.
+doctor_expect "otel backend present -> ok, runtime state disclosed as not checked" ob_doctor personal -- \
+  "[ok] otel backend: managed $ob_managed present (runtime state not checked: doctor does not look at Colima or the container yet)" \
+  ! "otel backend definition missing"
+# OB-2) missing -> action whose steps are mkdir then apply, consecutive and %q-escaped.
+rm -f "$ob_managed"
+ob_rc=0
+ob_out="$(ob_doctor personal 2>&1)" || ob_rc=$?
+if [[ "$ob_rc" -eq 0 ]] \
+  && grep -Fxq -- "[warn] otel backend definition missing: $ob_managed (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" <<< "$ob_out" \
+  && steps_consecutive "$ob_out" "        \$ mkdir -p $(printf '%q' "$ob_home/.config")" \
+    "        \$ chezmoi apply $(printf '%q' "$ob_home/.config/otel-lgtm") $(printf '%q' "$ob_managed")"; then
+  ok "test passed: otel backend definition missing -> action with mkdir then apply steps"
+else
+  printf '%s\n' "${ob_out:-<no output>}" >&2
+  fail "test failed: otel backend definition missing -> expected exit 0 (got $ob_rc), the action line and the mkdir step immediately followed by the apply step"
+  status=1
+fi
+# OB-3) work does not list the module -> not managed, whatever is on disk.
+cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
+doctor_expect "otel backend work -> not managed" ob_doctor work -- \
+  "[ok] otel backend not managed (otel-backend module inactive for profile work)"
+rm -rf "$ob_home"
+
 # UR) agent-tools usage reader (agent-tools-usage-reader module, #301).
 #     doctor stays report-only / exit 0. Presence is its own check: missing
 #     -> action naming mkdir + apply; a symlink to nothing -> absent-like

@@ -114,6 +114,7 @@ main 直 commit は例外扱いにする。
 ./scripts/test-git-signing.sh
 ./scripts/test-git-ignore.sh
 ./scripts/test-herdr-config.sh
+./scripts/test-otel-backend.sh
 ./scripts/test-agent-tools-usage-reader.sh
 ./scripts/test-git-hook-gates.sh
 ./scripts/test-starship.sh
@@ -132,7 +133,7 @@ git diff --check
 ```
 
 `test-render.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` /
-`test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
+`test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-otel-backend.sh` / `test-agent-tools-usage-reader.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` は chezmoi を必要とする
 (CI では version pin して導入する。render job と、macOS の bash32 job の render group 所属)。`test-render.sh` / `test-claude-settings.sh` /
 `test-codex-settings.sh` / `test-opencode-settings.sh` は jq も必要とする(render した JSON がちょうど 1 つの object かを jq で確かめる。
 yq の JSON の reader は余分な comma を受け入れるため。jq は CI の runner と macOS に入っている)。`test-starship.sh` は source の静的検査と

@@ -2812,6 +2812,31 @@ else
   ok "herdr config not managed (herdr-config module inactive for profile $profile)"
 fi
 
+section "otel backend (report-only)"
+# otel-backend module (#514): the managed ~/.config/otel-lgtm/compose.yaml
+# defines the local OpenTelemetry backend (grafana/otel-lgtm pinned by
+# version and digest, its three ports on 127.0.0.1 only) that receives the
+# telemetry of the AI agents on this machine. Apply only places the file:
+# starting Colima, registering it as a login service and starting the
+# container are explicit manual steps (docs/otel-backend.md). This section
+# reports the file's presence, contents-blind; drift of the managed file is
+# the managed drift section's job. The runtime state (is Colima up, is the
+# container running the pinned image, are its ports loopback-only) is NOT
+# checked here yet, and the ok line says so rather than implying a working
+# backend.
+otel_compose="$HOME/.config/otel-lgtm/compose.yaml"
+if module_active_for_profile "$profile" otel-backend; then
+  if [[ -f "$otel_compose" ]]; then
+    ok "otel backend: managed $otel_compose present (runtime state not checked: doctor does not look at Colima or the container yet)"
+  else
+    action "otel backend definition missing: $otel_compose (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" \
+      "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
+      "\$ chezmoi apply $(shell_quote_safe "$HOME/.config/otel-lgtm") $(shell_quote_safe "$otel_compose")"
+  fi
+else
+  ok "otel backend not managed (otel-backend module inactive for profile $profile)"
+fi
+
 section "Codex review / worker profiles (report-only)"
 # #264 (agent-tools#339 hand-off): codex-settings renders the Codex profile
 # files that agent-tools' personal-codex-review and personal-codex-worker pick
