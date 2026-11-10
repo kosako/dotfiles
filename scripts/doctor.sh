@@ -2818,16 +2818,140 @@ section "otel backend (report-only)"
 # version and digest, its three ports on 127.0.0.1 only) that receives the
 # telemetry of the AI agents on this machine. Apply only places the file:
 # starting Colima, registering it as a login service and starting the
-# container are explicit manual steps (docs/otel-backend.md). This section
-# reports the file's presence, contents-blind; drift of the managed file is
-# the managed drift section's job. The runtime state (is Colima up, is the
-# container running the pinned image, are its ports loopback-only) is NOT
-# checked here yet, and the ok line says so rather than implying a working
-# backend.
+# container are explicit manual steps (docs/otel-backend.md), so a present
+# file says nothing about a working backend. With the file present this
+# section therefore also reads the runtime state — is the docker daemon
+# (Colima) reachable, is the container running, on the image the definition
+# pins, with every published port on 127.0.0.1, in a VM that mounts no host
+# directory — and whether Colima is registered as a login service. It only
+# reads: `docker ps` / `docker inspect` / `colima ssh -- mount`, each
+# through bounded_probe, so an absent, failing or hung runtime is an action
+# or "not checked", never a pass, and doctor neither starts nor changes
+# anything. Drift of the managed file is the managed drift section's job.
 otel_compose="$HOME/.config/otel-lgtm/compose.yaml"
+otel_container="otel-lgtm"
+# report_otel_backend_runtime — the runtime checks, run only when the
+# managed definition is present. Stops at the first state that makes the
+# later checks meaningless (no daemon, no container, not running).
+report_otel_backend_runtime() {
+  local up_step state image ports_json want_image host_ips ip published=0 beyond=0
+  up_step="\$ docker-compose -f $(shell_quote_safe "$otel_compose") up -d"
+  if ! command -v docker >/dev/null 2>&1; then
+    item "otel backend runtime not checked: docker not on PATH (the software catalog section reports a missing runtime)"
+    return 0
+  fi
+  # `docker ps`, not `docker inspect`: it tells "no such container" (exit 0,
+  # no line) from "no daemon" (non-zero), where inspect exits 1 for both.
+  bounded_probe docker ps -a --no-trunc --filter "name=^/${otel_container}\$" --format '{{.State}}'
+  case "$probe_rc" in
+    0) ;;
+    "")
+      warn "otel backend runtime not checked: docker ps gave no answer within ${probe_deadline}s"
+      return 0
+      ;;
+    *)
+      # The step carries the two flags that matter on a NEW VM: a bare
+      # `colima start` is right for an existing one (it reuses the saved
+      # settings) but would create a new one with Colima's defaults ($HOME
+      # mounted writable, ~/.ssh/config rewritten). On an existing VM the
+      # flags repeat what is saved.
+      action "otel backend down: docker cannot reach its daemon (docker ps exit $probe_rc) — Colima is not running, so nothing receives telemetry on 127.0.0.1" \
+        "\$ colima start --mount none --ssh-config=false"
+      return 0
+      ;;
+  esac
+  state="${probe_lines%%$'\n'*}"
+  if [[ -z "$state" ]]; then
+    action "otel backend down: no container named $otel_container — nothing receives telemetry on 127.0.0.1" "$up_step"
+    return 0
+  fi
+  if [[ "$state" != "running" ]]; then
+    action "otel backend down: container $otel_container is $state, not running" "$up_step"
+    return 0
+  fi
+  ok "otel backend: container $otel_container is running"
+
+  # The image and the published ports, in one read. .Config.Image is the
+  # reference the container was created from (version@digest as written in
+  # the definition), so comparing it to the definition tells a container
+  # left on an older pin after the managed file moved on.
+  bounded_probe docker inspect --format '{{.Config.Image}}{{"\n"}}{{json .NetworkSettings.Ports}}' "$otel_container"
+  if [[ "$probe_rc" != "0" ]]; then
+    warn "otel backend image and ports not checked: docker inspect gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
+  else
+    image="${probe_lines%%$'\n'*}"
+    ports_json="${probe_lines#*$'\n'}"
+    ports_json="${ports_json%%$'\n'*}"
+    want_image="$(yq -r '.services[] | .image // ""' "$otel_compose" 2>/dev/null | head -n 1 || true)"
+    if [[ -z "$want_image" ]]; then
+      warn "otel backend image not checked: no image could be read from $otel_compose"
+    elif [[ "$image" == "$want_image" ]]; then
+      ok "otel backend: the container runs the image the definition pins"
+    else
+      action "otel backend: the container runs another image than the definition pins (version or digest differs) — it was created before the managed file changed, or from another definition" "$up_step"
+    fi
+    # Every published binding must be on 127.0.0.1: Grafana answers its API
+    # without a login, and Colima forwards a port published on any other
+    # address to every interface of the host. An unpublished port is null
+    # in the JSON and is skipped. Each binding is printed as `ip=<HostIp>`
+    # so one with an empty HostIp (every interface) is a line of its own,
+    # not an empty output read as "no binding". If the JSON cannot be read,
+    # nothing is claimed.
+    if host_ips="$(yq -p json -r '.[] | select(. != null) | .[] | "ip=" + .HostIp' <<< "$ports_json" 2>/dev/null)"; then
+      while IFS= read -r ip; do
+        [[ -n "$ip" ]] || continue
+        published=$((published + 1))
+        [[ "$ip" == "ip=127.0.0.1" ]] || beyond=1
+      done <<< "$host_ips"
+      if [[ "$beyond" -eq 1 ]]; then
+        action "otel backend exposed: the container publishes a port on an address other than 127.0.0.1 — Grafana answers its API without a login, and Colima forwards such a port to every interface of this host" "$up_step"
+      elif [[ "$published" -eq 0 ]]; then
+        warn "otel backend: the container publishes no port, so nothing on this host can send it telemetry"
+      else
+        ok "otel backend: every published port is on 127.0.0.1"
+      fi
+    else
+      warn "otel backend ports not checked: the port bindings docker inspect printed could not be read"
+    fi
+  fi
+
+  # The VM must not mount host directories (it is created with --mount
+  # none): with the default $HOME mount, anything that can use the docker
+  # socket can bind-mount the home directory into a container. Colima's
+  # saved settings cannot tell "none" from the default (both are saved as
+  # `mounts: null`), so the VM is asked. No value goes into the remote
+  # command: the mount table is read whole and matched here.
+  if ! command -v colima >/dev/null 2>&1; then
+    item "otel backend VM mounts not checked: colima not on PATH (docker reaches a daemon that is not Colima's, or the catalog is not installed)"
+  else
+    bounded_probe colima ssh -- mount
+    case "$probe_rc" in
+      0)
+        if grep -Eq ' type (virtiofs|9p|fuse\.sshfs) ' <<< "$probe_lines"; then
+          warn "otel backend: the Colima VM mounts host directories (it was created without --mount none) — a container can reach them through the docker socket; recreating the VM without the mount is in docs/otel-backend.md"
+        else
+          ok "otel backend: the Colima VM mounts no host directory"
+        fi
+        ;;
+      *)
+        warn "otel backend VM mounts not checked: colima ssh gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
+        ;;
+    esac
+  fi
+
+  # The login service is the user's choice (always-on or started by hand),
+  # so either state is a neutral item. Homebrew has named the LaunchAgent
+  # both ways over time.
+  if [[ -f "$HOME/Library/LaunchAgents/sh.brew.colima.plist" || -f "$HOME/Library/LaunchAgents/homebrew.mxcl.colima.plist" ]]; then
+    item "otel backend: Colima is registered as a login service (brew services)"
+  else
+    item "otel backend: Colima is not registered as a login service — after a login the backend stays down until Colima is started (brew services start colima registers it)"
+  fi
+}
 if module_active_for_profile "$profile" otel-backend; then
   if [[ -f "$otel_compose" ]]; then
-    ok "otel backend: managed $otel_compose present (runtime state not checked: doctor does not look at Colima or the container yet)"
+    ok "otel backend: managed $otel_compose present"
+    report_otel_backend_runtime
   else
     action "otel backend definition missing: $otel_compose (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" \
       "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \

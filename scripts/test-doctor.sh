@@ -1146,43 +1146,270 @@ hc_check "work -> not managed" "[ok] herdr config not managed (herdr-config modu
 rm -rf "$hc_home" "$hc_fakebin"
 
 # otel backend report (otel-backend module, #514). doctor stays report-only
-# / exit 0 and must tell apart: the managed compose file present (ok, and the
-# line says the runtime state is not checked, so it cannot be read as "the
-# backend works"), missing (action naming mkdir + apply), and the
-# module-inactive profile (work). Presence only: doctor does not read the
-# file. Every run is hermetic (`env -i`).
+# / exit 0. The managed compose file missing -> action naming mkdir + apply,
+# and nothing is probed; the module-inactive profile (work) -> not managed,
+# nothing probed. With the file present doctor reads the runtime state and
+# must tell apart: docker absent (item), daemon unreachable (action whose
+# step starts Colima with the two flags that matter on a new VM), a hung
+# docker (not checked), no container / a stopped one (action naming the
+# compose command), a container on another image than the definition pins
+# (action), a port published beyond 127.0.0.1 — 0.0.0.0, an empty HostIp,
+# IPv6 any — (action), no published port (warn), an unreadable inspect
+# answer (not checked), a VM that mounts host directories (warn), colima
+# absent or failing (not checked), and the login service either way (item).
+# docker and colima are PATH-front fakes that answer from files and log
+# every call, so the runs are hermetic (`env -i`) and the read-only contract
+# is checked: only `docker ps`, `docker inspect` and `colima ssh -- mount`
+# are ever run.
 ob_home="$fixture_home/ob"
 ob_managed="$ob_home/.config/otel-lgtm/compose.yaml"
-# ob_doctor PROFILE — one hermetic doctor run.
-ob_doctor() {
-  env -i PATH="$PATH" HOME="$ob_home" "$SCRIPT_DIR/doctor.sh" "$1"
+ob_fakebin="$fixture_home/obfake"
+ob_state="$fixture_home/obstate"
+mkdir -p "$ob_fakebin" "$ob_state"
+cat > "$ob_fakebin/docker" <<SH
+#!/bin/sh
+d=$(shell_single_quote "$ob_state")
+printf 'docker %s\n' "\$*" >> "\$d/calls"
+case "\$1" in
+  ps)
+    [ -e "\$d/ps-hang" ] && exec sleep 30
+    [ -e "\$d/ps-out" ] && cat "\$d/ps-out"
+    exit "\$(cat "\$d/ps-rc")"
+    ;;
+  inspect)
+    [ -e "\$d/inspect-out" ] && cat "\$d/inspect-out"
+    exit "\$(cat "\$d/inspect-rc")"
+    ;;
+esac
+exit 97
+SH
+cat > "$ob_fakebin/colima" <<SH
+#!/bin/sh
+d=$(shell_single_quote "$ob_state")
+printf 'colima %s\n' "\$*" >> "\$d/calls"
+case "\$1" in
+  ssh)
+    [ -e "\$d/mount-out" ] && cat "\$d/mount-out"
+    exit "\$(cat "\$d/mount-rc")"
+    ;;
+esac
+exit 97
+SH
+chmod +x "$ob_fakebin/docker" "$ob_fakebin/colima"
+ob_image="$(yq -r '.services.lgtm.image' "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml")"
+ob_ports_loopback='{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":"3000"}],"3200/tcp":null,"4317/tcp":[{"HostIp":"127.0.0.1","HostPort":"4317"}],"4318/tcp":[{"HostIp":"127.0.0.1","HostPort":"4318"}]}'
+# ob_healthy — the fakes answer as a working backend: the container
+# running on the pinned image, every binding on 127.0.0.1, a VM whose mount
+# table has no host share. Each case changes one answer from here. The call
+# log starts empty.
+ob_healthy() {
+  rm -f "$ob_state/ps-hang"
+  printf 'running\n' > "$ob_state/ps-out"
+  printf '0' > "$ob_state/ps-rc"
+  printf '%s\n%s\n' "$ob_image" "$ob_ports_loopback" > "$ob_state/inspect-out"
+  printf '0' > "$ob_state/inspect-rc"
+  printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' 'tmpfs on /run type tmpfs (rw,nosuid,nodev)' > "$ob_state/mount-out"
+  printf '0' > "$ob_state/mount-rc"
+  : > "$ob_state/calls"
 }
+# ob_doctor PATH PROFILE — one hermetic doctor run with PATH as given.
+ob_doctor() {
+  env -i PATH="$1" HOME="$ob_home" "$SCRIPT_DIR/doctor.sh" "$2"
+}
+ob_path="$ob_fakebin:$PATH"
+# ob_expect LABEL -- EXPECT... [! ABSENT...] — a personal run with both fakes.
+ob_expect() {
+  doctor_expect "otel backend $1" ob_doctor "$ob_path" personal "${@:2}"
+}
+ob_present="[ok] otel backend: managed $ob_managed present"
+ob_running="[ok] otel backend: container otel-lgtm is running"
+ob_image_ok="[ok] otel backend: the container runs the image the definition pins"
+ob_ports_ok="[ok] otel backend: every published port is on 127.0.0.1"
+ob_mounts_ok="[ok] otel backend: the Colima VM mounts no host directory"
+ob_service_off="[info] - otel backend: Colima is not registered as a login service — after a login the backend stays down until Colima is started (brew services start colima registers it)"
+ob_service_on="[info] - otel backend: Colima is registered as a login service (brew services)"
+ob_up_step="        \$ docker-compose -f $(printf '%q' "$ob_managed") up -d"
+ob_exposed="[warn] otel backend exposed: the container publishes a port on an address other than 127.0.0.1 — Grafana answers its API without a login, and Colima forwards such a port to every interface of this host"
 rm -rf "$ob_home"
 mkdir -p "$ob_home/.config/otel-lgtm"
 cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
-# OB-1) present -> ok, with the "not checked" disclosure.
-doctor_expect "otel backend present -> ok, runtime state disclosed as not checked" ob_doctor personal -- \
-  "[ok] otel backend: managed $ob_managed present (runtime state not checked: doctor does not look at Colima or the container yet)" \
-  ! "otel backend definition missing"
-# OB-2) missing -> action whose steps are mkdir then apply, consecutive and %q-escaped.
+# OB-1) a working backend -> every check ok, the login service a neutral
+#       item, and doctor ran exactly its three read-only commands.
+ob_healthy
+ob_expect "healthy -> ok for container, image, ports and VM mounts" -- \
+  "$ob_present" "$ob_running" "$ob_image_ok" "$ob_ports_ok" "$ob_mounts_ok" "$ob_service_off" \
+  ! "otel backend down" "otel backend exposed" "otel backend runtime not checked" \
+    "otel backend image" "otel backend ports not checked" "otel backend VM mounts not checked" \
+    "publishes no port" "mounts host directories"
+if [[ "$(wc -l < "$ob_state/calls" | tr -d ' ')" == "3" ]] \
+  && grep -q '^docker ps ' "$ob_state/calls" \
+  && grep -q '^docker inspect .* otel-lgtm$' "$ob_state/calls" \
+  && grep -Fxq 'colima ssh -- mount' "$ob_state/calls"; then
+  ok "test passed: otel backend runtime check runs only docker ps, docker inspect and colima ssh -- mount"
+else
+  cat "$ob_state/calls" >&2
+  fail "test failed: otel backend runtime check must run exactly docker ps, docker inspect and colima ssh -- mount"
+  status=1
+fi
+# OB-1b) the LaunchAgent under either name Homebrew has used -> registered.
+mkdir -p "$ob_home/Library/LaunchAgents"
+for ob_plist in sh.brew.colima.plist homebrew.mxcl.colima.plist; do
+  : > "$ob_home/Library/LaunchAgents/$ob_plist"
+  ob_healthy
+  ob_expect "login service registered ($ob_plist) -> item" -- "$ob_service_on" ! "not registered as a login service"
+  rm -f "$ob_home/Library/LaunchAgents/$ob_plist"
+done
+# OB-2) the definition missing -> action whose steps are mkdir then apply,
+#       consecutive and %q-escaped, and no runtime command is run.
 rm -f "$ob_managed"
+ob_healthy
 ob_rc=0
-ob_out="$(ob_doctor personal 2>&1)" || ob_rc=$?
+ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
 if [[ "$ob_rc" -eq 0 ]] \
   && grep -Fxq -- "[warn] otel backend definition missing: $ob_managed (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" <<< "$ob_out" \
   && steps_consecutive "$ob_out" "        \$ mkdir -p $(printf '%q' "$ob_home/.config")" \
-    "        \$ chezmoi apply $(printf '%q' "$ob_home/.config/otel-lgtm") $(printf '%q' "$ob_managed")"; then
-  ok "test passed: otel backend definition missing -> action with mkdir then apply steps"
+    "        \$ chezmoi apply $(printf '%q' "$ob_home/.config/otel-lgtm") $(printf '%q' "$ob_managed")" \
+  && [[ ! -s "$ob_state/calls" ]]; then
+  ok "test passed: otel backend definition missing -> action with mkdir then apply steps, nothing probed"
 else
   printf '%s\n' "${ob_out:-<no output>}" >&2
-  fail "test failed: otel backend definition missing -> expected exit 0 (got $ob_rc), the action line and the mkdir step immediately followed by the apply step"
+  fail "test failed: otel backend definition missing -> expected exit 0 (got $ob_rc), the action line, the mkdir step immediately followed by the apply step, and no docker / colima call"
   status=1
 fi
-# OB-3) work does not list the module -> not managed, whatever is on disk.
 cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
-doctor_expect "otel backend work -> not managed" ob_doctor work -- \
-  "[ok] otel backend not managed (otel-backend module inactive for profile work)"
-rm -rf "$ob_home"
+# OB-3) docker cannot reach its daemon -> action that starts Colima with
+#       --mount none and --ssh-config=false; nothing is said about the
+#       container, and neither inspect nor colima is run.
+ob_healthy
+printf '1' > "$ob_state/ps-rc"
+: > "$ob_state/ps-out"
+ob_expect "daemon unreachable -> action starting Colima with the safe flags" -- \
+  "$ob_present" \
+  "[warn] otel backend down: docker cannot reach its daemon (docker ps exit 1) — Colima is not running, so nothing receives telemetry on 127.0.0.1" \
+  "        \$ colima start --mount none --ssh-config=false" \
+  ! "$ob_running" "container otel-lgtm" "VM mounts"
+if grep -q -e '^docker inspect' -e '^colima ' "$ob_state/calls"; then
+  cat "$ob_state/calls" >&2
+  fail "test failed: with the daemon unreachable doctor must stop after docker ps"
+  status=1
+else
+  ok "test passed: with the daemon unreachable doctor stops after docker ps"
+fi
+# OB-4) the daemon answers but no such container -> action naming the compose command.
+ob_healthy
+: > "$ob_state/ps-out"
+ob_expect "no container -> action with the compose step" -- \
+  "[warn] otel backend down: no container named otel-lgtm — nothing receives telemetry on 127.0.0.1" "$ob_up_step" \
+  ! "$ob_running"
+# OB-5) the container exists but is stopped -> action naming its state.
+ob_healthy
+printf 'exited\n' > "$ob_state/ps-out"
+ob_expect "container exited -> action with the compose step" -- \
+  "[warn] otel backend down: container otel-lgtm is exited, not running" "$ob_up_step" \
+  ! "$ob_running"
+# OB-6) running on another image than the definition pins (an older digest
+#       left behind) -> action; the ports and the VM are still checked.
+ob_healthy
+printf '%s\n%s\n' "${ob_image}0" "$ob_ports_loopback" > "$ob_state/inspect-out"
+ob_expect "another image than the pin -> action, ports and mounts still checked" -- \
+  "$ob_running" \
+  "[warn] otel backend: the container runs another image than the definition pins (version or digest differs) — it was created before the managed file changed, or from another definition" \
+  "$ob_up_step" "$ob_ports_ok" "$ob_mounts_ok" \
+  ! "$ob_image_ok"
+# OB-7) a binding beyond 127.0.0.1 -> action, whichever way it is spelled:
+#       0.0.0.0, an empty HostIp (every interface) even as the ONLY
+#       binding, and IPv6 any next to loopback ones.
+for ob_ports in \
+  '{"3000/tcp":[{"HostIp":"0.0.0.0","HostPort":"3000"}],"4318/tcp":[{"HostIp":"127.0.0.1","HostPort":"4318"}]}' \
+  '{"3000/tcp":[{"HostIp":"","HostPort":"3000"}]}' \
+  '{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":"3000"},{"HostIp":"::","HostPort":"3000"}]}'; do
+  ob_healthy
+  printf '%s\n%s\n' "$ob_image" "$ob_ports" > "$ob_state/inspect-out"
+  ob_expect "a port beyond loopback ($ob_ports) -> exposed action" -- \
+    "$ob_exposed" "$ob_up_step" "$ob_image_ok" ! "$ob_ports_ok" "publishes no port"
+done
+# OB-8) nothing published -> warn (the receiver cannot be reached), not ok.
+ob_healthy
+printf '%s\n%s\n' "$ob_image" '{"3000/tcp":null,"4318/tcp":null}' > "$ob_state/inspect-out"
+ob_expect "no published port -> warn" -- \
+  "[warn] otel backend: the container publishes no port, so nothing on this host can send it telemetry" \
+  ! "$ob_ports_ok" "otel backend exposed"
+# OB-9) docker inspect fails, or prints bindings that are not JSON -> not
+#       checked, never ok.
+ob_healthy
+printf '1' > "$ob_state/inspect-rc"
+ob_expect "inspect fails -> image and ports not checked" -- \
+  "$ob_running" "[warn] otel backend image and ports not checked: docker inspect gave no usable answer (exit 1)" "$ob_mounts_ok" \
+  ! "$ob_image_ok" "$ob_ports_ok"
+ob_healthy
+printf '%s\n%s\n' "$ob_image" 'not json' > "$ob_state/inspect-out"
+ob_expect "unreadable port bindings -> ports not checked" -- \
+  "$ob_image_ok" "[warn] otel backend ports not checked: the port bindings docker inspect printed could not be read" \
+  ! "$ob_ports_ok" "otel backend exposed"
+# OB-10) the VM mounts a host directory (created without --mount none) ->
+#        warn, for each mount type Colima can use.
+for ob_fstype in virtiofs 9p fuse.sshfs; do
+  ob_healthy
+  printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' "mount0 on /Users/someone type $ob_fstype (rw,relatime)" > "$ob_state/mount-out"
+  ob_expect "VM mounts a host directory ($ob_fstype) -> warn" -- \
+    "[warn] otel backend: the Colima VM mounts host directories (it was created without --mount none) — a container can reach them through the docker socket; recreating the VM without the mount is in docs/otel-backend.md" \
+    ! "$ob_mounts_ok"
+done
+# OB-11) colima ssh fails -> not checked, never "no host directory".
+ob_healthy
+printf '255' > "$ob_state/mount-rc"
+ob_expect "colima ssh fails -> VM mounts not checked" -- \
+  "[warn] otel backend VM mounts not checked: colima ssh gave no usable answer (exit 255)" ! "$ob_mounts_ok"
+# OB-12) docker ps hangs -> not checked at the deadline, the hung process
+#        reaped, and nothing after it claimed.
+ob_healthy
+: > "$ob_state/ps-hang"
+ob_expect "docker ps hangs -> runtime not checked at the deadline" -- \
+  "$ob_present" "[warn] otel backend runtime not checked: docker ps gave no answer within 5s" \
+  ! "$ob_running" "otel backend down" "$ob_mounts_ok"
+rm -f "$ob_state/ps-hang"
+# OB-13) docker not on PATH -> item pointing at the catalog section; colima
+#        not on PATH (docker answering) -> the mount check is an item. The
+#        PATHs: yq and git, the host stubs, and a copy of the system dirs
+#        without docker and colima (a CI runner has a real docker there).
+ob_tools="$fixture_home/ob-tools"
+ob_sysbin="$fixture_home/ob-sysbin"
+ob_dockeronly="$fixture_home/ob-dockeronly"
+mkdir -p "$ob_tools" "$ob_sysbin" "$ob_dockeronly"
+ln -sf "$(command -v yq)" "$ob_tools/yq"
+ln -sf "$(command -v git)" "$ob_tools/git"
+for host_tool in op herdr codex opencode brew npm gh; do
+  ln -sf "$host_stub_dir/bin/$host_tool" "$ob_tools/$host_tool"
+done
+ln -s /bin/* "$ob_sysbin/"
+ln -sf /usr/bin/* "$ob_sysbin/"
+rm -f "$ob_sysbin/docker" "$ob_sysbin/colima"
+ln -s "$ob_fakebin/docker" "$ob_dockeronly/docker"
+ob_healthy
+doctor_expect "otel backend without docker on PATH -> item, nothing probed" ob_doctor "$ob_tools:$ob_sysbin" personal -- \
+  "$ob_present" "[info] - otel backend runtime not checked: docker not on PATH (the software catalog section reports a missing runtime)" \
+  ! "$ob_running" "otel backend down" "VM mounts"
+if [[ -s "$ob_state/calls" ]]; then
+  cat "$ob_state/calls" >&2
+  fail "test failed: without docker on PATH no fake may have been called"
+  status=1
+fi
+ob_healthy
+doctor_expect "otel backend without colima on PATH -> the mount check is an item" ob_doctor "$ob_dockeronly:$ob_tools:$ob_sysbin" personal -- \
+  "$ob_running" "$ob_image_ok" "$ob_ports_ok" \
+  "[info] - otel backend VM mounts not checked: colima not on PATH (docker reaches a daemon that is not Colima's, or the catalog is not installed)" \
+  ! "$ob_mounts_ok"
+# OB-14) work does not list the module -> not managed, whatever is on disk,
+#        and nothing probed.
+ob_healthy
+doctor_expect "otel backend work -> not managed, nothing probed" ob_doctor "$ob_path" work -- \
+  "[ok] otel backend not managed (otel-backend module inactive for profile work)" ! "$ob_present"
+if [[ -s "$ob_state/calls" ]]; then
+  cat "$ob_state/calls" >&2
+  fail "test failed: an inactive otel-backend module must not probe docker or colima"
+  status=1
+fi
+rm -rf "$ob_home" "$ob_fakebin" "$ob_state" "$ob_tools" "$ob_sysbin" "$ob_dockeronly"
 
 # UR) agent-tools usage reader (agent-tools-usage-reader module, #301).
 #     doctor stays report-only / exit 0. Presence is its own check: missing

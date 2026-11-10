@@ -155,7 +155,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。capability=false でも live の `~/.claude/settings.json` / `~/.codex/hooks.json` に登録が残っていれば(apply 前の flip、または profile 切替の残置)、file ごとに action にする(`--actions-only` にも出る)。body の path (品質ループは PostToolUse と Stop の 2 本のどちらか) を固定文字列で探すだけで、中身は出さない。その profile が file を管理していれば(settings module が active)`chezmoi apply` を、管理していなければ hook の項目か file を手で消す手順(file を消したら herdr の登録を入れ直す)を出す。在るのに通常の file でない(FIFO なら読むと止まる)、または読めない file は、登録を確かめられないので warn にし、not-wired の ok は出さない(#200 / #201)。親の dir を辿れず在るかを確かめられない file も同じ(不在とするのは、親に入れてそこに file が無いときと、親が無い・dir でないと cd の errno で確かめたときだけ。#439)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。各 process を止めてから子を辿る `kill_tree`(`lib-policy.sh`)で、辿っている間に増える子も残さない、#423。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
 - herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ綴りか、両方あれば `-ef` で同じ file と判定。presence とは独立に warn し、欠損時の action は読み先がずれていれば「既定値で動く」と断定しない。ずれていれば検証もしない)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
-- otel backend(report-only): `otel-backend` module が active な profile で managed `~/.config/otel-lgtm/compose.yaml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action。中身は読まない)。実行時の状態(Colima・container・image・port)はまだ見ず、ok の行にそう書く。非 active profile では「not managed」の ok(#514)。
+- otel backend(report-only): `otel-backend` module が active な profile で managed `~/.config/otel-lgtm/compose.yaml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action で、実行時の状態は見ない)。file があれば、実行時の状態を読むだけで確かめる(`docker ps`・`docker inspect`・`colima ssh -- mount` を `bounded_probe` の期限付きで実行): docker が PATH に無い → 未確認の item / daemon に届かない → `colima start --mount none --ssh-config=false` の action / container が無い・running でない → `docker-compose -f <file> up -d` の action / image が定義の固定と違う → action / `127.0.0.1` 以外に公開した port がある → action、公開が 0 → warn / VM が host の directory を mount している → warn / Colima の login の常駐の登録 → どちらでも item。答えが取れない・読めないときは「未確認」で、ok にしない。非 active profile では「not managed」の ok で、何も実行しない(#514)。
 - Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` が配る
   `~/.codex/agent-tools-{review,worker}.config.toml` の **presence のみ**(中身は config 値なので出さない)。
   codex-settings が active な profile では、値があるのに file が無い / `off` なのに file が残る(agent-tools は読み続ける)を
@@ -608,8 +608,16 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   「wrapper が読む」「読み取り口なし」と断定せず、ずれた先を示す)。設定の canary が出力に出ないこと。fixture の
   reader は実行されると、wrapper は `--help` / `--check` 以外で呼ばれるか `--check` が `XDG_CONFIG_HOME` を見ると
   marker を残し、全 run の後に marker が無いこと。どの run も `env -i` で hermetic。
-- otel backend(#514): present → ok(行に「runtime state not checked」を含み、missing の action は出ない)/ missing →
-  `mkdir -p` → `chezmoi apply` の連続 2 step の action で exit 0 / work → not managed。どの run も `env -i` で hermetic。
+- otel backend(#514): PATH 先頭の fake の docker / colima が file から答え、呼ばれた command を記録する。healthy → container・
+  image・port・VM の mount がすべて ok で、実行されたのが `docker ps`・`docker inspect`・`colima ssh -- mount` の 3 つだけ /
+  LaunchAgent(`sh.brew.colima` と `homebrew.mxcl.colima` のどちらの名前でも)→ registered の item / definition missing →
+  `mkdir -p` → `chezmoi apply` の連続 2 step の action で、何も probe しない / daemon に届かない → `colima start --mount none
+  --ssh-config=false` の action で、`docker ps` の後は何も実行しない / container なし・exited → compose の action / pin と違う
+  image → action(port と mount は続けて確認)/ loopback 以外の port(`0.0.0.0`・唯一の binding が空の HostIp・IPv6 の any)→
+  exposed の action / 公開が 0 → warn / inspect の失敗・JSON でない binding → 未確認 / VM の mount(`virtiofs`・`9p`・
+  `fuse.sshfs`)→ warn / `colima ssh` の失敗 → 未確認 / `docker ps` の hang → 期限で未確認 / docker が PATH に無い → item で
+  何も probe しない / colima が PATH に無い → mount の確認だけ item / work → not managed で何も probe しない。どの run も
+  `env -i` で hermetic。
 - 1Password(#231): fake op の signed in(ok 1 行だけ。doctor の stdin に行を流し、fake は自分の stdin が
   `/dev/null` でないと印を残す — 印が無いこと = stdin 隔離)/ signed out(既存 warn)。fake op は ok・fail の mode を
   持つ。応答の無い `op whoami`(期限で回収し「未確認」の warn だけを出して次の section へ進む。signed in / out とは
