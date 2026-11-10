@@ -43,6 +43,12 @@ profiles:
       # personal only: a work machine has no tacho yet, and without the file
       # agent-tools runs with "no usage reader".
       - agent-tools-usage-reader
+      # #514: managed compose file for the local OpenTelemetry backend
+      # (~/.config/otel-lgtm/compose.yaml: grafana/otel-lgtm pinned by version
+      # and digest, ports on 127.0.0.1 only). Module-gated, personal only:
+      # whether a work machine runs a container runtime and stores agent
+      # telemetry is undecided. Apply places the file and starts nothing.
+      - otel-backend
     capabilities:
       installPackages: true
       installGuiApps: true

@@ -46,6 +46,7 @@ personal project として段階的に作っている。現時点の実装状況
 | Git global ignore(AI agent の local-only file `.agent-packets/` / `.claude/settings.local.json` を全 repo から除外、[docs/git-ignore.md](docs/git-ignore.md)) | 実装済み・実機適用済み(personal のみ、#248) |
 | herdr config(UI の設定と OS 通知の配信先、[docs/herdr-config.md](docs/herdr-config.md)) | 実装済み・実機適用済み(personal のみ、#261) |
 | agent-tools の残量の読み取り口の設定(`usage-reader.json`、[docs/agent-tools-usage-reader.md](docs/agent-tools-usage-reader.md)) | 実装済み・実機適用済み(personal のみ、#301) |
+| local の OpenTelemetry backend の定義(grafana/otel-lgtm の compose file。image は版と digest で固定、port は 127.0.0.1 だけ、[docs/otel-backend.md](docs/otel-backend.md)) | 実装済み・実機適用済み(personal のみ、#514) |
 
 「実機適用済み」は、現時点でこの author の Mac 上で managed file が実際に稼働しているという意味(実機の状態は repo からは検証できないので、この列は運用記録。repo 側で機械検証されるのは managed template と render / test の整合まで)。VS Code は未使用のため管理しない(#16。dormant 配線も #145 で削除)。SSH の移行手順は [docs/ssh.md](docs/ssh.md)。
 
@@ -220,6 +221,7 @@ chezmoi execute-template --source ~/dotfiles '{{ .profile }}'                 # 
     - [git-ignore.md](docs/git-ignore.md) — AI agent の local-only file を除外する global gitignore。
     - [herdr-config.md](docs/herdr-config.md) — herdr の config(UI の設定と OS 通知の配信先)。
     - [agent-tools-usage-reader.md](docs/agent-tools-usage-reader.md) — agent-tools の残量の読み取り口の設定(`usage-reader.json`)。
+    - [otel-backend.md](docs/otel-backend.md) — local の OpenTelemetry backend(container runtime の初回の手順と compose file)。
     - [git-hook-gates.md](docs/git-hook-gates.md) — commit 境界 gate の配線(実体は agent-tools)。
     - [ssh.md](docs/ssh.md) — `~/.ssh/config` と 1Password SSH agent。
     - [shell.md](docs/shell.md) — zsh と starship(shell-extra)。

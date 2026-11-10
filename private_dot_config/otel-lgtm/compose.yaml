@@ -1,0 +1,24 @@
+# Managed by chezmoi from kosako/dotfiles (otel-backend module, #514).
+# The local OpenTelemetry backend: grafana/otel-lgtm (OpenTelemetry
+# Collector, Prometheus, Tempo, Loki, Pyroscope and Grafana in one image)
+# for the telemetry of the AI agents on this machine. Apply starts nothing:
+# a person runs `docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d`
+# once, and `restart: unless-stopped` brings the container back with the
+# docker daemon. Every port is published on 127.0.0.1 only: Grafana answers
+# its API without a login, and Colima forwards a port published without an
+# address to every interface of the host. The image is pinned by version
+# AND digest; change both in one PR. See docs/otel-backend.md.
+name: otel-lgtm
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe
+    container_name: otel-lgtm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - data:/data
+volumes:
+  data:

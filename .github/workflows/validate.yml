@@ -173,7 +173,8 @@ jobs:
             suites: >-
               test-render.sh test-claude-settings.sh test-codex-settings.sh
               test-opencode-settings.sh test-git-signing.sh test-git-ignore.sh
-              test-herdr-config.sh test-agent-tools-usage-reader.sh
+              test-herdr-config.sh test-otel-backend.sh
+              test-agent-tools-usage-reader.sh
               test-git-hook-gates.sh test-starship.sh test-ssh.sh test-npmrc.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -332,6 +333,9 @@ jobs:
 
       - name: herdr config gating and content tests
         run: ./scripts/test-herdr-config.sh
+
+      - name: otel backend compose file gating and content tests
+        run: ./scripts/test-otel-backend.sh
 
       - name: agent-tools usage reader config gating and content tests
         run: ./scripts/test-agent-tools-usage-reader.sh

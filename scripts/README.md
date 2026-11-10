@@ -155,6 +155,7 @@ Codex の rules の file 名、backup の marker の欄、Codex の project の 
 - quality loop hooks(report-only): `enableQualityLoopHooks` の PostToolUse / Stop hook 登録を両 home で wired 状態と body presence で report し、check 宣言 `~/.config/agent-tools/checks.local.json` は **presence のみ**を見る — hook が実行する command を列挙する file なので中身は読まない(#199)。capability=false でも live の `~/.claude/settings.json` / `~/.codex/hooks.json` に登録が残っていれば(apply 前の flip、または profile 切替の残置)、file ごとに action にする(`--actions-only` にも出る)。body の path (品質ループは PostToolUse と Stop の 2 本のどちらか) を固定文字列で探すだけで、中身は出さない。その profile が file を管理していれば(settings module が active)`chezmoi apply` を、管理していなければ hook の項目か file を手で消す手順(file を消したら herdr の登録を入れ直す)を出す。在るのに通常の file でない(FIFO なら読むと止まる)、または読めない file は、登録を確かめられないので warn にし、not-wired の ok は出さない(#200 / #201)。親の dir を辿れず在るかを確かめられない file も同じ(不在とするのは、親に入れてそこに file が無いときと、親が無い・dir でないと cd の errno で確かめたときだけ。#439)。
 - herdr integration(report-only): `enableHerdrIntegration` の SessionStart hook 登録を両 home で wired 状態と herdr 配置 body の presence で report し、herdr が PATH にあれば `herdr integration status` の currency(current / outdated / needs repair)も出す — body header を読むだけで server 不要。5 秒の期限付きで実行し exit 0 のときだけ採用、不在・失敗・hang は「未確認」と明示して doctor を止めない(一時ファイル不使用・stdin `/dev/null`・期限到達と中断時は probe の process tree ごと回収。各 process を止めてから子を辿る `kill_tree`(`lib-policy.sh`)で、辿っている間に増える子も残さない、#423。doctor 共通の `bounded_probe` helper で、1Password の `op whoami` と共有、#231)。capability=false は宣言上の状態として報告し、herdr 自身の見え方を module の active / inactive に応じた所有者説明つきで添える(#225)。OpenCode が入っていれば、herdr から見た OpenCode integration の状態も中立に表示する(plugin は herdr の installer が置き、dotfiles に登録の役割は無い。#263)。
 - herdr config(report-only): `herdr-config` module が active な profile で managed `~/.config/herdr/config.toml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action)、doctor を実行した環境の `HERDR_CONFIG_PATH` / `XDG_CONFIG_HOME` が別の file を指していないか(herdr は設定されていれば空でも採用する。同じ綴りか、両方あれば `-ef` で同じ file と判定。presence とは独立に warn し、欠損時の action は読み先がずれていれば「既定値で動く」と断定しない。ずれていれば検証もしない)、herdr が PATH にあれば `herdr config check` の結果(`bounded_probe` の期限付き。exit 0 なら ok、それ以外は action — parse error のとき herdr は黙って全部既定値で動くため。答えが無ければ「未確認」)。herdr の出力は表示しない。module 非 active は not managed(#261)。
+- otel backend(report-only): `otel-backend` module が active な profile で managed `~/.config/otel-lgtm/compose.yaml` の presence(無ければ `mkdir -p ~/.config` → `chezmoi apply` の action。中身は読まない)。実行時の状態(Colima・container・image・port)はまだ見ず、ok の行にそう書く。非 active profile では「not managed」の ok(#514)。
 - Codex review / worker profiles(report-only): `codexReviewEffort` / `codexWorkerEffort` が配る
   `~/.codex/agent-tools-{review,worker}.config.toml` の **presence のみ**(中身は config 値なので出さない)。
   codex-settings が active な profile では、値があるのに file が無い / `off` なのに file が残る(agent-tools は読み続ける)を
@@ -607,6 +608,8 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   「wrapper が読む」「読み取り口なし」と断定せず、ずれた先を示す)。設定の canary が出力に出ないこと。fixture の
   reader は実行されると、wrapper は `--help` / `--check` 以外で呼ばれるか `--check` が `XDG_CONFIG_HOME` を見ると
   marker を残し、全 run の後に marker が無いこと。どの run も `env -i` で hermetic。
+- otel backend(#514): present → ok(行に「runtime state not checked」を含み、missing の action は出ない)/ missing →
+  `mkdir -p` → `chezmoi apply` の連続 2 step の action で exit 0 / work → not managed。どの run も `env -i` で hermetic。
 - 1Password(#231): fake op の signed in(ok 1 行だけ。doctor の stdin に行を流し、fake は自分の stdin が
   `/dev/null` でないと印を残す — 印が無いこと = stdin 隔離)/ signed out(既存 warn)。fake op は ok・fail の mode を
   持つ。応答の無い `op whoami`(期限で回収し「未確認」の warn だけを出して次の section へ進む。signed in / out とは
@@ -1150,6 +1153,17 @@ directory 0755 であること(既存 host の初回 apply で権限を変えな
 test は umask 022 に固定して確かめる。#332 F38)、隣に置いた `session.json` と log が apply で
 変わらないこと(herdr の実行時状態には触れない)。chezmoi と yq が必要(render job)。実 home には触れない。
 
+## test-otel-backend.sh
+
+otel-backend module(#514)を検証する。personal で `~/.config/otel-lgtm/compose.yaml` が apply され work では
+されないこと(work が持つ自前の file は byte 単位で不変)、1 行目の managed-by header、YAML として parse でき定義が
+pin どおりであること(key を sort して比べる)。pin とは別に、定義が守る性質も確かめる: image が
+`name:X.Y.Z@sha256:<64 hex>`、すべての port が `127.0.0.1:` で始まる文字列(map の形と address の省略は不合格)、
+mount が top-level で宣言した named volume だけ(host の path は不合格)、権限を広げる key(`privileged`・
+`network_mode`・`pid`・`cap_add` など)が無い、restart policy が `unless-stopped`。mode は file 0644 / directory 0755
+(umask 022 に固定して確かめる。#332 F38)。chezmoi と yq が必要(render job)。実 home には触れず、container runtime
+とは通信しない。
+
 ## test-agent-tools-usage-reader.sh
 
 agent-tools-usage-reader module(#301)を検証する。personal で `~/.config/agent-tools/usage-reader.json` が apply され
@@ -1228,4 +1242,4 @@ git が必要。chezmoi / starship binary は不要(CI では render job で実�
 他 script から source される共通 helper。
 data file path、profile/module/capability 取得、出力 helper、command availability check、Git remote credential 検出(`git_remotes_with_credentials`。remote 名のみを出力し、URL 値は出力しない)、global excludes の解決(`git_excludes_file_setting`: global > system・`GIT_CONFIG_NOSYSTEM` 尊重・unset / empty / path / error の 4 状態、`git_default_excludes_file`: XDG 既定。doctor と preflight が共有、#248)を提供する。ほかに、BSD/GNU をまたぐ octal mode 取得(`file_mode`)、doctor / preflight が共有する policy ゲート(`run_policy_validation`)と標準 project roots 報告(`report_standard_project_roots`)、catalog source → package manager の対応表(`manager_present`。installer と catalog drift 報告の単一 source)を持つ。environmentKind の禁止の表を読む判定(違反の一覧 `profile_environment_kind_violations`、capability ごとの許可 `profile_grants_capability`、副作用のある入口での拒否 `require_environment_kind_limits`)もここにあり、validate-policy・install-packages・private-backup が共有する(#357)。
 
-policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-agent-tools-usage-reader.sh` / `test-preflight.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
+policy data(`.chezmoidata/*.yaml`)の読み取りは mikefarah/yq v4 で行う。`require_yq` が yq の存在と variant・版を検査し、満たさなければ fail closed する(`validate-policy.sh` / `install-packages.sh` / `private-backup.sh` と、`test-render.sh` / `test-npmrc.sh` / `test-claude-settings.sh` / `test-codex-settings.sh` / `test-opencode-settings.sh` / `test-git-signing.sh` / `test-git-ignore.sh` / `test-herdr-config.sh` / `test-otel-backend.sh` / `test-agent-tools-usage-reader.sh` / `test-preflight.sh` / `test-git-hook-gates.sh` / `test-ssh.sh` / `test-shell-syntax.sh` が yq を使う前に呼ぶ。`doctor.sh` / `preflight.sh` は内部で `validate-policy.sh` を先に実行するため間接的にカバーされる。例外として catalog drift 報告(`report_catalog_drift`)は、yq を満たさないとき fail closed せず warn を出して skip する)。profile / module / capability 名は `strenv()` 経由で渡し、yq 式へ展開しない。
