@@ -60,6 +60,14 @@ packages:
   # homebrew-core formula (bottled); background service is optional and not
   # managed here (start manually with `herdr server` or `brew services`).
   - { name: herdr, source: brew_formula }
+  # Container runtime for the local OpenTelemetry backend (#514): Colima (the
+  # VM; pulls in lima as a dependency), the docker CLI and the standalone
+  # docker-compose binary. homebrew-core formulae, no GUI app. Starting the VM,
+  # registering it as a login service (`brew services`) and starting
+  # containers are explicit manual steps and are not managed here.
+  - { name: colima, source: brew_formula }
+  - { name: docker, source: brew_formula }
+  - { name: docker-compose, source: brew_formula }
   - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: iterm2, source: brew_cask }
   - { name: swiftbar, source: brew_cask }
