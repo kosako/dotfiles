@@ -435,7 +435,7 @@ docker-compose)は software catalog で入れる。
   実行する(暗黙の install と常駐を避ける)。Colima の VM と設定・docker の context・container と volume は
   管理しない。
 - 定義が守る性質: image は版と digest の両方で固定、port は 3 つとも `127.0.0.1` だけ(Grafana は認証なしで応え、
-  Colima は address を省いた公開を host の全 interface に転送する)、mount は named volume だけ、権限を広げる key を
+  Colima は address を省いた公開を host の全 interface に転送する)、mount は中身が空の宣言の named volume だけ、権限を広げる key を
   使わない。`test-otel-backend.sh` が pin する。
 - **doctor**: managed file の presence(中身は読まない)。実行時の状態(Colima・container・image・port)は
   まだ見ず、ok の行にそう書く。

@@ -1159,7 +1159,7 @@ otel-backend module(#514)を検証する。personal で `~/.config/otel-lgtm/com
 されないこと(work が持つ自前の file は byte 単位で不変)、1 行目の managed-by header、YAML として parse でき定義が
 pin どおりであること(key を sort して比べる)。pin とは別に、定義が守る性質も確かめる: image が
 `name:X.Y.Z@sha256:<64 hex>`、すべての port が `127.0.0.1:` で始まる文字列(map の形と address の省略は不合格)、
-mount が top-level で宣言した named volume だけ(host の path は不合格)、権限を広げる key(`privileged`・
+mount が top-level で宣言した named volume だけで、その宣言が空(host の path と、`driver_opts` などを持つ宣言は不合格)、権限を広げる key(`privileged`・
 `network_mode`・`pid`・`cap_add` など)が無い、restart policy が `unless-stopped`。mode は file 0644 / directory 0755
 (umask 022 に固定して確かめる。#332 F38)。chezmoi と yq が必要(render job)。実 home には触れず、container runtime
 とは通信しない。

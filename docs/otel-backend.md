@@ -92,7 +92,7 @@ managed file の定義:
 
    ```sh
    docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
-   lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(3000|4317|4318)$'   # どれも 127.0.0.1: で始まる
+   lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(3000|4317|4318) \(LISTEN\)'   # 3 行出て、どれも address が 127.0.0.1
    ```
 
    Grafana は `http://127.0.0.1:3000`。
@@ -194,6 +194,6 @@ loopback だけか、常駐が登録されているか。ok の行にもそう�
 
 `scripts/test-otel-backend.sh`: personal で apply され work ではされない(work が持つ自前の file は byte 単位で
 不変)、1 行目の managed-by 見出し、YAML として parse でき定義が pin どおり、image が版と digest の両方で固定
-されている、すべての port が `127.0.0.1` だけ、mount が宣言した named volume だけ、権限を広げる key
+されている、すべての port が `127.0.0.1` だけ、mount が宣言した named volume だけで宣言の中身が空、権限を広げる key
 (`privileged`・`network_mode` など)が無い、restart policy、mode が file 0644 / directory 0755。container runtime
 とは通信しない。doctor の分岐は `test-doctor.sh`。

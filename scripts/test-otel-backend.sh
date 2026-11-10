@@ -137,19 +137,31 @@ else
 fi
 
 # 4c) Each mount is a named volume declared at the top level: no host path
-#     (absolute, relative or ~) reaches the container.
+#     (absolute, relative or ~) reaches the container. The declaration
+#     itself must be empty (null or {}): one with driver_opts (type: none,
+#     o: bind, device: /...) binds a path under a name that still reads as
+#     a named volume, and external / name point at a volume defined
+#     elsewhere (Codex review, PR #516).
 volume_re='^!!str [a-z][a-z0-9_-]*:/[^:]*$'
-declared_volumes="$(yq -r '.volumes // {} | keys | .[]' "$managed")"
 mounts_ok=1
+# A top-level volumes that is not a map makes yq fail: no declared names
+# then, so every mount below is undeclared and the check fails with its own
+# message instead of the script stopping here.
+declared_volumes="$(yq -r '.volumes // {} | keys | .[]' "$managed" 2>/dev/null)" || declared_volumes=""
+if ! nonempty_volume_decls="$(yq -r '.volumes // {} | to_entries | .[]
+    | select((.value | tag) != "!!null" and ((.value | tag) != "!!map" or (.value | length) != 0)) | .key' "$managed" 2>/dev/null)" \
+  || [[ -n "$nonempty_volume_decls" ]]; then
+  mounts_ok=0
+fi
 yq -r '.services[] | .volumes[] | (tag + " " + (. | tostring))' "$managed" 2>/dev/null | every_line_matches "$volume_re" || mounts_ok=0
 while IFS= read -r mount_source; do
   [[ -n "$mount_source" ]] || continue
   grep -Fxq -- "$mount_source" <<< "$declared_volumes" || mounts_ok=0
 done < <(yq -r '.services[] | .volumes[] | (. | tostring) | sub(":.*$"; "")' "$managed" 2>/dev/null)
 if [[ "$mounts_ok" -eq 1 ]]; then
-  ok "test passed: every mount is a declared named volume (no host path)"
+  ok "test passed: every mount is a declared named volume with an empty declaration (no host path)"
 else
-  fail "test failed: every mount must be <declared named volume>:<container path>"
+  fail "test failed: every mount must be <declared named volume>:<container path>, and every volume declaration must be empty"
   status=1
 fi
 
