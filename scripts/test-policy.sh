@@ -1358,9 +1358,9 @@ EOF
   done
 
   # Default inventory == the reality-seed catalog (drift-free baseline).
-  printf '%s\n' age chezmoi gh herdr mise opencode shellcheck tmux yq "${shell_env_formulae[@]}" \
+  printf '%s\n' age chezmoi colima docker docker-compose gh herdr mise opencode shellcheck tmux yq "${shell_env_formulae[@]}" \
     > "$drift_dir/brew_formulae"
-  printf '%s\n' age chezmoi gh herdr mise opencode shellcheck tmux yq "${shell_env_formulae[@]}" \
+  printf '%s\n' age chezmoi colima docker docker-compose gh herdr mise opencode shellcheck tmux yq "${shell_env_formulae[@]}" \
     > "$drift_dir/brew_leaves"
   printf '%s\n' 1password-cli iterm2 swiftbar > "$drift_dir/brew_casks"
   # npm and corepack are node-bundled; including them proves they are
