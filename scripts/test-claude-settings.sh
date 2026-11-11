@@ -1549,6 +1549,7 @@ tel_apply() {
   fi
   if [[ -n "$seed" ]]; then
     printf '%s\n' "$seed" > "$tel_file"
+    cp "$tel_file" "$tel_root/seed.json"
   fi
   tel_rc=0
   render_personal_into "$source_dir" "$tel_root" || tel_rc=$?
@@ -1598,8 +1599,22 @@ else
   status=1
 fi
 
+# T2b) The edges of the accepted shape: the highest port, a hyphen inside a
+#      label, an IPv4 host, no port, a path with a trailing slash.
+for tel_good in 'http://127.0.0.1:65535' 'https://otlp-1.example.test' 'http://10.0.0.1:1/otlp/'; do
+  tel_apply good "$tel_on_src" "$tel_good"
+  if [[ "$tel_rc" -eq 0 && "$(jq -r '.env.OTEL_EXPORTER_OTLP_ENDPOINT' "$tel_file" 2>/dev/null)" == "$tel_good" ]]; then
+    ok "test passed: an endpoint of the accepted shape is used as written ($tel_good)"
+  else
+    fail "test failed: an endpoint of the accepted shape was refused or changed (rc=$tel_rc: $tel_good)"
+    status=1
+  fi
+done
+
 # T4) A malformed endpoint file fails the apply, and the live file stays as
-#     it was (byte for byte). Each value is one file's content.
+#     it was (byte for byte, compared with cmp: a command substitution would
+#     drop trailing newlines; Codex review, PR #524). Each value is one
+#     file's content.
 tel_seed="$(cat "$off_file")"
 tel_long="#$(printf '%04100d' 0)"
 for tel_bad in \
@@ -1614,9 +1629,18 @@ for tel_bad in \
   'ftp://otlp.example.test' \
   'http://[::1]:4318' \
   'http://otlp example.test:4318' \
+  'http://127.0.0.1:99999' \
+  'http://127.0.0.1:65536' \
+  'http://127.0.0.1:0' \
+  'http://127.0.0.1:04318' \
+  'http://127.0.0.1:' \
+  'http://-otlp.example.test:4318' \
+  'http://otlp-.example.test:4318' \
+  'http://otlp..example.test:4318' \
+  'http://.otlp.example.test' \
   "$tel_long"$'\nhttps://otlp.example.test'; do
   tel_apply bad "$tel_on_src" "$tel_bad" "$tel_seed"
-  if [[ "$tel_rc" -ne 0 ]] && [[ "$(cat "$tel_file")" == "$tel_seed" ]]; then
+  if [[ "$tel_rc" -ne 0 ]] && cmp -s "$tel_root/seed.json" "$tel_file"; then
     ok "test passed: a malformed endpoint file fails the apply and leaves settings.json alone ($(printf '%s' "$tel_bad" | head -c 40 | tr '\n' '|'))"
   else
     fail "test failed: a malformed endpoint file was accepted or settings.json changed (rc=$tel_rc: $(printf '%s' "$tel_bad" | head -c 40 | tr '\n' '|'))"
@@ -1628,7 +1652,7 @@ tel_apply dir "$tel_on_src" '<none>' "$tel_seed"
 mkdir "$tel_local"
 tel_rc=0
 render_personal_into "$tel_on_src" "$tel_root" || tel_rc=$?
-if [[ "$tel_rc" -ne 0 && "$(cat "$tel_file")" == "$tel_seed" ]]; then
+if [[ "$tel_rc" -ne 0 ]] && cmp -s "$tel_root/seed.json" "$tel_file"; then
   ok "test passed: a directory in the endpoint file's place fails the apply and leaves settings.json alone"
 else
   fail "test failed: a directory in the endpoint file's place was accepted (rc=$tel_rc)"

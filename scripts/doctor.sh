@@ -2397,19 +2397,20 @@ section "Claude Code telemetry (report-only)"
 # ~/.config/dotfiles/claude-telemetry.local, read at apply time; without it
 # the env block is not emitted and nothing is sent. Like the other local
 # files (docs/local-overrides.md) only its presence is looked at here: the
-# value is never read or shown. A malformed file stops chezmoi apply, and a
-# changed file shows as drift of settings.json in the managed drift section
-# until it is applied. Whether the backend answers is the otel backend
-# section's job.
+# value is never read or shown. So the lines say what the managed file does
+# after chezmoi apply: until then an env from an earlier apply stays (and
+# keeps sending), which shows as drift of settings.json in the managed drift
+# section (Codex review, PR #524). A malformed file stops chezmoi apply.
+# Whether the backend answers is the otel backend section's job.
 claude_telemetry_file="$HOME/.config/dotfiles/claude-telemetry.local"
 if [[ "$(capability_value "$profile" enableClaudeTelemetry)" == "true" ]]; then
   if module_active_for_profile "$profile" claude-settings; then
     if [[ -f "$claude_telemetry_file" && -r "$claude_telemetry_file" ]]; then
-      ok "enableClaudeTelemetry=true; managed ~/.claude/settings.json sends Claude Code metrics and events over OTLP/HTTP to the endpoint in $claude_telemetry_file (value not shown; prompts, responses, tool output and API bodies stay off, tool details on)"
+      ok "enableClaudeTelemetry=true; endpoint file present: $claude_telemetry_file (value not shown) — after chezmoi apply, the managed ~/.claude/settings.json sends Claude Code metrics and events over OTLP/HTTP to it (prompts, responses, tool output and API bodies stay off, tool details on); a change not yet applied shows in the managed drift section"
     elif [[ -e "$claude_telemetry_file" || -L "$claude_telemetry_file" ]]; then
       warn "enableClaudeTelemetry=true but $claude_telemetry_file is not a readable regular file — chezmoi apply stops on it (a broken link counts as no file: no telemetry); make it a file holding one line, the OTLP/HTTP base endpoint (docs/claude-settings.md)"
     elif absence_confirmed "$claude_telemetry_file"; then
-      warn "enableClaudeTelemetry=true but there is no endpoint file: $claude_telemetry_file — Claude Code sends no telemetry until it holds one line, the OTLP/HTTP base endpoint (docs/claude-settings.md), and chezmoi apply has run"
+      warn "enableClaudeTelemetry=true but there is no endpoint file: $claude_telemetry_file — after chezmoi apply the managed ~/.claude/settings.json carries no telemetry env and Claude Code sends nothing, while an env from an earlier apply keeps sending until then (it shows in the managed drift section); to send, write one line, the OTLP/HTTP base endpoint (docs/claude-settings.md), and apply"
     else
       warn "enableClaudeTelemetry=true; whether $claude_telemetry_file exists is not checked (a directory on its path cannot be entered)"
     fi

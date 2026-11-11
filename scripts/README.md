@@ -1080,8 +1080,9 @@ here-document を一時 file に置く)ことも見る。決まった path へ�
 だけ。managed の JSON も stdin で渡すので引数に出ない。#523)。telemetry の env(#523): `enableClaudeTelemetry` を明示して
 on / off にした source で、送り先の file が無い render に `env` が無いこと、file があると `env` がちょうど 6 つの変数で送り先が
 file の値(前後の空白を落とす)と同じこと、ほかの key は変わらないこと、off なら file を無視すること、形の正しくない file
-(空・comment だけ・値が 2 つ・認証情報・query・fragment・signal の path・別の scheme・IPv6 の literal・空白を含む・4096 byte
-を超える・directory)では apply が失敗し live の file が byte で変わらないこと、file を消すと前の apply の `env` が消えること、
+(空・comment だけ・値が 2 つ・認証情報・query・fragment・signal の path・別の scheme・IPv6 の literal・空白を含む・範囲外や
+先頭が 0 の port・崩れた host の label・4096 byte を超える・directory)では apply が失敗し live の file が byte で変わらないこと、
+受け付ける形の端(port 65535、label の中の hyphen、IPv4、port なし、末尾の slash)はそのまま使うこと、file を消すと前の apply の `env` が消えること、
 live の `env` に手で足した変数が消え 2 回目の apply と diff が何も変えないこと、送り先が jq の引数に出ないこと、`env` が
 capability で出し入れする key で script の削除の一覧にあること。固定の home(`/dotfiles-render-test-home`)で `enableBridgeOneHook` を off にした personal の render は、
 `scripts/testdata/claude-settings.personal.json` と正規化せずに byte で同じで、on にした render は、その file に Bridge One の entry の

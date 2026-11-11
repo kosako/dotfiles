@@ -197,9 +197,11 @@
        throwaway destination never picks up this machine's file. No file:
        no "env" block, nothing is sent. A file that is there but is not a
        regular file of at most 4096 bytes holding exactly one http(s) URL
-       without credentials, query or fragment, and not a per-signal
-       /v1/<signal> path, fails the render (the apply stops) instead of
-       sending somewhere unintended. The value is never printed. Secret
+       (a DNS name or IPv4 host whose labels start and end with a letter or
+       digit, a port of 1-65535) without credentials, query or fragment,
+       and not a per-signal /v1/<signal> path, fails the render (the apply
+       stops) instead of sending somewhere unintended (Codex review, PR
+       #524: the port range). The value is never printed. Secret
        headers do not belong in settings.json; otelHeadersHelper is the
        route when the destination needs them. */ -}}
 {{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Edit(//**/.agent-context.local.md)" -}}
@@ -220,7 +222,7 @@
 {{-   $telemetryFile := joinPath .chezmoi.destDir ".config/dotfiles/claude-telemetry.local" -}}
 {{-   $telemetryStat := stat $telemetryFile -}}
 {{-   if $telemetryStat -}}
-{{-     $telemetryHelp := printf "%s must be a regular file of at most 4096 bytes holding one line, the OTLP/HTTP base endpoint (http(s)://host[:port][/path], no credentials, query, fragment or /v1/<signal> path; docs/claude-settings.md)" $telemetryFile -}}
+{{-     $telemetryHelp := printf "%s must be a regular file of at most 4096 bytes holding one line, the OTLP/HTTP base endpoint (http(s)://host[:port][/path]: a DNS name or IPv4 host, a port of 1-65535, no credentials, query, fragment or /v1/<signal> path; docs/claude-settings.md)" $telemetryFile -}}
 {{-     if or (ne $telemetryStat.type "file") (gt $telemetryStat.size 4096) -}}
 {{-       fail $telemetryHelp -}}
 {{-     end -}}
@@ -235,7 +237,12 @@
 {{-       fail $telemetryHelp -}}
 {{-     end -}}
 {{-     $telemetryEndpoint = index $telemetryValues 0 -}}
-{{-     if or (not (regexMatch "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$" $telemetryEndpoint)) (regexMatch "/v1/(logs|metrics|traces)/?$" $telemetryEndpoint) -}}
+{{-     $telemetryShape := `^https?://[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*(:(?P<port>[1-9][0-9]{0,4}))?(/[A-Za-z0-9._~/-]*)?$` -}}
+{{-     if or (not (regexMatch $telemetryShape $telemetryEndpoint)) (regexMatch `/v1/(logs|metrics|traces)/?$` $telemetryEndpoint) -}}
+{{-       fail $telemetryHelp -}}
+{{-     end -}}
+{{-     $telemetryPort := regexReplaceAll $telemetryShape $telemetryEndpoint "${port}" -}}
+{{-     if and $telemetryPort (gt (atoi $telemetryPort) 65535) -}}
 {{-       fail $telemetryHelp -}}
 {{-     end -}}
 {{-   end -}}

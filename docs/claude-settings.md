@@ -214,7 +214,8 @@ client / agent で false 必須。[policy-model](policy-model.md))。
 - 1 行に OTLP/HTTP の base endpoint を 1 つ書く。`#` で始まる行と空行は飛ばし、前後の空白は落とす。
 - 手元の otel backend へ送るなら `http://127.0.0.1:4318`。`localhost` は使わない(この Mac の `localhost` は `::1` を先に
   引き、Collector は `127.0.0.1` でしか待ち受けないため)。
-- 形は `http(s)://host[:port][/path]`。認証情報(`user:pass@`)、query、fragment は書けない。signal ごとの path
+- 形は `http(s)://host[:port][/path]`。host は DNS の名前か IPv4 の形で、label は英数字で始まり英数字で終わる。port は
+  1 から 65535(先頭に 0 を付けない)。認証情報(`user:pass@`)、query、fragment は書けない。signal ごとの path
   (`/v1/logs` など)も書けない(Claude Code が base endpoint に足すため)。IPv6 の literal も受け付けない。
 - 4096 byte 以下の通常の file にする(symlink は、先が通常の file ならよい)。
 - 値を変えたら `chezmoi apply` する。apply までは、managed drift の section に `settings.json` の差分として出る。
@@ -255,7 +256,8 @@ template は出さない。`env` は object 全体を managed にするので、
 - 送り先に認証の header が要るようになったら、秘密は `settings.json` に書かず、Claude Code の `otelHeadersHelper`
   (header を出す script)で渡す。その配線は別の Issue で行う。
 - 止めるときは file を消して `chezmoi apply` する。profile ごと止めるなら capability を false にする。
-- doctor は file の有無だけを見る(値は読まない)。
+- doctor は file の有無だけを見る(値は読まない)。表示は apply の後の状態で、apply までは前の apply の `env` が残って
+  送り続ける(managed drift の section に出る)。
 
 ## 後日 / 対象外
 

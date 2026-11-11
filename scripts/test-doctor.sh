@@ -2423,8 +2423,8 @@ flip_profile_capability "$ct_root" personal enableClaudeTelemetry true
 ct_home="$fixture_home/ct"
 ct_file="$ct_home/.config/dotfiles/claude-telemetry.local"
 mkdir -p "$ct_home"
-ct_ok="[ok] enableClaudeTelemetry=true; managed ~/.claude/settings.json sends Claude Code metrics and events over OTLP/HTTP to the endpoint in $ct_file (value not shown; prompts, responses, tool output and API bodies stay off, tool details on)"
-ct_absent="[warn] enableClaudeTelemetry=true but there is no endpoint file: $ct_file — Claude Code sends no telemetry until it holds one line, the OTLP/HTTP base endpoint (docs/claude-settings.md), and chezmoi apply has run"
+ct_ok="[ok] enableClaudeTelemetry=true; endpoint file present: $ct_file (value not shown) — after chezmoi apply, the managed ~/.claude/settings.json sends Claude Code metrics and events over OTLP/HTTP to it (prompts, responses, tool output and API bodies stay off, tool details on); a change not yet applied shows in the managed drift section"
+ct_absent="[warn] enableClaudeTelemetry=true but there is no endpoint file: $ct_file — after chezmoi apply the managed ~/.claude/settings.json carries no telemetry env and Claude Code sends nothing, while an env from an earlier apply keeps sending until then (it shows in the managed drift section); to send, write one line, the OTLP/HTTP base endpoint (docs/claude-settings.md), and apply"
 ct_not_file="[warn] enableClaudeTelemetry=true but $ct_file is not a readable regular file — chezmoi apply stops on it (a broken link counts as no file: no telemetry); make it a file holding one line, the OTLP/HTTP base endpoint (docs/claude-settings.md)"
 ct_unchecked="[warn] enableClaudeTelemetry=true; whether $ct_file exists is not checked (a directory on its path cannot be entered)"
 # ct_case LABEL ROOT WANT [NOT...] — doctor (personal) with HOME=$ct_home
