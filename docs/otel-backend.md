@@ -32,6 +32,7 @@ managed file の定義:
 | `ports` | `127.0.0.1:3000`(Grafana)・`127.0.0.1:4317`(OTLP/gRPC)・`127.0.0.1:4318`(OTLP/HTTP) | 下の「port を 127.0.0.1 に限る理由」 |
 | `volumes` | named volume `data` を `/data` に | host の directory を container に見せない |
 | `restart` | `unless-stopped` | docker の daemon と一緒に戻る(常時起動の 2 段目) |
+| `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative` | 下の「metric の temporality」 |
 
 ### port を 127.0.0.1 に限る理由
 
@@ -132,9 +133,31 @@ metrics_exporter = { otlp-http = { endpoint = "http://127.0.0.1:4318/v1/metrics"
 log_user_prompt = false
 ```
 
-実測(codex-cli 0.165.0): 同じ値を `-c` で渡した `codex exec` の log と metric が届いた(service の名前は
-`codex_exec`。trace は届いていない)。`headers` は書かない(agent-tools#652 は、`headers` のある `[otel]` を
-skill の起動へ引き継がずに止める)。
+実測(codex-cli 0.165.0、2026-11-11): この `[otel]` を置いた `config.toml` で `codex exec` を動かすと、log(Loki)・
+trace(Tempo)・metric(Prometheus)の 3 つが届く。service の名前は `codex_exec`。`log_user_prompt = false` で、prompt の
+本文は伏せられる。`headers` は書かない(agent-tools#652 は、`headers` のある `[otel]` を skill の起動へ引き継がずに
+止める)。
+
+確かめ方:
+
+- trace は、Tempo の検索に TraceQL の `{}` を渡す(TraceQL なしの検索では出ない)。
+- event の名前(`codex.sse_event` など)は Loki の stream の label ではなく structured metadata なので、LogQL では
+  `{service_name="codex_exec"} | event_name="codex.sse_event"` のように絞る。
+- 届いていないときは、Collector の受付と送信の数を Prometheus で見る(`otelcol_receiver_accepted_*_total` と
+  `otelcol_exporter_send_failed_*_total`)。
+
+### metric の temporality
+
+Codex は metric をすべて delta の temporality で送る(61 種類すべてで確認)。Prometheus の OTLP の受け口は、既定では
+delta を受け付けず、`invalid temporality and type combination` で拒否する(#517 で確認。log と trace は届くのに、metric
+だけが Collector の送信で失敗する)。image の Collector には delta を変換する processor が無いので、Prometheus の
+`--enable-feature=otlp-deltatocumulative` で取り込みのときに cumulative に直す。`test-otel-backend.sh` がこの指定を
+pin する。
+
+- 変換の状態は Prometheus の memory にあり、container を作り直すと counter は 0 から数え直す(`rate()` /
+  `increase()` は reset として扱う)。
+- Codex の resource には process を区別する attribute が無いので、同じ service の複数の process の値は 1 つの系列に
+  足し合わされる。
 
 ## image の更新
 
@@ -194,6 +217,6 @@ loopback だけか、常駐が登録されているか。ok の行にもそう�
 
 `scripts/test-otel-backend.sh`: personal で apply され work ではされない(work が持つ自前の file は byte 単位で
 不変)、1 行目の managed-by 見出し、YAML として parse でき定義が pin どおり、image が版と digest の両方で固定
-されている、すべての port が `127.0.0.1` だけ、mount が宣言した named volume だけで宣言の中身が空、権限を広げる key
+されている、すべての port が `127.0.0.1` だけ、mount が宣言した named volume だけで宣言の中身が空、Prometheus が delta の metric を変換する指定、権限を広げる key
 (`privileged`・`network_mode` など)が無い、restart policy、mode が file 0644 / directory 0755。container runtime
 とは通信しない。doctor の分岐は `test-doctor.sh`。

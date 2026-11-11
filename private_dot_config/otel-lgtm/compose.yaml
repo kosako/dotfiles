@@ -7,13 +7,17 @@
 # docker daemon. Every port is published on 127.0.0.1 only: Grafana answers
 # its API without a login, and Colima forwards a port published without an
 # address to every interface of the host. The image is pinned by version
-# AND digest; change both in one PR. See docs/otel-backend.md.
+# AND digest; change both in one PR. Prometheus converts delta metrics to
+# cumulative on OTLP ingestion: Codex sends every metric as delta, which
+# Prometheus otherwise rejects (#517). See docs/otel-backend.md.
 name: otel-lgtm
 services:
   lgtm:
     image: grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe
     container_name: otel-lgtm
     restart: unless-stopped
+    environment:
+      PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4317:4317"
