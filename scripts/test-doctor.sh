@@ -1277,7 +1277,7 @@ ob_expect "healthy -> ok for container, image, ports and VM mounts" -- \
   "~[info] - otel backend archive: 1 file(s), " \
   ! "otel backend down" "otel backend exposed" "otel backend runtime not checked" \
     "otel backend image" "otel backend ports not checked" "otel backend VM mounts not checked" \
-    "publishes no port" "does not need" "does not mount" "writable —" "read-only —" \
+    "publishes no port" "host shares are not the two" \
     "archive directory missing" "not private"
 if [[ "$(wc -l < "$ob_state/calls" | tr -d ' ')" == "3" ]] \
   && grep -q '^docker ps ' "$ob_state/calls" \
@@ -1364,12 +1364,12 @@ ob_healthy
 printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' > "$ob_state/mount-out"
 ob_rc=0
 ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
-ob_mount_no="$(ob_action_no "$ob_out" "otel backend: the Colima VM does not mount")"
+ob_mount_no="$(ob_action_no "$ob_out" "otel backend: the Colima VM's host shares are not the two")"
 ob_up_no="$(ob_action_no "$ob_out" "otel backend down: no container named otel-lgtm")"
 if [[ "$ob_rc" -eq 0 && -n "$ob_mount_no" && -n "$ob_up_no" && "$ob_mount_no" -lt "$ob_up_no" ]] \
   && expect_report "$ob_out" \
     "[warn] otel backend down: no container named otel-lgtm — nothing receives telemetry on 127.0.0.1" \
-    "[warn] otel backend: the Colima VM does not mount $ob_config_dir and $ob_archive_dir — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"; then
+    "[warn] otel backend: the Colima VM's host shares are not the two the definition needs: $ob_config_dir is not mounted; $ob_archive_dir is not mounted — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"; then
   ok "test passed: otel backend no container and no mounts -> both actions, the mount one first in the next-actions list"
 else
   fail "test failed: otel backend no container and no mounts -> expected exit 0 (got $ob_rc), both actions, the mount action (#${ob_mount_no:-none}) before the compose one (#${ob_up_no:-none})"
@@ -1454,50 +1454,55 @@ for ob_bad_ports in 'not json' \
     ! "$ob_ports_ok" "otel backend exposed" "publishes no port"
 done
 # OB-10) the VM's host shares, one departure at a time from the two the
-#        binds need: another share (for each mount type Colima can use) ->
-#        warn naming it; the config directory writable or the archive
-#        read-only -> warn; one or both of the two missing -> action whose
-#        steps stop Colima, create the archive directory and start Colima
-#        with both mounts. None of them is the ok line.
+#        binds need: another share (for each mount type Colima can use),
+#        the config directory writable, the archive read-only, the archive
+#        or both missing, and two departures at once. Each is ONE action
+#        naming every departure, with the steps that stop Colima, create
+#        the archive directory, chmod it 700 and start Colima with both
+#        mounts, in that order (a warn alone would leave the fix out of
+#        the next-actions list; Codex review, PR #521). None of them is the
+#        ok line.
+ob_mount_reason="[warn] otel backend: the Colima VM's host shares are not the two the definition needs: "
+ob_missing_tail=" — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"
+# ob_mount_case LABEL EXPECTED_DEPARTURES — run doctor on the mount table
+# already in mount-out and check the one action and its steps.
+ob_mount_case() {
+  local label="$1" want="$2" rc=0 out
+  out="$(ob_doctor "$ob_path" personal 2>&1)" || rc=$?
+  if [[ "$rc" -eq 0 ]] \
+    && expect_report "$out" "$ob_mount_reason$want" ! "$ob_mounts_ok" \
+    && [[ "$(grep -c -F "host shares are not the two" <<< "$out")" == "2" ]] \
+    && ob_steps_in_order "$out" "        \$ colima stop" "${ob_colima_steps[@]}"; then
+    ok "test passed: otel backend $label -> one action whose steps restart Colima with both mounts"
+  else
+    fail "test failed: otel backend $label -> expected exit 0 (got $rc), one action naming the departures and the colima stop / mkdir / chmod 700 / colima start steps in that order"
+    status=1
+  fi
+}
 for ob_fstype in virtiofs 9p fuse.sshfs; do
   ob_healthy
   printf 'mount0 on /Users/someone type %s (rw,relatime)\n' "$ob_fstype" >> "$ob_state/mount-out"
-  ob_expect "VM shares another host directory ($ob_fstype) -> warn" -- \
-    "[warn] otel backend: the Colima VM mounts host directories it does not need (/Users/someone) — a container can reach them through the docker socket; setting the VM's mounts is in docs/otel-backend.md" \
-    ! "$ob_mounts_ok"
+  ob_mount_case "VM shares another host directory ($ob_fstype)" \
+    "it also mounts /Users/someone, which a container can reach through the docker socket"
 done
 ob_healthy
 printf '%s\n' "${ob_share_config/(ro,/(rw,}" "$ob_share_archive" > "$ob_state/mount-out"
-ob_expect "config directory mounted writable -> warn" -- \
-  "[warn] otel backend: the Colima VM mounts $ob_config_dir writable — a container could rewrite the Collector config and the dashboards; mount it read-only (docs/otel-backend.md)" \
-  ! "$ob_mounts_ok" "does not mount"
+ob_mount_case "config directory mounted writable" \
+  "$ob_config_dir is writable, so a container could rewrite the Collector config and the dashboards"
 ob_healthy
 printf '%s\n' "$ob_share_config" "${ob_share_archive/(rw,/(ro,}" > "$ob_state/mount-out"
-ob_expect "archive mounted read-only -> warn" -- \
-  "[warn] otel backend: the Colima VM mounts $ob_archive_dir read-only — the Collector cannot write the raw telemetry; mount it writable (docs/otel-backend.md)" \
-  ! "$ob_mounts_ok" "does not mount"
-for ob_missing in archive both; do
-  ob_healthy
-  if [[ "$ob_missing" == archive ]]; then
-    printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' "$ob_share_config" > "$ob_state/mount-out"
-    ob_what="$ob_archive_dir"
-  else
-    printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' > "$ob_state/mount-out"
-    ob_what="$ob_config_dir and $ob_archive_dir"
-  fi
-  ob_rc=0
-  ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
-  if [[ "$ob_rc" -eq 0 ]] \
-    && expect_report "$ob_out" \
-      "[warn] otel backend: the Colima VM does not mount $ob_what — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host" \
-      ! "$ob_mounts_ok" \
-    && ob_steps_in_order "$ob_out" "        \$ colima stop" "${ob_colima_steps[@]}"; then
-    ok "test passed: otel backend VM without the $ob_missing mount(s) -> action whose steps restart Colima with both mounts"
-  else
-    fail "test failed: otel backend VM without the $ob_missing mount(s) -> expected exit 0 (got $ob_rc), the action and the colima stop / mkdir / chmod 700 / colima start steps in that order"
-    status=1
-  fi
-done
+ob_mount_case "archive mounted read-only" \
+  "$ob_archive_dir is read-only, so the Collector cannot write the raw telemetry"
+ob_healthy
+printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' "$ob_share_config" > "$ob_state/mount-out"
+ob_mount_case "VM without the archive mount" "$ob_archive_dir is not mounted$ob_missing_tail"
+ob_healthy
+printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' > "$ob_state/mount-out"
+ob_mount_case "VM without both mounts" "$ob_config_dir is not mounted; $ob_archive_dir is not mounted$ob_missing_tail"
+ob_healthy
+printf '%s\n' "${ob_share_config/(ro,/(rw,}" 'mount0 on /Users/someone type virtiofs (rw,relatime)' > "$ob_state/mount-out"
+ob_mount_case "VM with another share, the config writable and no archive" \
+  "it also mounts /Users/someone, which a container can reach through the docker socket; $ob_config_dir is writable, so a container could rewrite the Collector config and the dashboards; $ob_archive_dir is not mounted$ob_missing_tail"
 # OB-10b) a host share line that cannot be read (no closing parenthesis,
 #         options not starting with ro / rw) next to the two good ones ->
 #         the mounts are not checked, never ok: skipping the line could
@@ -1507,7 +1512,7 @@ for ob_bad_share in "lima-3 on /Users/someone type virtiofs (rw,relatime" "lima-
   printf '%s\n' "$ob_bad_share" >> "$ob_state/mount-out"
   ob_expect "unreadable share line ($ob_bad_share) -> mounts not checked" -- \
     "[warn] otel backend VM mounts not checked: 1 host share line(s) of the VM's mount table could not be read" \
-    ! "$ob_mounts_ok" "does not need" "does not mount"
+    ! "$ob_mounts_ok" "host shares are not the two"
 done
 # OB-11) colima ssh fails -> not checked, never the mounts ok line.
 ob_healthy

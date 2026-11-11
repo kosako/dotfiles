@@ -3005,8 +3005,15 @@ report_otel_backend_runtime() {
 # those types but does not read as that shape, or whose options do not
 # start with ro / rw, makes the whole table "not checked": skipping it
 # could hide a third share behind the ok line (Codex review, PR #521).
+# Every departure (another share, the config writable, the archive
+# read-only, one of the two missing) is ONE action with the same steps:
+# `colima start --mount` replaces the VM's mounts with exactly the ones
+# given (measured), so stopping Colima and starting it with the two mounts
+# fixes each of them, and an action puts the fix in the next-actions list
+# (a warn alone would not; Codex review, PR #521).
 report_otel_backend_mounts() {
-  local line dir opts mode config_mode="" archive_mode="" others="" missing="" unread=0 share_re share_hint_re
+  local line dir opts mode config_mode="" archive_mode="" others="" unread=0 share_re share_hint_re
+  local problems="" missing=0
   share_re='^.* on (.*) type (virtiofs|9p|fuse\.sshfs) \(([^)]*)\)$'
   share_hint_re=' type (virtiofs|9p|fuse\.sshfs)( |$)'
   while IFS= read -r line; do
@@ -3033,20 +3040,29 @@ report_otel_backend_mounts() {
     return 0
   fi
   if [[ -n "$others" ]]; then
-    warn "otel backend: the Colima VM mounts host directories it does not need ($others) — a container can reach them through the docker socket; setting the VM's mounts is in docs/otel-backend.md"
+    problems+="${problems:+; }it also mounts $others, which a container can reach through the docker socket"
   fi
   if [[ "$config_mode" == "rw" ]]; then
-    warn "otel backend: the Colima VM mounts $otel_config_dir writable — a container could rewrite the Collector config and the dashboards; mount it read-only (docs/otel-backend.md)"
+    problems+="${problems:+; }$otel_config_dir is writable, so a container could rewrite the Collector config and the dashboards"
   fi
   if [[ "$archive_mode" == "ro" ]]; then
-    warn "otel backend: the Colima VM mounts $otel_archive_dir read-only — the Collector cannot write the raw telemetry; mount it writable (docs/otel-backend.md)"
+    problems+="${problems:+; }$otel_archive_dir is read-only, so the Collector cannot write the raw telemetry"
   fi
-  [[ -n "$config_mode" ]] || missing="$otel_config_dir"
-  [[ -n "$archive_mode" ]] || missing+="${missing:+ and }$otel_archive_dir"
-  if [[ -n "$missing" ]]; then
-    action "otel backend: the Colima VM does not mount $missing — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host" \
+  if [[ -z "$config_mode" ]]; then
+    problems+="${problems:+; }$otel_config_dir is not mounted"
+    missing=1
+  fi
+  if [[ -z "$archive_mode" ]]; then
+    problems+="${problems:+; }$otel_archive_dir is not mounted"
+    missing=1
+  fi
+  if [[ -n "$problems" ]]; then
+    if [[ "$missing" -eq 1 ]]; then
+      problems+=" — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"
+    fi
+    action "otel backend: the Colima VM's host shares are not the two the definition needs: $problems" \
       "\$ colima stop" "${otel_colima_steps[@]}"
-  elif [[ -z "$others" && "$config_mode" == "ro" && "$archive_mode" == "rw" ]]; then
+  else
     ok "otel backend: the Colima VM mounts only $otel_config_dir (read-only) and $otel_archive_dir (writable)"
   fi
 }

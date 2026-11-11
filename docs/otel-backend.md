@@ -337,7 +337,7 @@ compose file があるときは、実行時の状態と保管の directory を**
 | container があり、running か | 無い・止まっているなら action(`docker-compose -f <file> up -d`)。image と port は見ないが、VM の mount と常駐の登録は続けて見る |
 | container の image が、定義の固定と同じか | 違えば action(managed file が進んだ後に作り直していない、など) |
 | 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn。port の JSON は、strict な 1 つの object と読めたときだけ使う(下の注) |
-| VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro` なら warn。2 つのどちらかが無ければ action(`colima stop` の後、保管の directory を作って `chmod 700` し、2 つの mount で起動し直す)。share の行で形が読めないものがあれば「未確認」 |
+| VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro`、2 つのどちらかが無い、のどれかなら、それを全部並べた 1 つの action(`colima stop` の後、保管の directory を作って `chmod 700` し、2 つの mount で起動し直す。`colima start --mount` は VM の mount を指定どおりに置き換えるので、どれもこの手順で直る)。share の行で形が読めないものがあれば「未確認」 |
 | Colima が login の常駐に登録されているか | どちらでも中立の item(常時起動にするかは選べる) |
 | 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない。`du` が失敗したら大きさは「未確認」) |
 
