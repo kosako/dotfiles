@@ -233,7 +233,10 @@ cumulative に直す(使い捨ての container で、捕まえた Codex の payl
 
 ## dashboard
 
-Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-codex`)を provisioning する。
+Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-codex`)と「AI agents (Claude Code)」
+(uid `ai-agents-claude-code`。#525)を provisioning する。
+
+### Codex
 
 | 段 | panel | 出どころ |
 | --- | --- | --- |
@@ -243,10 +246,11 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 | tool | tool の呼び出し(tool と成否ごと)、tool の所要時間(p95) | Loki |
 | 最近の動き | 会話の開始、失敗した request、trace | Loki、Tempo |
 
-- 上の `service` の変数で service を絞る(既定は `codex` で始まるもの全部)。Claude Code などを足すときは、変数の
-  条件と panel を足す。
+- 上の `service` の変数で service を絞る(既定は `codex` で始まるもの全部)。
 - 正本は dotfiles の JSON。Grafana の UI での変更は保存できない(provider の `allowUiUpdates: false`)。変えるときは
-  `private_dot_config/otel-lgtm/grafana/dashboards/agents.json` を直して apply する。Grafana は 30 秒ごとに読み直す。
+  `private_dot_config/otel-lgtm/grafana/dashboards/` の JSON を直して apply する。Grafana は 30 秒ごとに読み直す。
+  provider は directory の file をすべて読むので、dashboard を足すときは module の paths と `test-otel-backend.sh` の
+  一覧にも足す。
 - datasource は image が provisioning する `loki`・`prometheus`・`tempo` を uid で指す。
 - 数は log から数える。`codex exec` は短命の process で、metric は終わるときに 1 回だけ delta で届く。Prometheus の
   `increase()` は系列の最初の値を増分として数えず、delta の変換の状態は Prometheus を起動し直すと 1 から数え直すので、
@@ -256,6 +260,26 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   approval_policy・sandbox_policy)、`codex.api_request`(endpoint・http_response_status_code・success・duration_ms)、
   `codex.sse_event` の `event_kind="response.completed"`(input / output / cached / reasoning_token_count)、
   `codex.turn_ttft`(duration_ms)、`codex.tool_result`(tool_name・success・duration_ms)。
+
+### Claude Code
+
+| 段 | panel | 出どころ |
+| --- | --- | --- |
+| 概要 | prompt のあった session・prompt・API request・API error・cost・output token(表示している期間の合計) | Loki |
+| token と cost | token(model と種類ごと)、cost(model ごと) | Loki |
+| 応答の速さ | TTFT(p50 / p95)、API request の所要時間(p50 / p95) | Loki |
+| tool | tool の呼び出し(tool と成否ごと)、tool の許可(判定と出どころごと)、tool の所要時間(p95) | Loki |
+| 最近の動き | tool の呼び出し(tool の入力を含む)、API error | Loki |
+
+- `service` の変数は `claude-code` で始まるもの全部(Desktop の Code tab の session は `claude-code-desktop`)。
+- 数は Codex と同じく log から数える。cost は Claude Code が見積もった API の料金で、plan で使うときは請求額ではない。
+- session の数は、`user_prompt` の `session_id` の種類の数(prompt を 1 つも送らない session は数えない)。
+- trace は送っていない(beta。[claude-settings](claude-settings.md) の「telemetry」)ので、trace の panel は無い。
+- Claude Code の event と attribute(LogQL で使うもの。2.1.322 で実測。`api_error` はまだ届いていないので Claude Code の docs による): `user_prompt`(session_id・prompt_length)、
+  `api_request`(model・input / output / cache_read / cache_creation_tokens・cost_usd・duration_ms・ttft_ms)、
+  `api_error`(model・status_code・attempt・error)、`tool_result`(tool_name・success・duration_ms・tool_input)、
+  `tool_decision`(tool_name・decision・source)。event の名前は structured metadata の `event_name` で、`claude_code.`
+  を付けない。
 
 ## 保存期間
 

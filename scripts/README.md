@@ -1176,8 +1176,8 @@ test は umask 022 に固定して確かめる。#332 F38)、隣に置いた `se
 
 ## test-otel-backend.sh
 
-otel-backend module(#514 / #517)を検証する。personal で `~/.config/otel-lgtm/` の 4 つの file(compose file・
-`otelcol/archive.yaml`・`grafana/provisioning/agents.yaml`・`grafana/dashboards/agents.json`)が apply され work では
+otel-backend module(#514 / #517 / #525)を検証する。personal で `~/.config/otel-lgtm/` の 5 つの file(compose file・
+`otelcol/archive.yaml`・`grafana/provisioning/agents.yaml`・`grafana/dashboards/agents.json`・`grafana/dashboards/claude-code.json`)が apply され work では
 されないこと(work が持つ自前の compose file は byte 単位で不変)、managed-by の header(dashboard は strict な JSON
 なので description)、compose file が YAML として parse でき定義が pin どおりであること(key を sort して比べる)。
 pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@sha256:<64 hex>`、すべての port が `127.0.0.1:` で
@@ -1194,9 +1194,10 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 足すだけで(image の pipeline を上書きしない)、`otlp` から processor なしで `file` exporter に書き、file は `/archive`
 の下の別々の JSON、圧縮なし、`max_megabytes` が 1 以上 1024 以下の整数、`max_days` が 365、`max_backups` が 0(実測で、0 は回した file を全部残す)。receivers と exporters は
 配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
-directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard は strict な JSON
-の object で、uid が `ai-agents-codex`、どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object
-(名前の文字列は不合格)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
+directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard はどれも strict な JSON
+の object で、uid が `ai-agents-codex`(Codex)と `ai-agents-claude-code`(Claude Code、#525)、どの datasource の参照も
+`loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列は不合格)。bind する dashboard の directory には、この 2 つの
+file だけがある。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
 directory 0755(umask 022 に固定して確かめる。#332 F38)。chezmoi・yq・jq が必要(render job)。実 home には触れず、
 container runtime とは通信しない。
 

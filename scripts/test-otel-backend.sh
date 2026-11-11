@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Gating and content tests for the otel-backend module (#514, #517): the
-# managed files under ~/.config/otel-lgtm that define the local
+# Gating and content tests for the otel-backend module (#514, #517, #525):
+# the managed files under ~/.config/otel-lgtm that define the local
 # OpenTelemetry backend (grafana/otel-lgtm): the compose file, the extra
 # Collector config that archives the raw telemetry, and the Grafana
-# dashboard provider and dashboard. They must (1) be applied for personal
+# dashboard provider and dashboards (Codex, Claude Code). They must (1) be applied for personal
 # and not for work, (2) carry the managed-by header (the doctor orphan scan
 # keys on it; the dashboard, strict JSON, carries it in its description),
 # (3) parse with exactly the pinned compose definition, (4) keep the
@@ -19,8 +19,9 @@ set -euo pipefail
 # none of the keys that widen what the container can touch — (5) keep the
 # archive config to added */archive pipelines writing replayable files
 # kept for one year, (6) keep the dashboard provider pointed at the bound
-# dashboards and closed to UI edits, (7) keep the dashboard on the bundled
-# datasources, and (8) land 0644 in 0755 directories. Renders into
+# dashboards and closed to UI edits, (7) keep each dashboard on the bundled
+# datasources under its own uid, with no other dashboard in the bound
+# directory, and (8) land 0644 in 0755 directories. Renders into
 # throwaway destinations; never touches the real home and never talks to a
 # container runtime.
 
@@ -57,6 +58,7 @@ managed_rel=".config/otel-lgtm/compose.yaml"
 archive_rel=".config/otel-lgtm/otelcol/archive.yaml"
 provider_rel=".config/otel-lgtm/grafana/provisioning/agents.yaml"
 dashboard_rel=".config/otel-lgtm/grafana/dashboards/agents.json"
+claude_dashboard_rel=".config/otel-lgtm/grafana/dashboards/claude-code.json"
 expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem","OTELCOL_EXTRA_ARGS":"--config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
@@ -72,8 +74,7 @@ fi
 managed="$personal_root/home/$managed_rel"
 archive_cfg="$personal_root/home/$archive_rel"
 provider_cfg="$personal_root/home/$provider_rel"
-dashboard_json="$personal_root/home/$dashboard_rel"
-for rel in "$managed_rel" "$archive_rel" "$provider_rel" "$dashboard_rel"; do
+for rel in "$managed_rel" "$archive_rel" "$provider_rel" "$dashboard_rel" "$claude_dashboard_rel"; do
   if [[ -f "$personal_root/home/$rel" ]]; then
     ok "test passed: personal applies $rel"
   else
@@ -112,12 +113,14 @@ for f in "$managed" "$archive_cfg" "$provider_cfg"; do
     status=1
   fi
 done
-if [[ "$(yq -p json -r '.description // ""' "$dashboard_json" 2>/dev/null)" == "Managed by chezmoi"* ]]; then
-  ok "test passed: the dashboard description carries the managed-by header"
-else
-  fail "test failed: the dashboard description must start with the managed-by header (doctor orphan scan)"
-  status=1
-fi
+for rel in "$dashboard_rel" "$claude_dashboard_rel"; do
+  if [[ "$(yq -p json -r '.description // ""' "$personal_root/home/$rel" 2>/dev/null)" == "Managed by chezmoi"* ]]; then
+    ok "test passed: the description of $rel carries the managed-by header"
+  else
+    fail "test failed: the description of $rel must start with the managed-by header (doctor orphan scan)"
+    status=1
+  fi
+done
 
 # 3) Parses as YAML and is exactly the pinned definition (keys sorted, so
 #    only a value or key change trips it). An image update changes the
@@ -428,25 +431,39 @@ else
   status=1
 fi
 
-# 7) The dashboard is one JSON object (jq, as strict_json_object: yq's JSON
+# 7) Each dashboard is one JSON object (jq, as strict_json_object: yq's JSON
 #    reader accepts a trailing comma), keeps its uid (links and bookmarks
-#    use it), and every datasource reference anywhere in it (panels,
-#    queries, variables) is an object naming one of the bundled datasources
-#    by its provisioned uid: a bare string (a datasource name) is refused,
-#    not skipped (Codex review, PR #519). Every non-row panel names one.
-if strict_json_object "$dashboard_json" \
-  && [[ "$(jq -r '.uid' "$dashboard_json")" == "ai-agents-codex" ]] \
-  && [[ "$(jq -r '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then (.uid // "<none>") else "<\(type)>" end] | map(select(. != "loki" and . != "prometheus" and . != "tempo")) | length' "$dashboard_json")" == "0" ]] \
-  && [[ "$(jq -r '[.panels[] | select(.type != "row") | .datasource.uid] | map(select(. == null)) | length' "$dashboard_json")" == "0" ]]; then
-  ok "test passed: the dashboard is a strict JSON object with its uid, on the loki / prometheus / tempo datasources only"
+#    use it; the two differ, as Grafana needs), and every datasource
+#    reference anywhere in it (panels, queries, variables) is an object
+#    naming one of the bundled datasources by its provisioned uid: a bare
+#    string (a datasource name) is refused, not skipped (Codex review, PR
+#    #519). Every non-row panel names one.
+for dash_case in "$dashboard_rel ai-agents-codex" "$claude_dashboard_rel ai-agents-claude-code"; do
+  dash_file="$personal_root/home/${dash_case%% *}"
+  dash_uid="${dash_case##* }"
+  if strict_json_object "$dash_file" \
+    && [[ "$(jq -r '.uid' "$dash_file")" == "$dash_uid" ]] \
+    && [[ "$(jq -r '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then (.uid // "<none>") else "<\(type)>" end] | map(select(. != "loki" and . != "prometheus" and . != "tempo")) | length' "$dash_file")" == "0" ]] \
+    && [[ "$(jq -r '[.panels[] | select(.type != "row") | .datasource.uid] | map(select(. == null)) | length' "$dash_file")" == "0" ]]; then
+    ok "test passed: ${dash_case%% *} is a strict JSON object with uid $dash_uid, on the loki / prometheus / tempo datasources only"
+  else
+    fail "test failed: ${dash_case%% *} must be one strict JSON object with uid $dash_uid whose every datasource is an object with uid loki, prometheus or tempo"
+    status=1
+  fi
+done
+#    The provider serves every file in the bound directory, so the render
+#    holds exactly these two dashboards: a new one must be pinned here too.
+dash_listing="$(cd "$personal_root/home/.config/otel-lgtm/grafana/dashboards" && ls -A | LC_ALL=C sort | tr '\n' ' ')"
+if [[ "$dash_listing" == "agents.json claude-code.json " ]]; then
+  ok "test passed: the bound dashboards directory holds exactly the Codex and Claude Code dashboards"
 else
-  fail "test failed: the dashboard must be one strict JSON object with uid ai-agents-codex whose every datasource is an object with uid loki, prometheus or tempo"
+  fail "test failed: the bound dashboards directory holds $dash_listing, not agents.json and claude-code.json"
   status=1
 fi
 
 # 8) Modes under the stock umask pinned above: files 0644 in 0755 directories.
 modes_ok=1
-for rel in "$managed_rel" "$archive_rel" "$provider_rel" "$dashboard_rel"; do
+for rel in "$managed_rel" "$archive_rel" "$provider_rel" "$dashboard_rel" "$claude_dashboard_rel"; do
   [[ "$(file_mode "$personal_root/home/$rel")" == "644" ]] || modes_ok=0
 done
 for rel in .config/otel-lgtm .config/otel-lgtm/otelcol .config/otel-lgtm/grafana .config/otel-lgtm/grafana/provisioning .config/otel-lgtm/grafana/dashboards; do
