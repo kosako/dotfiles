@@ -45,7 +45,7 @@ cleanup() {
 trap cleanup EXIT
 
 managed_rel=".config/otel-lgtm/compose.yaml"
-expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data"]}},"volumes":{"data":null}}'
+expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data"]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
 
@@ -181,6 +181,17 @@ if [[ "$(yq -r '[.services[] | .restart // ""] | unique | join(",")' "$managed")
   ok "test passed: restart policy is unless-stopped"
 else
   fail "test failed: every service must use restart: unless-stopped"
+  status=1
+fi
+
+# 4f) Prometheus converts delta metrics on OTLP ingestion. Codex sends every
+#     metric as delta, which Prometheus rejects without this flag ("invalid
+#     temporality and type combination", #517), so dropping it loses all of
+#     Codex's metrics while logs and traces keep arriving.
+if [[ "$(yq -r '.services.lgtm.environment.PROMETHEUS_EXTRA_ARGS // ""' "$managed")" == *"--enable-feature=otlp-deltatocumulative"* ]]; then
+  ok "test passed: Prometheus converts delta metrics on OTLP ingestion"
+else
+  fail "test failed: PROMETHEUS_EXTRA_ARGS must carry --enable-feature=otlp-deltatocumulative (Codex sends delta metrics)"
   status=1
 fi
 
