@@ -203,9 +203,12 @@ trace(Tempo)・metric(Prometheus)の 3 つが届く。service の名前は `code
 
 Codex は metric をすべて delta の temporality で送る(61 種類すべてで確認)。Prometheus の OTLP の受け口は、既定では
 delta を受け付けず、`invalid temporality and type combination` で拒否する(#517 で確認。log と trace は届くのに、metric
-だけが Collector の送信で失敗する)。image の Collector には delta を変換する processor が無いので、Prometheus の
-`--enable-feature=otlp-deltatocumulative` で取り込みのときに cumulative に直す。`test-otel-backend.sh` がこの指定を
-pin する。
+だけが Collector の送信で失敗する)。Prometheus の `--enable-feature=otlp-deltatocumulative` で、取り込みのときに
+cumulative に直す(使い捨ての container で、捕まえた Codex の payload が受け付けられることを確かめた)。
+`test-otel-backend.sh` がこの指定を pin する。
+
+- image の Collector の build にも、delta を変換する processor(`delta_to_cumulative`)はある。#517 の時点では、名前の
+  下線を見落として「無い」と判断していた(2026-11-11 に訂正)。Prometheus の側で直す今の形で動くので、変えていない。
 
 - 変換の状態は Prometheus の memory にあり、container を作り直すと counter は 0 から数え直す(`rate()` /
   `increase()` は reset として扱う)。
@@ -300,8 +303,8 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 
 - 保管には直近の 1 年分しか無い。それより前の分は、backend にも保管にも残らない。
 - `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、圧縮しない改行区切りの OTLP JSON を読める
-  (upstream の README)。signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build には
-  `otlpjsonfile` receiver が無いので、読み戻しは別の Collector で行う。
+  (upstream の README)。signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build にも
+  `otlp_json_file` の名前で入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。
 - 元の時刻のまま送られるので、読み戻す先の backend が古い時刻を受け付けるか(Prometheus の
   `out_of_order_time_window` など)を確かめる。
 - metric は Codex が送った delta のまま保管している。読み戻す先が delta を受け付けないときは、そちらで変換する。
@@ -359,8 +362,9 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 
 ## profile
 
-- **personal のみ列挙**。work は非列挙: container runtime を入れるか、agent の telemetry を手元に貯めるかを
-  決めていない。
+- **personal のみ列挙**。work には配布しない(2026-11-11 に決定)。個人の machine の間でだけ、agent の telemetry の
+  送り先と方式をそろえる(どの agent も手元の Collector の `127.0.0.1:4318` へ OTLP/HTTP で送る)。work と共通にする
+  ための capability などは作らない。
 - module 列挙だけで gate する(capability は無い。herdr-config と同型)。managed-by の見出しを持つので(dashboard の
   JSON は description に持つ)、profile 切替で非 active になった残置は doctor の managed-path orphan scan が拾う。
 

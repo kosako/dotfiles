@@ -430,8 +430,8 @@ AI agent の telemetry を手元で受ける backend(grafana/otel-lgtm)の定義
 skill の起動する Codex の送り先として loopback の受け口を前提にしており、その受け口の構築を dotfiles が持つ。
 container runtime(Colima・docker の CLI・docker-compose)は software catalog で入れる。
 
-- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work は非列挙(container runtime を入れるか、
-  telemetry を手元に貯めるかを決めていない)。
+- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work には配布しない(2026-11-11 に決定。work と
+  共通にする capability は作らない)。
 - **apply は file を置くだけ**。Colima の起動・常駐の登録(`brew services`)・container の起動は、人が明示して
   実行する(暗黙の install と常駐を避ける)。Colima の VM と設定・docker の context・container と volume・保管の
   file(`~/.local/share/otel-lgtm/archive/`)は管理しない。
