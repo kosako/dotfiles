@@ -225,12 +225,14 @@ while IFS= read -r mount_line; do
     *) mounts_ok=0 ;;
   esac
 done <<< "$mount_lines"
-[[ "$writable_binds" -le 1 ]] || mounts_ok=0
+# Exactly one writable bind, the archive one: without it the raw telemetry
+# never reaches the host (Codex review, PR #519).
+[[ "$writable_binds" -eq 1 ]] || mounts_ok=0
 if [[ "$mounts_ok" -eq 1 ]]; then
   ok "test passed: host paths reach the container only through the allowlisted binds (read-only from the compose directory, the archive directory writable), every bind with create_host_path false"
 else
   printf '%s\n' "${mount_lines:-<no mounts read>}" >&2
-  fail "test failed: every mount must be a declared named volume with an empty declaration, a read-only ./ bind, or the archive bind on /archive, each bind with create_host_path false and no other key"
+  fail "test failed: every mount must be a declared named volume with an empty declaration, a read-only ./ bind, or the archive bind on /archive (exactly once), each bind with create_host_path false and no other key"
   status=1
 fi
 
@@ -302,8 +304,10 @@ section "otel-backend: archive config"
 #    taking the otlp receiver's data unprocessed into a file exporter.
 #    Every exporter writes uncompressed newline-delimited OTLP JSON under
 #    /archive (what a later Collector's otlpjsonfile receiver reads back)
-#    and never deletes: no age limit, and a large explicit backup count
-#    (0's meaning is not documented upstream).
+#    and never deletes: no age limit, and max_backups 0, which keeps every
+#    rotated file on this image's Collector (measured, #517; any other
+#    count deletes the oldest ones). receivers and exporters must be real
+#    lists: a string "[otlp]" is not one (Codex review, PR #519).
 archive_ok=1
 # yq lists keys (and unique values) in document order, so every list is
 # sorted before it is compared.
@@ -312,8 +316,10 @@ archive_ok=1
 [[ "$(yq -r '.service.pipelines | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "logs/archive,metrics/archive,traces/archive" ]] || archive_ok=0
 if ! bad_pipelines="$(yq -r '.service.pipelines | to_entries | .[]
     | select((.value | keys | sort | join(",")) != "exporters,receivers"
-      or (.value.receivers | tostring) != "[otlp]"
-      or (.value.exporters | length) != 1
+      or (.value.receivers | tag) != "!!seq" or (.value.receivers | length) != 1
+      or (.value.receivers[0] | tag) != "!!str" or .value.receivers[0] != "otlp"
+      or (.value.exporters | tag) != "!!seq" or (.value.exporters | length) != 1
+      or (.value.exporters[0] | tag) != "!!str"
       or (.value.exporters[0] | test("^file/") | not)) | .key' "$archive_cfg" 2>/dev/null)" || [[ -n "$bad_pipelines" ]]; then
   archive_ok=0
 fi
@@ -325,14 +331,14 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
       or .value.format != "json"
       or (.value.path | test("^/archive/[a-z]+\\.jsonl$") | not)
       or (.value.rotation | keys | sort | join(",")) != "max_backups,max_megabytes"
-      or .value.rotation.max_backups < 1000) | .key' "$archive_cfg" 2>/dev/null)" || [[ -n "$bad_exporters" ]]; then
+      or (.value.rotation.max_backups | tag) != "!!int" or .value.rotation.max_backups != 0) | .key' "$archive_cfg" 2>/dev/null)" || [[ -n "$bad_exporters" ]]; then
   archive_ok=0
 fi
 [[ "$(yq -r '[.exporters[].path] | unique | length' "$archive_cfg" 2>/dev/null)" == "3" ]] || archive_ok=0
 if [[ "$archive_ok" -eq 1 ]]; then
   ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own never-deleted JSON file under /archive"
 else
-  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each), with json files under /archive, rotation by size only and max_backups >= 1000"
+  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size only and max_backups 0"
   status=1
 fi
 
@@ -353,15 +359,17 @@ fi
 
 # 7) The dashboard is one JSON object (jq, as strict_json_object: yq's JSON
 #    reader accepts a trailing comma), keeps its uid (links and bookmarks
-#    use it), and every panel and query uses the bundled datasources by
-#    their provisioned uid.
+#    use it), and every datasource reference anywhere in it (panels,
+#    queries, variables) is an object naming one of the bundled datasources
+#    by its provisioned uid: a bare string (a datasource name) is refused,
+#    not skipped (Codex review, PR #519). Every non-row panel names one.
 if strict_json_object "$dashboard_json" \
   && [[ "$(jq -r '.uid' "$dashboard_json")" == "ai-agents-codex" ]] \
-  && [[ "$(jq -r '[.. | objects | select(has("datasource")) | .datasource | objects | .uid] | unique | map(select(. != "loki" and . != "prometheus" and . != "tempo")) | length' "$dashboard_json")" == "0" ]] \
+  && [[ "$(jq -r '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then (.uid // "<none>") else "<\(type)>" end] | map(select(. != "loki" and . != "prometheus" and . != "tempo")) | length' "$dashboard_json")" == "0" ]] \
   && [[ "$(jq -r '[.panels[] | select(.type != "row") | .datasource.uid] | map(select(. == null)) | length' "$dashboard_json")" == "0" ]]; then
   ok "test passed: the dashboard is a strict JSON object with its uid, on the loki / prometheus / tempo datasources only"
 else
-  fail "test failed: the dashboard must be one strict JSON object with uid ai-agents-codex whose datasources are loki, prometheus or tempo"
+  fail "test failed: the dashboard must be one strict JSON object with uid ai-agents-codex whose every datasource is an object with uid loki, prometheus or tempo"
   status=1
 fi
 

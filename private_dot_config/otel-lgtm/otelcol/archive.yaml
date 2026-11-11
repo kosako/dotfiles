@@ -8,27 +8,29 @@
 # (uncompressed, so a later Collector's otlpjsonfile receiver can read it
 # back) to /archive, which compose binds to ~/.local/share/otel-lgtm/archive
 # on the host. Nothing is ever deleted: max_days is left unset (no age
-# limit) and max_backups is set high on purpose, because the meaning of 0
-# is not documented. See docs/otel-backend.md.
+# limit) and max_backups is 0, which keeps every rotated file (measured on
+# this image's Collector, #517: with 1MB files, 0 kept all 7 rotated files
+# while 1 kept only the newest one; the upstream README does not say what
+# 0 means). See docs/otel-backend.md.
 exporters:
   file/archive-traces:
     path: /archive/traces.jsonl
     format: json
     rotation:
       max_megabytes: 64
-      max_backups: 100000
+      max_backups: 0
   file/archive-metrics:
     path: /archive/metrics.jsonl
     format: json
     rotation:
       max_megabytes: 64
-      max_backups: 100000
+      max_backups: 0
   file/archive-logs:
     path: /archive/logs.jsonl
     format: json
     rotation:
       max_megabytes: 64
-      max_backups: 100000
+      max_backups: 0
 
 service:
   pipelines:

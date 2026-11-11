@@ -247,11 +247,12 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   名前の違う pipeline を足すだけ(Collector の設定の重ね方では、list は置き換わり、map は足される)。
 - file は signal ごとに `traces.jsonl`・`metrics.jsonl`・`logs.jsonl`。中身は改行区切りの OTLP JSON(1 行が 1 回の
   export)で、圧縮しない。
-- 64MB を超えると、`<名前>-<UTC の時刻>.jsonl` に回して新しい file に書く。**古い file は消さない**: 期間の上限
-  (`max_days`)は付けず、残す数(`max_backups`)は 100000 にした(0 のときの意味は upstream の docs に書かれていないので
-  頼らない)。容量は増え続ける。目安(実測、2026-11-11): 短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が
+- 64MB を超えると、`<名前>-<UTC の時刻>-size.jsonl` に回して新しい file に書く。**古い file は消さない**: 期間の上限
+  (`max_days`)は付けず、残す数(`max_backups`)は 0 にした。0 は回した file を全部残す(この image の Collector で実測、
+  #517: 1MB で回す設定で、0 は回した 7 つを全部残し、1 は最新の 1 つだけを残した。upstream の README には 0 の意味が
+  書かれていない)。0 以外の数は、古いものから消す。容量は増え続ける。目安(実測、2026-11-11): 短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が
   約 0.18MB、log が約 0.03MB)。skill が起動した review(effort が xhigh)の 1 回では、数分で約 8MB になった(ほとんどが
-  trace)。大きさは doctor が出す。
+  trace)。大きさは `du -sh ~/.local/share/otel-lgtm/archive` で見る。
 - Collector の自分の metric(`prometheus/collector` の scrape)は入らない。agent から届いたものだけ。
 
 読み戻すとき(将来の server の Collector で):
@@ -348,7 +349,8 @@ byte 単位で不変)、managed-by の見出し(dashboard は description)、com
 書き込み可で、どれも `create_host_path: false`)、named volume の宣言の中身が空、Prometheus が delta の metric を
 変換する指定、Collector が bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が
 無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
-processor なしで file に書き、file は `/archive` の下の JSON、期間の上限なし、`max_backups` が 1000 以上。provider は
-bind した dashboard の directory を指し、UI での変更を拒む。dashboard は strict な JSON の object で、uid と
-datasource(`loki`・`prometheus`・`tempo`)が決まっている。mode が file 0644 / directory 0755。container runtime とは
+processor なしで file に書き、file は `/archive` の下の JSON、期間の上限なし、`max_backups` が 0(全部残す)。provider は
+bind した dashboard の directory を指し、UI での変更を拒む。dashboard は strict な JSON の object で、uid が決まっていて、
+どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列は不合格)。保管の bind は
+ちょうど 1 つ。mode が file 0644 / directory 0755。container runtime とは
 通信しない。doctor の分岐は `test-doctor.sh`。
