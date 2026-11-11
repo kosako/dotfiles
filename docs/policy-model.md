@@ -430,8 +430,8 @@ AI agent の telemetry を手元で受ける backend(grafana/otel-lgtm)の定義
 skill の起動する Codex の送り先として loopback の受け口を前提にしており、その受け口の構築を dotfiles が持つ。
 container runtime(Colima・docker の CLI・docker-compose)は software catalog で入れる。
 
-- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work は非列挙(container runtime を入れるか、
-  telemetry を手元に貯めるかを決めていない)。
+- **module 列挙だけで gate**(capability 無し)。personal のみ列挙、work には配布しない(2026-11-11 に決定。work と
+  共通にする capability は作らない)。
 - **apply は file を置くだけ**。Colima の起動・常駐の登録(`brew services`)・container の起動は、人が明示して
   実行する(暗黙の install と常駐を避ける)。Colima の VM と設定・docker の context・container と volume・保管の
   file(`~/.local/share/otel-lgtm/archive/`)は管理しない。
@@ -439,9 +439,11 @@ container runtime(Colima・docker の CLI・docker-compose)は software catalog 
   Colima は address を省いた公開を host の全 interface に転送する)、host の path は許可した bind だけ(compose の
   directory の下を読み取りだけで、保管の directory を書き込み可で。どれも `create_host_path: false`)、named
   volume の宣言は空、権限を広げる key を使わない、Prometheus が delta の metric を変換する。保管の設定は `*/archive`
-  の pipeline を足すだけで file を消さない。`test-otel-backend.sh` が pin する。
+  の pipeline を足すだけで、file は 1 年残す。`test-otel-backend.sh` が pin する。
 - Colima の VM は、host の directory を 2 つだけ mount する(`~/.config/otel-lgtm` を読み取りだけ、
   `~/.local/share/otel-lgtm/archive` を書き込み可)。`$HOME` 全体は見せない。
+- **保存期間は 1 年**(#520): Prometheus・Loki・Tempo は `*_EXTRA_ARGS` の保持の指定で、保管の file は
+  `max_days: 365` で。`test-otel-backend.sh` が 4 つとも 1 年であることを確かめる。
 - **doctor**: compose file の presence。file があるときは、実行時の状態を読むだけで確かめる(何も起動しない):
   daemon に届くか、container が running か、image が定義の固定と同じか、公開した port がすべて `127.0.0.1` か、VM の
   host の share が設定(`ro`)と保管(`rw`)の 2 つだけか、Colima が login の常駐に登録されているか。保管の directory の

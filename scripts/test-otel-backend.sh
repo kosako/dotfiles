@@ -17,8 +17,8 @@ set -euo pipefail
 # ones from the compose file's own directory, and the one writable archive
 # directory), every bind failing instead of being created in the VM, and
 # none of the keys that widen what the container can touch — (5) keep the
-# archive config to added */archive pipelines writing replayable,
-# never-deleted files, (6) keep the dashboard provider pointed at the bound
+# archive config to added */archive pipelines writing replayable files
+# kept for one year, (6) keep the dashboard provider pointed at the bound
 # dashboards and closed to UI edits, (7) keep the dashboard on the bundled
 # datasources, and (8) land 0644 in 0755 directories. Renders into
 # throwaway destinations; never touches the real home and never talks to a
@@ -57,7 +57,7 @@ managed_rel=".config/otel-lgtm/compose.yaml"
 archive_rel=".config/otel-lgtm/otelcol/archive.yaml"
 provider_rel=".config/otel-lgtm/grafana/provisioning/agents.yaml"
 dashboard_rel=".config/otel-lgtm/grafana/dashboards/agents.json"
-expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"OTELCOL_EXTRA_ARGS":"--config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
+expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem","OTELCOL_EXTRA_ARGS":"--config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
 
@@ -263,9 +263,25 @@ fi
 #     feature must be one of the comma-separated names of an
 #     --enable-feature= argument exactly: a substring match would take
 #     otlp-deltatocumulative-typo for it (Codex review, PR #518).
-prom_args=()
-read -ra prom_args <<< "$(yq -r '.services.lgtm.environment.PROMETHEUS_EXTRA_ARGS // ""' "$managed")"
+# extra_args_of VAR — set extra_args to the arguments the image's run-*.sh
+# scripts make of VAR: they read the value with `read -ra`, which splits on
+# whitespace and keeps the FIRST LINE only. So VAR must be one string on
+# one line: a YAML list, or a multi-line string whose later lines the image
+# would drop, returns 1 with no arguments (Codex review, PR #522).
+extra_args=()
+extra_args_of() {
+  local value
+  extra_args=()
+  [[ "$(V="$1" yq -r '.services.lgtm.environment[strenv(V)] | tag' "$managed" 2>/dev/null)" == "!!str" ]] || return 1
+  value="$(V="$1" yq -r '.services.lgtm.environment[strenv(V)]' "$managed" 2>/dev/null)" || return 1
+  [[ "$value" != *$'\n'* ]] || return 1
+  read -ra extra_args <<< "$value"
+}
 delta_feature=0
+prom_args=()
+if extra_args_of PROMETHEUS_EXTRA_ARGS; then
+  prom_args=(${extra_args[@]+"${extra_args[@]}"})
+fi
 for prom_arg in ${prom_args[@]+"${prom_args[@]}"}; do
   case "$prom_arg" in
     --enable-feature=*)
@@ -281,6 +297,54 @@ if [[ "$delta_feature" -eq 1 ]]; then
   ok "test passed: Prometheus converts delta metrics on OTLP ingestion"
 else
   fail "test failed: PROMETHEUS_EXTRA_ARGS must carry --enable-feature=otlp-deltatocumulative (Codex sends delta metrics)"
+  status=1
+fi
+
+# 4h) Every backend keeps one year of data (#520), checked per argument the
+#     way the image's run-*.sh scripts split each *_EXTRA_ARGS (on
+#     whitespace), so a value that only contains the flag as a substring
+#     does not pass. Prometheus: its retention flag (deprecated in 3.15 in
+#     favour of the config file, but honoured). Loki: retention needs the
+#     compactor's retention switched on and a delete-request store, and the
+#     period. Tempo: the block retention of both the backend scheduler and
+#     the backend worker (both are set rather than guessing which one
+#     prunes). The archive's max_days (section 5) is the same year.
+# extra_args_have VAR NAME=VALUE... — VAR is one one-line string
+# (extra_args_of), and each option NAME appears in it exactly once, as
+# exactly NAME=VALUE. An option is matched by its name however it is
+# spelled (one or two leading dashes, `=value` or the value in the next
+# argument, which both Prometheus' kingpin and Go's flag package accept),
+# so a second, conflicting spelling (-store.retention=1d after
+# -store.retention=365d, or --store.retention 1d) fails instead of being
+# ignored (Codex review, PR #522).
+extra_args_have() {
+  local var="$1" want want_name have have_name count matched
+  shift
+  extra_args_of "$var" || return 1
+  for want in "$@"; do
+    want_name="${want%%=*}"
+    want_name="${want_name#-}"
+    want_name="${want_name#-}"
+    count=0
+    matched=0
+    for have in ${extra_args[@]+"${extra_args[@]}"}; do
+      [[ "$have" == -* ]] || continue
+      have_name="${have%%=*}"
+      have_name="${have_name#-}"
+      have_name="${have_name#-}"
+      [[ "$have_name" == "$want_name" ]] || continue
+      count=$((count + 1))
+      [[ "$have" == "$want" ]] && matched=1
+    done
+    [[ "$count" -eq 1 && "$matched" -eq 1 ]] || return 1
+  done
+}
+if extra_args_have PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d \
+  && extra_args_have LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem \
+  && extra_args_have TEMPO_EXTRA_ARGS -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h; then
+  ok "test passed: Prometheus, Loki and Tempo keep one year of data"
+else
+  fail "test failed: the backends must keep one year: PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d, LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem, TEMPO_EXTRA_ARGS both block-retention=8760h flags"
   status=1
 fi
 
@@ -303,11 +367,11 @@ section "otel-backend: archive config"
 #    the image's own traces / metrics / logs ones), one per signal, each
 #    taking the otlp receiver's data unprocessed into a file exporter.
 #    Every exporter writes uncompressed newline-delimited OTLP JSON under
-#    /archive (what a later Collector's otlpjsonfile receiver reads back)
-#    and never deletes: no age limit, and max_backups 0, which keeps every
-#    rotated file on this image's Collector (measured, #517; any other
-#    count deletes the oldest ones), and max_megabytes an integer in
-#    1..1024. receivers and exporters must be real lists: a string "[otlp]"
+#    /archive (what a later Collector's otlpjsonfile receiver reads back),
+#    keeps one year (#520): max_days 365, the same year as the backends,
+#    and max_backups 0, which keeps every rotated file on this image's
+#    Collector (measured, #517; any other count deletes the oldest ones
+#    sooner), and max_megabytes an integer in 1..1024. receivers and exporters must be real lists: a string "[otlp]"
 #    is not one (Codex review, PR #519).
 archive_ok=1
 # yq lists keys (and unique values) in document order, so every list is
@@ -331,7 +395,8 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
       or (.value | keys | sort | join(",")) != "format,path,rotation"
       or .value.format != "json"
       or (.value.path | test("^/archive/[a-z]+\\.jsonl$") | not)
-      or (.value.rotation | keys | sort | join(",")) != "max_backups,max_megabytes"
+      or (.value.rotation | keys | sort | join(",")) != "max_backups,max_days,max_megabytes"
+      or (.value.rotation.max_days | tag) != "!!int" or .value.rotation.max_days != 365
       or (.value.rotation.max_megabytes | tag) != "!!int"
       or .value.rotation.max_megabytes < 1 or .value.rotation.max_megabytes > 1024
       or (.value.rotation.max_backups | tag) != "!!int" or .value.rotation.max_backups != 0) | .key' "$archive_cfg" 2>/dev/null)" || [[ -n "$bad_exporters" ]]; then
@@ -339,9 +404,9 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
 fi
 [[ "$(yq -r '[.exporters[].path] | unique | length' "$archive_cfg" 2>/dev/null)" == "3" ]] || archive_ok=0
 if [[ "$archive_ok" -eq 1 ]]; then
-  ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own never-deleted JSON file under /archive"
+  ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own JSON file under /archive kept for one year"
 else
-  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size only (max_megabytes an integer in 1..1024) and max_backups 0"
+  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
   status=1
 fi
 
