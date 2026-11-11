@@ -306,8 +306,9 @@ section "otel-backend: archive config"
 #    /archive (what a later Collector's otlpjsonfile receiver reads back)
 #    and never deletes: no age limit, and max_backups 0, which keeps every
 #    rotated file on this image's Collector (measured, #517; any other
-#    count deletes the oldest ones). receivers and exporters must be real
-#    lists: a string "[otlp]" is not one (Codex review, PR #519).
+#    count deletes the oldest ones), and max_megabytes an integer in
+#    1..1024. receivers and exporters must be real lists: a string "[otlp]"
+#    is not one (Codex review, PR #519).
 archive_ok=1
 # yq lists keys (and unique values) in document order, so every list is
 # sorted before it is compared.
@@ -331,6 +332,8 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
       or .value.format != "json"
       or (.value.path | test("^/archive/[a-z]+\\.jsonl$") | not)
       or (.value.rotation | keys | sort | join(",")) != "max_backups,max_megabytes"
+      or (.value.rotation.max_megabytes | tag) != "!!int"
+      or .value.rotation.max_megabytes < 1 or .value.rotation.max_megabytes > 1024
       or (.value.rotation.max_backups | tag) != "!!int" or .value.rotation.max_backups != 0) | .key' "$archive_cfg" 2>/dev/null)" || [[ -n "$bad_exporters" ]]; then
   archive_ok=0
 fi
@@ -338,22 +341,25 @@ fi
 if [[ "$archive_ok" -eq 1 ]]; then
   ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own never-deleted JSON file under /archive"
 else
-  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size only and max_backups 0"
+  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size only (max_megabytes an integer in 1..1024) and max_backups 0"
   status=1
 fi
 
 section "otel-backend: Grafana dashboards"
 
 # 6) The provider serves the bound dashboards directory and refuses UI
-#    edits (the JSON in dotfiles is the source of truth).
+#    edits (the JSON in dotfiles is the source of truth). providers must be
+#    a list of exactly one object: a map of the same entries enumerates the
+#    same values under .providers[] (Codex review, PR #519).
 dash_target="$(yq -r '.services.lgtm.volumes[] | select(tag == "!!map" and .source == "./grafana/dashboards") | .target' "$managed" 2>/dev/null | head -n 1)"
 provider_target="$(yq -r '.services.lgtm.volumes[] | select(tag == "!!map" and .source == "./grafana/provisioning/agents.yaml") | .target' "$managed" 2>/dev/null | head -n 1)"
 if [[ -n "$dash_target" && "$provider_target" == /otel-lgtm/grafana/conf/provisioning/dashboards/*.yaml \
+  && "$(yq -r '(.providers | tag) + "|" + (.providers | length | tostring) + "|" + ([.providers[] | tag] | unique | join(","))' "$provider_cfg" 2>/dev/null)" == "!!seq|1|!!map" \
   && "$(yq -r '[.providers[] | .options.path] | join(",")' "$provider_cfg" 2>/dev/null)" == "$dash_target" \
   && "$(yq -r '[.providers[] | (.allowUiUpdates | tostring)] | unique | join(",")' "$provider_cfg" 2>/dev/null)" == "false" ]]; then
   ok "test passed: the dashboard provider is bound into Grafana's provisioning, serves the bound dashboards and refuses UI edits"
 else
-  fail "test failed: the provider must be bound into /otel-lgtm/grafana/conf/provisioning/dashboards/, point at the ./grafana/dashboards bind target and set allowUiUpdates: false"
+  fail "test failed: the provider must be bound into /otel-lgtm/grafana/conf/provisioning/dashboards/, be a list of one object, point at the ./grafana/dashboards bind target and set allowUiUpdates: false"
   status=1
 fi
 
