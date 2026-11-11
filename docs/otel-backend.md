@@ -252,7 +252,7 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   #517: 1MB で回す設定で、0 は回した 7 つを全部残し、1 は最新の 1 つだけを残した。upstream の README には 0 の意味が
   書かれていない)。0 以外の数は、古いものから消す。容量は増え続ける。目安(実測、2026-11-11): 短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が
   約 0.18MB、log が約 0.03MB)。skill が起動した review(effort が xhigh)の 1 回では、数分で約 8MB になった(ほとんどが
-  trace)。大きさは `du -sh ~/.local/share/otel-lgtm/archive` で見る。
+  trace)。大きさと最後に書いた時刻は doctor が出す(`du -sh ~/.local/share/otel-lgtm/archive` でも見られる)。
 - Collector の自分の metric(`prometheus/collector` の scrape)は入らない。agent から届いたものだけ。
 
 読み戻すとき(将来の server の Collector で):
@@ -323,18 +323,35 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 
 ## doctor
 
-「otel backend」section(report-only)が、module が active な profile で compose file の presence を見る。無ければ
-action(`mkdir -p ~/.config` と `chezmoi apply` の手順)。中身は読まない(drift は managed drift section が出す)。
+「otel backend」section(report-only)。module が active な profile で、まず compose file の presence を見る。無ければ
+action(`mkdir -p ~/.config` と `chezmoi apply` の手順)で、ほかは見ない。managed file の drift は managed drift section が
+出す。
 
-**実行時の状態は、まだ見ない**: Colima が動いているか、container が固定した image で動いているか、port が
-loopback だけか、VM の mount が上の 2 つだけか、保管の file が書かれているか。ok の行にもそう書く(file が
-あることを「backend が動いている」と読ませないため)。#514 の続きで足す。
+compose file があるときは、実行時の状態と保管の directory を**読むだけ**で確かめる(何も起動せず、何も変えない)。
+使う command は `docker ps`・`docker inspect`・`colima ssh -- mount` の 3 つで、どれも期限付き(`bounded_probe`)。
+
+| 見ること | 結果 |
+| --- | --- |
+| docker が PATH にあるか | 無ければ「未確認」の item(catalog の section が未導入を出す) |
+| docker が daemon に届くか | 届かなければ action(保管の directory を作り、2 つの mount で `colima start`)。期限内に答えなければ「未確認」の warn |
+| container があり、running か | 無い・止まっているなら action(`docker-compose -f <file> up -d`) |
+| container の image が、定義の固定と同じか | 違えば action(managed file が進んだ後に作り直していない、など) |
+| 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn |
+| VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro` なら warn。2 つのどちらかが無ければ action(`colima stop` の後、2 つの mount で起動し直す) |
+| Colima が login の常駐に登録されているか | どちらでも中立の item(常時起動にするかは選べる) |
+| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない) |
+
+- daemon に届かないときの手順に 2 つの mount と `--ssh-config=false` を付けているのは、VM が無い状態で裸の
+  `colima start` を実行すると、既定の動作(`$HOME` の mount と `~/.ssh/config` の書き換え)で新しい VM が作られるため。
+  VM が既にあるときは、mount を指定どおりに置き換える(保存された設定と同じなら、その繰り返し)。
+- 答えが取れない・読めないとき(command の失敗、期限切れ、JSON でない出力)は「未確認」と書き、ok にはしない。
+- VM の mount は、Colima の設定 file ではなく VM の mount の一覧(`virtiofs`・`9p`・`fuse.sshfs` の行)で見る。
 
 ## 残る risk
 
 - loopback の port には、同じ Mac の process と browser から届く。Grafana は認証なしで、Admin の権限で応える。
 - docker の socket は、使える process にとって強い権限になる。VM に mount する host の directory を 2 つ(設定は
-  読み取りだけ、保管だけ書き込み可)に限ることで、影響を狭めている。
+  読み取りだけ、保管だけ書き込み可)に限ることで、影響を狭めている。doctor がこの mount の形を確かめる。
 - 保管の file は消さないので、容量は増え続ける。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る

@@ -2813,23 +2813,38 @@ else
 fi
 
 section "otel backend (report-only)"
-# otel-backend module (#514): the managed ~/.config/otel-lgtm/compose.yaml
-# defines the local OpenTelemetry backend (grafana/otel-lgtm pinned by
-# version and digest, its three ports on 127.0.0.1 only) that receives the
-# telemetry of the AI agents on this machine. Apply only places the file:
-# starting Colima, registering it as a login service and starting the
-# container are explicit manual steps (docs/otel-backend.md), so a present
-# file says nothing about a working backend. With the file present this
-# section therefore also reads the runtime state — is the docker daemon
-# (Colima) reachable, is the container running, on the image the definition
-# pins, with every published port on 127.0.0.1, in a VM that mounts no host
-# directory — and whether Colima is registered as a login service. It only
-# reads: `docker ps` / `docker inspect` / `colima ssh -- mount`, each
-# through bounded_probe, so an absent, failing or hung runtime is an action
-# or "not checked", never a pass, and doctor neither starts nor changes
-# anything. Drift of the managed file is the managed drift section's job.
+# otel-backend module (#514, #517): the managed files under
+# ~/.config/otel-lgtm define the local OpenTelemetry backend (grafana/
+# otel-lgtm pinned by version and digest, its three ports on 127.0.0.1
+# only) that receives the telemetry of the AI agents on this machine, keeps
+# a raw copy of it under ~/.local/share/otel-lgtm/archive on the host, and
+# serves an agent dashboard. Apply only places the files: starting Colima,
+# registering it as a login service and starting the container are explicit
+# manual steps (docs/otel-backend.md), so a present file says nothing about
+# a working backend. With the compose file present this section therefore
+# also reads the runtime state — is the docker daemon (Colima) reachable,
+# is the container running, on the image the definition pins, with every
+# published port on 127.0.0.1, in a VM that mounts exactly the two host
+# directories the binds need (the config directory read-only, the archive
+# writable) — whether Colima is registered as a login service, and the
+# archive directory on the host. It only reads: `docker ps` / `docker
+# inspect` / `colima ssh -- mount`, each through bounded_probe, so an
+# absent, failing or hung runtime is an action or "not checked", never a
+# pass, and doctor neither starts nor changes anything. Drift of the
+# managed files is the managed drift section's job.
 otel_compose="$HOME/.config/otel-lgtm/compose.yaml"
+otel_config_dir="$HOME/.config/otel-lgtm"
+otel_archive_dir="$HOME/.local/share/otel-lgtm/archive"
 otel_container="otel-lgtm"
+# The steps that (re)start Colima with the two mounts the binds need. On an
+# existing VM `colima start` with --mount replaces the saved mounts (and
+# keeps the disk); on a new one the flags avoid Colima's defaults ($HOME
+# mounted writable, ~/.ssh/config rewritten). The archive directory must
+# exist before the VM mounts it.
+otel_colima_steps=(
+  "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")"
+  "\$ colima start --mount $(shell_quote_safe "$otel_config_dir") --mount $(shell_quote_safe "$otel_archive_dir:w") --ssh-config=false"
+)
 # report_otel_backend_runtime — the runtime checks, run only when the
 # managed definition is present. Stops at the first state that makes the
 # later checks meaningless (no daemon, no container, not running).
@@ -2850,13 +2865,12 @@ report_otel_backend_runtime() {
       return 0
       ;;
     *)
-      # The step carries the two flags that matter on a NEW VM: a bare
-      # `colima start` is right for an existing one (it reuses the saved
-      # settings) but would create a new one with Colima's defaults ($HOME
-      # mounted writable, ~/.ssh/config rewritten). On an existing VM the
-      # flags repeat what is saved.
+      # A bare `colima start` is right for an existing VM (it reuses the
+      # saved settings) but would create a new one with Colima's defaults;
+      # the steps carry the mounts and --ssh-config=false, which on an
+      # existing VM repeat what is saved.
       action "otel backend down: docker cannot reach its daemon (docker ps exit $probe_rc) — Colima is not running, so nothing receives telemetry on 127.0.0.1" \
-        "\$ colima start --mount none --ssh-config=false"
+        "${otel_colima_steps[@]}"
       return 0
       ;;
   esac
@@ -2915,24 +2929,22 @@ report_otel_backend_runtime() {
     fi
   fi
 
-  # The VM must not mount host directories (it is created with --mount
-  # none): with the default $HOME mount, anything that can use the docker
-  # socket can bind-mount the home directory into a container. Colima's
-  # saved settings cannot tell "none" from the default (both are saved as
-  # `mounts: null`), so the VM is asked. No value goes into the remote
-  # command: the mount table is read whole and matched here.
+  # The VM must mount exactly the two host directories the binds need: the
+  # config directory read-only and the archive directory writable (#517).
+  # Any other host share (Colima's default is $HOME, writable) is reachable
+  # by anything that can use the docker socket; the config directory
+  # mounted writable would let a container rewrite the Collector config and
+  # the dashboards; a missing or read-only archive keeps the raw telemetry
+  # off the host (and with create_host_path false the container cannot be
+  # created). Colima's saved settings cannot tell every case apart, so the
+  # VM is asked. No value goes into the remote command: the mount table is
+  # read whole and matched here, line by line.
   if ! command -v colima >/dev/null 2>&1; then
     item "otel backend VM mounts not checked: colima not on PATH (docker reaches a daemon that is not Colima's, or the catalog is not installed)"
   else
     bounded_probe colima ssh -- mount
     case "$probe_rc" in
-      0)
-        if grep -Eq ' type (virtiofs|9p|fuse\.sshfs) ' <<< "$probe_lines"; then
-          warn "otel backend: the Colima VM mounts host directories (it was created without --mount none) — a container can reach them through the docker socket; recreating the VM without the mount is in docs/otel-backend.md"
-        else
-          ok "otel backend: the Colima VM mounts no host directory"
-        fi
-        ;;
+      0) report_otel_backend_mounts "$probe_lines" ;;
       *)
         warn "otel backend VM mounts not checked: colima ssh gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
         ;;
@@ -2948,10 +2960,79 @@ report_otel_backend_runtime() {
     item "otel backend: Colima is not registered as a login service — after a login the backend stays down until Colima is started (brew services start colima registers it)"
   fi
 }
+# report_otel_backend_mounts MOUNT_TABLE — judge the VM's host shares
+# (virtiofs / 9p / sshfs lines of `mount`, "<src> on <dir> type <fs>
+# (<opts>)"): each must be the config directory read-only or the archive
+# directory writable, and both must be there.
+report_otel_backend_mounts() {
+  local line dir opts mode config_mode="" archive_mode="" others="" missing="" share_re
+  share_re='^.* on (.*) type (virtiofs|9p|fuse\.sshfs) \(([^)]*)\)$'
+  while IFS= read -r line; do
+    [[ "$line" =~ $share_re ]] || continue
+    dir="${BASH_REMATCH[1]}"
+    opts="${BASH_REMATCH[3]}"
+    mode="${opts%%,*}"
+    case "$dir" in
+      "$otel_config_dir") config_mode="$mode" ;;
+      "$otel_archive_dir") archive_mode="$mode" ;;
+      *) others+="${others:+, }$dir" ;;
+    esac
+  done <<< "$1"
+  if [[ -n "$others" ]]; then
+    warn "otel backend: the Colima VM mounts host directories it does not need ($others) — a container can reach them through the docker socket; setting the VM's mounts is in docs/otel-backend.md"
+  fi
+  if [[ "$config_mode" == "rw" ]]; then
+    warn "otel backend: the Colima VM mounts $otel_config_dir writable — a container could rewrite the Collector config and the dashboards; mount it read-only (docs/otel-backend.md)"
+  fi
+  if [[ "$archive_mode" == "ro" ]]; then
+    warn "otel backend: the Colima VM mounts $otel_archive_dir read-only — the Collector cannot write the raw telemetry; mount it writable (docs/otel-backend.md)"
+  fi
+  [[ -n "$config_mode" ]] || missing="$otel_config_dir"
+  [[ -n "$archive_mode" ]] || missing+="${missing:+ and }$otel_archive_dir"
+  if [[ -n "$missing" ]]; then
+    action "otel backend: the Colima VM does not mount $missing — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host" \
+      "\$ colima stop" "${otel_colima_steps[@]}"
+  elif [[ -z "$others" && "$config_mode" == "ro" && "$archive_mode" == "rw" ]]; then
+    ok "otel backend: the Colima VM mounts only $otel_config_dir (read-only) and $otel_archive_dir (writable)"
+  fi
+}
+# report_otel_backend_archive — the raw telemetry kept on the host for
+# re-ingesting into another backend later: the directory must exist (the
+# VM mounts it) and be private (it holds what Loki holds: tool output
+# excerpts, account attributes). Its size and newest write are shown so a
+# stalled archive is visible. Report-only; nothing is read from the files.
+report_otel_backend_archive() {
+  local files=0 kb="" newest="" f mode
+  if [[ ! -d "$otel_archive_dir" ]]; then
+    action "otel backend archive directory missing: $otel_archive_dir — the Colima VM cannot mount it, so the container cannot be created and the raw telemetry is not kept" \
+      "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")" \
+      "\$ chmod 700 $(shell_quote_safe "${otel_archive_dir%/*}") $(shell_quote_safe "$otel_archive_dir")"
+    return 0
+  fi
+  mode="$(file_mode "$otel_archive_dir" 2>/dev/null || true)"
+  if [[ "$mode" != "700" ]]; then
+    action "otel backend archive directory is not private (mode ${mode:-unknown}): $otel_archive_dir holds the raw telemetry (tool output excerpts, account attributes)" \
+      "\$ chmod 700 $(shell_quote_safe "${otel_archive_dir%/*}") $(shell_quote_safe "$otel_archive_dir")"
+  fi
+  for f in "$otel_archive_dir"/*.jsonl; do
+    [[ -f "$f" ]] || continue
+    files=$((files + 1))
+    if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
+      newest="$f"
+    fi
+  done
+  if [[ "$files" -eq 0 ]]; then
+    item "otel backend archive: no file yet in $otel_archive_dir (the Collector writes one per signal when telemetry arrives)"
+    return 0
+  fi
+  kb="$(du -sk "$otel_archive_dir" 2>/dev/null | awk '{print $1}' || true)"
+  item "otel backend archive: $files file(s), ${kb:-?} KB in $otel_archive_dir, newest written $(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null || printf '?')"
+}
 if module_active_for_profile "$profile" otel-backend; then
   if [[ -f "$otel_compose" ]]; then
     ok "otel backend: managed $otel_compose present"
     report_otel_backend_runtime
+    report_otel_backend_archive
   else
     action "otel backend definition missing: $otel_compose (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" \
       "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
