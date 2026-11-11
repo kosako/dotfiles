@@ -191,6 +191,22 @@ trace(Tempo)・metric(Prometheus)の 3 つが届く。service の名前は `code
 本文は伏せられる。`headers` は書かない(agent-tools#652 は、`headers` のある `[otel]` を skill の起動へ引き継がずに
 止める)。
 
+Claude Code は、managed な `~/.claude/settings.json` が送る(#523。`enableClaudeTelemetry`)。送り先は repo に入れず、
+`~/.config/dotfiles/claude-telemetry.local` に 1 行で書いてから `chezmoi apply` する:
+
+```text
+http://127.0.0.1:4318
+```
+
+`localhost` は使わない。この Mac の `localhost` は `::1` を先に引き、Collector は `127.0.0.1` でしか待ち受けない。
+service の名前は `claude-code`。送る中身と止め方は [claude-settings](claude-settings.md) の「telemetry」。
+
+実測(Claude Code 2.1.322、2026-11-11): この設定で `claude -p` を 1 回動かすと、Loki に event(`user_prompt`・
+`api_request`・`assistant_response` など)、Prometheus に metric(`claude_code_token_usage_tokens_total` など。job は
+`claude-code`)が届き、保管の file にも入った。prompt と応答の本文は `<REDACTED>` で、長さだけが残る。event の名前は、
+Loki の structured metadata では `claude_code.` を付けない形なので、`{service_name="claude-code"} | event_name="user_prompt"`
+のように絞る。
+
 確かめ方:
 
 - trace は、Tempo の検索に TraceQL の `{}` を渡す(TraceQL なしの検索では出ない)。

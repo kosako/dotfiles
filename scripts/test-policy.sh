@@ -906,17 +906,19 @@ run_fail_contains \
 # environmentKind cross-check. work / client / agent の deny 表 (lib-policy の
 # environment_kind_forbidden_capabilities) の行が kind ごとに全部発火することを
 # 確かめる: personal (元から elevated) を各 kind に付け替え、false の enableAiTools と
-# enableBridgeOneHook (#508。commit された値に依らないよう personal を名指しで替える。#510) も true にして、行の文言をすべて assert する。client / agent に profile はまだ無い
+# enableBridgeOneHook (#508。commit された値に依らないよう personal を名指しで替える。#510)、
+# enableClaudeTelemetry (#523。同じく名指しで替える) も true にして、行の文言をすべて assert する。client / agent に profile はまだ無い
 # ので、この付け替えが表の行の証明になる。cap 名は表から導かず test に固定する (表から
 # 行が落ちる退行を検出するため)。docs/policy-model.md の契約は hard fail なので、
-# 文言だけでなく exit code も pin する。client / agent は 6 つ。work は enableBridgeOneHook を
-# 除く 5 つで (#512。Mac の中からだけ決定を受ける形を許す)、true にした enableBridgeOneHook が
+# 文言だけでなく exit code も pin する。client / agent は 7 つ。work は enableBridgeOneHook を
+# 除く 6 つで (#512。Mac の中からだけ決定を受ける形を許す)、true にした enableBridgeOneHook が
 # work の違反として出ないことも pin する (行に戻る退行と、client / agent の行から落ちる退行の両方を見る)。
 for ek_kind in work client agent; do
   make_fixture
   replace_once "$fixture/.chezmoidata/profiles.yaml" "    environmentKind: personal" "    environmentKind: $ek_kind"
   replace_once "$fixture/.chezmoidata/profiles.yaml" "      enableAiTools: false" "      enableAiTools: true"
   flip_personal_capability "$fixture" enableBridgeOneHook true
+  flip_personal_capability "$fixture" enableClaudeTelemetry true
   ek_rc=0
   ek_output="$("$fixture/scripts/validate-policy.sh" personal 2>&1)" || ek_rc=$?
   if [[ "$ek_rc" -eq 0 ]]; then
@@ -925,9 +927,9 @@ for ek_kind in work client agent; do
     exit 1
   fi
   if [[ "$ek_kind" == work ]]; then
-    ek_caps="installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools"
+    ek_caps="installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools enableClaudeTelemetry"
   else
-    ek_caps="installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools enableBridgeOneHook"
+    ek_caps="installPackages installGuiApps allowSecretsAccess allowNetworkTunnels enableAiTools enableBridgeOneHook enableClaudeTelemetry"
   fi
   ek_missing=""
   for cap in $ek_caps; do

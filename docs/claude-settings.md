@@ -16,6 +16,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | personal・public-safe な `settings.json`(model の既定 / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 / `switchModelsOnFlag` 等の global preference) | public repo(`dot_claude/modify_settings.json.tmpl`。chezmoi の modify script。下記「apply の仕組み」) | ✅ chezmoi(**personal profile のみ**) |
 | permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 21 件(#341。どちらも personal 既定 true で deny は計 56 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225 / #353 / #497 / #505 / #508): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `^(startup\|resume\|clear\|compact\|fork)$`(herdr 0.9.3 の integration v10 と同じ。#274)に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。`enableToolCallRecordHook` 連動(#353、agent-tools#454)で SessionStart(matcher なし)と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest(matcher `*`。PermissionRequest は確認の回数を実測するため。#505、agent-tools#639)に agent-tools 配布の `personal-tool-call-record-hook` を `async: true`・timeout 10 で登録(tool 呼び出しの記録。引数は key だけ・fail-open。既存の entry の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない)。`enableJaReplyGuardHook` 連動(#497、agent-tools#588)で matcher なしの Stop に agent-tools 配布の `personal-ja-reply-guard` を timeout 10 で登録(最後の答えが英語に逸れたら 1 回だけ止めて日本語で書き直させる。fail-open で、`stop_hook_active` のときは止めない。`personal-changed-scope-qa` の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない。英語で答えさせたい session は env の `AGENT_TOOLS_JA_GUARD_DISABLE` で止める)。`enableBridgeOneHook` 連動(#508。personal は #510 で on、work は off)で PermissionRequest / matcher `*` に Bridge One の起動用の script `~/.local/share/bridge-one/hook/current/bin/permission-request` を timeout 600 で登録(`async` と `onFailure` は付けない。command は path を single quote で囲み ` 2>/dev/null` を付けた、Bridge One の `tools/hook-deploy/deploy.mjs` が表示するものと同じ文字列。記録 hook の後ろに 2 つ目の entry として足す。ほかの hook と違い決定 (allow / deny) を返しうる: Bridge One の host が答えたときだけ返し、host が動いていない間・起動用の script が無いときは何も出力せず、承認は端末の dialog に戻る。dotfiles が出す PermissionRequest の hook で決定を返しうるのはこれだけで、決定を返す hook を手で足したものとの併存は dotfiles の範囲の外。Claude だけで Codex には出さない。配備は Bridge One の repo が行う)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
+| telemetry の `env`(#523): `enableClaudeTelemetry` 連動で、Claude Code の OpenTelemetry(metric と event を OTLP/HTTP で送る)の変数を出す。送り先は管理外の local file から apply のときに読む(下記「telemetry」) | 方式は public repo(`dot_claude/modify_settings.json.tmpl`)、送り先は `~/.config/dotfiles/claude-telemetry.local`(非コミット) | ✅ chezmoi(**personal profile のみ**。file が無ければ出さない) |
 | 手元だけの key: `/model` で選んだ `model`(template の値は file に無いときの既定だけ)、`modelSettings`(model ごとの effort)、`autoMode`(auto mode の environment。repository 名などを含み public に出さない)、Claude Code が後から足す key | live の `~/.claude/settings.json` | ⚪ 管理外だが apply で消さない(modify script がそのまま残す。#360) |
 | personal・機密(secret を含む設定など) | project の `.claude/settings.local.json`(project 単位)/ `CLAUDE_CONFIG_DIR` の別 config dir(machine 全体)/ `--settings` や環境変数(session 限定)。user 級 `~/.claude/settings.local.json` は Claude Code が**読まない**ので置き場にしない(#245、[local-overrides](local-overrides.md)) | ❌ 非コミット・管理外 |
 | work / client の settings | 各マシン手設定(#60 の暗号化バックアップは `allowSecretsAccess=false` の work / client では実行を拒否するため使えない) | ❌ public repo に生値を置かない |
@@ -84,25 +85,28 @@ project 自身の deny / ask が止めないものを warn する(rule の
   - managed の JSON の top-level の key は、値が違えば template の値にする(jq の `==` は object の key の
     順を見ないので、意味が同じなら live の byte のまま残る)。
   - ただし `model` は、live に在ればそのまま残す(`/model` の選択)。template の値は file に無いときの既定。
-  - capability で出し入れする `sandbox`(`enforceAiSandbox`)と `hooks`(hook の 6 capability)は、template が
-    出さないときは live からも消す。capability で出し入れする top-level の key を足すときは、script の
-    この一覧にも足す(`test-claude-settings.sh` が、全 on と全 off の render の key の差がこの一覧と同じことを
-    固定する)。template から top-level の key を消すときも、live に残したくなければこの一覧に足す。
+  - capability で出し入れする `sandbox`(`enforceAiSandbox`)、`hooks`(hook の 6 capability)、`env`
+    (`enableClaudeTelemetry` と送り先の file。#523)は、template が出さないときは live からも消す。capability で
+    出し入れする top-level の key を足すときは、script のこの一覧にも足す(`test-claude-settings.sh` が、capability を
+    on にした render と off の render の key の差がこの一覧と同じことを固定する)。template から top-level の key を
+    消すときも、live に残したくなければこの一覧に足す。
+  - `env` は object 全体を managed にする(`hooks` と同じ)。live の `env` に手で足した変数は apply で消える。host
+    固有の環境変数は [local-overrides](local-overrides.md) の経路に置く。
   - それ以外の key(`modelSettings` / `autoMode` / Claude Code が後から足す key)は、位置も値もそのまま残す。
 - 合成しても live の file と意味が同じなら、live の byte をそのまま返す(初回の apply が書いた 1 行の配列なども
   整形し直さないので、`chezmoi diff` は空のまま)。変わるときは jq が 2 space の indent で出す(Claude Code が
   書く形と同じ)。
 - live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON・NUL を含む)ときは、
   apply はその file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
-- live の file の中身は一時 file に書かず、shell の変数に保って jq には stdin で渡す(#446)。jq の引数に置くのは
-  template が描く managed の JSON(public)だけで、live にしかない値(`autoMode` など)は process の一覧(`ps`)に
-  出ない。合成と比較は 1 回の jq で行う。script は live の中身を一時 file に置かないので、kill されても live の写しは
+- live の file の中身は一時 file に書かず、shell の変数に保って jq には stdin で渡す(#446)。managed の JSON も、
+  live の file の前に同じ stdin で渡す(#523。telemetry の送り先は local の値なので、jq の引数に置かない)。jq の
+  引数は option と filter だけで、live にしかない値(`autoMode` など)も送り先も process の一覧(`ps`)に出ない。合成と比較は 1 回の jq で行う。script は live の中身を一時 file に置かないので、kill されても live の写しは
   残らない。shell の変数は NUL を持てないので、NUL は `tr` で別の制御文字に置き換えて jq に渡し、上の「壊れた JSON」
   として止める(末尾の NUL も止める。jq は file を直に読むと末尾の NUL を通すが、ここでは通さない)。
   `tr` は `LC_ALL=C` で byte として読む(UTF-8 の locale の BSD の `tr` は、UTF-8 でない byte で止まるため。string の
   中のそうした byte は jq が読み、変わらなければ live の byte のまま返す)。
 - ただし chezmoi 自身は、modify script を一時 dir(chezmoi の設定の `scriptTempDir`、既定は `TMPDIR`)に書いてから
-  走らせる(書くのは template が描いた script で、live の中身は入らない)。そのため `TMPDIR` が書ける dir でない環境では、
+  走らせる(書くのは template が描いた script で、live の中身は入らない。telemetry の送り先は入る)。そのため `TMPDIR` が書ける dir でない環境では、
   `scriptTempDir` を書ける dir に向けない限り、`chezmoi diff` / `status` / `apply` も doctor の drift の検査も
   失敗する。この repo の chezmoi の設定は `scriptTempDir` を決めない。doctor はこのとき、`TMPDIR` が書ける dir で
   ないことを action に書き、config / template の error とだけは案内しない。
@@ -198,6 +202,62 @@ gate する。true のときだけ `sandbox`(`enabled` / `failIfUnavailable: tru
 [policy-model](policy-model.md)・[ai-environment-boundary](ai-environment-boundary.md)、
 Issue #50。content の回帰は `scripts/test-claude-settings.sh`(cap=true で block が出る /
 false で出ない)が固定する。
+
+## telemetry(`enableClaudeTelemetry`、#523)
+
+Claude Code の OpenTelemetry を、managed な `settings.json` の `env` で有効にする。方式は repo で固定し、送り先は repo に
+入れない(今は手元の otel backend だが、将来は自分の server へ移すため)。work には配布しない(environmentKind の work /
+client / agent で false 必須。[policy-model](policy-model.md))。
+
+送り先は管理外の `~/.config/dotfiles/claude-telemetry.local` に書く。
+
+- 1 行に OTLP/HTTP の base endpoint を 1 つ書く。`#` で始まる行と空行は飛ばし、前後の空白は落とす。
+- 手元の otel backend へ送るなら `http://127.0.0.1:4318`。`localhost` は使わない(この Mac の `localhost` は `::1` を先に
+  引き、Collector は `127.0.0.1` でしか待ち受けないため)。
+- 形は `http(s)://host[:port][/path]`。host は DNS の名前か IPv4 の形で、label は英数字で始まり英数字で終わる。port は
+  1 から 65535(先頭に 0 を付けない)。認証情報(`user:pass@`)、query、fragment は書けない。signal ごとの path
+  (`/v1/logs` など)も書けない(Claude Code が base endpoint に足すため)。IPv6 の literal も受け付けない。
+- 4096 byte 以下の通常の file にする(symlink は、先が通常の file ならよい)。
+- 値を変えたら `chezmoi apply` する。apply までは、managed drift の section に `settings.json` の差分として出る。
+
+apply のときの動き:
+
+- file が無い: `env` を出さない(何も送らない)。前の apply で出した `env` も消す。
+- 形の正しい file: `env` に下の表の 6 つを出す。値は live の `settings.json` にだけ入る。
+- それ以外(値が無い・2 つ以上、形が違う、通常の file でない、大きすぎる、読めない): render が失敗して apply が止まり、
+  `settings.json` は書き換わらない。error には file の path が出て、値は出ない。
+- 読む file は destination の下(`.chezmoi.destDir`)で、HOME の下ではない。test の使い捨ての destination への render は、
+  この machine の file を読まない。
+
+| 変数 | 値 |
+| --- | --- |
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` |
+| `OTEL_METRICS_EXPORTER` / `OTEL_LOGS_EXPORTER` | `otlp` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | file の値 |
+| `OTEL_LOG_TOOL_DETAILS` | `1` |
+
+送るもの(Claude Code の docs による。2.1.322 の時点):
+
+- metric(`claude_code.session.count`、`token.usage`、`cost.usage` など)と event(`claude_code.user_prompt`、`tool_result`、
+  `api_request` など)。service の名前は `claude-code`(Desktop の Code tab の session は `claude-code-desktop`)。
+- `OTEL_LOG_TOOL_DETAILS=1` で、tool の event に Bash の command(切り詰めない)、skill と MCP の名前、tool の入力が入る。
+  tool の入力は、値ごとに 512 文字、合わせて約 4K 文字で切られる。tool の出力は自分の server に出してよいと決めたので
+  (2026-11-11)、この範囲は出す。
+- どの event にも、session の id、account の uuid、`user.email` などの標準の attribute が付く。
+
+送らないもの: prompt の本文(`OTEL_LOG_USER_PROMPTS`)、assistant の応答(`OTEL_LOG_ASSISTANT_RESPONSES`)、tool の出力の
+中身(`OTEL_LOG_TOOL_CONTENT`)、API の body(`OTEL_LOG_RAW_API_BODIES`)、trace(beta)。どれも Claude Code の既定で off で、
+template は出さない。`env` は object 全体を managed にするので、live に手で足しても apply で消える。
+
+- metric の temporality は Claude Code の既定(delta)のまま。手元の Prometheus は取り込みのときに cumulative に直す
+  ([otel-backend](otel-backend.md) の「metric の temporality」)。
+- Claude Code は `OTEL_*` の変数を、Bash の tool や hook などの子 process に渡さない(Claude Code の docs)。
+- 送り先に認証の header が要るようになったら、秘密は `settings.json` に書かず、Claude Code の `otelHeadersHelper`
+  (header を出す script)で渡す。その配線は別の Issue で行う。
+- 止めるときは file を消して `chezmoi apply` する。profile ごと止めるなら capability を false にする。
+- doctor は file の有無だけを見る(値は読まない)。表示は apply の後の状態で、apply までは前の apply の `env` が残って
+  送り続ける(managed drift の section に出る)。
 
 ## 後日 / 対象外
 

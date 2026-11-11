@@ -35,6 +35,12 @@ set -euo pipefail
 # async, the only decision-capable PermissionRequest hook, Claude only); each
 # capability adds exactly its own entries, and all six false -> no hooks key
 # at all.
+# It also fixes the telemetry env (#523): enableClaudeTelemetry with an
+# endpoint file under the destination -> exactly the six telemetry
+# variables, the endpoint as the file holds it; no file, the capability off,
+# or an apply over a stale env -> no env key; a malformed file -> the apply
+# fails and the live file is left as it was; the endpoint never reaches
+# jq's arguments.
 # Renders into throwaway destinations; never touches the real home directory.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1324,7 +1330,8 @@ fi
 # 9f) The keys the script removes when the template does not emit them are
 #     exactly the keys a capability adds: the all-on render (sandbox + hooks)
 #     minus the all-off render. A new capability-gated top-level key must be
-#     added to the script's list as well.
+#     added to the script's list as well. env (#523) also needs the endpoint
+#     file, so its part is pinned in the telemetry section (T7).
 gated_keys="$(yq -p json -o json -I0 '[keys[]]' "$on_file" 2>/dev/null)"
 off_keys="$(yq -p json -o json -I0 '[keys[]]' "$both_off_file" 2>/dev/null)"
 gated_diff="$(GATED="$gated_keys" OFF="$off_keys" yq -n -o json -I0 '(env(GATED) - env(OFF)) | sort')"
@@ -1476,7 +1483,8 @@ fi
 # 9j) No live value reaches jq's arguments (#446): a jq shim first on PATH
 #     logs every argument it gets and runs the real jq. A value that only
 #     the live file's autoMode holds is kept by apply and never shows in the
-#     log, while the log shows that jq ran with the managed JSON: chezmoi diff
+#     log, while the log shows that jq ran (-s); the managed JSON does not
+#     show either, since it goes through stdin too (#523): chezmoi diff
 #     over a live file with a stale managed key, the apply that merges it,
 #     and chezmoi diff over the merged file (the unchanged case).
 argv_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-argv.XXXXXX")"
@@ -1502,13 +1510,222 @@ for argv_step in diff apply diff; do
     chezmoi --config "$argv_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
     --destination "$argv_root/home" "$argv_step" >/dev/null 2>&1 || argv_rc=1
 done
-if [[ "$argv_rc" -eq 0 ]] && grep -Fqx -- '--argjson' "$argv_log" \
-  && grep -Fq '"permissions"' "$argv_log" && ! grep -Fq -- "$argv_marker" "$argv_log" \
+if [[ "$argv_rc" -eq 0 ]] && grep -Fqx -- '-s' "$argv_log" \
+  && ! grep -Fq '"permissions"' "$argv_log" && ! grep -Fq -- "$argv_marker" "$argv_log" \
   && [[ "$(yq -p json -o yaml '.autoMode.environment[0]' "$argv_file")" == "$argv_marker" \
     && "$(yq -p json -o yaml '.tui' "$argv_file")" == "$(yq -p json -o yaml '.tui' "$off_file")" ]]; then
   ok "test passed: a value only the live file holds never reaches jq's arguments (diff, apply and diff again)"
 else
   fail "test failed: a live-only value reached jq's arguments, the jq shim did not run, or the apply failed (rc=$argv_rc)"
+  status=1
+fi
+
+section "claude settings telemetry env (#523)"
+
+# Two flipped sources pin enableClaudeTelemetry either way, so the cases do
+# not depend on the committed value. tel_apply renders one of them into a
+# fresh destination, with the endpoint file (CONTENT, written as given plus a
+# newline; the default <none> writes no file) and a live settings.json (SEED,
+# none by default) placed first.
+tel_on_parent="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-telemetry-on.XXXXXX")"
+tmp_roots+=("$tel_on_parent")
+make_flipped_source "$tel_on_parent"
+flip_personal_capability "$tel_on_parent/src" enableClaudeTelemetry true
+tel_on_src="$tel_on_parent/src"
+tel_off_parent="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-telemetry-off.XXXXXX")"
+tmp_roots+=("$tel_off_parent")
+make_flipped_source "$tel_off_parent"
+flip_personal_capability "$tel_off_parent/src" enableClaudeTelemetry false
+tel_off_src="$tel_off_parent/src"
+tel_apply() {
+  local label="$1" source_dir="$2" content="${3-<none>}" seed="${4-}"
+  tel_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-telemetry-$label.XXXXXX")"
+  tmp_roots+=("$tel_root")
+  mkdir -p "$tel_root/home/.claude" "$tel_root/home/.config/dotfiles"
+  tel_file="$tel_root/home/.claude/settings.json"
+  tel_local="$tel_root/home/.config/dotfiles/claude-telemetry.local"
+  if [[ "$content" != "<none>" ]]; then
+    printf '%s\n' "$content" > "$tel_local"
+  fi
+  if [[ -n "$seed" ]]; then
+    printf '%s\n' "$seed" > "$tel_file"
+    cp "$tel_file" "$tel_root/seed.json"
+  fi
+  tel_rc=0
+  render_personal_into "$source_dir" "$tel_root" || tel_rc=$?
+}
+tel_want="$(jq -cS -n --arg e 'https://otlp.example.test:4318/otlp' '{
+  CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+  OTEL_METRICS_EXPORTER: "otlp",
+  OTEL_LOGS_EXPORTER: "otlp",
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
+  OTEL_EXPORTER_OTLP_ENDPOINT: $e,
+  OTEL_LOG_TOOL_DETAILS: "1"}')"
+
+# T1) The committed source with no endpoint file: no env key (whatever the
+#     committed value of the capability is).
+tel_apply committed "$DOTFILES_ROOT"
+if [[ "$tel_rc" -eq 0 && "$(jq -r 'has("env")' "$tel_file" 2>/dev/null)" == "false" ]]; then
+  ok "test passed: no endpoint file -> no env key (nothing is sent)"
+else
+  fail "test failed: a render with no endpoint file emitted an env key or failed (rc=$tel_rc)"
+  status=1
+fi
+
+# T2) Capability on and an endpoint file with a comment, a blank line and
+#     surrounding blanks: exactly the six variables, the endpoint as the file
+#     holds it (trimmed), and every other key as in the default render.
+tel_apply on "$tel_on_src" $'# the local otel-lgtm for now\n\n  https://otlp.example.test:4318/otlp  '
+tel_on_file="$tel_file"
+if [[ "$tel_rc" -eq 0 && "$(jq -cS '.env' "$tel_on_file" 2>/dev/null)" == "$tel_want" ]]; then
+  ok "test passed: an endpoint file -> exactly the six telemetry variables, endpoint from the file (prompts, responses, tool output, API bodies and traces stay off)"
+else
+  fail "test failed: telemetry env wrong (rc=$tel_rc env=$(jq -cS '.env' "$tel_on_file" 2>/dev/null))"
+  status=1
+fi
+if [[ -n "$(norm "$off_file")" && "$(norm "$tel_on_file" 'del(.env)')" == "$(norm "$off_file")" ]]; then
+  ok "test passed: the telemetry env changes no other key"
+else
+  fail "test failed: turning telemetry on changed a key other than env"
+  status=1
+fi
+
+# T3) Capability off with a valid endpoint file: the file is ignored.
+tel_apply off "$tel_off_src" 'https://otlp.example.test:4318/otlp'
+if [[ "$tel_rc" -eq 0 && "$(jq -r 'has("env")' "$tel_file" 2>/dev/null)" == "false" ]]; then
+  ok "test passed: enableClaudeTelemetry=false ignores the endpoint file (no env key)"
+else
+  fail "test failed: enableClaudeTelemetry=false emitted an env key or failed (rc=$tel_rc)"
+  status=1
+fi
+
+# T2b) The edges of the accepted shape: the highest port, a hyphen inside a
+#      label, an IPv4 host, no port, a path with a trailing slash.
+for tel_good in 'http://127.0.0.1:65535' 'https://otlp-1.example.test' 'http://10.0.0.1:1/otlp/'; do
+  tel_apply good "$tel_on_src" "$tel_good"
+  if [[ "$tel_rc" -eq 0 && "$(jq -r '.env.OTEL_EXPORTER_OTLP_ENDPOINT' "$tel_file" 2>/dev/null)" == "$tel_good" ]]; then
+    ok "test passed: an endpoint of the accepted shape is used as written ($tel_good)"
+  else
+    fail "test failed: an endpoint of the accepted shape was refused or changed (rc=$tel_rc: $tel_good)"
+    status=1
+  fi
+done
+
+# T4) A malformed endpoint file fails the apply, and the live file stays as
+#     it was (byte for byte, compared with cmp: a command substitution would
+#     drop trailing newlines; Codex review, PR #524). Each value is one
+#     file's content.
+tel_seed="$(cat "$off_file")"
+tel_long="#$(printf '%04100d' 0)"
+for tel_bad in \
+  '' \
+  '# only a comment' \
+  $'https://a.example.test\nhttps://b.example.test' \
+  'https://user:secret@otlp.example.test' \
+  'https://otlp.example.test:4318?token=x' \
+  'https://otlp.example.test:4318#x' \
+  'http://127.0.0.1:4318/v1/logs' \
+  'http://127.0.0.1:4318/v1/metrics/' \
+  'ftp://otlp.example.test' \
+  'http://[::1]:4318' \
+  'http://otlp example.test:4318' \
+  'http://127.0.0.1:99999' \
+  'http://127.0.0.1:65536' \
+  'http://127.0.0.1:0' \
+  'http://127.0.0.1:04318' \
+  'http://127.0.0.1:' \
+  'http://-otlp.example.test:4318' \
+  'http://otlp-.example.test:4318' \
+  'http://otlp..example.test:4318' \
+  'http://.otlp.example.test' \
+  "$tel_long"$'\nhttps://otlp.example.test'; do
+  tel_apply bad "$tel_on_src" "$tel_bad" "$tel_seed"
+  if [[ "$tel_rc" -ne 0 ]] && cmp -s "$tel_root/seed.json" "$tel_file"; then
+    ok "test passed: a malformed endpoint file fails the apply and leaves settings.json alone ($(printf '%s' "$tel_bad" | head -c 40 | tr '\n' '|'))"
+  else
+    fail "test failed: a malformed endpoint file was accepted or settings.json changed (rc=$tel_rc: $(printf '%s' "$tel_bad" | head -c 40 | tr '\n' '|'))"
+    status=1
+  fi
+done
+#     A directory in the file's place fails the same way.
+tel_apply dir "$tel_on_src" '<none>' "$tel_seed"
+mkdir "$tel_local"
+tel_rc=0
+render_personal_into "$tel_on_src" "$tel_root" || tel_rc=$?
+if [[ "$tel_rc" -ne 0 ]] && cmp -s "$tel_root/seed.json" "$tel_file"; then
+  ok "test passed: a directory in the endpoint file's place fails the apply and leaves settings.json alone"
+else
+  fail "test failed: a directory in the endpoint file's place was accepted (rc=$tel_rc)"
+  status=1
+fi
+
+# T5) A live file with an env from an earlier apply (telemetry on), and now
+#     no endpoint file: the env key goes, so nothing keeps sending; every
+#     other key matches the default render.
+tel_stale="$(jq --argjson env "$tel_want" '. + {env: $env}' "$off_file")"
+tel_apply stale "$tel_on_src" '<none>' "$tel_stale"
+if [[ "$tel_rc" -eq 0 && "$(jq -r 'has("env")' "$tel_file" 2>/dev/null)" == "false" \
+  && "$(norm "$tel_file")" == "$(norm "$off_file")" ]]; then
+  ok "test passed: with the endpoint file gone, apply removes the env key of an earlier apply"
+else
+  fail "test failed: a stale env survived the apply, or another key changed (rc=$tel_rc)"
+  status=1
+fi
+
+# T6) env is managed as a whole: a hand-added variable and a changed value in
+#     the live env go back to the render, and a second apply and chezmoi diff
+#     change nothing.
+tel_hand="$(jq --argjson env "$tel_want" '. + {env: ($env + {OTEL_LOG_USER_PROMPTS: "1", OTEL_LOG_TOOL_DETAILS: "0"})}' "$off_file")"
+tel_apply hand "$tel_on_src" 'https://otlp.example.test:4318/otlp' "$tel_hand"
+tel_hand_rc="$tel_rc"
+cp "$tel_file" "$tel_root/after-first-apply.json"
+tel_rc=0
+render_personal_into "$tel_on_src" "$tel_root" || tel_rc=$?
+tel_diff="$(chezmoi --config "$tel_root/chezmoi.toml" --source "$tel_on_src" \
+  --destination "$tel_root/home" diff 2>/dev/null)" || tel_diff="<chezmoi diff failed>"
+if [[ "$tel_hand_rc" -eq 0 && "$tel_rc" -eq 0 && "$(jq -cS '.env' "$tel_file" 2>/dev/null)" == "$tel_want" \
+  && -z "$tel_diff" ]] && cmp -s "$tel_file" "$tel_root/after-first-apply.json"; then
+  ok "test passed: env is managed as a whole (hand-added and changed variables go back), and applying again changes nothing"
+else
+  fail "test failed: the live env was not brought back to the render, or a second apply / diff was not a no-op (rc=$tel_hand_rc/$tel_rc)"
+  status=1
+fi
+
+# T7) env is the third capability-gated top-level key (9f has the other
+#     two): the telemetry-on render minus the default render is exactly env,
+#     and the modify script's removal list names sandbox, hooks and env.
+tel_gated="$(GATED="$(yq -p json -o json -I0 '[keys[]]' "$tel_on_file" 2>/dev/null)" \
+  OFF="$(yq -p json -o json -I0 '[keys[]]' "$off_file" 2>/dev/null)" \
+  yq -n -o json -I0 '(env(GATED) - env(OFF)) | sort' 2>/dev/null)"
+if [[ "$tel_gated" == '["env"]' ]] \
+  && grep -Fq 'reduce ("sandbox", "hooks", "env") as $key' "$DOTFILES_ROOT/dot_claude/modify_settings.json.tmpl"; then
+  ok "test passed: env is capability-gated and in the modify script's removal list"
+else
+  fail "test failed: the telemetry render adds $tel_gated, not [env], or the modify script's removal list does not name env"
+  status=1
+fi
+
+# T8) The endpoint never reaches jq's arguments: the 9j shim, over a live
+#     file with a stale managed key, with an endpoint only the local file
+#     holds (diff, apply, diff again). The merged file carries it.
+tel_apply argv "$tel_on_src" '<none>' "$(jq '.tui = "default"' "$off_file")"
+mkdir -p "$tel_root/bin"
+cp "$argv_root/bin/jq" "$tel_root/bin/jq"
+tel_marker="dotfiles-argv-probe-$$-$RANDOM.invalid"
+printf 'http://%s:4318\n' "$tel_marker" > "$tel_local"
+tel_log="$tel_root/jq-argv.log"
+: > "$tel_log"
+tel_rc=0
+for tel_step in diff apply diff; do
+  JQ_ARGV_LOG="$tel_log" JQ_REAL="$argv_real_jq" PATH="$tel_root/bin:$PATH" \
+    chezmoi --config "$tel_root/chezmoi.toml" --source "$tel_on_src" \
+    --destination "$tel_root/home" "$tel_step" >/dev/null 2>&1 || tel_rc=1
+done
+if [[ "$tel_rc" -eq 0 ]] && grep -Fqx -- '-s' "$tel_log" && ! grep -Fq -- "$tel_marker" "$tel_log" \
+  && [[ "$(jq -r '.env.OTEL_EXPORTER_OTLP_ENDPOINT' "$tel_file")" == "http://$tel_marker:4318" ]]; then
+  ok "test passed: the endpoint from the local file never reaches jq's arguments (diff, apply and diff again)"
+else
+  fail "test failed: the endpoint reached jq's arguments, the jq shim did not run, or the apply failed (rc=$tel_rc)"
   status=1
 fi
 

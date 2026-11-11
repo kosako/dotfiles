@@ -69,7 +69,8 @@ environmentKind は飾りラベルではない。`validate-policy.sh` が、環�
 
 | environmentKind | false 必須の capability |
 | --- | --- |
-| work / client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools |
+| work | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools, enableClaudeTelemetry |
+| client / agent | installPackages, installGuiApps, allowSecretsAccess, allowNetworkTunnels, enableAiTools, enableBridgeOneHook, enableClaudeTelemetry |
 | sandbox | allowSecretsAccess |
 | personal | (制約なし) |
 

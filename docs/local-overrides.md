@@ -118,7 +118,8 @@ template の値は file に無いときの既定にだけ使う(`modelSettings` 
 [claude-settings](claude-settings.md) の「apply の仕組み」)。Claude が動的に足す permission や、`/sandbox` による
 per-project の sandbox 調整は **project の `.claude/settings.local.json`**(chezmoi 管理外。
 `.chezmoiignore` は allowlist で宣言外を通さない、#207)に書かれるため、managed な user
-設定とは衝突しない。
+設定とは衝突しない。`env` は #523 から managed で(telemetry 用。object 全体を template の値にし、telemetry を出さない
+ときは消す)、live の `env` に手で足した変数は apply で消える。host 固有の環境変数は下の表の経路に置く。
 
 host 固有・機密の settings(env / permissions / model 等を、この machine の全 project に効かせたいもの)の
 置き場所は、Claude Code が**実際に読む経路**から選ぶ(#245)。user 級の `~/.claude/settings.local.json` は
@@ -184,6 +185,20 @@ project の置き場が違うときの seam で、その path を public repo �
   ときだけ、既定の root を使う。
 - **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
 - 振る舞いと限界は [shell](shell.md) の「agent の起動場所」。
+
+## Claude Code の telemetry の送り先(#523)
+
+managed な `~/.claude/settings.json` が telemetry を送る先(OTLP/HTTP の base endpoint)は、managed file に焼かず
+**`~/.config/dotfiles/claude-telemetry.local`**(chezmoi 管理外・非コミット)に置く。今は手元の otel backend だが、
+将来は自分の server へ移すので、送り先を public repo に入れない。
+
+- 行形式: 1 行に endpoint を 1 つ。`#` 行と空行は飛ばす。形と制限は [claude-settings](claude-settings.md) の
+  「telemetry」。
+- ほかの local file と違い、**apply のときに template が中身を読み**、live の `settings.json` に書く(Claude Code は
+  user 級の local の settings を読まないため。上の「Claude Code settings」)。doctor は存在だけを見る。
+- 共通原則どおり managed 側はこの file が無くても壊れない(`env` を出さず、何も送らない)。形の正しくない file では
+  apply が止まる。
+- **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
 
 ## agent-tools の checkout path(#73)
 
