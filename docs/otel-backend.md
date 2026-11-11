@@ -336,7 +336,7 @@ compose file があるときは、実行時の状態と保管の directory を**
 | docker が daemon に届くか | 届かなければ action(保管の directory を作って `chmod 700` し、2 つの mount で `colima start`)で、container と VM の確認はしない。期限内に答えなければ「未確認」の warn |
 | container があり、running か | 無い・止まっているなら action(`docker-compose -f <file> up -d`)。image と port は見ないが、VM の mount と常駐の登録は続けて見る |
 | container の image が、定義の固定と同じか | 違えば action(managed file が進んだ後に作り直していない、など) |
-| 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn。port の JSON は、jq で 1 つの object と読めたときだけ使う |
+| 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn。port の JSON は、strict な 1 つの object と読めたときだけ使う(下の注) |
 | VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro` なら warn。2 つのどちらかが無ければ action(`colima stop` の後、保管の directory を作って `chmod 700` し、2 つの mount で起動し直す)。share の行で形が読めないものがあれば「未確認」 |
 | Colima が login の常駐に登録されているか | どちらでも中立の item(常時起動にするかは選べる) |
 | 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない。`du` が失敗したら大きさは「未確認」) |
@@ -346,6 +346,12 @@ compose file があるときは、実行時の状態と保管の directory を**
   VM が既にあるときは、mount を指定どおりに置き換える(保存された設定と同じなら、その繰り返し)。
 - `chmod 700` を `colima start` より先にするのは、container が VM と一緒に戻って(restart policy)、すぐに保管に書き
   始めるため。
+- `docker-compose up` を手順に持つ action(container が無い・止まっている、image の違い、広い port)は、section の最後に
+  まとめて出す。次の手順の一覧は action が出た順に並ぶので、mount と保管の権限を直す手順が先に来る(container の bind は、
+  VM の 2 つの mount と 0700 の保管の directory を前提にするため)。
+- port の JSON は、Bridge One の確認が `~/.claude/settings.json` を読むのと同じ方法で strict に読む: jq に raw の文字列で
+  渡し、文字列の外の token が `true`・`false`・`null`・JSON の数値だけかを確かめてから `fromjson` する(2 つ目の値も
+  拒む)。yq の JSON の reader は comma の欠けを受け付け、jq の parser は `NaN`・`01`・`+1` を数値として受け付けるため。
 - 答えが取れない・読めないとき(command の失敗、期限切れ、1 つの JSON の object と読めない出力、形の読めない share の
   行、一覧できない directory)は「未確認」と書き、ok にはしない。
 - VM の mount は、Colima の設定 file ではなく VM の mount の一覧(`virtiofs`・`9p`・`fuse.sshfs` の行)で見る。

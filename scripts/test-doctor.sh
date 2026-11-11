@@ -1245,6 +1245,11 @@ ob_ports_ok="[ok] otel backend: every published port is on 127.0.0.1"
 ob_mounts_ok="[ok] otel backend: the Colima VM mounts only $ob_config_dir (read-only) and $ob_archive_dir (writable)"
 ob_private_step="        \$ chmod 700 $(printf '%q' "${ob_archive_dir%/*}") $(printf '%q' "$ob_archive_dir")"
 ob_colima_steps=("        \$ mkdir -p $(printf '%q' "$ob_archive_dir")" "$ob_private_step" "        \$ colima start --mount $(printf '%q' "$ob_config_dir") --mount $(printf '%q' "$ob_archive_dir:w") --ssh-config=false")
+# ob_action_no OUTPUT REASON_PREFIX — the number doctor gave the action whose
+# reason starts with REASON_PREFIX in the next-actions list (empty if none).
+ob_action_no() {
+  grep -F -- "$2" <<< "$1" | sed -n 's/^\[info\] \([0-9][0-9]*\)\. .*/\1/p' | head -n 1
+}
 # ob_steps_in_order OUTPUT STEP... — every STEP is on the line right after
 # the one before it.
 ob_steps_in_order() {
@@ -1351,14 +1356,43 @@ if grep -q '^docker inspect' "$ob_state/calls"; then
   status=1
 fi
 # OB-4b) no container in a VM made with --mount none (the state before
-#        #517): both actions, so the compose step is not left to fail on
-#        the missing binds.
+#        #517): both actions, and in the next-actions list the mount one
+#        comes first, so the compose step is not run before the binds can
+#        resolve (Codex review, PR #521).
 ob_healthy
 : > "$ob_state/ps-out"
 printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' > "$ob_state/mount-out"
-ob_expect "no container and no mounts -> both actions" -- \
-  "[warn] otel backend down: no container named otel-lgtm — nothing receives telemetry on 127.0.0.1" \
-  "[warn] otel backend: the Colima VM does not mount $ob_config_dir and $ob_archive_dir — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"
+ob_rc=0
+ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
+ob_mount_no="$(ob_action_no "$ob_out" "otel backend: the Colima VM does not mount")"
+ob_up_no="$(ob_action_no "$ob_out" "otel backend down: no container named otel-lgtm")"
+if [[ "$ob_rc" -eq 0 && -n "$ob_mount_no" && -n "$ob_up_no" && "$ob_mount_no" -lt "$ob_up_no" ]] \
+  && expect_report "$ob_out" \
+    "[warn] otel backend down: no container named otel-lgtm — nothing receives telemetry on 127.0.0.1" \
+    "[warn] otel backend: the Colima VM does not mount $ob_config_dir and $ob_archive_dir — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"; then
+  ok "test passed: otel backend no container and no mounts -> both actions, the mount one first in the next-actions list"
+else
+  fail "test failed: otel backend no container and no mounts -> expected exit 0 (got $ob_rc), both actions, the mount action (#${ob_mount_no:-none}) before the compose one (#${ob_up_no:-none})"
+  status=1
+fi
+# OB-4c) a stopped container and an archive directory that is not
+#        private: the chmod action comes before the compose one, so the
+#        container does not resume writing into an open directory.
+ob_healthy
+printf 'exited\n' > "$ob_state/ps-out"
+chmod 755 "$ob_archive_dir"
+ob_rc=0
+ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
+chmod 700 "$ob_archive_dir"
+ob_private_no="$(ob_action_no "$ob_out" "otel backend archive directory is not private")"
+ob_up_no="$(ob_action_no "$ob_out" "otel backend down: container otel-lgtm is exited")"
+if [[ "$ob_rc" -eq 0 && -n "$ob_private_no" && -n "$ob_up_no" && "$ob_private_no" -lt "$ob_up_no" ]]; then
+  ok "test passed: otel backend stopped container and an open archive directory -> the chmod action first in the next-actions list"
+else
+  printf '%s\n' "${ob_out:-<no output>}" >&2
+  fail "test failed: otel backend stopped container and an open archive directory -> expected exit 0 (got $ob_rc) and the chmod action (#${ob_private_no:-none}) before the compose one (#${ob_up_no:-none})"
+  status=1
+fi
 # OB-5) the container exists but is stopped -> action naming its state;
 #       the mounts are still checked.
 ob_healthy
@@ -1400,13 +1434,23 @@ printf '1' > "$ob_state/inspect-rc"
 ob_expect "inspect fails -> image and ports not checked" -- \
   "$ob_running" "[warn] otel backend image and ports not checked: docker inspect gave no usable answer (exit 1)" "$ob_mounts_ok" \
   ! "$ob_image_ok" "$ob_ports_ok"
-# Not JSON, and JSON that only a lenient reader takes (a missing comma
-# between two members, which yq accepts; Codex review, PR #521).
-for ob_bad_ports in 'not json' '{"3000/tcp":[{"HostIp":"127.0.0.1" "HostPort":"3000"}]}' '{"3000/tcp":[]} {"4318/tcp":[]}'; do
+# Not JSON, and JSON that only a lenient reader takes: a missing comma
+# between two members (yq accepts it), number literals jq 1.7.1 accepts
+# (NaN, a leading zero, +1), two objects on one line, and a second line
+# after a loopback object (Codex review, PR #521).
+ob_ok_object='{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":"3000"}]}'
+for ob_bad_ports in 'not json' \
+  '{"3000/tcp":[{"HostIp":"127.0.0.1" "HostPort":"3000"}]}' \
+  '{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":NaN}]}' \
+  '{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":01}]}' \
+  '{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":+1}]}' \
+  '{"3000/tcp":[]} {"4318/tcp":[]}' \
+  "$ob_ok_object"$'\n''{"4318/tcp":[{"HostIp":"0.0.0.0","HostPort":"4318"}]}' \
+  "$ob_ok_object"$'\n''garbage'; do
   ob_healthy
   printf '%s\n%s\n' "$ob_image" "$ob_bad_ports" > "$ob_state/inspect-out"
-  ob_expect "unreadable port bindings ($ob_bad_ports) -> ports not checked" -- \
-    "$ob_image_ok" "[warn] otel backend ports not checked: the port bindings docker inspect printed could not be read as one JSON object (or jq is not on PATH)" \
+  ob_expect "unreadable port bindings ($(tr '\n' '|' <<< "$ob_bad_ports")) -> ports not checked" -- \
+    "$ob_image_ok" "[warn] otel backend ports not checked: the port bindings docker inspect printed could not be read as one strict JSON object (or jq is not on PATH)" \
     ! "$ob_ports_ok" "otel backend exposed" "publishes no port"
 done
 # OB-10) the VM's host shares, one departure at a time from the two the

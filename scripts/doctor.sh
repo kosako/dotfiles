@@ -2849,6 +2849,14 @@ otel_colima_steps=(
   "$otel_archive_private_step"
   "\$ colima start --mount $(shell_quote_safe "$otel_config_dir") --mount $(shell_quote_safe "$otel_archive_dir:w") --ssh-config=false"
 )
+otel_up_step="\$ docker-compose -f $(shell_quote_safe "$otel_compose") up -d"
+# Reasons for an action whose step is `docker-compose up`, emitted after
+# every other otel backend action (report_otel_backend_up_actions): the
+# container is (re)created from binds that need the VM's two mounts and a
+# private archive directory, so the steps that fix those must come first in
+# the next-actions list, which keeps the order actions are raised in (Codex
+# review, PR #521).
+otel_up_reasons=()
 # report_otel_backend_runtime — the runtime checks, run only when the
 # managed definition is present. Without docker or a daemon nothing else
 # can be read, so it stops there. A missing or stopped container skips only
@@ -2856,8 +2864,7 @@ otel_colima_steps=(
 # anyway, since a VM without the two mounts is exactly why a container
 # cannot be created (Codex review, PR #521).
 report_otel_backend_runtime() {
-  local up_step state image ports_json want_image host_ips ip published=0 beyond=0 running=0
-  up_step="\$ docker-compose -f $(shell_quote_safe "$otel_compose") up -d"
+  local state image ports_json want_image host_ips ip published=0 beyond=0 running=0
   if ! command -v docker >/dev/null 2>&1; then
     item "otel backend runtime not checked: docker not on PATH (the software catalog section reports a missing runtime)"
     return 0
@@ -2883,9 +2890,9 @@ report_otel_backend_runtime() {
   esac
   state="${probe_lines%%$'\n'*}"
   if [[ -z "$state" ]]; then
-    action "otel backend down: no container named $otel_container — nothing receives telemetry on 127.0.0.1" "$up_step"
+    otel_up_reasons+=("otel backend down: no container named $otel_container — nothing receives telemetry on 127.0.0.1")
   elif [[ "$state" != "running" ]]; then
-    action "otel backend down: container $otel_container is $state, not running" "$up_step"
+    otel_up_reasons+=("otel backend down: container $otel_container is $state, not running")
   else
     running=1
     ok "otel backend: container $otel_container is running"
@@ -2901,15 +2908,16 @@ report_otel_backend_runtime() {
     warn "otel backend image and ports not checked: docker inspect gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
   else
     image="${probe_lines%%$'\n'*}"
+    # Everything after the image line: one JSON line is expected, and a
+    # second line is not dropped but makes the bindings unreadable below.
     ports_json="${probe_lines#*$'\n'}"
-    ports_json="${ports_json%%$'\n'*}"
     want_image="$(yq -r '.services[] | .image // ""' "$otel_compose" 2>/dev/null | head -n 1 || true)"
     if [[ -z "$want_image" ]]; then
       warn "otel backend image not checked: no image could be read from $otel_compose"
     elif [[ "$image" == "$want_image" ]]; then
       ok "otel backend: the container runs the image the definition pins"
     else
-      action "otel backend: the container runs another image than the definition pins (version or digest differs) — it was created before the managed file changed, or from another definition" "$up_step"
+      otel_up_reasons+=("otel backend: the container runs another image than the definition pins (version or digest differs) — it was created before the managed file changed, or from another definition")
     fi
     # Every published binding must be on 127.0.0.1: Grafana answers its API
     # without a login, and Colima forwards a port published on any other
@@ -2917,26 +2925,45 @@ report_otel_backend_runtime() {
     # in the JSON and is skipped. Each binding is printed as `ip=<HostIp>`
     # so one with an empty HostIp (every interface) is a line of its own,
     # not an empty output read as "no binding". The JSON is adopted only as
-    # exactly one object read by jq (yq's JSON reader accepts a missing
-    # comma, Codex review, PR #521; macOS ships /usr/bin/jq); unreadable or
-    # without jq, nothing is claimed.
+    # exactly one strict JSON object, read the way the Bridge One section
+    # reads settings.json (yq's JSON reader accepts a missing comma, and
+    # jq's parser accepts NaN, Infinity, 01, .5 and +1 as numbers; Codex
+    # review, PR #521): jq takes the text raw, every bare token outside the
+    # strings must be true / false / null or a JSON number, then fromjson
+    # parses it (refusing a second value, so a line after the object is not
+    # skipped). A value of the wrong type fails the extraction. Unreadable,
+    # or without jq (macOS ships /usr/bin/jq), nothing is claimed.
     if command -v jq >/dev/null 2>&1 \
-      && jq -e -s 'length == 1 and (.[0] | type) == "object"' <<< "$ports_json" >/dev/null 2>&1 \
-      && host_ips="$(jq -r '.[] | select(. != null) | .[] | "ip=" + (.HostIp // "")' <<< "$ports_json" 2>/dev/null)"; then
+      && host_ips="$(printf '%s' "$ports_json" | jq -R -s -r '
+          . as $raw
+          | if ($raw
+              | gsub("\"(?:[^\"\\\\]|\\\\.)*\""; " ")
+              | [splits("[ \t\n\r{}\\[\\]:,]+")]
+              | map(select(. != ""))
+              | all(test("^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$")))
+            then $raw | fromjson
+            else error("not strict JSON")
+            end
+          | if type == "object" then
+              .[] | select(. != null) | .[] | "ip=" + (.HostIp // "")
+            else
+              error("not one JSON object")
+            end
+        ' 2>/dev/null)"; then
       while IFS= read -r ip; do
         [[ -n "$ip" ]] || continue
         published=$((published + 1))
         [[ "$ip" == "ip=127.0.0.1" ]] || beyond=1
       done <<< "$host_ips"
       if [[ "$beyond" -eq 1 ]]; then
-        action "otel backend exposed: the container publishes a port on an address other than 127.0.0.1 — Grafana answers its API without a login, and Colima forwards such a port to every interface of this host" "$up_step"
+        otel_up_reasons+=("otel backend exposed: the container publishes a port on an address other than 127.0.0.1 — Grafana answers its API without a login, and Colima forwards such a port to every interface of this host")
       elif [[ "$published" -eq 0 ]]; then
         warn "otel backend: the container publishes no port, so nothing on this host can send it telemetry"
       else
         ok "otel backend: every published port is on 127.0.0.1"
       fi
     else
-      warn "otel backend ports not checked: the port bindings docker inspect printed could not be read as one JSON object (or jq is not on PATH)"
+      warn "otel backend ports not checked: the port bindings docker inspect printed could not be read as one strict JSON object (or jq is not on PATH)"
     fi
   fi
 
@@ -3067,11 +3094,20 @@ report_otel_backend_archive() {
   newest_at="$(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null)" || newest_at="not checked (date -r failed)"
   item "otel backend archive: $files file(s), $kb in $otel_archive_dir, newest written $newest_at"
 }
+# report_otel_backend_up_actions — the actions whose step is `docker-compose
+# up`, last (see otel_up_reasons).
+report_otel_backend_up_actions() {
+  local reason
+  for reason in ${otel_up_reasons[@]+"${otel_up_reasons[@]}"}; do
+    action "$reason" "$otel_up_step"
+  done
+}
 if module_active_for_profile "$profile" otel-backend; then
   if [[ -f "$otel_compose" ]]; then
     ok "otel backend: managed $otel_compose present"
     report_otel_backend_runtime
     report_otel_backend_archive
+    report_otel_backend_up_actions
   else
     action "otel backend definition missing: $otel_compose (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" \
       "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
