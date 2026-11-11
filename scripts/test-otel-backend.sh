@@ -17,8 +17,8 @@ set -euo pipefail
 # ones from the compose file's own directory, and the one writable archive
 # directory), every bind failing instead of being created in the VM, and
 # none of the keys that widen what the container can touch — (5) keep the
-# archive config to added */archive pipelines writing replayable,
-# never-deleted files, (6) keep the dashboard provider pointed at the bound
+# archive config to added */archive pipelines writing replayable files
+# kept for one year, (6) keep the dashboard provider pointed at the bound
 # dashboards and closed to UI edits, (7) keep the dashboard on the bundled
 # datasources, and (8) land 0644 in 0755 directories. Renders into
 # throwaway destinations; never touches the real home and never talks to a
@@ -309,18 +309,34 @@ fi
 #     period. Tempo: the block retention of both the backend scheduler and
 #     the backend worker (both are set rather than guessing which one
 #     prunes). The archive's max_days (section 5) is the same year.
-# extra_args_have VAR ARG... — VAR is one one-line string (extra_args_of)
-# and every ARG is one of its whitespace-split arguments, exactly.
+# extra_args_have VAR NAME=VALUE... — VAR is one one-line string
+# (extra_args_of), and each option NAME appears in it exactly once, as
+# exactly NAME=VALUE. An option is matched by its name however it is
+# spelled (one or two leading dashes, `=value` or the value in the next
+# argument, which both Prometheus' kingpin and Go's flag package accept),
+# so a second, conflicting spelling (-store.retention=1d after
+# -store.retention=365d, or --store.retention 1d) fails instead of being
+# ignored (Codex review, PR #522).
 extra_args_have() {
-  local var="$1" want have found
+  local var="$1" want want_name have have_name count matched
   shift
   extra_args_of "$var" || return 1
   for want in "$@"; do
-    found=0
+    want_name="${want%%=*}"
+    want_name="${want_name#-}"
+    want_name="${want_name#-}"
+    count=0
+    matched=0
     for have in ${extra_args[@]+"${extra_args[@]}"}; do
-      [[ "$have" == "$want" ]] && found=1
+      [[ "$have" == -* ]] || continue
+      have_name="${have%%=*}"
+      have_name="${have_name#-}"
+      have_name="${have_name#-}"
+      [[ "$have_name" == "$want_name" ]] || continue
+      count=$((count + 1))
+      [[ "$have" == "$want" ]] && matched=1
     done
-    [[ "$found" -eq 1 ]] || return 1
+    [[ "$count" -eq 1 && "$matched" -eq 1 ]] || return 1
   done
 }
 if extra_args_have PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d \
