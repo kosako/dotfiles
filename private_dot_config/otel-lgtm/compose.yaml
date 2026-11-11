@@ -9,7 +9,14 @@
 # address to every interface of the host. The image is pinned by version
 # AND digest; change both in one PR. Prometheus converts delta metrics to
 # cumulative on OTLP ingestion: Codex sends every metric as delta, which
-# Prometheus otherwise rejects (#517). See docs/otel-backend.md.
+# Prometheus otherwise rejects (#517).
+# The binds need the Colima VM to mount exactly two host directories:
+# ~/.config/otel-lgtm read-only (the Collector archive config and the
+# Grafana dashboards next to this file) and ~/.local/share/otel-lgtm/archive
+# writable (the raw telemetry, kept for re-ingesting into another backend).
+# create_host_path is false on every bind, so a directory the VM does not
+# mount fails the start instead of being created inside the VM, where the
+# archive would silently not reach the host. See docs/otel-backend.md.
 name: otel-lgtm
 services:
   lgtm:
@@ -18,11 +25,35 @@ services:
     restart: unless-stopped
     environment:
       PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative
+      OTELCOL_EXTRA_ARGS: --config=file:/otel-lgtm/otelcol-archive.yaml
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4317:4317"
       - "127.0.0.1:4318:4318"
     volumes:
       - data:/data
+      - type: bind
+        source: ./otelcol/archive.yaml
+        target: /otel-lgtm/otelcol-archive.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./grafana/provisioning/agents.yaml
+        target: /otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./grafana/dashboards
+        target: /otel-lgtm/agent-dashboards
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME}/.local/share/otel-lgtm/archive
+        target: /archive
+        bind:
+          create_host_path: false
 volumes:
   data:

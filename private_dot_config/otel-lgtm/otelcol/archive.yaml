@@ -1,0 +1,43 @@
+# Managed by chezmoi from kosako/dotfiles (otel-backend module, #517).
+# Extra OpenTelemetry Collector config for the otel-lgtm container, layered
+# on the image's own otelcol-config.yaml through OTELCOL_EXTRA_ARGS
+# (--config=file:...). It only ADDS pipelines (*/archive) next to the
+# image's traces / metrics / logs ones, so it does not depend on how the
+# image names its own exporters. Each archive pipeline takes what the otlp
+# receiver got, unprocessed, and writes it as newline-delimited OTLP JSON
+# (uncompressed, so a later Collector's otlpjsonfile receiver can read it
+# back) to /archive, which compose binds to ~/.local/share/otel-lgtm/archive
+# on the host. Nothing is ever deleted: max_days is left unset (no age
+# limit) and max_backups is set high on purpose, because the meaning of 0
+# is not documented. See docs/otel-backend.md.
+exporters:
+  file/archive-traces:
+    path: /archive/traces.jsonl
+    format: json
+    rotation:
+      max_megabytes: 64
+      max_backups: 100000
+  file/archive-metrics:
+    path: /archive/metrics.jsonl
+    format: json
+    rotation:
+      max_megabytes: 64
+      max_backups: 100000
+  file/archive-logs:
+    path: /archive/logs.jsonl
+    format: json
+    rotation:
+      max_megabytes: 64
+      max_backups: 100000
+
+service:
+  pipelines:
+    traces/archive:
+      receivers: [otlp]
+      exporters: [file/archive-traces]
+    metrics/archive:
+      receivers: [otlp]
+      exporters: [file/archive-metrics]
+    logs/archive:
+      receivers: [otlp]
+      exporters: [file/archive-logs]
