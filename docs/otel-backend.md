@@ -301,7 +301,8 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 
 読み戻すとき(将来の server の Collector で):
 
-- 保管には直近の 1 年分しか無い。それより前の分は、backend にも保管にも残らない。
+- 保管に残るのは、おおむね直近の 1 年分。回した file は、名前の時刻(回した時刻)から 365 日で消える。今書いている
+  file と、回した file の中の古い data は、それより少し長く残る(上の注意)。backend の data も 1 年で消える。
 - `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、圧縮しない改行区切りの OTLP JSON を読める
   (upstream の README)。signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build にも
   `otlp_json_file` の名前で入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。
@@ -354,9 +355,10 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 
 - backend の data は named volume `otel-lgtm_data`(VM の disk の中)。container や VM を再起動しても残る。
 - 消すとき: `docker-compose -f ~/.config/otel-lgtm/compose.yaml down -v`(container と volume を消す)。VM ごと
-  消すなら `colima delete`。**どちらも保管の file には触れない**(host にあるため)。保管の file を消すのは、
-  `~/.local/share/otel-lgtm/archive/` を人が消すときだけ。
-- backend と保管の file は、どちらも 1 年で消える(上の「保存期間」)。volume の増え方は未確認(起動の直後で約 0.7GB)。
+  消すなら `colima delete`。**どちらも保管の file には触れない**(host にあるため)。保管の file は、回した file が
+  365 日で消える(上の「生データの保管と読み戻し」)ほかは、`~/.local/share/otel-lgtm/archive/` を人が消すときだけ消える。
+- backend と保管の file は、どちらも 1 年で消える(上の「保存期間」。保管は回した file の単位で、今書いている file は期間
+  では消えない)。volume の増え方は未確認(起動の直後で約 0.7GB)。
 - telemetry には tool の出力の抜粋が入りうる(agent-tools#652)。data は手元に留め、外へは送らない。外部の
   backend への転送と項目の絞り込みは、この module の範囲外。
 
@@ -409,7 +411,8 @@ compose file があるときは、実行時の状態と保管の directory を**
 - docker の socket は、使える process にとって強い権限になる。VM に mount する host の directory を 2 つ(設定は
   読み取りだけ、保管だけ書き込み可)に限ることで、影響を狭めている。doctor がこの mount の形を確かめる。
 - 保存期間は 1 年なので、それまでは容量が増え続ける。1 年分の量は未確認(上の「保存期間」の容量)。
-- 1 年より前の telemetry は、backend にも保管にも残らない。将来の server へ読み戻せるのは、直近の 1 年分。
+- 1 年を過ぎた telemetry は、backend からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
+  では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。

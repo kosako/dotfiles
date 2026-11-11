@@ -263,9 +263,25 @@ fi
 #     feature must be one of the comma-separated names of an
 #     --enable-feature= argument exactly: a substring match would take
 #     otlp-deltatocumulative-typo for it (Codex review, PR #518).
-prom_args=()
-read -ra prom_args <<< "$(yq -r '.services.lgtm.environment.PROMETHEUS_EXTRA_ARGS // ""' "$managed")"
+# extra_args_of VAR — set extra_args to the arguments the image's run-*.sh
+# scripts make of VAR: they read the value with `read -ra`, which splits on
+# whitespace and keeps the FIRST LINE only. So VAR must be one string on
+# one line: a YAML list, or a multi-line string whose later lines the image
+# would drop, returns 1 with no arguments (Codex review, PR #522).
+extra_args=()
+extra_args_of() {
+  local value
+  extra_args=()
+  [[ "$(V="$1" yq -r '.services.lgtm.environment[strenv(V)] | tag' "$managed" 2>/dev/null)" == "!!str" ]] || return 1
+  value="$(V="$1" yq -r '.services.lgtm.environment[strenv(V)]' "$managed" 2>/dev/null)" || return 1
+  [[ "$value" != *$'\n'* ]] || return 1
+  read -ra extra_args <<< "$value"
+}
 delta_feature=0
+prom_args=()
+if extra_args_of PROMETHEUS_EXTRA_ARGS; then
+  prom_args=(${extra_args[@]+"${extra_args[@]}"})
+fi
 for prom_arg in ${prom_args[@]+"${prom_args[@]}"}; do
   case "$prom_arg" in
     --enable-feature=*)
@@ -293,16 +309,15 @@ fi
 #     period. Tempo: the block retention of both the backend scheduler and
 #     the backend worker (both are set rather than guessing which one
 #     prunes). The archive's max_days (section 5) is the same year.
-# extra_args_have VAR ARG... — every ARG is one of VAR's whitespace-split
-# arguments, exactly.
+# extra_args_have VAR ARG... — VAR is one one-line string (extra_args_of)
+# and every ARG is one of its whitespace-split arguments, exactly.
 extra_args_have() {
   local var="$1" want have found
   shift
-  local args=()
-  read -ra args <<< "$(V="$var" yq -r '.services.lgtm.environment[strenv(V)] // ""' "$managed")"
+  extra_args_of "$var" || return 1
   for want in "$@"; do
     found=0
-    for have in ${args[@]+"${args[@]}"}; do
+    for have in ${extra_args[@]+"${extra_args[@]}"}; do
       [[ "$have" == "$want" ]] && found=1
     done
     [[ "$found" -eq 1 ]] || return 1
