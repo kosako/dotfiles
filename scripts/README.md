@@ -1176,7 +1176,7 @@ test は umask 022 に固定して確かめる。#332 F38)、隣に置いた `se
 
 ## test-otel-backend.sh
 
-otel-backend module(#514 / #517)を検証する。personal で `~/.config/otel-lgtm/` の 4 つの file(compose file・
+otel-backend module(#514 / #517 / #525)を検証する。personal で `~/.config/otel-lgtm/` の 5 つの file(compose file・
 `otelcol/archive.yaml`・`grafana/provisioning/agents.yaml`・`grafana/dashboards/agents.json`・`grafana/dashboards/claude-code.json`)が apply され work では
 されないこと(work が持つ自前の compose file は byte 単位で不変)、managed-by の header(dashboard は strict な JSON
 なので description)、compose file が YAML として parse でき定義が pin どおりであること(key を sort して比べる)。
