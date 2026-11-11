@@ -25,12 +25,13 @@ modules:
     paths:
       - .config/agent-tools/usage-reader.json
   otel-backend:
-    description: local の OpenTelemetry backend の定義(#514)。managed な ~/.config/otel-lgtm/compose.yaml に、grafana/otel-lgtm の container の定義(版と digest で固定した image、127.0.0.1 だけに公開する 3 つの port、named volume、restart policy)を置く。#517 で、受け取った生の telemetry を host の ~/.local/share/otel-lgtm/archive に書く Collector の設定(otelcol/archive.yaml)と、AI agent 用の Grafana の dashboard(grafana/provisioning/agents.yaml と grafana/dashboards/agents.json)を足した。compose はこの directory の file を読み取りだけで、保管の directory だけを書き込み可で container に渡す(Colima の VM はこの 2 つの directory だけを mount する)。AI agent の telemetry を手元で受ける受け口で、agent-tools#652 が送り先として前提にする。apply は file を置くだけで、container runtime(Colima)の起動・常駐の登録・container の起動は人が明示して実行する。port を 127.0.0.1 に限るのは、Grafana が認証なしで API に応え、Colima が address を省いた公開を host の全 interface に転送するため。work には配布しない(2026-11-11 に決定)。
+    description: local の OpenTelemetry backend の定義(#514)。managed な ~/.config/otel-lgtm/compose.yaml に、grafana/otel-lgtm の container の定義(版と digest で固定した image、127.0.0.1 だけに公開する 3 つの port、named volume、restart policy)を置く。#517 で、受け取った生の telemetry を host の ~/.local/share/otel-lgtm/archive に書く Collector の設定(otelcol/archive.yaml)と、AI agent 用の Grafana の dashboard(grafana/provisioning/agents.yaml と grafana/dashboards/agents.json)を足した。#525 で Claude Code 用の dashboard(grafana/dashboards/claude-code.json)を足した。compose はこの directory の file を読み取りだけで、保管の directory だけを書き込み可で container に渡す(Colima の VM はこの 2 つの directory だけを mount する)。AI agent の telemetry を手元で受ける受け口で、agent-tools#652 が送り先として前提にする。apply は file を置くだけで、container runtime(Colima)の起動・常駐の登録・container の起動は人が明示して実行する。port を 127.0.0.1 に限るのは、Grafana が認証なしで API に応え、Colima が address を省いた公開を host の全 interface に転送するため。work には配布しない(2026-11-11 に決定)。
     paths:
       - .config/otel-lgtm/compose.yaml
       - .config/otel-lgtm/otelcol/archive.yaml
       - .config/otel-lgtm/grafana/provisioning/agents.yaml
       - .config/otel-lgtm/grafana/dashboards/agents.json
+      - .config/otel-lgtm/grafana/dashboards/claude-code.json
   supply-chain-git:
     description: Git credential 漏洩防止と remote URL 検査。
   supply-chain-npm:
