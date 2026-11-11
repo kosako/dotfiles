@@ -1,0 +1,18 @@
+# Managed by chezmoi from kosako/dotfiles (otel-backend module, #517).
+# Grafana dashboard provider for the AI agent dashboards. compose binds
+# this file into the image's provisioning directory next to the image's own
+# providers, and binds ~/.config/otel-lgtm/grafana/dashboards (read-only) to
+# the path below. Edits made in the Grafana UI are refused: the JSON in
+# dotfiles is the source of truth. See docs/otel-backend.md.
+apiVersion: 1
+
+providers:
+  - name: "AI agents"
+    folder: "AI agents"
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/agent-dashboards
+      foldersFromFilesStructure: false

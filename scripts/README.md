@@ -1155,15 +1155,26 @@ test は umask 022 に固定して確かめる。#332 F38)、隣に置いた `se
 
 ## test-otel-backend.sh
 
-otel-backend module(#514)を検証する。personal で `~/.config/otel-lgtm/compose.yaml` が apply され work では
-されないこと(work が持つ自前の file は byte 単位で不変)、1 行目の managed-by header、YAML として parse でき定義が
-pin どおりであること(key を sort して比べる)。pin とは別に、定義が守る性質も確かめる: image が
-`name:X.Y.Z@sha256:<64 hex>`、すべての port が `127.0.0.1:` で始まる文字列(map の形と address の省略は不合格)、
-mount が top-level で宣言した named volume だけで、その宣言が空(host の path と、`driver_opts` などを持つ宣言は不合格)、権限を広げる key(`privileged`・
-`network_mode`・`pid`・`cap_add` など)が無い、restart policy が `unless-stopped`、Prometheus が delta の metric を変換する
-`--enable-feature=otlp-deltatocumulative`(Codex の metric は delta。#517)。mode は file 0644 / directory 0755
-(umask 022 に固定して確かめる。#332 F38)。chezmoi と yq が必要(render job)。実 home には触れず、container runtime
-とは通信しない。
+otel-backend module(#514 / #517)を検証する。personal で `~/.config/otel-lgtm/` の 4 つの file(compose file・
+`otelcol/archive.yaml`・`grafana/provisioning/agents.yaml`・`grafana/dashboards/agents.json`)が apply され work では
+されないこと(work が持つ自前の compose file は byte 単位で不変)、managed-by の header(dashboard は strict な JSON
+なので description)、compose file が YAML として parse でき定義が pin どおりであること(key を sort して比べる)。
+pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@sha256:<64 hex>`、すべての port が `127.0.0.1:` で
+始まる文字列(map の形と address の省略は不合格)、host の path は許可した bind だけ(long syntax の bind で
+`create_host_path: false`、source は compose の directory の下の `./...` を読み取りだけか、保管の directory
+`${HOME}/.local/share/otel-lgtm/archive` を `/archive` に書き込み可。`..`・絶対 path・short syntax の bind・2 つ目の
+書き込み可の bind・ほかの key は不合格)、named volume の宣言が空、権限を広げる key(`privileged`・`network_mode`・
+`pid`・`cap_add` など)が無い、restart policy が `unless-stopped`、Prometheus が delta の metric を変換する
+`--enable-feature=otlp-deltatocumulative`(空白で引数に分け、comma で分けた feature の名前で確かめる。#517)、
+`OTELCOL_EXTRA_ARGS` が bind した保管の設定を指すこと。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
+足すだけで(image の pipeline を上書きしない)、`otlp` から processor なしで `file` exporter に書き、file は `/archive`
+の下の別々の JSON、圧縮なし、期間の上限なし、`max_megabytes` が 1 以上 1024 以下の整数、`max_backups` が 0(回した file を全部残す。実測)。receivers と exporters は
+配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
+directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard は strict な JSON
+の object で、uid が `ai-agents-codex`、どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object
+(名前の文字列は不合格)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
+directory 0755(umask 022 に固定して確かめる。#332 F38)。chezmoi・yq・jq が必要(render job)。実 home には触れず、
+container runtime とは通信しない。
 
 ## test-agent-tools-usage-reader.sh
 

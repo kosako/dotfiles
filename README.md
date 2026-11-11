@@ -47,6 +47,7 @@ personal project として段階的に作っている。現時点の実装状況
 | herdr config(UI の設定と OS 通知の配信先、[docs/herdr-config.md](docs/herdr-config.md)) | 実装済み・実機適用済み(personal のみ、#261) |
 | agent-tools の残量の読み取り口の設定(`usage-reader.json`、[docs/agent-tools-usage-reader.md](docs/agent-tools-usage-reader.md)) | 実装済み・実機適用済み(personal のみ、#301) |
 | local の OpenTelemetry backend の定義(grafana/otel-lgtm の compose file。image は版と digest で固定、port は 127.0.0.1 だけ、[docs/otel-backend.md](docs/otel-backend.md)) | 実装済み・実機適用済み(personal のみ、#514) |
+| AI agent の telemetry の dashboard と、再収集のための生データの保管(Grafana の provisioning、Collector の file の出力、[docs/otel-backend.md](docs/otel-backend.md)) | 実装済み・実機適用済み(personal のみ、#517) |
 
 「実機適用済み」は、現時点でこの author の Mac 上で managed file が実際に稼働しているという意味(実機の状態は repo からは検証できないので、この列は運用記録。repo 側で機械検証されるのは managed template と render / test の整合まで)。VS Code は未使用のため管理しない(#16。dormant 配線も #145 で削除)。SSH の移行手順は [docs/ssh.md](docs/ssh.md)。
 
