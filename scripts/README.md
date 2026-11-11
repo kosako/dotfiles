@@ -1066,7 +1066,7 @@ managed file は modify script(#360)なので、live の file がある home へ
 未知の key と `/model` の選択(`model`)が値も位置もそのまま残る、managed の key の古い値は render に戻り要らない
 `sandbox` は消える、2 回目の apply で byte 単位で変わらず `chezmoi diff` が空、object の key の順だけ違う値は live の
 byte のまま残る、`model` が無ければ template の値が入る、hook の capability が全部 false なら live の `hooks` が消える、
-capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox`)と同じ、ちょうど 1 つの JSON の
+capability で出し入れする top-level の key が script の削除の一覧(`hooks` / `sandbox` / `env`)と同じ、ちょうど 1 つの JSON の
 object でない live の file(配列・壊れた JSON・空白だけ・object 2 つ・改行だけ・NUL を含む。末尾の NUL も)は apply を止めて
 byte 単位で変えない、UTF-8 でない byte を string に含むだけの live の file は UTF-8 の locale でも apply が通り byte 単位で
 変わらない、file の無い home への初回の apply の直後も `chezmoi diff` が空で 2 回目の apply が byte を変えない(chezmoi は script に
@@ -1077,7 +1077,13 @@ live の file への `chezmoi diff` は通常の `TMPDIR` のときと同じ差�
 mktemp が走らず(BSD の mktemp は `TMPDIR` が無いと別の dir に作る)、jq が live の file を pipe から読む(/bin/sh の bash は
 here-document を一時 file に置く)ことも見る。決まった path への書き込みまでは見ない。PATH の先頭に置いた jq の shim が
 記録する引数に、live の file の `autoMode` だけにある値が diff・apply・2 回目の diff のどこでも出ない(見るのは jq の引数
-だけ)。固定の home(`/dotfiles-render-test-home`)で `enableBridgeOneHook` を off にした personal の render は、
+だけ。managed の JSON も stdin で渡すので引数に出ない。#523)。telemetry の env(#523): `enableClaudeTelemetry` を明示して
+on / off にした source で、送り先の file が無い render に `env` が無いこと、file があると `env` がちょうど 6 つの変数で送り先が
+file の値(前後の空白を落とす)と同じこと、ほかの key は変わらないこと、off なら file を無視すること、形の正しくない file
+(空・comment だけ・値が 2 つ・認証情報・query・fragment・signal の path・別の scheme・IPv6 の literal・空白を含む・4096 byte
+を超える・directory)では apply が失敗し live の file が byte で変わらないこと、file を消すと前の apply の `env` が消えること、
+live の `env` に手で足した変数が消え 2 回目の apply と diff が何も変えないこと、送り先が jq の引数に出ないこと、`env` が
+capability で出し入れする key で script の削除の一覧にあること。固定の home(`/dotfiles-render-test-home`)で `enableBridgeOneHook` を off にした personal の render は、
 `scripts/testdata/claude-settings.personal.json` と正規化せずに byte で同じで、on にした render は、その file に Bridge One の entry の
 行だけを足したものと byte で同じ(#508。正規化した比較では整形だけの変化を捕まえられないため)。commit された personal の render は、
 profile の値に合うほうと byte で同じ(#510 で personal は on)。hooks の組み合わせの検査も flag を明示して off にした render を基準にするので、

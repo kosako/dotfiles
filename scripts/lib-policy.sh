@@ -665,7 +665,8 @@ environment_kind_forbidden_capabilities() {
         installGuiApps \
         allowSecretsAccess \
         allowNetworkTunnels \
-        enableAiTools
+        enableAiTools \
+        enableClaudeTelemetry
       ;;
     client | agent)
       printf '%s\n' \
@@ -674,7 +675,8 @@ environment_kind_forbidden_capabilities() {
         allowSecretsAccess \
         allowNetworkTunnels \
         enableAiTools \
-        enableBridgeOneHook
+        enableBridgeOneHook \
+        enableClaudeTelemetry
       ;;
     sandbox)
       printf '%s\n' allowSecretsAccess

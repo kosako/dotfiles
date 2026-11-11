@@ -2413,6 +2413,83 @@ else
   status=1
 fi
 
+# CT) Claude Code telemetry (#523): the section looks only at whether the
+#     endpoint file is there (never its value). Each case has its own HOME,
+#     and the capability is flipped by name for personal so the cases do not
+#     depend on the committed value. Every run stays exit 0 (report-only).
+ct_root="$fixture_home/.dotfiles-claude-telemetry"
+copy_repo_fixture "$ct_root"
+flip_profile_capability "$ct_root" personal enableClaudeTelemetry true
+ct_home="$fixture_home/ct"
+ct_file="$ct_home/.config/dotfiles/claude-telemetry.local"
+mkdir -p "$ct_home"
+ct_ok="[ok] enableClaudeTelemetry=true; managed ~/.claude/settings.json sends Claude Code metrics and events over OTLP/HTTP to the endpoint in $ct_file (value not shown; prompts, responses, tool output and API bodies stay off, tool details on)"
+ct_absent="[warn] enableClaudeTelemetry=true but there is no endpoint file: $ct_file — Claude Code sends no telemetry until it holds one line, the OTLP/HTTP base endpoint (docs/claude-settings.md), and chezmoi apply has run"
+ct_not_file="[warn] enableClaudeTelemetry=true but $ct_file is not a readable regular file — chezmoi apply stops on it (a broken link counts as no file: no telemetry); make it a file holding one line, the OTLP/HTTP base endpoint (docs/claude-settings.md)"
+ct_unchecked="[warn] enableClaudeTelemetry=true; whether $ct_file exists is not checked (a directory on its path cannot be entered)"
+# ct_case LABEL ROOT WANT [NOT...] — doctor (personal) with HOME=$ct_home
+# prints the line WANT and none of the lines NOT, and exits 0.
+ct_case() {
+  local label="$1" case_root="$2" want="$3" not
+  shift 3
+  if ct_out="$(HOME="$ct_home" "$case_root/scripts/doctor.sh" personal 2>&1)"; then
+    if ! grep -Fxq -- "$want" <<< "$ct_out"; then
+      printf '%s\n' "$ct_out" >&2
+      fail "test failed: Claude Code telemetry ($label): missing line: $want"
+      status=1
+      return
+    fi
+    for not in "$@"; do
+      if grep -Fxq -- "$not" <<< "$ct_out"; then
+        printf '%s\n' "$ct_out" >&2
+        fail "test failed: Claude Code telemetry ($label): unexpected line: $not"
+        status=1
+        return
+      fi
+    done
+    ok "test passed: Claude Code telemetry ($label)"
+  else
+    printf '%s\n' "$ct_out" >&2
+    fail "test failed: doctor must stay exit 0 (Claude Code telemetry, $label)"
+    status=1
+  fi
+}
+#     CT-a) no endpoint file (no ~/.config at all) -> the no-file warn.
+ct_case "no endpoint file" "$ct_root" "$ct_absent" "$ct_ok" "$ct_not_file" "$ct_unchecked"
+#     CT-b) a regular file -> ok naming the path; the marker value is not shown.
+mkdir -p "${ct_file%/*}"
+printf 'http://dotfiles-doctor-probe.invalid:4318\n' > "$ct_file"
+ct_case "endpoint file present" "$ct_root" "$ct_ok" "$ct_absent" "$ct_not_file" "$ct_unchecked"
+if grep -Fq 'dotfiles-doctor-probe' <<< "$ct_out"; then
+  fail "test failed: Claude Code telemetry: doctor printed the endpoint value"
+  status=1
+fi
+#     CT-c) an unreadable file and a directory in its place -> the not-a-file warn.
+chmod 000 "$ct_file"
+ct_case "unreadable endpoint file" "$ct_root" "$ct_not_file" "$ct_ok" "$ct_absent"
+rm -f "$ct_file"
+mkdir "$ct_file"
+ct_case "directory in the endpoint file's place" "$ct_root" "$ct_not_file" "$ct_ok" "$ct_absent"
+rmdir "$ct_file"
+#     CT-d) a directory on the path that cannot be entered -> not checked,
+#           never "no file".
+chmod 000 "${ct_file%/*}"
+ct_case "endpoint file's directory not enterable" "$ct_root" "$ct_unchecked" "$ct_ok" "$ct_absent" "$ct_not_file"
+chmod 755 "${ct_file%/*}"
+#     CT-e) capability off with the file present -> not active, plus the
+#           present-but-unused item.
+ct_off_root="$fixture_home/.dotfiles-claude-telemetry-off"
+copy_repo_fixture "$ct_off_root"
+flip_profile_capability "$ct_off_root" personal enableClaudeTelemetry false
+printf 'http://dotfiles-doctor-probe.invalid:4318\n' > "$ct_file"
+ct_case "capability off" "$ct_off_root" "[ok] enableClaudeTelemetry not active (false)" "$ct_ok" "$ct_absent"
+if ! grep -Fxq "[info] - $ct_file is present but not used (enableClaudeTelemetry=false)" <<< "$ct_out"; then
+  printf '%s\n' "$ct_out" >&2
+  fail "test failed: Claude Code telemetry (capability off): the present-but-unused item is missing"
+  status=1
+fi
+rm -f "$ct_file"
+
 # DR) enableDirenv selects the doctor check only (#401): with it false, the
 #     report says the check is skipped and that the shell hook still runs,
 #     not that direnv is off (the managed ~/.zshrc registers the hook
@@ -2670,6 +2747,7 @@ for ql_dangling in \
   "gateUnusedClaudeMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
   "enableToolCallRecordHook=true but the claude-settings module is inactive for this profile; no managed settings carry the record hook (dangling capability)" \
   "enableJaReplyGuardHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Japanese reply guard (dangling capability)" \
+  "enableClaudeTelemetry=true but the claude-settings module is inactive for this profile; no managed settings carry the telemetry env (dangling capability)" \
   "gateGitHubMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
   "enableGitHubIsolatedReader=true but the claude-settings module is inactive for this profile; no managed settings carry the hook registration (dangling capability)"; do
   if grep -Fxq "[warn] $ql_dangling" <<< "$ql_out"; then

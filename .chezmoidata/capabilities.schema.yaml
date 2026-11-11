@@ -86,6 +86,9 @@ capabilities:
   enableBridgeOneHook:
     type: boolean
     implemented: true
+  enableClaudeTelemetry:
+    type: boolean
+    implemented: true
   codexReviewEffort:
     type: enum
     implemented: true

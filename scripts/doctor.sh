@@ -2389,6 +2389,40 @@ else
   ok "enableBridgeOneHook not active (false)"
 fi
 
+section "Claude Code telemetry (report-only)"
+# enableClaudeTelemetry (#523) emits, in the managed ~/.claude/settings.json,
+# an env block that turns on Claude Code's OpenTelemetry (metrics and events
+# over OTLP/HTTP, tool details on; prompts, responses, tool output, API
+# bodies and traces off). The destination comes from the untracked
+# ~/.config/dotfiles/claude-telemetry.local, read at apply time; without it
+# the env block is not emitted and nothing is sent. Like the other local
+# files (docs/local-overrides.md) only its presence is looked at here: the
+# value is never read or shown. A malformed file stops chezmoi apply, and a
+# changed file shows as drift of settings.json in the managed drift section
+# until it is applied. Whether the backend answers is the otel backend
+# section's job.
+claude_telemetry_file="$HOME/.config/dotfiles/claude-telemetry.local"
+if [[ "$(capability_value "$profile" enableClaudeTelemetry)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    if [[ -f "$claude_telemetry_file" && -r "$claude_telemetry_file" ]]; then
+      ok "enableClaudeTelemetry=true; managed ~/.claude/settings.json sends Claude Code metrics and events over OTLP/HTTP to the endpoint in $claude_telemetry_file (value not shown; prompts, responses, tool output and API bodies stay off, tool details on)"
+    elif [[ -e "$claude_telemetry_file" || -L "$claude_telemetry_file" ]]; then
+      warn "enableClaudeTelemetry=true but $claude_telemetry_file is not a readable regular file — chezmoi apply stops on it (a broken link counts as no file: no telemetry); make it a file holding one line, the OTLP/HTTP base endpoint (docs/claude-settings.md)"
+    elif absence_confirmed "$claude_telemetry_file"; then
+      warn "enableClaudeTelemetry=true but there is no endpoint file: $claude_telemetry_file — Claude Code sends no telemetry until it holds one line, the OTLP/HTTP base endpoint (docs/claude-settings.md), and chezmoi apply has run"
+    else
+      warn "enableClaudeTelemetry=true; whether $claude_telemetry_file exists is not checked (a directory on its path cannot be entered)"
+    fi
+  else
+    warn "enableClaudeTelemetry=true but the claude-settings module is inactive for this profile; no managed settings carry the telemetry env (dangling capability)"
+  fi
+else
+  ok "enableClaudeTelemetry not active (false)"
+  if [[ -e "$claude_telemetry_file" || -L "$claude_telemetry_file" ]]; then
+    item "$claude_telemetry_file is present but not used (enableClaudeTelemetry=false)"
+  fi
+fi
+
 section "GitHub injection guard (report-only)"
 # gateGitHubMcp / enableGitHubIsolatedReader are safety-hardening capabilities for
 # the GitHub runtime prompt-injection defense (epic #119). Like enforceAiSandbox

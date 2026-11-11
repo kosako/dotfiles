@@ -53,6 +53,11 @@ backup_paths:
   # that path stays out of the public repo; the encrypted archive carries it.
   # Absent => the default roots (~/src, ~/dotfiles).
   - { path: .config/dotfiles/agent-launch-roots.local, type: file, category: ai-tools }
+  # Claude Code telemetry destination (#523): the OTLP base endpoint the
+  # managed ~/.claude/settings.json sends to. It will move to the user's own
+  # server, so it stays out of the public repo; the encrypted archive carries
+  # it. Absent => no telemetry settings, nothing is sent.
+  - { path: .config/dotfiles/claude-telemetry.local, type: file, category: ai-tools }
   # GitHub injection-guard trust list (#119). Holds the self trust basis only
   # (GitHub login + numeric id); the trust basis is is_self and there are no
   # opt-in trusted accounts (docs/ai-policy.md). Read by agent-tools'
