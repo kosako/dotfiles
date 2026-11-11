@@ -187,8 +187,26 @@ fi
 # 4f) Prometheus converts delta metrics on OTLP ingestion. Codex sends every
 #     metric as delta, which Prometheus rejects without this flag ("invalid
 #     temporality and type combination", #517), so dropping it loses all of
-#     Codex's metrics while logs and traces keep arriving.
-if [[ "$(yq -r '.services.lgtm.environment.PROMETHEUS_EXTRA_ARGS // ""' "$managed")" == *"--enable-feature=otlp-deltatocumulative"* ]]; then
+#     Codex's metrics while logs and traces keep arriving. The value is
+#     split as the image's run-prometheus.sh does (on whitespace), and the
+#     feature must be one of the comma-separated names of an
+#     --enable-feature= argument exactly: a substring match would take
+#     otlp-deltatocumulative-typo for it (Codex review, PR #518).
+prom_args=()
+read -ra prom_args <<< "$(yq -r '.services.lgtm.environment.PROMETHEUS_EXTRA_ARGS // ""' "$managed")"
+delta_feature=0
+for prom_arg in ${prom_args[@]+"${prom_args[@]}"}; do
+  case "$prom_arg" in
+    --enable-feature=*)
+      prom_features=()
+      IFS=',' read -ra prom_features <<< "${prom_arg#--enable-feature=}"
+      for prom_feature in ${prom_features[@]+"${prom_features[@]}"}; do
+        [[ "$prom_feature" == "otlp-deltatocumulative" ]] && delta_feature=1
+      done
+      ;;
+  esac
+done
+if [[ "$delta_feature" -eq 1 ]]; then
   ok "test passed: Prometheus converts delta metrics on OTLP ingestion"
 else
   fail "test failed: PROMETHEUS_EXTRA_ARGS must carry --enable-feature=otlp-deltatocumulative (Codex sends delta metrics)"
