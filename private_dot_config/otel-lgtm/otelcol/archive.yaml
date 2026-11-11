@@ -7,29 +7,35 @@
 # receiver got, unprocessed, and writes it as newline-delimited OTLP JSON
 # (uncompressed, so a later Collector's otlpjsonfile receiver can read it
 # back) to /archive, which compose binds to ~/.local/share/otel-lgtm/archive
-# on the host. Nothing is ever deleted: max_days is left unset (no age
-# limit) and max_backups is 0, which keeps every rotated file (measured on
-# this image's Collector, #517: with 1MB files, 0 kept all 7 rotated files
-# while 1 kept only the newest one; the upstream README does not say what
-# 0 means). See docs/otel-backend.md.
+# on the host. Files are kept for one year (#520): max_days 365 deletes a
+# rotated file 365 days after the time in its name (when it was rotated;
+# measured on this image's Collector: with max_days 1, a file named two
+# years back was deleted at the next rotation and the new ones were kept),
+# and max_backups is 0, so no other limit applies (with 1MB files, 0 kept
+# all 7 rotated files while 1 kept only the newest one, #517; the upstream
+# README does not say what 0 means). The file being written is never
+# deleted by age. See docs/otel-backend.md.
 exporters:
   file/archive-traces:
     path: /archive/traces.jsonl
     format: json
     rotation:
       max_megabytes: 64
+      max_days: 365
       max_backups: 0
   file/archive-metrics:
     path: /archive/metrics.jsonl
     format: json
     rotation:
       max_megabytes: 64
+      max_days: 365
       max_backups: 0
   file/archive-logs:
     path: /archive/logs.jsonl
     format: json
     rotation:
       max_megabytes: 64
+      max_days: 365
       max_backups: 0
 
 service:

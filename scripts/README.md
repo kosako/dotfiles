@@ -1180,9 +1180,10 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 書き込み可の bind・ほかの key は不合格)、named volume の宣言が空、権限を広げる key(`privileged`・`network_mode`・
 `pid`・`cap_add` など)が無い、restart policy が `unless-stopped`、Prometheus が delta の metric を変換する
 `--enable-feature=otlp-deltatocumulative`(空白で引数に分け、comma で分けた feature の名前で確かめる。#517)、
-`OTELCOL_EXTRA_ARGS` が bind した保管の設定を指すこと。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
+`OTELCOL_EXTRA_ARGS` が bind した保管の設定を指すこと、Prometheus・Loki・Tempo が 1 年残す指定(`*_EXTRA_ARGS` を
+空白で引数に分け、引数ごとに完全一致で比べる。#520)。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
 足すだけで(image の pipeline を上書きしない)、`otlp` から processor なしで `file` exporter に書き、file は `/archive`
-の下の別々の JSON、圧縮なし、期間の上限なし、`max_megabytes` が 1 以上 1024 以下の整数、`max_backups` が 0(回した file を全部残す。実測)。receivers と exporters は
+の下の別々の JSON、圧縮なし、期間の上限なし、`max_megabytes` が 1 以上 1024 以下の整数、`max_days` が 365、`max_backups` が 0(実測で、0 は回した file を全部残す)。receivers と exporters は
 配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
 directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard は strict な JSON
 の object で、uid が `ai-agents-codex`、どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object

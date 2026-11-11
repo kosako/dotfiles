@@ -1,4 +1,4 @@
-# local の OpenTelemetry backend(`otel-backend` module、#514 / #517)
+# local の OpenTelemetry backend(`otel-backend` module、#514 / #517 / #520)
 
 AI agent(Codex など)の telemetry を、手元で受けて見るための backend。
 [grafana/docker-otel-lgtm](https://github.com/grafana/docker-otel-lgtm)(OpenTelemetry Collector・Prometheus・Tempo・
@@ -35,7 +35,8 @@ compose file の定義:
 | `ports` | `127.0.0.1:3000`(Grafana)・`127.0.0.1:4317`(OTLP/gRPC)・`127.0.0.1:4318`(OTLP/HTTP) | 下の「port を 127.0.0.1 に限る理由」 |
 | `volumes` | named volume `data` を `/data` に。bind は下の表の 4 つ | backend の data は VM の中、host から渡すのは決めた path だけ |
 | `restart` | `unless-stopped` | docker の daemon と一緒に戻る(常時起動の 2 段目) |
-| `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative` | 下の「metric の temporality」 |
+| `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d` | 下の「metric の temporality」と「保存期間」 |
+| `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定) | 下の「保存期間」 |
 | `environment` | `OTELCOL_EXTRA_ARGS: --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline を重ねる |
 
 bind(どれも long syntax で `bind.create_host_path: false`):
@@ -237,6 +238,41 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   `codex.sse_event` の `event_kind="response.completed"`(input / output / cached / reasoning_token_count)、
   `codex.turn_ttft`(duration_ms)、`codex.tool_result`(tool_name・success・duration_ms)。
 
+## 保存期間
+
+telemetry は、backend も保管の file も 1 年残す(#520)。image の既定では、Prometheus は 15 日、Tempo は 14 日で消え、
+Loki は消さない。
+
+| 対象 | 指定 | 実効の値(使い捨ての container で確認) |
+| --- | --- | --- |
+| Prometheus(metric) | `PROMETHEUS_EXTRA_ARGS` に `--storage.tsdb.retention.time=365d` | `storageRetention: 1y` |
+| Loki(log) | `LOKI_EXTRA_ARGS` に `-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem` | `compactor.retention_enabled: true`、`limits_config.retention_period: 1y` |
+| Tempo(trace) | `TEMPO_EXTRA_ARGS` に `-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h` | 2 か所の `block_retention` が `8760h` |
+| 保管の file | 保管の設定の `rotation.max_days: 365` | 下の「生データの保管と読み戻し」 |
+
+- 値は image の起動 script が空白で引数に分けて、各 backend の起動の引数の末尾に足す。
+- Prometheus の `--storage.tsdb.retention.time` は、3.15 で DEPRECATED になった(設定 file の項目が推奨)。この版では
+  動く。image を更新するときは、flag が残っているかを確かめる(下の「image の更新」)。
+- Loki は、compactor の保持を有効にしないと `-store.retention` が効かない(flag の help のとおり)。期間を過ぎた
+  chunk は、compactor が既定の 2 時間の猶予の後に消す。
+- Tempo 3 は 1 つの process(`target: all`)で動き、`block_retention` が backend scheduler と backend worker の 2 か所に
+  ある。どちらが消す側かを決め打ちせず、両方を指定する。
+- `test-otel-backend.sh` が、4 つとも 1 年であることを確かめる(どれか 1 つだけ期間が違う状態を防ぐ)。
+- 実効の値の確かめ方(container の中から):
+
+  ```sh
+  docker exec otel-lgtm curl -s http://127.0.0.1:9090/api/v1/status/runtimeinfo | grep -o '"storageRetention":"[^"]*"'
+  docker exec otel-lgtm curl -s http://127.0.0.1:3100/config | grep -E '^\s+(retention_enabled|retention_period):'
+  docker exec otel-lgtm curl -s http://127.0.0.1:3200/status/config | grep -E '^\s+block_retention:'
+  ```
+
+  Loki は `retention_period` を 2 行出す。`1y` が `limits_config` の値で、`0s` は今の storage(tsdb と compactor)では使われない
+  `table_manager` の項目。
+
+容量(2026-11-11 の観測): docker の data は VM の別の disk(`/var/lib/docker`、30GB)にあり、使用は 4.0GB(image 3.6GB、
+backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`colima ssh -- df -h /var/lib/docker` で見る。足りなく
+なったら `colima stop` の後に `colima start --disk <GB>` で大きくする(増やすことしかできない)。
+
 ## 生データの保管と読み戻し
 
 いずれ別の server を立てて収集し直すときのために、Collector が受け取った telemetry を、そのまま host の
@@ -247,16 +283,22 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   名前の違う pipeline を足すだけ(Collector の設定の重ね方では、list は置き換わり、map は足される)。
 - file は signal ごとに `traces.jsonl`・`metrics.jsonl`・`logs.jsonl`。中身は改行区切りの OTLP JSON(1 行が 1 回の
   export)で、圧縮しない。
-- 64MB を超えると、`<名前>-<UTC の時刻>-size.jsonl` に回して新しい file に書く。**古い file は消さない**: 期間の上限
-  (`max_days`)は付けず、残す数(`max_backups`)は 0 にした。0 は回した file を全部残す(この image の Collector で実測、
-  #517: 1MB で回す設定で、0 は回した 7 つを全部残し、1 は最新の 1 つだけを残した。upstream の README には 0 の意味が
-  書かれていない)。0 以外の数は、古いものから消す。容量は増え続ける。目安(実測、2026-11-11): 短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が
-  約 0.18MB、log が約 0.03MB)。skill が起動した review(effort が xhigh)の 1 回では、数分で約 8MB になった(ほとんどが
-  trace)。大きさと最後に書いた時刻は doctor が出す(`du -sh ~/.local/share/otel-lgtm/archive` でも見られる)。
+- 64MB を超えると、`<名前>-<UTC の時刻>-size.jsonl` に回して新しい file に書く。**回した file は 1 年残す**(#520):
+  - `max_days: 365` で、回した file を、名前の時刻(回した時刻)から 365 日で消す(この image の Collector で実測:
+    `max_days: 1` の設定に 2 年前の時刻の名前の file を置くと、次に回したときに消え、新しく回った file は残った)。
+  - file の中の最も古い data は、1 年より少し古いことがある(回すまでの間の data が 1 つの file に入るため)。
+  - 今書いている file は、期間では消えない。64MB に達するまで回らないので、量が少ないと 1 年より長く残る。
+  - 残す数(`max_backups`)は 0 にした。0 は回した file を全部残す(実測、#517: 1MB で回す設定で、0 は回した 7 つを
+    全部残し、1 は最新の 1 つだけを残した。upstream の README には 0 の意味が書かれていない)。0 以外の数は、期間より
+    先に古いものを消す。
+- 容量の目安(実測、2026-11-11): 短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が約 0.18MB、log が
+  約 0.03MB)。skill が起動した review(effort が xhigh)の 1 回では、数分で約 8MB になった(ほとんどが trace)。大きさと
+  最後に書いた時刻は doctor が出す(`du -sh ~/.local/share/otel-lgtm/archive` でも見られる)。
 - Collector の自分の metric(`prometheus/collector` の scrape)は入らない。agent から届いたものだけ。
 
 読み戻すとき(将来の server の Collector で):
 
+- 保管には直近の 1 年分しか無い。それより前の分は、backend にも保管にも残らない。
 - `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、圧縮しない改行区切りの OTLP JSON を読める
   (upstream の README)。signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build には
   `otlpjsonfile` receiver が無いので、読み戻しは別の Collector で行う。
@@ -294,9 +336,11 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
    `--feature-gates service.profilesSupport` は、image の設定にある profiles の pipeline のために要る(image の
    `run-otelcol.sh` も付けて起動する。付けないと validate がその pipeline で止まる)。
 
-4. `private_dot_config/otel-lgtm/compose.yaml` の版と digest、`scripts/test-otel-backend.sh` の pin を、同じ PR で
+4. 新しい image の Prometheus・Loki・Tempo が保持の指定を受け付けるかを確かめる(上の「保存期間」の command を、
+   使い捨ての container で実行する。Prometheus の flag は DEPRECATED なので、残っているかを見る)。
+5. `private_dot_config/otel-lgtm/compose.yaml` の版と digest、`scripts/test-otel-backend.sh` の pin を、同じ PR で
    変える。
-5. merge の後、`chezmoi apply` してから `docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d` を実行する
+6. merge の後、`chezmoi apply` してから `docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d` を実行する
    (container が新しい image で作り直される。volume と保管の file は残る)。
 
 設定の file(保管の設定・provider)を変えたときは、`docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
@@ -309,8 +353,7 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 - 消すとき: `docker-compose -f ~/.config/otel-lgtm/compose.yaml down -v`(container と volume を消す)。VM ごと
   消すなら `colima delete`。**どちらも保管の file には触れない**(host にあるため)。保管の file を消すのは、
   `~/.local/share/otel-lgtm/archive/` を人が消すときだけ。
-- backend の保持期間と volume の増え方は未確認(起動の直後で約 0.7GB)。upstream は、`PROMETHEUS_EXTRA_ARGS` や
-  `LOKI_EXTRA_ARGS` で保持期間を渡す例を README に載せている。保持期間で backend から消えても、保管の file には残る。
+- backend と保管の file は、どちらも 1 年で消える(上の「保存期間」)。volume の増え方は未確認(起動の直後で約 0.7GB)。
 - telemetry には tool の出力の抜粋が入りうる(agent-tools#652)。data は手元に留め、外へは送らない。外部の
   backend への転送と項目の絞り込みは、この module の範囲外。
 
@@ -361,7 +404,8 @@ compose file があるときは、実行時の状態と保管の directory を**
 - loopback の port には、同じ Mac の process と browser から届く。Grafana は認証なしで、Admin の権限で応える。
 - docker の socket は、使える process にとって強い権限になる。VM に mount する host の directory を 2 つ(設定は
   読み取りだけ、保管だけ書き込み可)に限ることで、影響を狭めている。doctor がこの mount の形を確かめる。
-- 保管の file は消さないので、容量は増え続ける。
+- 保存期間は 1 年なので、それまでは容量が増え続ける。1 年分の量は未確認(上の「保存期間」の容量)。
+- 1 年より前の telemetry は、backend にも保管にも残らない。将来の server へ読み戻せるのは、直近の 1 年分。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。
@@ -373,9 +417,9 @@ byte 単位で不変)、managed-by の見出し(dashboard は description)、com
 どおり。pin とは別に、定義が守る性質も確かめる: image が版と digest の両方で固定、すべての port が `127.0.0.1`
 だけ、host の path は許可した bind だけ(compose の directory の下を読み取りだけで、保管の directory を `/archive` に
 書き込み可で、どれも `create_host_path: false`)、named volume の宣言の中身が空、Prometheus が delta の metric を
-変換する指定、Collector が bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が
-無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
-processor なしで file に書き、file は `/archive` の下の JSON、期間の上限なし、`max_backups` が 0(全部残す)。provider は
+変換する指定、Prometheus・Loki・Tempo が 1 年残す指定(引数ごとに完全一致)、Collector が bind した保管の設定を読む
+指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
+processor なしで file に書き、file は `/archive` の下の JSON、`max_days` が 365、`max_backups` が 0。provider は
 bind した dashboard の directory を指し、UI での変更を拒む。dashboard は strict な JSON の object で、uid が決まっていて、
 どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列は不合格)。保管の bind は
 ちょうど 1 つ。mode が file 0644 / directory 0755。container runtime とは

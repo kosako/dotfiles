@@ -57,7 +57,7 @@ managed_rel=".config/otel-lgtm/compose.yaml"
 archive_rel=".config/otel-lgtm/otelcol/archive.yaml"
 provider_rel=".config/otel-lgtm/grafana/provisioning/agents.yaml"
 dashboard_rel=".config/otel-lgtm/grafana/dashboards/agents.json"
-expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"OTELCOL_EXTRA_ARGS":"--config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
+expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem","OTELCOL_EXTRA_ARGS":"--config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
 
@@ -284,6 +284,39 @@ else
   status=1
 fi
 
+# 4h) Every backend keeps one year of data (#520), checked per argument the
+#     way the image's run-*.sh scripts split each *_EXTRA_ARGS (on
+#     whitespace), so a value that only contains the flag as a substring
+#     does not pass. Prometheus: its retention flag (deprecated in 3.15 in
+#     favour of the config file, but honoured). Loki: retention needs the
+#     compactor's retention switched on and a delete-request store, and the
+#     period. Tempo: the block retention of both the backend scheduler and
+#     the backend worker (both are set rather than guessing which one
+#     prunes). The archive's max_days (section 5) is the same year.
+# extra_args_have VAR ARG... — every ARG is one of VAR's whitespace-split
+# arguments, exactly.
+extra_args_have() {
+  local var="$1" want have found
+  shift
+  local args=()
+  read -ra args <<< "$(V="$var" yq -r '.services.lgtm.environment[strenv(V)] // ""' "$managed")"
+  for want in "$@"; do
+    found=0
+    for have in ${args[@]+"${args[@]}"}; do
+      [[ "$have" == "$want" ]] && found=1
+    done
+    [[ "$found" -eq 1 ]] || return 1
+  done
+}
+if extra_args_have PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d \
+  && extra_args_have LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem \
+  && extra_args_have TEMPO_EXTRA_ARGS -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h; then
+  ok "test passed: Prometheus, Loki and Tempo keep one year of data"
+else
+  fail "test failed: the backends must keep one year: PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d, LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem, TEMPO_EXTRA_ARGS both block-retention=8760h flags"
+  status=1
+fi
+
 # 4g) The Collector reads the archive config from the read-only bind of
 #     ./otelcol/archive.yaml: OTELCOL_EXTRA_ARGS names exactly that bind's
 #     target (another path would start the Collector without the archive
@@ -303,11 +336,11 @@ section "otel-backend: archive config"
 #    the image's own traces / metrics / logs ones), one per signal, each
 #    taking the otlp receiver's data unprocessed into a file exporter.
 #    Every exporter writes uncompressed newline-delimited OTLP JSON under
-#    /archive (what a later Collector's otlpjsonfile receiver reads back)
-#    and never deletes: no age limit, and max_backups 0, which keeps every
-#    rotated file on this image's Collector (measured, #517; any other
-#    count deletes the oldest ones), and max_megabytes an integer in
-#    1..1024. receivers and exporters must be real lists: a string "[otlp]"
+#    /archive (what a later Collector's otlpjsonfile receiver reads back),
+#    keeps one year (#520): max_days 365, the same year as the backends,
+#    and max_backups 0, which keeps every rotated file on this image's
+#    Collector (measured, #517; any other count deletes the oldest ones
+#    sooner), and max_megabytes an integer in 1..1024. receivers and exporters must be real lists: a string "[otlp]"
 #    is not one (Codex review, PR #519).
 archive_ok=1
 # yq lists keys (and unique values) in document order, so every list is
@@ -331,7 +364,8 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
       or (.value | keys | sort | join(",")) != "format,path,rotation"
       or .value.format != "json"
       or (.value.path | test("^/archive/[a-z]+\\.jsonl$") | not)
-      or (.value.rotation | keys | sort | join(",")) != "max_backups,max_megabytes"
+      or (.value.rotation | keys | sort | join(",")) != "max_backups,max_days,max_megabytes"
+      or (.value.rotation.max_days | tag) != "!!int" or .value.rotation.max_days != 365
       or (.value.rotation.max_megabytes | tag) != "!!int"
       or .value.rotation.max_megabytes < 1 or .value.rotation.max_megabytes > 1024
       or (.value.rotation.max_backups | tag) != "!!int" or .value.rotation.max_backups != 0) | .key' "$archive_cfg" 2>/dev/null)" || [[ -n "$bad_exporters" ]]; then
@@ -339,9 +373,9 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
 fi
 [[ "$(yq -r '[.exporters[].path] | unique | length' "$archive_cfg" 2>/dev/null)" == "3" ]] || archive_ok=0
 if [[ "$archive_ok" -eq 1 ]]; then
-  ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own never-deleted JSON file under /archive"
+  ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own JSON file under /archive kept for one year"
 else
-  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size only (max_megabytes an integer in 1..1024) and max_backups 0"
+  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files under /archive, rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
   status=1
 fi
 

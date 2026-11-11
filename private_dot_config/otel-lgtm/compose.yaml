@@ -9,7 +9,10 @@
 # address to every interface of the host. The image is pinned by version
 # AND digest; change both in one PR. Prometheus converts delta metrics to
 # cumulative on OTLP ingestion: Codex sends every metric as delta, which
-# Prometheus otherwise rejects (#517).
+# Prometheus otherwise rejects (#517). Every backend keeps one year of
+# data (#520): Prometheus by its retention flag, Loki by the compactor's
+# retention (off in the image), Tempo by the block retention of both the
+# backend scheduler and the backend worker (the image's default is 14 days).
 # The binds need the Colima VM to mount exactly two host directories:
 # ~/.config/otel-lgtm read-only (the Collector archive config and the
 # Grafana dashboards next to this file) and ~/.local/share/otel-lgtm/archive
@@ -24,7 +27,9 @@ services:
     container_name: otel-lgtm
     restart: unless-stopped
     environment:
-      PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative
+      PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d
+      LOKI_EXTRA_ARGS: -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem
+      TEMPO_EXTRA_ARGS: -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h
       OTELCOL_EXTRA_ARGS: --config=file:/otel-lgtm/otelcol-archive.yaml
     ports:
       - "127.0.0.1:3000:3000"
