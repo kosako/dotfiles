@@ -1200,7 +1200,14 @@ case "\$1" in
 esac
 exit 97
 SH
-chmod +x "$ob_fakebin/docker" "$ob_fakebin/colima"
+# du passes through to the real one unless the case asks it to fail.
+ob_real_du="$(command -v du)"
+cat > "$ob_fakebin/du" <<SH
+#!/bin/sh
+[ -e $(shell_single_quote "$ob_state/du-fail") ] && exit 1
+exec $(shell_single_quote "$ob_real_du") "\$@"
+SH
+chmod +x "$ob_fakebin/docker" "$ob_fakebin/colima" "$ob_fakebin/du"
 ob_image="$(yq -r '.services.lgtm.image' "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml")"
 ob_ports_loopback='{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":"3000"}],"3200/tcp":null,"4317/tcp":[{"HostIp":"127.0.0.1","HostPort":"4317"}],"4318/tcp":[{"HostIp":"127.0.0.1","HostPort":"4318"}]}'
 ob_config_dir="$ob_home/.config/otel-lgtm"
@@ -1213,7 +1220,7 @@ ob_share_archive="lima-2 on $ob_archive_dir type virtiofs (rw,relatime)"
 # (writable). Each case changes one answer from here. The call log starts
 # empty.
 ob_healthy() {
-  rm -f "$ob_state/ps-hang"
+  rm -f "$ob_state/ps-hang" "$ob_state/du-fail"
   printf 'running\n' > "$ob_state/ps-out"
   printf '0' > "$ob_state/ps-rc"
   printf '%s\n%s\n' "$ob_image" "$ob_ports_loopback" > "$ob_state/inspect-out"
@@ -1236,7 +1243,18 @@ ob_running="[ok] otel backend: container otel-lgtm is running"
 ob_image_ok="[ok] otel backend: the container runs the image the definition pins"
 ob_ports_ok="[ok] otel backend: every published port is on 127.0.0.1"
 ob_mounts_ok="[ok] otel backend: the Colima VM mounts only $ob_config_dir (read-only) and $ob_archive_dir (writable)"
-ob_colima_steps=("        \$ mkdir -p $(printf '%q' "$ob_archive_dir")" "        \$ colima start --mount $(printf '%q' "$ob_config_dir") --mount $(printf '%q' "$ob_archive_dir:w") --ssh-config=false")
+ob_private_step="        \$ chmod 700 $(printf '%q' "${ob_archive_dir%/*}") $(printf '%q' "$ob_archive_dir")"
+ob_colima_steps=("        \$ mkdir -p $(printf '%q' "$ob_archive_dir")" "$ob_private_step" "        \$ colima start --mount $(printf '%q' "$ob_config_dir") --mount $(printf '%q' "$ob_archive_dir:w") --ssh-config=false")
+# ob_steps_in_order OUTPUT STEP... — every STEP is on the line right after
+# the one before it.
+ob_steps_in_order() {
+  local out="$1" prev="$2"
+  shift 2
+  for next in "$@"; do
+    steps_consecutive "$out" "$prev" "$next" || return 1
+    prev="$next"
+  done
+}
 ob_service_off="[info] - otel backend: Colima is not registered as a login service — after a login the backend stays down until Colima is started (brew services start colima registers it)"
 ob_service_on="[info] - otel backend: Colima is registered as a login service (brew services)"
 ob_up_step="        \$ docker-compose -f $(printf '%q' "$ob_managed") up -d"
@@ -1292,9 +1310,11 @@ else
   status=1
 fi
 cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
-# OB-3) docker cannot reach its daemon -> action that starts Colima with
-#       --mount none and --ssh-config=false; nothing is said about the
-#       container, and neither inspect nor colima is run.
+# OB-3) docker cannot reach its daemon -> action whose steps create the
+#       archive directory, make it private and only then start Colima with
+#       both mounts and --ssh-config=false (the container resumes writing
+#       as soon as the VM is up, Codex review, PR #521); nothing is said
+#       about the container, and neither inspect nor colima is run.
 ob_healthy
 printf '1' > "$ob_state/ps-rc"
 : > "$ob_state/ps-out"
@@ -1304,10 +1324,10 @@ if [[ "$ob_rc" -eq 0 ]] \
   && expect_report "$ob_out" "$ob_present" \
     "[warn] otel backend down: docker cannot reach its daemon (docker ps exit 1) — Colima is not running, so nothing receives telemetry on 127.0.0.1" \
     ! "$ob_running" "container otel-lgtm" "VM mounts" \
-  && steps_consecutive "$ob_out" "${ob_colima_steps[0]}" "${ob_colima_steps[1]}"; then
-  ok "test passed: otel backend daemon unreachable -> action whose steps create the archive directory and start Colima with both mounts"
+  && ob_steps_in_order "$ob_out" "${ob_colima_steps[@]}"; then
+  ok "test passed: otel backend daemon unreachable -> action whose steps create the archive directory, chmod 700 it, then start Colima with both mounts"
 else
-  fail "test failed: otel backend daemon unreachable -> expected exit 0 (got $ob_rc), the action and the mkdir step immediately followed by the colima start step with both mounts"
+  fail "test failed: otel backend daemon unreachable -> expected exit 0 (got $ob_rc), the action and the mkdir / chmod 700 / colima start steps in that order"
   status=1
 fi
 if grep -q -e '^docker inspect' -e '^colima ' "$ob_state/calls"; then
@@ -1317,18 +1337,35 @@ if grep -q -e '^docker inspect' -e '^colima ' "$ob_state/calls"; then
 else
   ok "test passed: with the daemon unreachable doctor stops after docker ps"
 fi
-# OB-4) the daemon answers but no such container -> action naming the compose command.
+# OB-4) the daemon answers but no such container -> action naming the
+#       compose command; the image and ports are not read, but the VM's
+#       mounts and the login service still are (Codex review, PR #521).
 ob_healthy
 : > "$ob_state/ps-out"
-ob_expect "no container -> action with the compose step" -- \
+ob_expect "no container -> action with the compose step, mounts still checked" -- \
   "[warn] otel backend down: no container named otel-lgtm — nothing receives telemetry on 127.0.0.1" "$ob_up_step" \
-  ! "$ob_running"
-# OB-5) the container exists but is stopped -> action naming its state.
+  "$ob_mounts_ok" "$ob_service_off" \
+  ! "$ob_running" "$ob_image_ok" "ports not checked"
+if grep -q '^docker inspect' "$ob_state/calls"; then
+  fail "test failed: with no container doctor must not run docker inspect"
+  status=1
+fi
+# OB-4b) no container in a VM made with --mount none (the state before
+#        #517): both actions, so the compose step is not left to fail on
+#        the missing binds.
+ob_healthy
+: > "$ob_state/ps-out"
+printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' > "$ob_state/mount-out"
+ob_expect "no container and no mounts -> both actions" -- \
+  "[warn] otel backend down: no container named otel-lgtm — nothing receives telemetry on 127.0.0.1" \
+  "[warn] otel backend: the Colima VM does not mount $ob_config_dir and $ob_archive_dir — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"
+# OB-5) the container exists but is stopped -> action naming its state;
+#       the mounts are still checked.
 ob_healthy
 printf 'exited\n' > "$ob_state/ps-out"
-ob_expect "container exited -> action with the compose step" -- \
-  "[warn] otel backend down: container otel-lgtm is exited, not running" "$ob_up_step" \
-  ! "$ob_running"
+ob_expect "container exited -> action with the compose step, mounts still checked" -- \
+  "[warn] otel backend down: container otel-lgtm is exited, not running" "$ob_up_step" "$ob_mounts_ok" \
+  ! "$ob_running" "$ob_image_ok"
 # OB-6) running on another image than the definition pins (an older digest
 #       left behind) -> action; the ports and the VM are still checked.
 ob_healthy
@@ -1363,11 +1400,15 @@ printf '1' > "$ob_state/inspect-rc"
 ob_expect "inspect fails -> image and ports not checked" -- \
   "$ob_running" "[warn] otel backend image and ports not checked: docker inspect gave no usable answer (exit 1)" "$ob_mounts_ok" \
   ! "$ob_image_ok" "$ob_ports_ok"
-ob_healthy
-printf '%s\n%s\n' "$ob_image" 'not json' > "$ob_state/inspect-out"
-ob_expect "unreadable port bindings -> ports not checked" -- \
-  "$ob_image_ok" "[warn] otel backend ports not checked: the port bindings docker inspect printed could not be read" \
-  ! "$ob_ports_ok" "otel backend exposed"
+# Not JSON, and JSON that only a lenient reader takes (a missing comma
+# between two members, which yq accepts; Codex review, PR #521).
+for ob_bad_ports in 'not json' '{"3000/tcp":[{"HostIp":"127.0.0.1" "HostPort":"3000"}]}' '{"3000/tcp":[]} {"4318/tcp":[]}'; do
+  ob_healthy
+  printf '%s\n%s\n' "$ob_image" "$ob_bad_ports" > "$ob_state/inspect-out"
+  ob_expect "unreadable port bindings ($ob_bad_ports) -> ports not checked" -- \
+    "$ob_image_ok" "[warn] otel backend ports not checked: the port bindings docker inspect printed could not be read as one JSON object (or jq is not on PATH)" \
+    ! "$ob_ports_ok" "otel backend exposed" "publishes no port"
+done
 # OB-10) the VM's host shares, one departure at a time from the two the
 #        binds need: another share (for each mount type Colima can use) ->
 #        warn naming it; the config directory writable or the archive
@@ -1406,13 +1447,23 @@ for ob_missing in archive both; do
     && expect_report "$ob_out" \
       "[warn] otel backend: the Colima VM does not mount $ob_what — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host" \
       ! "$ob_mounts_ok" \
-    && steps_consecutive "$ob_out" "        \$ colima stop" "${ob_colima_steps[0]}" \
-    && steps_consecutive "$ob_out" "${ob_colima_steps[0]}" "${ob_colima_steps[1]}"; then
+    && ob_steps_in_order "$ob_out" "        \$ colima stop" "${ob_colima_steps[@]}"; then
     ok "test passed: otel backend VM without the $ob_missing mount(s) -> action whose steps restart Colima with both mounts"
   else
-    fail "test failed: otel backend VM without the $ob_missing mount(s) -> expected exit 0 (got $ob_rc), the action and the colima stop / mkdir / colima start steps in that order"
+    fail "test failed: otel backend VM without the $ob_missing mount(s) -> expected exit 0 (got $ob_rc), the action and the colima stop / mkdir / chmod 700 / colima start steps in that order"
     status=1
   fi
+done
+# OB-10b) a host share line that cannot be read (no closing parenthesis,
+#         options not starting with ro / rw) next to the two good ones ->
+#         the mounts are not checked, never ok: skipping the line could
+#         hide a third share (Codex review, PR #521).
+for ob_bad_share in "lima-3 on /Users/someone type virtiofs (rw,relatime" "lima-3 on /Users/someone type 9p (relatime,rw)" "lima-3 on /Users/someone type fuse.sshfs"; do
+  ob_healthy
+  printf '%s\n' "$ob_bad_share" >> "$ob_state/mount-out"
+  ob_expect "unreadable share line ($ob_bad_share) -> mounts not checked" -- \
+    "[warn] otel backend VM mounts not checked: 1 host share line(s) of the VM's mount table could not be read" \
+    ! "$ob_mounts_ok" "does not need" "does not mount"
 done
 # OB-11) colima ssh fails -> not checked, never the mounts ok line.
 ob_healthy
@@ -1460,8 +1511,10 @@ doctor_expect "otel backend without colima on PATH -> the mount check is an item
   ! "$ob_mounts_ok"
 # OB-15) the archive directory on the host: missing -> action naming mkdir
 #        then chmod 700; not private -> action naming chmod 700; empty ->
-#        item that no file is written yet; holding files -> item with the
-#        count. The runtime fakes stay healthy throughout.
+#        item that no file is written yet; unlistable -> not checked;
+#        holding files -> item with the count, the size and the newest
+#        write; du failing -> the size not checked. The runtime fakes stay
+#        healthy throughout.
 ob_healthy
 rm -rf "$ob_archive_dir"
 ob_rc=0
@@ -1485,13 +1538,38 @@ ob_healthy
 ob_expect "empty archive directory -> item" -- \
   "[info] - otel backend archive: no file yet in $ob_archive_dir (the Collector writes one per signal when telemetry arrives)" \
   ! "not private" "archive directory missing"
-printf '{}\n' > "$ob_archive_dir/logs.jsonl"
-printf '{}\n' > "$ob_archive_dir/traces-2026-11-11T00-00-00.000.jsonl"
+# A directory this user cannot list is not checked, never "no file yet"
+# (Codex review, PR #521). Root reads any directory, so the case is
+# skipped there.
+chmod 000 "$ob_archive_dir"
+if [[ -r "$ob_archive_dir" ]]; then
+  ok "test skipped: otel backend unlistable archive (this user reads a mode-000 directory)"
+else
+  ob_healthy
+  ob_expect "archive directory that cannot be listed -> not checked" -- \
+    "[warn] otel backend archive not checked: $ob_archive_dir cannot be listed by this user" \
+    ! "no file yet" "file(s),"
+fi
+chmod 700 "$ob_archive_dir"
+# Files with known sizes and times: the count is of *.jsonl only, the size
+# is what du reports for the directory, and the newest write is the file
+# with the latest modification time, not the last one listed.
+head -c 20000 /dev/zero > "$ob_archive_dir/logs.jsonl"
+printf '{}\n' > "$ob_archive_dir/traces-2020-01-01T00-00-00.000-size.jsonl"
 printf 'not counted\n' > "$ob_archive_dir/notes.txt"
+touch -t 202101021504 "$ob_archive_dir/logs.jsonl"
+touch -t 202001010000 "$ob_archive_dir/traces-2020-01-01T00-00-00.000-size.jsonl"
+ob_kb="$(du -sk "$ob_archive_dir" | awk '{print $1}')"
 ob_healthy
-ob_expect "archive holding files -> item with the count of *.jsonl" -- \
-  "~[info] - otel backend archive: 2 file(s), " "~ in $ob_archive_dir, newest written " \
-  ! "no file yet" "not private"
+ob_expect "archive holding files -> item with the count, the size and the newest write" -- \
+  "[info] - otel backend archive: 2 file(s), $ob_kb KB in $ob_archive_dir, newest written 2021-01-02 15:04" \
+  ! "no file yet" "not private" "size not checked" "otel backend archive not checked"
+# du failing -> the size is not checked, not a number.
+ob_healthy
+: > "$ob_state/du-fail"
+ob_expect "du fails -> size not checked" -- \
+  "[info] - otel backend archive: 2 file(s), size not checked (du failed) in $ob_archive_dir, newest written 2021-01-02 15:04" \
+  ! " KB in "
 # OB-14) work does not list the module -> not managed, whatever is on disk,
 #        and nothing probed.
 ob_healthy

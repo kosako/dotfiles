@@ -2840,16 +2840,23 @@ otel_container="otel-lgtm"
 # existing VM `colima start` with --mount replaces the saved mounts (and
 # keeps the disk); on a new one the flags avoid Colima's defaults ($HOME
 # mounted writable, ~/.ssh/config rewritten). The archive directory must
-# exist before the VM mounts it.
+# exist and be private BEFORE the VM mounts it: the container comes back
+# with the VM (restart policy) and resumes writing at once (Codex review,
+# PR #521), so chmod comes before colima start.
+otel_archive_private_step="\$ chmod 700 $(shell_quote_safe "${otel_archive_dir%/*}") $(shell_quote_safe "$otel_archive_dir")"
 otel_colima_steps=(
   "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")"
+  "$otel_archive_private_step"
   "\$ colima start --mount $(shell_quote_safe "$otel_config_dir") --mount $(shell_quote_safe "$otel_archive_dir:w") --ssh-config=false"
 )
 # report_otel_backend_runtime — the runtime checks, run only when the
-# managed definition is present. Stops at the first state that makes the
-# later checks meaningless (no daemon, no container, not running).
+# managed definition is present. Without docker or a daemon nothing else
+# can be read, so it stops there. A missing or stopped container skips only
+# the image and port checks: the VM mounts and the login service are read
+# anyway, since a VM without the two mounts is exactly why a container
+# cannot be created (Codex review, PR #521).
 report_otel_backend_runtime() {
-  local up_step state image ports_json want_image host_ips ip published=0 beyond=0
+  local up_step state image ports_json want_image host_ips ip published=0 beyond=0 running=0
   up_step="\$ docker-compose -f $(shell_quote_safe "$otel_compose") up -d"
   if ! command -v docker >/dev/null 2>&1; then
     item "otel backend runtime not checked: docker not on PATH (the software catalog section reports a missing runtime)"
@@ -2877,20 +2884,20 @@ report_otel_backend_runtime() {
   state="${probe_lines%%$'\n'*}"
   if [[ -z "$state" ]]; then
     action "otel backend down: no container named $otel_container — nothing receives telemetry on 127.0.0.1" "$up_step"
-    return 0
-  fi
-  if [[ "$state" != "running" ]]; then
+  elif [[ "$state" != "running" ]]; then
     action "otel backend down: container $otel_container is $state, not running" "$up_step"
-    return 0
+  else
+    running=1
+    ok "otel backend: container $otel_container is running"
   fi
-  ok "otel backend: container $otel_container is running"
 
-  # The image and the published ports, in one read. .Config.Image is the
+  # The image and the published ports, in one read, for a running container. .Config.Image is the
   # reference the container was created from (version@digest as written in
   # the definition), so comparing it to the definition tells a container
   # left on an older pin after the managed file moved on.
-  bounded_probe docker inspect --format '{{.Config.Image}}{{"\n"}}{{json .NetworkSettings.Ports}}' "$otel_container"
-  if [[ "$probe_rc" != "0" ]]; then
+  if [[ "$running" -eq 0 ]]; then
+    :
+  elif ! bounded_probe docker inspect --format '{{.Config.Image}}{{"\n"}}{{json .NetworkSettings.Ports}}' "$otel_container" || [[ "$probe_rc" != "0" ]]; then
     warn "otel backend image and ports not checked: docker inspect gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
   else
     image="${probe_lines%%$'\n'*}"
@@ -2909,9 +2916,13 @@ report_otel_backend_runtime() {
     # address to every interface of the host. An unpublished port is null
     # in the JSON and is skipped. Each binding is printed as `ip=<HostIp>`
     # so one with an empty HostIp (every interface) is a line of its own,
-    # not an empty output read as "no binding". If the JSON cannot be read,
-    # nothing is claimed.
-    if host_ips="$(yq -p json -r '.[] | select(. != null) | .[] | "ip=" + .HostIp' <<< "$ports_json" 2>/dev/null)"; then
+    # not an empty output read as "no binding". The JSON is adopted only as
+    # exactly one object read by jq (yq's JSON reader accepts a missing
+    # comma, Codex review, PR #521; macOS ships /usr/bin/jq); unreadable or
+    # without jq, nothing is claimed.
+    if command -v jq >/dev/null 2>&1 \
+      && jq -e -s 'length == 1 and (.[0] | type) == "object"' <<< "$ports_json" >/dev/null 2>&1 \
+      && host_ips="$(jq -r '.[] | select(. != null) | .[] | "ip=" + (.HostIp // "")' <<< "$ports_json" 2>/dev/null)"; then
       while IFS= read -r ip; do
         [[ -n "$ip" ]] || continue
         published=$((published + 1))
@@ -2925,7 +2936,7 @@ report_otel_backend_runtime() {
         ok "otel backend: every published port is on 127.0.0.1"
       fi
     else
-      warn "otel backend ports not checked: the port bindings docker inspect printed could not be read"
+      warn "otel backend ports not checked: the port bindings docker inspect printed could not be read as one JSON object (or jq is not on PATH)"
     fi
   fi
 
@@ -2963,21 +2974,37 @@ report_otel_backend_runtime() {
 # report_otel_backend_mounts MOUNT_TABLE — judge the VM's host shares
 # (virtiofs / 9p / sshfs lines of `mount`, "<src> on <dir> type <fs>
 # (<opts>)"): each must be the config directory read-only or the archive
-# directory writable, and both must be there.
+# directory writable, and both must be there. A line that names one of
+# those types but does not read as that shape, or whose options do not
+# start with ro / rw, makes the whole table "not checked": skipping it
+# could hide a third share behind the ok line (Codex review, PR #521).
 report_otel_backend_mounts() {
-  local line dir opts mode config_mode="" archive_mode="" others="" missing="" share_re
+  local line dir opts mode config_mode="" archive_mode="" others="" missing="" unread=0 share_re share_hint_re
   share_re='^.* on (.*) type (virtiofs|9p|fuse\.sshfs) \(([^)]*)\)$'
+  share_hint_re=' type (virtiofs|9p|fuse\.sshfs)( |$)'
   while IFS= read -r line; do
-    [[ "$line" =~ $share_re ]] || continue
+    [[ "$line" =~ $share_hint_re ]] || continue
+    if ! [[ "$line" =~ $share_re ]]; then
+      unread=$((unread + 1))
+      continue
+    fi
     dir="${BASH_REMATCH[1]}"
     opts="${BASH_REMATCH[3]}"
     mode="${opts%%,*}"
+    if [[ "$mode" != "ro" && "$mode" != "rw" ]]; then
+      unread=$((unread + 1))
+      continue
+    fi
     case "$dir" in
       "$otel_config_dir") config_mode="$mode" ;;
       "$otel_archive_dir") archive_mode="$mode" ;;
       *) others+="${others:+, }$dir" ;;
     esac
   done <<< "$1"
+  if [[ "$unread" -gt 0 ]]; then
+    warn "otel backend VM mounts not checked: $unread host share line(s) of the VM's mount table could not be read"
+    return 0
+  fi
   if [[ -n "$others" ]]; then
     warn "otel backend: the Colima VM mounts host directories it does not need ($others) — a container can reach them through the docker socket; setting the VM's mounts is in docs/otel-backend.md"
   fi
@@ -3000,19 +3027,26 @@ report_otel_backend_mounts() {
 # re-ingesting into another backend later: the directory must exist (the
 # VM mounts it) and be private (it holds what Loki holds: tool output
 # excerpts, account attributes). Its size and newest write are shown so a
-# stalled archive is visible. Report-only; nothing is read from the files.
+# stalled archive is visible. A directory that cannot be listed, or a size
+# or time that cannot be read, is "not checked" rather than a number or
+# "no file yet" (Codex review, PR #521). Report-only; nothing is read from
+# the files.
 report_otel_backend_archive() {
-  local files=0 kb="" newest="" f mode
+  local files=0 kb="" du_out="" newest="" newest_at="" f mode
   if [[ ! -d "$otel_archive_dir" ]]; then
     action "otel backend archive directory missing: $otel_archive_dir — the Colima VM cannot mount it, so the container cannot be created and the raw telemetry is not kept" \
       "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")" \
-      "\$ chmod 700 $(shell_quote_safe "${otel_archive_dir%/*}") $(shell_quote_safe "$otel_archive_dir")"
+      "$otel_archive_private_step"
     return 0
   fi
   mode="$(file_mode "$otel_archive_dir" 2>/dev/null || true)"
   if [[ "$mode" != "700" ]]; then
     action "otel backend archive directory is not private (mode ${mode:-unknown}): $otel_archive_dir holds the raw telemetry (tool output excerpts, account attributes)" \
-      "\$ chmod 700 $(shell_quote_safe "${otel_archive_dir%/*}") $(shell_quote_safe "$otel_archive_dir")"
+      "$otel_archive_private_step"
+  fi
+  if [[ ! -r "$otel_archive_dir" || ! -x "$otel_archive_dir" ]]; then
+    warn "otel backend archive not checked: $otel_archive_dir cannot be listed by this user"
+    return 0
   fi
   for f in "$otel_archive_dir"/*.jsonl; do
     [[ -f "$f" ]] || continue
@@ -3025,8 +3059,13 @@ report_otel_backend_archive() {
     item "otel backend archive: no file yet in $otel_archive_dir (the Collector writes one per signal when telemetry arrives)"
     return 0
   fi
-  kb="$(du -sk "$otel_archive_dir" 2>/dev/null | awk '{print $1}' || true)"
-  item "otel backend archive: $files file(s), ${kb:-?} KB in $otel_archive_dir, newest written $(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null || printf '?')"
+  if du_out="$(du -sk "$otel_archive_dir" 2>/dev/null)" && [[ "${du_out%%[[:space:]]*}" =~ ^[0-9]+$ ]]; then
+    kb="${du_out%%[[:space:]]*} KB"
+  else
+    kb="size not checked (du failed)"
+  fi
+  newest_at="$(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null)" || newest_at="not checked (date -r failed)"
+  item "otel backend archive: $files file(s), $kb in $otel_archive_dir, newest written $newest_at"
 }
 if module_active_for_profile "$profile" otel-backend; then
   if [[ -f "$otel_compose" ]]; then

@@ -333,18 +333,21 @@ compose file があるときは、実行時の状態と保管の directory を**
 | 見ること | 結果 |
 | --- | --- |
 | docker が PATH にあるか | 無ければ「未確認」の item(catalog の section が未導入を出す) |
-| docker が daemon に届くか | 届かなければ action(保管の directory を作り、2 つの mount で `colima start`)。期限内に答えなければ「未確認」の warn |
-| container があり、running か | 無い・止まっているなら action(`docker-compose -f <file> up -d`) |
+| docker が daemon に届くか | 届かなければ action(保管の directory を作って `chmod 700` し、2 つの mount で `colima start`)で、container と VM の確認はしない。期限内に答えなければ「未確認」の warn |
+| container があり、running か | 無い・止まっているなら action(`docker-compose -f <file> up -d`)。image と port は見ないが、VM の mount と常駐の登録は続けて見る |
 | container の image が、定義の固定と同じか | 違えば action(managed file が進んだ後に作り直していない、など) |
-| 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn |
-| VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro` なら warn。2 つのどちらかが無ければ action(`colima stop` の後、2 つの mount で起動し直す) |
+| 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn。port の JSON は、jq で 1 つの object と読めたときだけ使う |
+| VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro` なら warn。2 つのどちらかが無ければ action(`colima stop` の後、保管の directory を作って `chmod 700` し、2 つの mount で起動し直す)。share の行で形が読めないものがあれば「未確認」 |
 | Colima が login の常駐に登録されているか | どちらでも中立の item(常時起動にするかは選べる) |
-| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない) |
+| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない。`du` が失敗したら大きさは「未確認」) |
 
 - daemon に届かないときの手順に 2 つの mount と `--ssh-config=false` を付けているのは、VM が無い状態で裸の
   `colima start` を実行すると、既定の動作(`$HOME` の mount と `~/.ssh/config` の書き換え)で新しい VM が作られるため。
   VM が既にあるときは、mount を指定どおりに置き換える(保存された設定と同じなら、その繰り返し)。
-- 答えが取れない・読めないとき(command の失敗、期限切れ、JSON でない出力)は「未確認」と書き、ok にはしない。
+- `chmod 700` を `colima start` より先にするのは、container が VM と一緒に戻って(restart policy)、すぐに保管に書き
+  始めるため。
+- 答えが取れない・読めないとき(command の失敗、期限切れ、1 つの JSON の object と読めない出力、形の読めない share の
+  行、一覧できない directory)は「未確認」と書き、ok にはしない。
 - VM の mount は、Colima の設定 file ではなく VM の mount の一覧(`virtiofs`・`9p`・`fuse.sshfs` の行)で見る。
 
 ## 残る risk
