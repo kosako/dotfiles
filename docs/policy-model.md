@@ -442,10 +442,12 @@ container runtime(Colima・docker の CLI・docker-compose)は software catalog 
   の pipeline を足すだけで file を消さない。`test-otel-backend.sh` が pin する。
 - Colima の VM は、host の directory を 2 つだけ mount する(`~/.config/otel-lgtm` を読み取りだけ、
   `~/.local/share/otel-lgtm/archive` を書き込み可)。`$HOME` 全体は見せない。
-- **doctor**: managed file の presence(中身は読まない)。実行時の状態(Colima・container・image・port)は
-  まだ見ず、ok の行にそう書く。
-- 初回の手順(`$HOME` を mount せず、`~/.ssh/config` を書き換えさせない Colima の引数)、image の更新、残る risk は
-  [otel-backend](otel-backend.md)。
+- **doctor**: compose file の presence。file があるときは、実行時の状態を読むだけで確かめる(何も起動しない):
+  daemon に届くか、container が running か、image が定義の固定と同じか、公開した port がすべて `127.0.0.1` か、VM の
+  host の share が設定(`ro`)と保管(`rw`)の 2 つだけか、Colima が login の常駐に登録されているか。保管の directory の
+  有無・mode(0700)・大きさも見る。答えが取れないときは「未確認」と書き、ok にはしない。
+- 初回の手順(2 つの directory だけを mount し、`~/.ssh/config` を書き換えさせない Colima の引数)、image の更新、
+  残る risk は [otel-backend](otel-backend.md)。
 
 ## dormant capability の扱い(残す基準)
 

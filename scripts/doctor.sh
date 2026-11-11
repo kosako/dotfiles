@@ -2813,21 +2813,317 @@ else
 fi
 
 section "otel backend (report-only)"
-# otel-backend module (#514): the managed ~/.config/otel-lgtm/compose.yaml
-# defines the local OpenTelemetry backend (grafana/otel-lgtm pinned by
-# version and digest, its three ports on 127.0.0.1 only) that receives the
-# telemetry of the AI agents on this machine. Apply only places the file:
-# starting Colima, registering it as a login service and starting the
-# container are explicit manual steps (docs/otel-backend.md). This section
-# reports the file's presence, contents-blind; drift of the managed file is
-# the managed drift section's job. The runtime state (is Colima up, is the
-# container running the pinned image, are its ports loopback-only) is NOT
-# checked here yet, and the ok line says so rather than implying a working
-# backend.
+# otel-backend module (#514, #517): the managed files under
+# ~/.config/otel-lgtm define the local OpenTelemetry backend (grafana/
+# otel-lgtm pinned by version and digest, its three ports on 127.0.0.1
+# only) that receives the telemetry of the AI agents on this machine, keeps
+# a raw copy of it under ~/.local/share/otel-lgtm/archive on the host, and
+# serves an agent dashboard. Apply only places the files: starting Colima,
+# registering it as a login service and starting the container are explicit
+# manual steps (docs/otel-backend.md), so a present file says nothing about
+# a working backend. With the compose file present this section therefore
+# also reads the runtime state — is the docker daemon (Colima) reachable,
+# is the container running, on the image the definition pins, with every
+# published port on 127.0.0.1, in a VM that mounts exactly the two host
+# directories the binds need (the config directory read-only, the archive
+# writable) — whether Colima is registered as a login service, and the
+# archive directory on the host. It only reads: `docker ps` / `docker
+# inspect` / `colima ssh -- mount`, each through bounded_probe, so an
+# absent, failing or hung runtime is an action or "not checked", never a
+# pass, and doctor neither starts nor changes anything. Drift of the
+# managed files is the managed drift section's job.
 otel_compose="$HOME/.config/otel-lgtm/compose.yaml"
+otel_config_dir="$HOME/.config/otel-lgtm"
+otel_archive_dir="$HOME/.local/share/otel-lgtm/archive"
+otel_container="otel-lgtm"
+# The steps that (re)start Colima with the two mounts the binds need. On an
+# existing VM `colima start` with --mount replaces the saved mounts (and
+# keeps the disk); on a new one the flags avoid Colima's defaults ($HOME
+# mounted writable, ~/.ssh/config rewritten). The archive directory must
+# exist and be private BEFORE the VM mounts it: the container comes back
+# with the VM (restart policy) and resumes writing at once (Codex review,
+# PR #521), so chmod comes before colima start.
+otel_archive_private_step="\$ chmod 700 $(shell_quote_safe "${otel_archive_dir%/*}") $(shell_quote_safe "$otel_archive_dir")"
+otel_colima_steps=(
+  "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")"
+  "$otel_archive_private_step"
+  "\$ colima start --mount $(shell_quote_safe "$otel_config_dir") --mount $(shell_quote_safe "$otel_archive_dir:w") --ssh-config=false"
+)
+otel_up_step="\$ docker-compose -f $(shell_quote_safe "$otel_compose") up -d"
+# Reasons for an action whose step is `docker-compose up`, emitted after
+# every other otel backend action (report_otel_backend_up_actions): the
+# container is (re)created from binds that need the VM's two mounts and a
+# private archive directory, so the steps that fix those must come first in
+# the next-actions list, which keeps the order actions are raised in (Codex
+# review, PR #521).
+otel_up_reasons=()
+# report_otel_backend_runtime — the runtime checks, run only when the
+# managed definition is present. Without docker or a daemon nothing else
+# can be read, so it stops there. A missing or stopped container skips only
+# the image and port checks: the VM mounts and the login service are read
+# anyway, since a VM without the two mounts is exactly why a container
+# cannot be created (Codex review, PR #521).
+report_otel_backend_runtime() {
+  local state image ports_json want_image host_ips ip published=0 beyond=0 running=0
+  if ! command -v docker >/dev/null 2>&1; then
+    item "otel backend runtime not checked: docker not on PATH (the software catalog section reports a missing runtime)"
+    return 0
+  fi
+  # `docker ps`, not `docker inspect`: it tells "no such container" (exit 0,
+  # no line) from "no daemon" (non-zero), where inspect exits 1 for both.
+  bounded_probe docker ps -a --no-trunc --filter "name=^/${otel_container}\$" --format '{{.State}}'
+  case "$probe_rc" in
+    0) ;;
+    "")
+      warn "otel backend runtime not checked: docker ps gave no answer within ${probe_deadline}s"
+      return 0
+      ;;
+    *)
+      # A bare `colima start` is right for an existing VM (it reuses the
+      # saved settings) but would create a new one with Colima's defaults;
+      # the steps carry the mounts and --ssh-config=false, which on an
+      # existing VM repeat what is saved.
+      action "otel backend down: docker cannot reach its daemon (docker ps exit $probe_rc) — Colima is not running, so nothing receives telemetry on 127.0.0.1" \
+        "${otel_colima_steps[@]}"
+      return 0
+      ;;
+  esac
+  state="${probe_lines%%$'\n'*}"
+  if [[ -z "$state" ]]; then
+    otel_up_reasons+=("otel backend down: no container named $otel_container — nothing receives telemetry on 127.0.0.1")
+  elif [[ "$state" != "running" ]]; then
+    otel_up_reasons+=("otel backend down: container $otel_container is $state, not running")
+  else
+    running=1
+    ok "otel backend: container $otel_container is running"
+  fi
+
+  # The image and the published ports, in one read, for a running container. .Config.Image is the
+  # reference the container was created from (version@digest as written in
+  # the definition), so comparing it to the definition tells a container
+  # left on an older pin after the managed file moved on.
+  if [[ "$running" -eq 0 ]]; then
+    :
+  elif ! bounded_probe docker inspect --format '{{.Config.Image}}{{"\n"}}{{json .NetworkSettings.Ports}}' "$otel_container" || [[ "$probe_rc" != "0" ]]; then
+    warn "otel backend image and ports not checked: docker inspect gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
+  else
+    image="${probe_lines%%$'\n'*}"
+    # Everything after the image line: one JSON line is expected, and a
+    # second line is not dropped but makes the bindings unreadable below.
+    ports_json="${probe_lines#*$'\n'}"
+    want_image="$(yq -r '.services[] | .image // ""' "$otel_compose" 2>/dev/null | head -n 1 || true)"
+    if [[ -z "$want_image" ]]; then
+      warn "otel backend image not checked: no image could be read from $otel_compose"
+    elif [[ "$image" == "$want_image" ]]; then
+      ok "otel backend: the container runs the image the definition pins"
+    else
+      otel_up_reasons+=("otel backend: the container runs another image than the definition pins (version or digest differs) — it was created before the managed file changed, or from another definition")
+    fi
+    # Every published binding must be on 127.0.0.1: Grafana answers its API
+    # without a login, and Colima forwards a port published on any other
+    # address to every interface of the host. An unpublished port is null
+    # in the JSON and is skipped. Each binding is printed as `ip=<HostIp>`
+    # so one with an empty HostIp (every interface) is a line of its own,
+    # not an empty output read as "no binding". The JSON is adopted only as
+    # exactly one strict JSON object, read the way the Bridge One section
+    # reads settings.json (yq's JSON reader accepts a missing comma, and
+    # jq's parser accepts NaN, Infinity, 01, .5 and +1 as numbers; Codex
+    # review, PR #521): jq takes the text raw, every bare token outside the
+    # strings must be true / false / null or a JSON number, then fromjson
+    # parses it (refusing a second value, so a line after the object is not
+    # skipped). A value of the wrong type fails the extraction. Unreadable,
+    # or without jq (macOS ships /usr/bin/jq), nothing is claimed.
+    if command -v jq >/dev/null 2>&1 \
+      && host_ips="$(printf '%s' "$ports_json" | jq -R -s -r '
+          . as $raw
+          | if ($raw
+              | gsub("\"(?:[^\"\\\\]|\\\\.)*\""; " ")
+              | [splits("[ \t\n\r{}\\[\\]:,]+")]
+              | map(select(. != ""))
+              | all(test("^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$")))
+            then $raw | fromjson
+            else error("not strict JSON")
+            end
+          | if type == "object" then
+              .[] | select(. != null) | .[] | "ip=" + (.HostIp // "")
+            else
+              error("not one JSON object")
+            end
+        ' 2>/dev/null)"; then
+      while IFS= read -r ip; do
+        [[ -n "$ip" ]] || continue
+        published=$((published + 1))
+        [[ "$ip" == "ip=127.0.0.1" ]] || beyond=1
+      done <<< "$host_ips"
+      if [[ "$beyond" -eq 1 ]]; then
+        otel_up_reasons+=("otel backend exposed: the container publishes a port on an address other than 127.0.0.1 — Grafana answers its API without a login, and Colima forwards such a port to every interface of this host")
+      elif [[ "$published" -eq 0 ]]; then
+        warn "otel backend: the container publishes no port, so nothing on this host can send it telemetry"
+      else
+        ok "otel backend: every published port is on 127.0.0.1"
+      fi
+    else
+      warn "otel backend ports not checked: the port bindings docker inspect printed could not be read as one strict JSON object (or jq is not on PATH)"
+    fi
+  fi
+
+  # The VM must mount exactly the two host directories the binds need: the
+  # config directory read-only and the archive directory writable (#517).
+  # Any other host share (Colima's default is $HOME, writable) is reachable
+  # by anything that can use the docker socket; the config directory
+  # mounted writable would let a container rewrite the Collector config and
+  # the dashboards; a missing or read-only archive keeps the raw telemetry
+  # off the host (and with create_host_path false the container cannot be
+  # created). Colima's saved settings cannot tell every case apart, so the
+  # VM is asked. No value goes into the remote command: the mount table is
+  # read whole and matched here, line by line.
+  if ! command -v colima >/dev/null 2>&1; then
+    item "otel backend VM mounts not checked: colima not on PATH (docker reaches a daemon that is not Colima's, or the catalog is not installed)"
+  else
+    bounded_probe colima ssh -- mount
+    case "$probe_rc" in
+      0) report_otel_backend_mounts "$probe_lines" ;;
+      *)
+        warn "otel backend VM mounts not checked: colima ssh gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
+        ;;
+    esac
+  fi
+
+  # The login service is the user's choice (always-on or started by hand),
+  # so either state is a neutral item. Homebrew has named the LaunchAgent
+  # both ways over time.
+  if [[ -f "$HOME/Library/LaunchAgents/sh.brew.colima.plist" || -f "$HOME/Library/LaunchAgents/homebrew.mxcl.colima.plist" ]]; then
+    item "otel backend: Colima is registered as a login service (brew services)"
+  else
+    item "otel backend: Colima is not registered as a login service — after a login the backend stays down until Colima is started (brew services start colima registers it)"
+  fi
+}
+# report_otel_backend_mounts MOUNT_TABLE — judge the VM's host shares
+# (virtiofs / 9p / sshfs lines of `mount`, "<src> on <dir> type <fs>
+# (<opts>)"): each must be the config directory read-only or the archive
+# directory writable, and both must be there. A line that names one of
+# those types but does not read as that shape, or whose options do not
+# start with ro / rw, makes the whole table "not checked": skipping it
+# could hide a third share behind the ok line (Codex review, PR #521).
+# Every departure (another share, the config writable, the archive
+# read-only, one of the two missing) is ONE action with the same steps:
+# `colima start --mount` replaces the VM's mounts with exactly the ones
+# given (measured), so stopping Colima and starting it with the two mounts
+# fixes each of them, and an action puts the fix in the next-actions list
+# (a warn alone would not; Codex review, PR #521).
+report_otel_backend_mounts() {
+  local line dir opts mode config_mode="" archive_mode="" others="" unread=0 share_re share_hint_re
+  local problems="" missing=0
+  share_re='^.* on (.*) type (virtiofs|9p|fuse\.sshfs) \(([^)]*)\)$'
+  share_hint_re=' type (virtiofs|9p|fuse\.sshfs)( |$)'
+  while IFS= read -r line; do
+    [[ "$line" =~ $share_hint_re ]] || continue
+    if ! [[ "$line" =~ $share_re ]]; then
+      unread=$((unread + 1))
+      continue
+    fi
+    dir="${BASH_REMATCH[1]}"
+    opts="${BASH_REMATCH[3]}"
+    mode="${opts%%,*}"
+    if [[ "$mode" != "ro" && "$mode" != "rw" ]]; then
+      unread=$((unread + 1))
+      continue
+    fi
+    case "$dir" in
+      "$otel_config_dir") config_mode="$mode" ;;
+      "$otel_archive_dir") archive_mode="$mode" ;;
+      *) others+="${others:+, }$dir" ;;
+    esac
+  done <<< "$1"
+  if [[ "$unread" -gt 0 ]]; then
+    warn "otel backend VM mounts not checked: $unread host share line(s) of the VM's mount table could not be read"
+    return 0
+  fi
+  if [[ -n "$others" ]]; then
+    problems+="${problems:+; }it also mounts $others, which a container can reach through the docker socket"
+  fi
+  if [[ "$config_mode" == "rw" ]]; then
+    problems+="${problems:+; }$otel_config_dir is writable, so a container could rewrite the Collector config and the dashboards"
+  fi
+  if [[ "$archive_mode" == "ro" ]]; then
+    problems+="${problems:+; }$otel_archive_dir is read-only, so the Collector cannot write the raw telemetry"
+  fi
+  if [[ -z "$config_mode" ]]; then
+    problems+="${problems:+; }$otel_config_dir is not mounted"
+    missing=1
+  fi
+  if [[ -z "$archive_mode" ]]; then
+    problems+="${problems:+; }$otel_archive_dir is not mounted"
+    missing=1
+  fi
+  if [[ -n "$problems" ]]; then
+    if [[ "$missing" -eq 1 ]]; then
+      problems+=" — the container cannot be created from the definition (its binds need both), and the raw telemetry is not kept on the host"
+    fi
+    action "otel backend: the Colima VM's host shares are not the two the definition needs: $problems" \
+      "\$ colima stop" "${otel_colima_steps[@]}"
+  else
+    ok "otel backend: the Colima VM mounts only $otel_config_dir (read-only) and $otel_archive_dir (writable)"
+  fi
+}
+# report_otel_backend_archive — the raw telemetry kept on the host for
+# re-ingesting into another backend later: the directory must exist (the
+# VM mounts it) and be private (it holds what Loki holds: tool output
+# excerpts, account attributes). Its size and newest write are shown so a
+# stalled archive is visible. A directory that cannot be listed, or a size
+# or time that cannot be read, is "not checked" rather than a number or
+# "no file yet" (Codex review, PR #521). Report-only; nothing is read from
+# the files.
+report_otel_backend_archive() {
+  local files=0 kb="" du_out="" newest="" newest_at="" f mode
+  if [[ ! -d "$otel_archive_dir" ]]; then
+    action "otel backend archive directory missing: $otel_archive_dir — the Colima VM cannot mount it, so the container cannot be created and the raw telemetry is not kept" \
+      "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")" \
+      "$otel_archive_private_step"
+    return 0
+  fi
+  mode="$(file_mode "$otel_archive_dir" 2>/dev/null || true)"
+  if [[ "$mode" != "700" ]]; then
+    action "otel backend archive directory is not private (mode ${mode:-unknown}): $otel_archive_dir holds the raw telemetry (tool output excerpts, account attributes)" \
+      "$otel_archive_private_step"
+  fi
+  if [[ ! -r "$otel_archive_dir" || ! -x "$otel_archive_dir" ]]; then
+    warn "otel backend archive not checked: $otel_archive_dir cannot be listed by this user"
+    return 0
+  fi
+  for f in "$otel_archive_dir"/*.jsonl; do
+    [[ -f "$f" ]] || continue
+    files=$((files + 1))
+    if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
+      newest="$f"
+    fi
+  done
+  if [[ "$files" -eq 0 ]]; then
+    item "otel backend archive: no file yet in $otel_archive_dir (the Collector writes one per signal when telemetry arrives)"
+    return 0
+  fi
+  if du_out="$(du -sk "$otel_archive_dir" 2>/dev/null)" && [[ "${du_out%%[[:space:]]*}" =~ ^[0-9]+$ ]]; then
+    kb="${du_out%%[[:space:]]*} KB"
+  else
+    kb="size not checked (du failed)"
+  fi
+  newest_at="$(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null)" || newest_at="not checked (date -r failed)"
+  item "otel backend archive: $files file(s), $kb in $otel_archive_dir, newest written $newest_at"
+}
+# report_otel_backend_up_actions — the actions whose step is `docker-compose
+# up`, last (see otel_up_reasons).
+report_otel_backend_up_actions() {
+  local reason
+  for reason in ${otel_up_reasons[@]+"${otel_up_reasons[@]}"}; do
+    action "$reason" "$otel_up_step"
+  done
+}
 if module_active_for_profile "$profile" otel-backend; then
   if [[ -f "$otel_compose" ]]; then
-    ok "otel backend: managed $otel_compose present (runtime state not checked: doctor does not look at Colima or the container yet)"
+    ok "otel backend: managed $otel_compose present"
+    report_otel_backend_runtime
+    report_otel_backend_archive
+    report_otel_backend_up_actions
   else
     action "otel backend definition missing: $otel_compose (otel-backend module) — the container cannot be created or updated from the pinned definition (a container already running keeps running)" \
       "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
