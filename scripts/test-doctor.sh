@@ -1280,7 +1280,11 @@ ob_exposed="[warn] otel backend exposed: the container publishes a port on an ad
 rm -rf "$ob_home"
 mkdir -p "$ob_home/.config/otel-lgtm" "$ob_archive_dir"
 chmod 700 "${ob_archive_dir%/*}" "$ob_archive_dir"
-printf 'zstd\n' > "$ob_archive_dir/logs.jsonl.zst"
+# A zstd file begins with the zstd frame magic (28 b5 2f fd); doctor reads
+# those 4 bytes and nothing else of the file (#529).
+ob_zstd_magic='\050\265\057\375'
+# shellcheck disable=SC2059  # the magic is a printf format of octal escapes
+printf "${ob_zstd_magic}zstd\n" > "$ob_archive_dir/logs.jsonl.zst"
 cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
 # OB-1) a working backend -> every check ok, the login service a neutral
 #       item, and doctor ran exactly its four read-only commands (docker
@@ -1663,9 +1667,12 @@ chmod 700 "$ob_archive_dir"
 # files (*.jsonl.zst and the rotated *.jsonl-*.zst, since #527) and of the ones from before (*.jsonl and
 # their gzip copies *.jsonl.gz), the size is what du reports for the
 # directory, and the newest write is the file with the latest modification
-# time, not the last one listed. Other names are not counted.
-head -c 20000 /dev/zero > "$ob_archive_dir/logs.jsonl.zst"
-printf 'zstd\n' > "$ob_archive_dir/traces.jsonl-2020-01-01T00-00-00.000-size.zst"
+# time, not the last one listed. Other names are not counted (nor their
+# head judged: traces.zst does not start with the magic).
+# shellcheck disable=SC2059  # the magic is a printf format of octal escapes
+{ printf "$ob_zstd_magic"; head -c 20000 /dev/zero; } > "$ob_archive_dir/logs.jsonl.zst"
+# shellcheck disable=SC2059
+printf "${ob_zstd_magic}zstd\n" > "$ob_archive_dir/traces.jsonl-2020-01-01T00-00-00.000-size.zst"
 printf 'not counted\n' > "$ob_archive_dir/notes.txt"
 printf 'not counted\n' > "$ob_archive_dir/traces.zst"
 touch -t 202101021504 "$ob_archive_dir/logs.jsonl.zst"
@@ -1674,7 +1681,8 @@ ob_kb="$(du -sk "$ob_archive_dir" | awk '{print $1}')"
 ob_healthy
 ob_expect "archive holding zstd files -> item with the count, the size and the newest write" -- \
   "[info] - otel backend archive: 2 file(s), $ob_kb KB in $ob_archive_dir, newest written 2021-01-02 15:04" \
-  ! "no file yet" "not private" "size not checked" "otel backend archive not checked" "from before #527"
+  ! "no file yet" "not private" "size not checked" "otel backend archive not checked" "from before #527" \
+    "zstd frame magic" "could not be read"
 # du failing -> the size is not checked, not a number.
 ob_healthy
 : > "$ob_state/du-fail"
@@ -1692,7 +1700,48 @@ ob_kb="$(du -sk "$ob_archive_dir" | awk '{print $1}')"
 ob_healthy
 ob_expect "archive with files from before #527 -> item naming how many of them" -- \
   "[info] - otel backend archive: 4 file(s) (2 of them from before #527, uncompressed or gzip, which the Collector does not delete by age), $ob_kb KB in $ob_archive_dir, newest written 2022-03-04 05:06" \
-  ! "no file yet" "size not checked"
+  ! "no file yet" "size not checked" "zstd frame magic"
+# A zstd file that a Collector without the gate started (#529): it begins
+# with a 4-byte length, not the zstd frame magic -> action naming it, whose
+# steps stop the container, make the aside directory, move each such file
+# there and start the container, in that order. Its name is shown, nothing
+# of its content. A file shorter than 4 bytes (just created) is not judged.
+printf '\000\000\001\000framed\n' > "$ob_archive_dir/traces.jsonl.zst"
+printf '\000\000\002\000framed\n' > "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst"
+printf '\050\265' > "$ob_archive_dir/logs.jsonl-2026-01-02T00-00-00.000-size.zst"
+ob_healthy
+ob_rc=0
+ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
+ob_framed_msg="[warn] otel backend archive: 2 zstd file(s) do not start with the zstd frame magic, so zstd -d cannot read them back (written by a Collector without the exporter.file.nativeCompression gate?): "
+if [[ "$ob_rc" -eq 0 ]] \
+  && grep -Fq "$ob_framed_msg" <<< "$ob_out" \
+  && grep -F "$ob_framed_msg" <<< "$ob_out" | grep -Fq 'metrics.jsonl-2026-01-01T00-00-00.000-size.zst' \
+  && grep -F "$ob_framed_msg" <<< "$ob_out" | grep -Fq 'traces.jsonl.zst' \
+  && ! grep -F "$ob_framed_msg" <<< "$ob_out" | grep -Fq 'logs.jsonl-2026-01-02' \
+  && ! grep -Fq 'framed' <<< "$ob_out" \
+  && steps_consecutive "$ob_out" "        \$ docker-compose -f $(printf '%q' "$ob_managed") stop" "        \$ mkdir -p $(printf '%q' "$ob_archive_dir/unreadable")" \
+  && steps_consecutive "$ob_out" "        \$ mkdir -p $(printf '%q' "$ob_archive_dir/unreadable")" "        \$ mv $(printf '%q' "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" \
+  && steps_consecutive "$ob_out" "        \$ mv $(printf '%q' "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" "        \$ mv $(printf '%q' "$ob_archive_dir/traces.jsonl.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" \
+  && steps_consecutive "$ob_out" "        \$ mv $(printf '%q' "$ob_archive_dir/traces.jsonl.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" "$ob_up_step"; then
+  ok "test passed: otel backend zstd files without the frame magic -> action naming them, steps stop / mkdir / mv each / up in order, a short file not judged"
+else
+  printf '%s\n' "$ob_out" >&2
+  fail "test failed: otel backend zstd files without the frame magic must be named (only those, never their content) in an action whose steps are stop, mkdir unreadable, mv each, then up, consecutively; a file shorter than 4 bytes must not be judged (exit $ob_rc)"
+  status=1
+fi
+rm -f "$ob_archive_dir/traces.jsonl.zst" "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst"
+# A zstd file this user cannot read -> its head is not checked (warn), never
+# judged either way. Root reads any file, so the case is skipped there.
+chmod 000 "$ob_archive_dir/logs.jsonl.zst"
+if [[ -r "$ob_archive_dir/logs.jsonl.zst" ]]; then
+  ok "test skipped: otel backend unreadable zstd file (this user reads a mode-000 file)"
+else
+  ob_healthy
+  ob_expect "a zstd file that cannot be read -> its head not checked" -- \
+    "[warn] otel backend archive: the first bytes of 1 zstd file(s) could not be read, so whether zstd -d can read them back is not checked" \
+    ! "zstd frame magic"
+fi
+chmod 644 "$ob_archive_dir/logs.jsonl.zst"
 # OB-14) work does not list the module -> not managed, whatever is on disk,
 #        and nothing probed.
 ob_healthy

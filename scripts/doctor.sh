@@ -3163,9 +3163,19 @@ report_otel_backend_mounts() {
 # before, and their gzip
 # copies (*.jsonl.gz, the step docs/otel-backend.md gives), are counted
 # apart: the Collector's rotation does not match their names, so nothing
-# deletes them by age. Report-only; nothing is read from the files.
+# deletes them by age. Of each zstd file only the first 4 bytes are read
+# (Codex review, PR #529): a Collector without the
+# exporter.file.nativeCompression gate length-prefixes every compressed
+# batch, so a file it started begins with a length, not the zstd frame
+# magic, and stays unreadable by `zstd -d` even after the container is
+# recreated with the gate (the environment check then matches again).
+# Such files are named in an action whose steps stop the container, move
+# them aside and start it, so the Collector begins a new file. A file
+# shorter than 4 bytes (just created) is not judged. Report-only; nothing
+# else is read from the files.
 report_otel_backend_archive() {
-  local files=0 legacy=0 kb="" du_out="" newest="" newest_at="" legacy_note="" f mode
+  local files=0 legacy=0 kb="" du_out="" newest="" newest_at="" legacy_note="" f mode head4 unread=0
+  local framed=() framed_steps=() name
   if [[ ! -d "$otel_archive_dir" ]]; then
     action "otel backend archive directory missing: $otel_archive_dir — the Colima VM cannot mount it, so the container cannot be created and the raw telemetry is not kept" \
       "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")" \
@@ -3188,7 +3198,16 @@ report_otel_backend_archive() {
   for f in "$otel_archive_dir"/*.zst "$otel_archive_dir"/*.jsonl "$otel_archive_dir"/*.jsonl.gz; do
     [[ -f "$f" ]] || continue
     case "${f##*/}" in
-      *.jsonl.zst | *.jsonl-*.zst) ;;
+      *.jsonl.zst | *.jsonl-*.zst)
+        # Nothing read from a file that is not empty means it could not be
+        # read (permissions, a failing head / od).
+        head4="$(head -c 4 "$f" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')" || head4=""
+        if [[ "${#head4}" -eq 8 && "$head4" != "28b52ffd" ]]; then
+          framed+=("$f")
+        elif [[ -z "$head4" && -s "$f" ]]; then
+          unread=$((unread + 1))
+        fi
+        ;;
       *.zst) continue ;;
       *) legacy=$((legacy + 1)) ;;
     esac
@@ -3197,6 +3216,20 @@ report_otel_backend_archive() {
       newest="$f"
     fi
   done
+  if [[ "${#framed[@]}" -gt 0 ]]; then
+    name=""
+    framed_steps=("\$ docker-compose -f $(shell_quote_safe "$otel_compose") stop" "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir/unreadable")")
+    for f in "${framed[@]}"; do
+      name+="${name:+, }$(display_safe "${f##*/}")"
+      framed_steps+=("\$ mv $(shell_quote_safe "$f") $(shell_quote_safe "$otel_archive_dir/unreadable/")")
+    done
+    framed_steps+=("$otel_up_step")
+    action "otel backend archive: ${#framed[@]} zstd file(s) do not start with the zstd frame magic, so zstd -d cannot read them back (written by a Collector without the exporter.file.nativeCompression gate?): $name — stop the container, move them aside (kept for a hand-made recovery), then start it so the Collector begins new files" \
+      "${framed_steps[@]}"
+  fi
+  if [[ "$unread" -gt 0 ]]; then
+    warn "otel backend archive: the first bytes of $unread zstd file(s) could not be read, so whether zstd -d can read them back is not checked"
+  fi
   if [[ "$legacy" -gt 0 ]]; then
     legacy_note=" ($legacy of them from before #527, uncompressed or gzip, which the Collector does not delete by age)"
   fi

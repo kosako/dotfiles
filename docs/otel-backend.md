@@ -333,10 +333,39 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
     独自の形で書き、`zstd -d` でも読めない(upstream の README)。
   - gate があると、batch ごとに 1 つの zstd の frame を書く。今書いている file もいつでも展開でき、Collector が
     再起動した後は同じ file に足していく(この image の Collector で実測)。
-  - gate は compose が container を作るときにだけ渡る。保管の設定や compose を変えた apply の後は、すぐに
-    `docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d` で作り直す。作り直す前に container が再起動すると、
-    新しい保管の設定を gate なしで読み、読めない形で書きうる。doctor は container の環境変数を定義と比べる
-    (下の「doctor」)。
+  - gate は compose が container を作るときにだけ渡る。gate の無い container が zstd の保管の設定を読むと、読めない
+    形で `*.jsonl.zst` を書き始める。その file は、gate のある container に作り直しても直らない(Codex review、PR #529)。
+    保管の設定を変える apply は、下の「保管の設定を変えるとき」の順で行う。
+
+保管の設定を変えるとき(#527 の移行を含む)は、先に container を止めてから apply し、作り直す:
+
+```sh
+docker-compose -f ~/.config/otel-lgtm/compose.yaml stop
+chezmoi apply ~/.config/otel-lgtm
+docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d --force-recreate
+```
+
+- 止めた container は、`restart: unless-stopped` でも docker の daemon と一緒には戻らない。そのため、apply から作り直し
+  までの間に再起動が入っても、古い container が新しい保管の設定を読むことはない。
+- `--force-recreate` を付けるのは、保管の設定の中身だけが変わったときに、`up -d` が container を作り直さないため
+  (bind の元の file の中身は、compose の定義の変更にならない)。
+- doctor は、container の環境変数を定義と比べる。さらに zstd の file の先頭の 4 byte を読み、zstd の frame の magic で
+  始まらない file を action にする(gate なしで書き始めた file は、先頭が長さの前置きになる)。
+
+読めない形の file があると doctor が出したときは、container を止め、その file を別の directory に移してから起動する。
+Collector は新しい file に書き始める(doctor の action の手順と同じ):
+
+```sh
+docker-compose -f ~/.config/otel-lgtm/compose.yaml stop
+mkdir -p ~/.local/share/otel-lgtm/archive/unreadable
+mv <doctor が挙げた file> ~/.local/share/otel-lgtm/archive/unreadable/
+docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
+```
+
+- 移した file は消さずに残す。中身は「4 byte の長さ(big endian)と、batch ごとの zstd の frame」の列なので、前置きを
+  外す処理を書けば読み戻せる(upstream の README の、gate が off のときの形)。
+- `unreadable/` の下は、Collector も doctor も見ない。期間では消えないので、要らなくなったら人が消す。
+
 - 64MB(圧縮した後の大きさ。この image の Collector で実測)を超えると、`<名前>.jsonl-<UTC の時刻>-size.zst` に
   回して新しい file に書く。**回した file は 1 年残す**(#520):
   - `max_days: 365` で、回した file を、名前の時刻(回した時刻)から 365 日で消す(この image の Collector で実測:
@@ -424,7 +453,8 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 
 設定の file(保管の設定・provider)を変えたときは、`docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 --force-recreate` で作り直す(どちらも起動のときにだけ読まれる。file の bind は作成のときの file を指し続けるので、
-`restart` では新しい中身が見えないことがある)。dashboard の JSON は作り直さなくても読み直される。
+`restart` では新しい中身が見えないことがある)。保管の設定を変えるときは、apply の前に container を止める(上の
+「保管の設定を変えるとき」)。dashboard の JSON は作り直さなくても読み直される。
 
 ## data
 
@@ -465,7 +495,7 @@ compose file があるときは、実行時の状態と保管の directory を**
 | 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn。port の JSON は、strict な 1 つの object と読めたときだけ使う(下の注) |
 | VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro`、2 つのどちらかが無い、のどれかなら、それを全部並べた 1 つの action(`colima stop` の後、保管の directory を作って `chmod 700` し、2 つの mount で起動し直す。`colima start --mount` は VM の mount を指定どおりに置き換えるので、どれもこの手順で直る)。share の行で形が読めないものがあれば「未確認」 |
 | Colima が login の常駐に登録されているか | どちらでも中立の item(常時起動にするかは選べる) |
-| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない。`du` が失敗したら大きさは「未確認」)。数えるのは `*.jsonl.zst`(回した `*.jsonl-*.zst` も)と、#527 より前の `*.jsonl`・`*.jsonl.gz` で、前の 2 つはその数を分けて出す(期間では消えないため) |
+| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(`du` が失敗したら大きさは「未確認」)。数えるのは `*.jsonl.zst`(回した `*.jsonl-*.zst` も)と、#527 より前の `*.jsonl`・`*.jsonl.gz` で、前の 2 つはその数を分けて出す(期間では消えないため)。zstd の file は先頭の 4 byte だけを読み(ほかは読まない)、zstd の frame の magic で始まらない file を、名前を並べた action にする(container を止め、`unreadable/` に移し、起動する手順。#529)。4 byte に満たない file は判定しない。読めない file は「未確認」 |
 
 - daemon に届かないときの手順に 2 つの mount と `--ssh-config=false` を付けているのは、VM が無い状態で裸の
   `colima start` を実行すると、既定の動作(`$HOME` の mount と `~/.ssh/config` の書き換え)で新しい VM が作られるため。
@@ -490,8 +520,12 @@ compose file があるときは、実行時の状態と保管の directory を**
 - 保存期間は 1 年なので、それまでは容量が増え続ける。保管の traces は、今の使い方で 1 年に約 2GB の見込み(上の
   「生データの保管と読み戻し」)。backend の 1 年分の量は未確認で、Tempo の増え方は #528 で扱う。
 - 保管の zstd は Alpha の feature gate に頼る。image を更新するときに gate の有無を確かめる(上の「image の更新」)。
-- apply の後、container を作り直す前に再起動が入ると、gate なしで新しい保管の設定を読み、`zstd -d` で読めない形で
-  書きうる。doctor が環境変数の違いを action にするので、すぐに `up -d` で作り直す。
+- 「保管の設定を変えるとき」の順を守らないと、gate の無い container が新しい保管の設定を読み、`zstd -d` で読めない形で
+  書きうる。doctor は環境変数の違いと、magic で始まらない zstd の file を action にするが、防ぎはしない。直すときは
+  file を移す(上の手順)。
+- doctor の magic の確認は、file の先頭だけを見る。gate のある Collector が書き始めた file に、後から gate の無い
+  Collector が足した場合は見つけられない(この repo の定義から作った container では、gate と保管の設定が揃って
+  変わるので、手順を守れば起きない)。
 - 1 年を過ぎた telemetry は、backend からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
   では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
 - image は 3.6GB あり、production 向けではない。
