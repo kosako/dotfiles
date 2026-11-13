@@ -94,8 +94,11 @@ profiles:
       # #341: deny, in the managed settings.json, the MCP that Claude Code is
       # connected to but does not use day to day: the claude.ai hosted
       # connectors Gmail / Google Calendar / Google Drive / Claude Docs (0 calls
-      # in 2026-09-01..10-08) and 17 Notion plugin write tools with no or rare
-      # use. Exposure reduction for Claude Code only (the web / mobile chat keep
+      # in 2026-09-01..10-08), the claude.ai Notion connector (#530: Notion is
+      # used through the plugin; the connector would offer the same tools under
+      # names the plugin's tool denies miss) and 17 Notion plugin write tools
+      # with no or rare use. Exposure reduction for Claude Code only (the web /
+      # mobile chat keep
       # the connectors); best-effort / steering, not an enforcement boundary.
       gateUnusedClaudeMcp: true
       # #137 / #181: register the PreToolUse hook (personal-safe-gh-hook) so raw

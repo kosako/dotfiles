@@ -164,6 +164,6 @@ work / client には配らない(`opencode-settings` module を持たない。cl
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
-  こと(secret floor 30 件 + #304 の hook の skip と note の deny 4 件 + personal 既定の `mcp__github` と `gateUnusedClaudeMcp` の 21 件(#341)で計 56 件の deny と、
+  こと(secret floor 30 件 + #304 の hook の skip と note の deny 4 件 + #530 の MCP のログインの tool 2 件 + personal 既定の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)で計 59 件の deny と、
   1Password の CLI 全体・#334 / #381 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 76 件を順序込みで
   exact pin。#315 / #304 / #334)。

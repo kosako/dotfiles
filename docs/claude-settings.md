@@ -14,7 +14,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model の既定 / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 / `switchModelsOnFlag` 等の global preference) | public repo(`dot_claude/modify_settings.json.tmpl`。chezmoi の modify script。下記「apply の仕組み」) | ✅ chezmoi(**personal profile のみ**) |
-| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 21 件(#341。どちらも personal 既定 true で deny は計 56 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
+| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、MCP のログインの tool の無条件 deny 2 件(#530)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 22 件(#341・#530。どちらも personal 既定 true で deny は計 59 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225 / #353 / #497 / #505 / #508): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `^(startup\|resume\|clear\|compact\|fork)$`(herdr 0.9.3 の integration v10 と同じ。#274)に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。`enableToolCallRecordHook` 連動(#353、agent-tools#454)で SessionStart(matcher なし)と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest(matcher `*`。PermissionRequest は確認の回数を実測するため。#505、agent-tools#639)に agent-tools 配布の `personal-tool-call-record-hook` を `async: true`・timeout 10 で登録(tool 呼び出しの記録。引数は key だけ・fail-open。既存の entry の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない)。`enableJaReplyGuardHook` 連動(#497、agent-tools#588)で matcher なしの Stop に agent-tools 配布の `personal-ja-reply-guard` を timeout 10 で登録(最後の答えが英語に逸れたら 1 回だけ止めて日本語で書き直させる。fail-open で、`stop_hook_active` のときは止めない。`personal-changed-scope-qa` の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない。英語で答えさせたい session は env の `AGENT_TOOLS_JA_GUARD_DISABLE` で止める)。`enableBridgeOneHook` 連動(#508。personal は #510 で on、work は off)で PermissionRequest / matcher `*` に Bridge One の起動用の script `~/.local/share/bridge-one/hook/current/bin/permission-request` を timeout 600 で登録(`async` と `onFailure` は付けない。command は path を single quote で囲み ` 2>/dev/null` を付けた、Bridge One の `tools/hook-deploy/deploy.mjs` が表示するものと同じ文字列。記録 hook の後ろに 2 つ目の entry として足す。ほかの hook と違い決定 (allow / deny) を返しうる: Bridge One の host が答えたときだけ返し、host が動いていない間・起動用の script が無いときは何も出力せず、承認は端末の dialog に戻る。dotfiles が出す PermissionRequest の hook で決定を返しうるのはこれだけで、決定を返す hook を手で足したものとの併存は dotfiles の範囲の外。Claude だけで Codex には出さない。配備は Bridge One の repo が行う)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | telemetry の `env`(#523): `enableClaudeTelemetry` 連動で、Claude Code の OpenTelemetry(metric と event を OTLP/HTTP で送る)の変数を出す。送り先は管理外の local file から apply のときに読む(下記「telemetry」) | 方式は public repo(`dot_claude/modify_settings.json.tmpl`)、送り先は `~/.config/dotfiles/claude-telemetry.local`(非コミット) | ✅ chezmoi(**personal profile のみ**。file が無ければ出さない) |
 | 手元だけの key: `/model` で選んだ `model`(template の値は file に無いときの既定だけ)、`modelSettings`(model ごとの effort)、`autoMode`(auto mode の environment。repository 名などを含み public に出さない)、Claude Code が後から足す key | live の `~/.claude/settings.json` | ⚪ 管理外だが apply で消さない(modify script がそのまま残す。#360) |
@@ -136,7 +136,7 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
 主軸**とする(Read tool はコマンド経由でない読取にも効く。Bash matcher は `head` / `xxd` /
 `python open()` 等の等価経路で迂回できる leaky steering なので、path ごとの Bash 列挙は
 意図的にしない。#136)。`gateGitHubMcp=true`(personal 既定)で
-`mcp__github`(server 全体)の deny を足して計 35 件(下の #304 の 4 件を含む)、`gateUnusedClaudeMcp=true`(personal 既定。#341)で claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs の connector(server 全体)と Notion の書込 tool 17 個の deny を足して計 56 件、`enforceAiSandbox=true` で human-legit gate
+`mcp__github`(server 全体)の deny を足して計 37 件(下の #304 の 4 件と #530 の 2 件を含む)、`gateUnusedClaudeMcp=true`(personal 既定。#341)で claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs / Notion(#530)の connector(server 全体)と Notion の書込 tool 17 個の deny を足して計 59 件、`enforceAiSandbox=true` で human-legit gate
 (`.env` 読取 / main・master への push の deny、release / branch-protection の ask)を
 追加する。`permissions.ask` には、1Password の CLI 全体(`Bash(op *)`)を常時出力する(`op read` / `op item get` /
 `op run` などの読み出し系は global option をどこにでも置けるので、subcommand の列挙ではなく program 単位にする。人が private-backup の `--identity-command` などで指示する
@@ -190,6 +190,20 @@ command の集合に当てて固定する(rule の文面を固定するもので
 enforcement boundary ではない**(射程と限界は
 [ai-environment-boundary](ai-environment-boundary.md))。deny の内容と順序は
 `scripts/test-claude-settings.sh` が exact-set で回帰固定している。
+
+**MCP のログインの tool(#530)**: `mcp__*__authenticate` と `mcp__*__complete_authentication` を、capability に依らず
+常時 deny する。どちらも、ログインが要る MCP の server に Claude Code が足す tool で、`*` は server の名前に当たる。
+
+- ログインを始めると、Claude Code は保存済みの OAuth の token を先に消す。その token は、この machine の Claude Code の
+  全 session が共有している。そのため 1 つの session の model が呼ぶと、全 session がログアウトする
+  (2026-11-13 に Notion で 2 回起きた)。
+- ログインが要る server には、ほかの tool が見えないことが多い。model は server を使おうとするたびに、これを呼びうる。
+- ログインは人が `/mcp` から 1 か所で行う。ログインしていない session も、server の tool を呼び直せば共有の token を拾う。
+- server の部分の `*` が全 server に当たることは、Claude Code 2.1.323 の動作で確かめた。動いている session で、
+  どちらの書き方の deny も、2 つの Notion の server (plugin と claude.ai の connector) からその tool を消した。deny を
+  外すと tool は戻った。docs にある書き方は `mcp__<server>__*` だけなので、後の版で読み方が変わると、この deny は
+  何にも当たらなくなりうる。
+- `scripts/test-claude-settings.sh` は rule の文面を固定する。harness の挙動の証明ではない。
 
 ## sandbox(`enforceAiSandbox`)
 
