@@ -2858,8 +2858,9 @@ section "otel backend (report-only)"
 # manual steps (docs/otel-backend.md), so a present file says nothing about
 # a working backend. With the compose file present this section therefore
 # also reads the runtime state — is the docker daemon (Colima) reachable,
-# is the container running, on the image the definition pins, with every
-# published port on 127.0.0.1, in a VM that mounts exactly the two host
+# is the container running, on the image the definition pins, with the
+# environment the definition sets (#527) and every published port on
+# 127.0.0.1, in a VM that mounts exactly the two host
 # directories the binds need (the config directory read-only, the archive
 # writable) — whether Colima is registered as a login service, and the
 # archive directory on the host. It only reads: `docker ps` / `docker
@@ -3002,6 +3003,12 @@ report_otel_backend_runtime() {
     fi
   fi
 
+  # The environment of a running container (#527), in a read of its own so
+  # the image / ports read above keeps its exact two-line shape.
+  if [[ "$running" -eq 1 ]]; then
+    report_otel_backend_env
+  fi
+
   # The VM must mount exactly the two host directories the binds need: the
   # config directory read-only and the archive directory writable (#517).
   # Any other host share (Colima's default is $HOME, writable) is reachable
@@ -3031,6 +3038,50 @@ report_otel_backend_runtime() {
     item "otel backend: Colima is registered as a login service (brew services)"
   else
     item "otel backend: Colima is not registered as a login service — after a login the backend stays down until Colima is started (brew services start colima registers it)"
+  fi
+}
+# report_otel_backend_env — every variable the definition sets must be in
+# the running container's environment with the same value (#527). Compose
+# passes the environment only when it creates the container, so one left
+# from before the managed file changed keeps the old values, as with the
+# image. Since #527 that is more than a missed setting: the archive config
+# is a bind, read again at every start, and it writes zstd, which needs the
+# Collector's feature gate in OTELCOL_EXTRA_ARGS. Without the gate the
+# exporter writes each batch in its own length-prefixed framing, which
+# `zstd -d` and a later Collector cannot read. The definition's environment
+# is adopted only as a map of single-line strings with plain names, so
+# each one is exactly one `NAME=value` line to look for among the lines
+# docker prints (extra variables of the image are fine). Only the names
+# that differ are shown, never a value.
+report_otel_backend_env() {
+  local want line differ="" gate_hint=""
+  if ! want="$(yq -r '[.services[]][0].environment
+      | (if tag != "!!map" then error("environment is not a map") else . end)
+      | to_entries[]
+      | (if (.key | test("^[A-Za-z_][A-Za-z0-9_]*$") | not) or (.value | tag) != "!!str" or (.value | test("\n"))
+          then error("not a plain NAME: single-line string")
+          else .key + "=" + .value
+        end)' "$otel_compose" 2>/dev/null)" || [[ -z "$want" ]]; then
+    warn "otel backend environment not checked: $otel_compose does not set its environment as a map of single-line strings"
+    return 0
+  fi
+  if ! bounded_probe docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$otel_container" || [[ "$probe_rc" != "0" ]]; then
+    warn "otel backend environment not checked: docker inspect gave no usable answer (exit ${probe_rc:-none within ${probe_deadline}s})"
+    return 0
+  fi
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if ! grep -Fxq -e "$line" <<< "$probe_lines"; then
+      differ+="${differ:+, }${line%%=*}"
+      if [[ "${line%%=*}" == "OTELCOL_EXTRA_ARGS" ]]; then
+        gate_hint=" (without the definition's OTELCOL_EXTRA_ARGS the Collector writes the archive in a framing zstd -d cannot read)"
+      fi
+    fi
+  done <<< "$want"
+  if [[ -n "$differ" ]]; then
+    otel_up_reasons+=("otel backend: the container's environment differs from the definition ($differ) — it was created before the managed file changed, or from another definition$gate_hint")
+  else
+    ok "otel backend: the container's environment matches the definition"
   fi
 }
 # report_otel_backend_mounts MOUNT_TABLE — judge the VM's host shares
@@ -3107,10 +3158,14 @@ report_otel_backend_mounts() {
 # excerpts, account attributes). Its size and newest write are shown so a
 # stalled archive is visible. A directory that cannot be listed, or a size
 # or time that cannot be read, is "not checked" rather than a number or
-# "no file yet" (Codex review, PR #521). Report-only; nothing is read from
-# the files.
+# "no file yet" (Codex review, PR #521). Since #527 the Collector writes
+# zstd (*.jsonl.zst, rotated *.jsonl-*.zst); the uncompressed *.jsonl of
+# before, and their gzip
+# copies (*.jsonl.gz, the step docs/otel-backend.md gives), are counted
+# apart: the Collector's rotation does not match their names, so nothing
+# deletes them by age. Report-only; nothing is read from the files.
 report_otel_backend_archive() {
-  local files=0 kb="" du_out="" newest="" newest_at="" f mode
+  local files=0 legacy=0 kb="" du_out="" newest="" newest_at="" legacy_note="" f mode
   if [[ ! -d "$otel_archive_dir" ]]; then
     action "otel backend archive directory missing: $otel_archive_dir — the Colima VM cannot mount it, so the container cannot be created and the raw telemetry is not kept" \
       "\$ mkdir -p $(shell_quote_safe "$otel_archive_dir")" \
@@ -3126,13 +3181,25 @@ report_otel_backend_archive() {
     warn "otel backend archive not checked: $otel_archive_dir cannot be listed by this user"
     return 0
   fi
-  for f in "$otel_archive_dir"/*.jsonl; do
+  # The zstd files are the one being written (<signal>.jsonl.zst) and the
+  # rotated ones (<signal>.jsonl-<time>-size.zst: the rotation puts the time
+  # before the last extension); another *.zst is not counted. The three
+  # globs end differently, so no file is listed twice.
+  for f in "$otel_archive_dir"/*.zst "$otel_archive_dir"/*.jsonl "$otel_archive_dir"/*.jsonl.gz; do
     [[ -f "$f" ]] || continue
+    case "${f##*/}" in
+      *.jsonl.zst | *.jsonl-*.zst) ;;
+      *.zst) continue ;;
+      *) legacy=$((legacy + 1)) ;;
+    esac
     files=$((files + 1))
     if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
       newest="$f"
     fi
   done
+  if [[ "$legacy" -gt 0 ]]; then
+    legacy_note=" ($legacy of them from before #527, uncompressed or gzip, which the Collector does not delete by age)"
+  fi
   if [[ "$files" -eq 0 ]]; then
     item "otel backend archive: no file yet in $otel_archive_dir (the Collector writes one per signal when telemetry arrives)"
     return 0
@@ -3143,7 +3210,7 @@ report_otel_backend_archive() {
     kb="size not checked (du failed)"
   fi
   newest_at="$(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null)" || newest_at="not checked (date -r failed)"
-  item "otel backend archive: $files file(s), $kb in $otel_archive_dir, newest written $newest_at"
+  item "otel backend archive: $files file(s)$legacy_note, $kb in $otel_archive_dir, newest written $newest_at"
 }
 # report_otel_backend_up_actions — the actions whose step is `docker-compose
 # up`, last (see otel_up_reasons).
