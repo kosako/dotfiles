@@ -362,8 +362,13 @@ mv <doctor が挙げた file> ~/.local/share/otel-lgtm/archive/unreadable/
 docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 ```
 
-- 移した file は消さずに残す。中身は「4 byte の長さ(big endian)と、batch ごとの zstd の frame」の列なので、前置きを
-  外す処理を書けば読み戻せる(upstream の README の、gate が off のときの形)。
+- 移した file は消さずに残す。gate なしで書いた部分は「4 byte の長さ(big endian)と、batch ごとの zstd の frame」の
+  列(upstream の README の、gate が off のときの形)。gate のある container に作り直した後に同じ file へ足された部分は、
+  前置きの無い標準の zstd の frame の列になる。1 つの file に両方が混ざりうる(Codex review、PR #529)。
+- 読み戻すには、位置ごとに次の 4 byte を見て分ける処理を書く。zstd の frame の magic(`28 b5 2f fd`)なら前置きの無い
+  frame で、frame を 1 つ展開して読んだ分だけ進む。それ以外なら長さの前置きで、その長さの frame を 1 つ展開する
+  (前置きが magic と同じ値になるのは長さが約 680MB のときで、64MB で回す設定では起きない)。
+  `zstd -d` は前置きを frame として読めないので、そのままでは使えない。
 - `unreadable/` の下は、Collector も doctor も見ない。期間では消えないので、要らなくなったら人が消す。
 
 - 64MB(圧縮した後の大きさ。この image の Collector で実測)を超えると、`<名前>.jsonl-<UTC の時刻>-size.zst` に
