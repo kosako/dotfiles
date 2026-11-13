@@ -5,34 +5,46 @@
 # image's traces / metrics / logs ones, so it does not depend on how the
 # image names its own exporters. Each archive pipeline takes what the otlp
 # receiver got, unprocessed, and writes it as newline-delimited OTLP JSON
-# (uncompressed, so a later Collector's otlpjsonfile receiver can read it
-# back) to /archive, which compose binds to ~/.local/share/otel-lgtm/archive
-# on the host. Files are kept for one year (#520): max_days 365 deletes a
-# rotated file 365 days after the time in its name (when it was rotated;
-# measured on this image's Collector: with max_days 1, a file named two
-# years back was deleted at the next rotation and the new ones were kept),
+# inside a standard zstd stream (#527: Codex's traces are about 100MB a day
+# uncompressed, about 21 times less in zstd) to /archive, which compose
+# binds to ~/.local/share/otel-lgtm/archive on the host. That stream needs
+# the Collector's exporter.file.nativeCompression feature gate, which
+# compose passes in OTELCOL_EXTRA_ARGS: without it `compression: zstd`
+# compresses each batch on its own and length-prefixes it, a framing
+# `zstd -d` cannot read. With the gate each batch is its own zstd frame, so
+# the file being written is readable at any time and a restarted Collector
+# appends to it; `zstd -d` gives back the lines a later Collector's
+# otlpjsonfile receiver reads (it reads gzip, not zstd). max_megabytes is
+# the compressed size (measured on this image's Collector, #527). Files are
+# kept for one year (#520): max_days 365 deletes a rotated file 365 days
+# after the time in its name (when it was rotated; measured on this image's
+# Collector: with max_days 1, a file named two years back was deleted at
+# the next rotation and the new ones were kept; again with zstd in #527),
 # and max_backups is 0, so no other limit applies (with 1MB files, 0 kept
 # all 7 rotated files while 1 kept only the newest one, #517; the upstream
 # README does not say what 0 means). The file being written is never
 # deleted by age. See docs/otel-backend.md.
 exporters:
   file/archive-traces:
-    path: /archive/traces.jsonl
+    path: /archive/traces.jsonl.zst
     format: json
+    compression: zstd
     rotation:
       max_megabytes: 64
       max_days: 365
       max_backups: 0
   file/archive-metrics:
-    path: /archive/metrics.jsonl
+    path: /archive/metrics.jsonl.zst
     format: json
+    compression: zstd
     rotation:
       max_megabytes: 64
       max_days: 365
       max_backups: 0
   file/archive-logs:
-    path: /archive/logs.jsonl
+    path: /archive/logs.jsonl.zst
     format: json
+    compression: zstd
     rotation:
       max_megabytes: 64
       max_days: 365

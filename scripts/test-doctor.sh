@@ -1153,7 +1153,8 @@ rm -rf "$hc_home" "$hc_fakebin"
 # step starts Colima with the two flags that matter on a new VM), a hung
 # docker (not checked), no container / a stopped one (action naming the
 # compose command), a container on another image than the definition pins
-# (action), a port published beyond 127.0.0.1 — 0.0.0.0, an empty HostIp,
+# or with another environment than it sets (action, #527; an unreadable
+# answer or definition -> not checked), a port published beyond 127.0.0.1 — 0.0.0.0, an empty HostIp,
 # IPv6 any — (action), no published port (warn), an unreadable inspect
 # answer (not checked), the VM's host shares (exactly the config directory
 # read-only and the archive writable -> ok; another share, the config
@@ -1182,6 +1183,12 @@ case "\$1" in
     exit "\$(cat "\$d/ps-rc")"
     ;;
   inspect)
+    case "\$*" in
+      *.Config.Env*)
+        [ -e "\$d/env-out" ] && cat "\$d/env-out"
+        exit "\$(cat "\$d/env-rc")"
+        ;;
+    esac
     [ -e "\$d/inspect-out" ] && cat "\$d/inspect-out"
     exit "\$(cat "\$d/inspect-rc")"
     ;;
@@ -1214,17 +1221,23 @@ ob_config_dir="$ob_home/.config/otel-lgtm"
 ob_archive_dir="$ob_home/.local/share/otel-lgtm/archive"
 ob_share_config="lima-1 on $ob_config_dir type virtiofs (ro,relatime)"
 ob_share_archive="lima-2 on $ob_archive_dir type virtiofs (rw,relatime)"
+# The environment a container created from the definition has (#527): the
+# image's own variables around the definition's NAME=value lines.
+ob_env_want="$(yq -r '.services.lgtm.environment | to_entries[] | .key + "=" + .value' "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml")"
+ob_env_ok="[ok] otel backend: the container's environment matches the definition"
 # ob_healthy — the fakes answer as a working backend: the container
-# running on the pinned image, every binding on 127.0.0.1, a VM whose mount
-# table shares exactly the config directory (read-only) and the archive
-# (writable). Each case changes one answer from here. The call log starts
-# empty.
+# running on the pinned image with the definition's environment, every
+# binding on 127.0.0.1, a VM whose mount table shares exactly the config
+# directory (read-only) and the archive (writable). Each case changes one
+# answer from here. The call log starts empty.
 ob_healthy() {
   rm -f "$ob_state/ps-hang" "$ob_state/du-fail"
   printf 'running\n' > "$ob_state/ps-out"
   printf '0' > "$ob_state/ps-rc"
   printf '%s\n%s\n' "$ob_image" "$ob_ports_loopback" > "$ob_state/inspect-out"
   printf '0' > "$ob_state/inspect-rc"
+  printf '%s\n' 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' "$ob_env_want" 'OTEL_LGTM_IMAGE=1' > "$ob_state/env-out"
+  printf '0' > "$ob_state/env-rc"
   printf '%s\n' '/dev/vda1 on / type ext4 (rw,relatime)' "$ob_share_config" 'tmpfs on /run type tmpfs (rw,nosuid,nodev)' "$ob_share_archive" > "$ob_state/mount-out"
   printf '0' > "$ob_state/mount-rc"
   : > "$ob_state/calls"
@@ -1267,26 +1280,33 @@ ob_exposed="[warn] otel backend exposed: the container publishes a port on an ad
 rm -rf "$ob_home"
 mkdir -p "$ob_home/.config/otel-lgtm" "$ob_archive_dir"
 chmod 700 "${ob_archive_dir%/*}" "$ob_archive_dir"
-printf '{}\n' > "$ob_archive_dir/logs.jsonl"
+# A zstd file begins with the zstd frame magic (28 b5 2f fd); doctor reads
+# those 4 bytes and nothing else of the file (#529).
+ob_zstd_magic='\050\265\057\375'
+# shellcheck disable=SC2059  # the magic is a printf format of octal escapes
+printf "${ob_zstd_magic}zstd\n" > "$ob_archive_dir/logs.jsonl.zst"
 cp "$DOTFILES_ROOT/private_dot_config/otel-lgtm/compose.yaml" "$ob_managed"
 # OB-1) a working backend -> every check ok, the login service a neutral
-#       item, and doctor ran exactly its three read-only commands.
+#       item, and doctor ran exactly its four read-only commands (docker
+#       inspect twice: the image and ports, then the environment).
 ob_healthy
-ob_expect "healthy -> ok for container, image, ports and VM mounts" -- \
-  "$ob_present" "$ob_running" "$ob_image_ok" "$ob_ports_ok" "$ob_mounts_ok" "$ob_service_off" \
+ob_expect "healthy -> ok for container, image, environment, ports and VM mounts" -- \
+  "$ob_present" "$ob_running" "$ob_image_ok" "$ob_env_ok" "$ob_ports_ok" "$ob_mounts_ok" "$ob_service_off" \
   "~[info] - otel backend archive: 1 file(s), " \
   ! "otel backend down" "otel backend exposed" "otel backend runtime not checked" \
     "otel backend image" "otel backend ports not checked" "otel backend VM mounts not checked" \
+    "otel backend environment not checked" "environment differs" \
     "publishes no port" "host shares are not the two" \
-    "archive directory missing" "not private"
-if [[ "$(wc -l < "$ob_state/calls" | tr -d ' ')" == "3" ]] \
+    "archive directory missing" "not private" "from before #527"
+if [[ "$(wc -l < "$ob_state/calls" | tr -d ' ')" == "4" ]] \
   && grep -q '^docker ps ' "$ob_state/calls" \
-  && grep -q '^docker inspect .* otel-lgtm$' "$ob_state/calls" \
+  && [[ "$(grep -c '^docker inspect .* otel-lgtm$' "$ob_state/calls")" == "2" ]] \
+  && grep -Fxq 'docker inspect --format {{range .Config.Env}}{{println .}}{{end}} otel-lgtm' "$ob_state/calls" \
   && grep -Fxq 'colima ssh -- mount' "$ob_state/calls"; then
-  ok "test passed: otel backend runtime check runs only docker ps, docker inspect and colima ssh -- mount"
+  ok "test passed: otel backend runtime check runs only docker ps, docker inspect (twice) and colima ssh -- mount"
 else
   cat "$ob_state/calls" >&2
-  fail "test failed: otel backend runtime check must run exactly docker ps, docker inspect and colima ssh -- mount"
+  fail "test failed: otel backend runtime check must run exactly docker ps, docker inspect for the image and ports, docker inspect for the environment, and colima ssh -- mount"
   status=1
 fi
 # OB-1b) the LaunchAgent under either name Homebrew has used -> registered.
@@ -1409,6 +1429,49 @@ ob_expect "another image than the pin -> action, ports and mounts still checked"
   "[warn] otel backend: the container runs another image than the definition pins (version or digest differs) — it was created before the managed file changed, or from another definition" \
   "$ob_up_step" "$ob_ports_ok" "$ob_mounts_ok" \
   ! "$ob_image_ok"
+# OB-6b) the environment the container was created with (#527): a variable
+#        of the definition missing or with another value -> action naming
+#        only the variables (never a value), with the zstd consequence
+#        when OTELCOL_EXTRA_ARGS is among them; a line that only starts
+#        with the wanted one is another value; extra variables of the image
+#        are fine; an inspect that fails, or a definition whose environment
+#        is not a map of single-line strings, is not checked.
+ob_env_gate="[warn] otel backend: the container's environment differs from the definition (OTELCOL_EXTRA_ARGS) — it was created before the managed file changed, or from another definition (without the definition's OTELCOL_EXTRA_ARGS the Collector writes the archive in a framing zstd -d cannot read)"
+ob_healthy
+grep -v '^OTELCOL_EXTRA_ARGS=' <<< "$ob_env_want" > "$ob_state/env-out"
+printf '%s\n' 'OTELCOL_EXTRA_ARGS=--config=file:/otel-lgtm/otelcol-archive.yaml' >> "$ob_state/env-out"
+ob_expect "environment without the zstd gate (created before #527) -> action naming OTELCOL_EXTRA_ARGS" -- \
+  "$ob_running" "$ob_image_ok" "$ob_env_gate" "$ob_up_step" "$ob_ports_ok" "$ob_mounts_ok" \
+  ! "$ob_env_ok" "--config=file:/otel-lgtm" "nativeCompression"
+ob_healthy
+grep -v '^OTELCOL_EXTRA_ARGS=' <<< "$ob_env_want" > "$ob_state/env-out"
+printf '%s extra\n' "$(grep '^OTELCOL_EXTRA_ARGS=' <<< "$ob_env_want")" >> "$ob_state/env-out"
+ob_expect "a value that only starts with the definition's -> differs" -- \
+  "$ob_env_gate" "$ob_up_step" ! "$ob_env_ok"
+ob_healthy
+grep -v -e '^LOKI_EXTRA_ARGS=' -e '^TEMPO_EXTRA_ARGS=' <<< "$ob_env_want" > "$ob_state/env-out"
+printf '%s\n' 'LOKI_EXTRA_ARGS=-store.retention=744h' >> "$ob_state/env-out"
+ob_expect "a retention flag changed and one missing -> action naming both, no zstd note" -- \
+  "[warn] otel backend: the container's environment differs from the definition (LOKI_EXTRA_ARGS, TEMPO_EXTRA_ARGS) — it was created before the managed file changed, or from another definition" \
+  "$ob_up_step" \
+  ! "$ob_env_ok" "framing zstd -d" "744h"
+ob_healthy
+printf '1' > "$ob_state/env-rc"
+ob_expect "environment inspect fails -> not checked, image and ports still ok" -- \
+  "[warn] otel backend environment not checked: docker inspect gave no usable answer (exit 1)" \
+  "$ob_image_ok" "$ob_ports_ok" \
+  ! "$ob_env_ok" "environment differs"
+cp "$ob_managed" "$ob_state/compose.keep"
+yq -i '.services.lgtm.environment = ["OTELCOL_EXTRA_ARGS=x"]' "$ob_managed"
+ob_healthy
+ob_expect "a definition whose environment is a list -> not checked" -- \
+  "[warn] otel backend environment not checked: $ob_managed does not set its environment as a map of single-line strings" \
+  ! "$ob_env_ok" "environment differs"
+if grep -Fq '.Config.Env' "$ob_state/calls"; then
+  fail "test failed: with an unreadable definition environment doctor must not inspect the container's"
+  status=1
+fi
+cp "$ob_state/compose.keep" "$ob_managed"
 # OB-7) a binding beyond 127.0.0.1 -> action, whichever way it is spelled:
 #       0.0.0.0, an empty HostIp (every interface) even as the ONLY
 #       binding, and IPv6 any next to loopback ones.
@@ -1600,25 +1663,85 @@ else
     ! "no file yet" "file(s),"
 fi
 chmod 700 "$ob_archive_dir"
-# Files with known sizes and times: the count is of *.jsonl only, the size
-# is what du reports for the directory, and the newest write is the file
-# with the latest modification time, not the last one listed.
-head -c 20000 /dev/zero > "$ob_archive_dir/logs.jsonl"
-printf '{}\n' > "$ob_archive_dir/traces-2020-01-01T00-00-00.000-size.jsonl"
+# Files with known sizes and times: the count is of the Collector's zstd
+# files (*.jsonl.zst and the rotated *.jsonl-*.zst, since #527) and of the ones from before (*.jsonl and
+# their gzip copies *.jsonl.gz), the size is what du reports for the
+# directory, and the newest write is the file with the latest modification
+# time, not the last one listed. Other names are not counted (nor their
+# head judged: traces.zst does not start with the magic).
+# shellcheck disable=SC2059  # the magic is a printf format of octal escapes
+{ printf "$ob_zstd_magic"; head -c 20000 /dev/zero; } > "$ob_archive_dir/logs.jsonl.zst"
+# shellcheck disable=SC2059
+printf "${ob_zstd_magic}zstd\n" > "$ob_archive_dir/traces.jsonl-2020-01-01T00-00-00.000-size.zst"
 printf 'not counted\n' > "$ob_archive_dir/notes.txt"
-touch -t 202101021504 "$ob_archive_dir/logs.jsonl"
-touch -t 202001010000 "$ob_archive_dir/traces-2020-01-01T00-00-00.000-size.jsonl"
+printf 'not counted\n' > "$ob_archive_dir/traces.zst"
+touch -t 202101021504 "$ob_archive_dir/logs.jsonl.zst"
+touch -t 202001010000 "$ob_archive_dir/traces.jsonl-2020-01-01T00-00-00.000-size.zst"
 ob_kb="$(du -sk "$ob_archive_dir" | awk '{print $1}')"
 ob_healthy
-ob_expect "archive holding files -> item with the count, the size and the newest write" -- \
+ob_expect "archive holding zstd files -> item with the count, the size and the newest write" -- \
   "[info] - otel backend archive: 2 file(s), $ob_kb KB in $ob_archive_dir, newest written 2021-01-02 15:04" \
-  ! "no file yet" "not private" "size not checked" "otel backend archive not checked"
+  ! "no file yet" "not private" "size not checked" "otel backend archive not checked" "from before #527" \
+    "zstd frame magic" "could not be read"
 # du failing -> the size is not checked, not a number.
 ob_healthy
 : > "$ob_state/du-fail"
 ob_expect "du fails -> size not checked" -- \
   "[info] - otel backend archive: 2 file(s), size not checked (du failed) in $ob_archive_dir, newest written 2021-01-02 15:04" \
   ! " KB in "
+# Files from before #527 (uncompressed, or gzip copies of them): counted
+# and named apart, since nothing deletes them by age; the newest write is
+# still the latest of all, whichever kind it is.
+printf '{}\n' > "$ob_archive_dir/traces-2019-01-01T00-00-00.000-size.jsonl"
+printf 'gz\n' > "$ob_archive_dir/metrics.jsonl.gz"
+touch -t 201901010000 "$ob_archive_dir/traces-2019-01-01T00-00-00.000-size.jsonl"
+touch -t 202203040506 "$ob_archive_dir/metrics.jsonl.gz"
+ob_kb="$(du -sk "$ob_archive_dir" | awk '{print $1}')"
+ob_healthy
+ob_expect "archive with files from before #527 -> item naming how many of them" -- \
+  "[info] - otel backend archive: 4 file(s) (2 of them from before #527, uncompressed or gzip, which the Collector does not delete by age), $ob_kb KB in $ob_archive_dir, newest written 2022-03-04 05:06" \
+  ! "no file yet" "size not checked" "zstd frame magic"
+# A zstd file that a Collector without the gate started (#529): it begins
+# with a 4-byte length, not the zstd frame magic -> action naming it, whose
+# steps stop the container, make the aside directory, move each such file
+# there and start the container, in that order. Its name is shown, nothing
+# of its content. A file shorter than 4 bytes (just created) is not judged.
+printf '\000\000\001\000framed\n' > "$ob_archive_dir/traces.jsonl.zst"
+printf '\000\000\002\000framed\n' > "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst"
+printf '\050\265' > "$ob_archive_dir/logs.jsonl-2026-01-02T00-00-00.000-size.zst"
+ob_healthy
+ob_rc=0
+ob_out="$(ob_doctor "$ob_path" personal 2>&1)" || ob_rc=$?
+ob_framed_msg="[warn] otel backend archive: 2 zstd file(s) do not start with the zstd frame magic, so zstd -d cannot read them back (written by a Collector without the exporter.file.nativeCompression gate?): "
+if [[ "$ob_rc" -eq 0 ]] \
+  && grep -Fq "$ob_framed_msg" <<< "$ob_out" \
+  && grep -F "$ob_framed_msg" <<< "$ob_out" | grep -Fq 'metrics.jsonl-2026-01-01T00-00-00.000-size.zst' \
+  && grep -F "$ob_framed_msg" <<< "$ob_out" | grep -Fq 'traces.jsonl.zst' \
+  && ! grep -F "$ob_framed_msg" <<< "$ob_out" | grep -Fq 'logs.jsonl-2026-01-02' \
+  && ! grep -Fq 'framed' <<< "$ob_out" \
+  && steps_consecutive "$ob_out" "        \$ docker-compose -f $(printf '%q' "$ob_managed") stop" "        \$ mkdir -p $(printf '%q' "$ob_archive_dir/unreadable")" \
+  && steps_consecutive "$ob_out" "        \$ mkdir -p $(printf '%q' "$ob_archive_dir/unreadable")" "        \$ mv $(printf '%q' "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" \
+  && steps_consecutive "$ob_out" "        \$ mv $(printf '%q' "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" "        \$ mv $(printf '%q' "$ob_archive_dir/traces.jsonl.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" \
+  && steps_consecutive "$ob_out" "        \$ mv $(printf '%q' "$ob_archive_dir/traces.jsonl.zst") $(printf '%q' "$ob_archive_dir/unreadable/")" "$ob_up_step"; then
+  ok "test passed: otel backend zstd files without the frame magic -> action naming them, steps stop / mkdir / mv each / up in order, a short file not judged"
+else
+  printf '%s\n' "$ob_out" >&2
+  fail "test failed: otel backend zstd files without the frame magic must be named (only those, never their content) in an action whose steps are stop, mkdir unreadable, mv each, then up, consecutively; a file shorter than 4 bytes must not be judged (exit $ob_rc)"
+  status=1
+fi
+rm -f "$ob_archive_dir/traces.jsonl.zst" "$ob_archive_dir/metrics.jsonl-2026-01-01T00-00-00.000-size.zst"
+# A zstd file this user cannot read -> its head is not checked (warn), never
+# judged either way. Root reads any file, so the case is skipped there.
+chmod 000 "$ob_archive_dir/logs.jsonl.zst"
+if [[ -r "$ob_archive_dir/logs.jsonl.zst" ]]; then
+  ok "test skipped: otel backend unreadable zstd file (this user reads a mode-000 file)"
+else
+  ob_healthy
+  ob_expect "a zstd file that cannot be read -> its head not checked" -- \
+    "[warn] otel backend archive: the first bytes of 1 zstd file(s) could not be read, so whether zstd -d can read them back is not checked" \
+    ! "zstd frame magic"
+fi
+chmod 644 "$ob_archive_dir/logs.jsonl.zst"
 # OB-14) work does not list the module -> not managed, whatever is on disk,
 #        and nothing probed.
 ob_healthy

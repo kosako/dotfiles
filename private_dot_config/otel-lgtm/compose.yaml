@@ -13,7 +13,16 @@
 # data (#520): Prometheus by its retention flag, Loki by the compactor's
 # retention (off in the image), Tempo by the block retention of both the
 # backend scheduler and the backend worker (the image's default is 14 days).
-# The binds need the Colima VM to mount exactly two host directories:
+# The Collector gets the archive config and, for its zstd files, the
+# exporter.file.nativeCompression feature gate (#527) in OTELCOL_EXTRA_ARGS.
+# Compose passes the environment only when it creates the container, and a
+# container without the gate that reads a zstd archive config writes a
+# framing `zstd -d` cannot read, which recreating does not repair. So an
+# apply that changes the archive config goes: `stop`, apply, then
+# `up -d --force-recreate` (a stopped container does not come back with the
+# daemon, and a change of the bound file alone is no change of this
+# definition to `up -d`). doctor compares the environment and reads the
+# first bytes of each zstd file. See docs/otel-backend.md. The binds need the Colima VM to mount exactly two host directories:
 # ~/.config/otel-lgtm read-only (the Collector archive config and the
 # Grafana dashboards next to this file) and ~/.local/share/otel-lgtm/archive
 # writable (the raw telemetry, kept for re-ingesting into another backend).
@@ -30,7 +39,7 @@ services:
       PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d
       LOKI_EXTRA_ARGS: -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem
       TEMPO_EXTRA_ARGS: -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h
-      OTELCOL_EXTRA_ARGS: --config=file:/otel-lgtm/otelcol-archive.yaml
+      OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4317:4317"

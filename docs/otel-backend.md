@@ -37,7 +37,7 @@ compose file の定義:
 | `restart` | `unless-stopped` | docker の daemon と一緒に戻る(常時起動の 2 段目) |
 | `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d` | 下の「metric の temporality」と「保存期間」 |
 | `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定) | 下の「保存期間」 |
-| `environment` | `OTELCOL_EXTRA_ARGS: --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline を重ねる |
+| `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline を重ねる。gate は保管の zstd に要る(下の「生データの保管と読み戻し」) |
 
 bind(どれも long syntax で `bind.create_host_path: false`):
 
@@ -133,7 +133,7 @@ Colima の VM には、host の directory を次の 2 つだけ mount する(#51
    ```sh
    docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
    lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(3000|4317|4318) \(LISTEN\)'   # 3 行出て、どれも address が 127.0.0.1
-   ls -la ~/.local/share/otel-lgtm/archive                                # telemetry が届くと *.jsonl ができる
+   ls -la ~/.local/share/otel-lgtm/archive                                # telemetry が届くと *.jsonl.zst ができる
    ```
 
    Grafana は `http://127.0.0.1:3000`。dashboard は「AI agents」folder の「AI agents (Codex)」。
@@ -324,28 +324,92 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 - 書くのは image の Collector に重ねた 3 つの pipeline(`traces/archive`・`metrics/archive`・`logs/archive`)。receiver は
   `otlp` だけで processor を通さないので、Codex が送ったままの形になる。image の既存の pipeline の定義には触れず、
   名前の違う pipeline を足すだけ(Collector の設定の重ね方では、list は置き換わり、map は足される)。
-- file は signal ごとに `traces.jsonl`・`metrics.jsonl`・`logs.jsonl`。中身は改行区切りの OTLP JSON(1 行が 1 回の
-  export)で、圧縮しない。
-- 64MB を超えると、`<名前>-<UTC の時刻>-size.jsonl` に回して新しい file に書く。**回した file は 1 年残す**(#520):
+- file は signal ごとに `traces.jsonl.zst`・`metrics.jsonl.zst`・`logs.jsonl.zst`。中身は改行区切りの OTLP JSON(1 行が
+  1 回の export)を、標準の zstd で圧縮したもの(#527)。`zstd -d` で元の改行区切りの JSON に戻る。
+  - 圧縮するのは、Codex の trace が多いため。圧縮しないと 1 日に約 100MB 増え、1 年で約 36GB になる見込みだった
+    (2026-11-11〜13 の観測。量の 8 割は `handle_responses`・`receiving`・`append_items` などの内部の span)。
+  - 標準の zstd で書くには、Collector の feature gate `exporter.file.nativeCompression`(Alpha、既定は off)が要る。
+    compose の `OTELCOL_EXTRA_ARGS` で渡す。gate が無いと、`compression: zstd` は batch ごとに圧縮して長さを前に付ける
+    独自の形で書き、`zstd -d` でも読めない(upstream の README)。
+  - gate があると、batch ごとに 1 つの zstd の frame を書く。今書いている file もいつでも展開でき、Collector が
+    再起動した後は同じ file に足していく(この image の Collector で実測)。
+  - gate は compose が container を作るときにだけ渡る。gate の無い container が zstd の保管の設定を読むと、読めない
+    形で `*.jsonl.zst` を書き始める。その file は、gate のある container に作り直しても直らない(Codex review、PR #529)。
+    保管の設定を変える apply は、下の「保管の設定を変えるとき」の順で行う。
+
+保管の設定を変えるとき(#527 の移行を含む)は、先に container を止めてから apply し、作り直す:
+
+```sh
+docker-compose -f ~/.config/otel-lgtm/compose.yaml stop
+chezmoi apply ~/.config/otel-lgtm
+docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d --force-recreate
+```
+
+- 止めた container は、`restart: unless-stopped` でも docker の daemon と一緒には戻らない。そのため、apply から作り直し
+  までの間に再起動が入っても、古い container が新しい保管の設定を読むことはない。
+- `--force-recreate` を付けるのは、保管の設定の中身だけが変わったときに、`up -d` が container を作り直さないため
+  (bind の元の file の中身は、compose の定義の変更にならない)。
+- doctor は、container の環境変数を定義と比べる。さらに zstd の file の先頭の 4 byte を読み、zstd の frame の magic で
+  始まらない file を action にする(gate なしで書き始めた file は、先頭が長さの前置きになる)。
+
+読めない形の file があると doctor が出したときは、container を止め、その file を別の directory に移してから起動する。
+Collector は新しい file に書き始める(doctor の action の手順と同じ):
+
+```sh
+docker-compose -f ~/.config/otel-lgtm/compose.yaml stop
+mkdir -p ~/.local/share/otel-lgtm/archive/unreadable
+mv <doctor が挙げた file> ~/.local/share/otel-lgtm/archive/unreadable/
+docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
+```
+
+- 移した file は消さずに残す。gate なしで書いた部分は「4 byte の長さ(big endian)と、batch ごとの zstd の frame」の
+  列(upstream の README の、gate が off のときの形)。gate のある container に作り直した後に同じ file へ足された部分は、
+  前置きの無い標準の zstd の frame の列になる。1 つの file に両方が混ざりうる(Codex review、PR #529)。
+- 読み戻すには、位置ごとに次の 4 byte を見て分ける処理を書く。zstd の frame の magic(`28 b5 2f fd`)なら前置きの無い
+  frame で、frame を 1 つ展開して読んだ分だけ進む。それ以外なら長さの前置きで、その長さの frame を 1 つ展開する
+  (前置きが magic と同じ値になるのは長さが約 680MB のときで、64MB で回す設定では起きない)。
+  `zstd -d` は前置きを frame として読めないので、そのままでは使えない。
+- `unreadable/` の下は、Collector も doctor も見ない。期間では消えないので、要らなくなったら人が消す。
+
+- 64MB(圧縮した後の大きさ。この image の Collector で実測)を超えると、`<名前>.jsonl-<UTC の時刻>-size.zst` に
+  回して新しい file に書く。**回した file は 1 年残す**(#520):
   - `max_days: 365` で、回した file を、名前の時刻(回した時刻)から 365 日で消す(この image の Collector で実測:
-    `max_days: 1` の設定に 2 年前の時刻の名前の file を置くと、次に回したときに消え、新しく回った file は残った)。
+    `max_days: 1` の設定に 2 年前の時刻の名前の file を置くと、次に回したときに消え、新しく回った file は残った。
+    #527 で、zstd の名前の file でも同じく消えることを確かめた)。
   - file の中の最も古い data は、1 年より少し古いことがある(回すまでの間の data が 1 つの file に入るため)。
   - 今書いている file は、期間では消えない。64MB に達するまで回らないので、量が少ないと 1 年より長く残る。
   - 残す数(`max_backups`)は 0 にした。0 は回した file を全部残す(実測、#517: 1MB で回す設定で、0 は回した 7 つを
     全部残し、1 は最新の 1 つだけを残した。upstream の README には 0 の意味が書かれていない)。0 以外の数は、期間より
     先に古いものを消す。
-- 容量の目安(実測、2026-11-11): 短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が約 0.18MB、log が
-  約 0.03MB)。skill が起動した review(effort が xhigh)の 1 回では、数分で約 8MB になった(ほとんどが trace)。大きさと
-  最後に書いた時刻は doctor が出す(`du -sh ~/.local/share/otel-lgtm/archive` でも見られる)。
+- 容量の目安: 圧縮する前の量は、短い `codex exec` の 1 回で約 1.1MB(trace が約 0.88MB、metric が約 0.18MB、log が
+  約 0.03MB。2026-11-11 の実測)。skill が起動した review(effort が xhigh)の 1 回では、数分で約 8MB になった
+  (ほとんどが trace)。zstd では、回した traces の file 1 つ(66.9MB)が 3.1MB になった(約 21 分の 1。#527 で、この
+  image の Collector に同じ data を送って実測)。2026-11-11〜13 の使い方なら、traces は 1 日に約 5MB、1 年で約 2GB の
+  見込み。大きさと最後に書いた時刻は doctor が出す(`du -sh ~/.local/share/otel-lgtm/archive` でも見られる)。
 - Collector の自分の metric(`prometheus/collector` の scrape)は入らない。agent から届いたものだけ。
+
+#527 より前の file(`*.jsonl` と、回した `<名前>-<UTC の時刻>-size.jsonl`)は、圧縮しないまま残る。今の設定の名前と
+合わないので、Collector は期間でも消さない。doctor は、その数を分けて出す。
+
+- 小さくするなら、container を作り直した後(doctor が「environment matches」を出し、`*.jsonl` に書かれなくなった後)に
+  gzip にする。読み戻しの `otlpjsonfile` receiver は gzip を読める(`compression: gzip`)。
+
+  ```sh
+  cd ~/.local/share/otel-lgtm/archive && gzip -- *.jsonl
+  ```
+
+- gzip にした file(`*.jsonl.gz`)も期間では消えない。要らなくなったら人が消す。
 
 読み戻すとき(将来の server の Collector で):
 
 - 保管に残るのは、おおむね直近の 1 年分。回した file は、名前の時刻(回した時刻)から 365 日で消える。今書いている
   file と、回した file の中の古い data は、それより少し長く残る(上の注意)。backend の data も 1 年で消える。
-- `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、圧縮しない改行区切りの OTLP JSON を読める
-  (upstream の README)。signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build にも
-  `otlp_json_file` の名前で入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。
+- `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、改行区切りの OTLP JSON を読める(upstream の README)。
+  signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build にも `otlp_json_file` の名前で
+  入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。
+- この receiver が読める圧縮は gzip だけで、zstd は読めない(upstream の README)。`*.zst` は、先に `zstd -d` で展開して
+  から読ませる(#527 で、この image の Collector が書いた file を展開し、送った行と span がすべて戻ることを確かめた)。
+  #527 より前の `*.jsonl` はそのまま、`*.jsonl.gz` は `compression: gzip` で読める。
 - 元の時刻のまま送られるので、読み戻す先の backend が古い時刻を受け付けるか(Prometheus の
   `out_of_order_time_window` など)を確かめる。
 - metric は Codex が送った delta のまま保管している。読み戻す先が delta を受け付けないときは、そちらで変換する。
@@ -368,17 +432,22 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
    通れば、その digest が upstream の repository の workflow で作られたものと分かる(0.39.0 で確認。digest を
    変えると失敗する)。依存先の中身の安全を示すものではない。
 3. 新しい image の Collector が保管の設定を受け付けるかを確かめる(`otlp` receiver の名前と `file` exporter が在る
-   こと)。
+   こと、zstd の gate が在ること)。
 
    ```sh
    docker run --rm -i --entrypoint sh grafana/otel-lgtm@sha256:<digest> -c \
      'cat > /tmp/a.yaml && cd /otel-lgtm && ./otelcol-contrib/otelcol-contrib validate \
-        --feature-gates service.profilesSupport \
+        --feature-gates service.profilesSupport --feature-gates=exporter.file.nativeCompression \
         --config=file:./otelcol-config.yaml --config=file:/tmp/a.yaml' < ~/.config/otel-lgtm/otelcol/archive.yaml
+   docker run --rm --entrypoint /otel-lgtm/otelcol-contrib/otelcol-contrib grafana/otel-lgtm@sha256:<digest> \
+     featuregate | grep exporter.file.nativeCompression
    ```
 
    `--feature-gates service.profilesSupport` は、image の設定にある profiles の pipeline のために要る(image の
    `run-otelcol.sh` も付けて起動する。付けないと validate がその pipeline で止まる)。
+   `exporter.file.nativeCompression` は Alpha の gate(0.164.0 で確認)。無い gate を渡すと、Collector は
+   `no such feature gate` で起動しない(0.164.0 で確認)。gate が無くなっていたら、upstream の README で、標準の zstd で
+   書く方法がどう変わったかを確かめてから、compose と保管の設定を合わせて更新する。
 
 4. 新しい image の Prometheus・Loki・Tempo が保持の指定を受け付けるかを確かめる(上の「保存期間」の command を、
    使い捨ての container で実行する。Prometheus の flag は DEPRECATED なので、残っているかを見る)。
@@ -389,7 +458,8 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
 
 設定の file(保管の設定・provider)を変えたときは、`docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 --force-recreate` で作り直す(どちらも起動のときにだけ読まれる。file の bind は作成のときの file を指し続けるので、
-`restart` では新しい中身が見えないことがある)。dashboard の JSON は作り直さなくても読み直される。
+`restart` では新しい中身が見えないことがある)。保管の設定を変えるときは、apply の前に container を止める(上の
+「保管の設定を変えるとき」)。dashboard の JSON は作り直さなくても読み直される。
 
 ## data
 
@@ -417,7 +487,8 @@ action(`mkdir -p ~/.config` と `chezmoi apply` の手順)で、ほかは見な�
 出す。
 
 compose file があるときは、実行時の状態と保管の directory を**読むだけ**で確かめる(何も起動せず、何も変えない)。
-使う command は `docker ps`・`docker inspect`・`colima ssh -- mount` の 3 つで、どれも期限付き(`bounded_probe`)。
+使う command は `docker ps`・`docker inspect`(image と port、環境変数の 2 回)・`colima ssh -- mount` で、どれも期限付き
+(`bounded_probe`)。
 
 | 見ること | 結果 |
 | --- | --- |
@@ -425,17 +496,18 @@ compose file があるときは、実行時の状態と保管の directory を**
 | docker が daemon に届くか | 届かなければ action(保管の directory を作って `chmod 700` し、2 つの mount で `colima start`)で、container と VM の確認はしない。期限内に答えなければ「未確認」の warn |
 | container があり、running か | 無い・止まっているなら action(`docker-compose -f <file> up -d`)。image と port は見ないが、VM の mount と常駐の登録は続けて見る |
 | container の image が、定義の固定と同じか | 違えば action(managed file が進んだ後に作り直していない、など) |
+| container の環境変数に、定義の `environment` がすべて同じ値であるか(#527) | 違う・無い変数があれば、その名前だけを並べた action(`up -d`。値は出さない)。`OTELCOL_EXTRA_ARGS` が違うときは、保管が読めない形になりうることも書く。image の持つほかの変数はあってよい。答えが取れない、または定義の `environment` が 1 行の文字列の map でなければ「未確認」 |
 | 公開した port が、すべて `127.0.0.1` か | 1 つでも違えば action(`0.0.0.0`・空の address・IPv6 の any)。公開が 0 なら warn。port の JSON は、strict な 1 つの object と読めたときだけ使う(下の注) |
 | VM の host の share が、上の 2 つだけか | 2 つだけで設定が `ro`、保管が `rw` なら ok。ほかの share、設定が `rw`、保管が `ro`、2 つのどちらかが無い、のどれかなら、それを全部並べた 1 つの action(`colima stop` の後、保管の directory を作って `chmod 700` し、2 つの mount で起動し直す。`colima start --mount` は VM の mount を指定どおりに置き換えるので、どれもこの手順で直る)。share の行で形が読めないものがあれば「未確認」 |
 | Colima が login の常駐に登録されているか | どちらでも中立の item(常時起動にするかは選べる) |
-| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(中身は読まない。`du` が失敗したら大きさは「未確認」) |
+| 保管の directory | 無ければ action(`mkdir` と `chmod 700`)、0700 でなければ action(`chmod 700`)。一覧できなければ「未確認」。file が無ければ item、あれば数・大きさ・最後に書いた時刻の item(`du` が失敗したら大きさは「未確認」)。数えるのは `*.jsonl.zst`(回した `*.jsonl-*.zst` も)と、#527 より前の `*.jsonl`・`*.jsonl.gz` で、前の 2 つはその数を分けて出す(期間では消えないため)。zstd の file は先頭の 4 byte だけを読み(ほかは読まない)、zstd の frame の magic で始まらない file を、名前を並べた action にする(container を止め、`unreadable/` に移し、起動する手順。#529)。4 byte に満たない file は判定しない。読めない file は「未確認」 |
 
 - daemon に届かないときの手順に 2 つの mount と `--ssh-config=false` を付けているのは、VM が無い状態で裸の
   `colima start` を実行すると、既定の動作(`$HOME` の mount と `~/.ssh/config` の書き換え)で新しい VM が作られるため。
   VM が既にあるときは、mount を指定どおりに置き換える(保存された設定と同じなら、その繰り返し)。
 - `chmod 700` を `colima start` より先にするのは、container が VM と一緒に戻って(restart policy)、すぐに保管に書き
   始めるため。
-- `docker-compose up` を手順に持つ action(container が無い・止まっている、image の違い、広い port)は、section の最後に
+- `docker-compose up` を手順に持つ action(container が無い・止まっている、image や環境変数の違い、広い port)は、section の最後に
   まとめて出す。次の手順の一覧は action が出た順に並ぶので、mount と保管の権限を直す手順が先に来る(container の bind は、
   VM の 2 つの mount と 0700 の保管の directory を前提にするため)。
 - port の JSON は、Bridge One の確認が `~/.claude/settings.json` を読むのと同じ方法で strict に読む: jq に raw の文字列で
@@ -450,7 +522,15 @@ compose file があるときは、実行時の状態と保管の directory を**
 - loopback の port には、同じ Mac の process と browser から届く。Grafana は認証なしで、Admin の権限で応える。
 - docker の socket は、使える process にとって強い権限になる。VM に mount する host の directory を 2 つ(設定は
   読み取りだけ、保管だけ書き込み可)に限ることで、影響を狭めている。doctor がこの mount の形を確かめる。
-- 保存期間は 1 年なので、それまでは容量が増え続ける。1 年分の量は未確認(上の「保存期間」の容量)。
+- 保存期間は 1 年なので、それまでは容量が増え続ける。保管の traces は、今の使い方で 1 年に約 2GB の見込み(上の
+  「生データの保管と読み戻し」)。backend の 1 年分の量は未確認で、Tempo の増え方は #528 で扱う。
+- 保管の zstd は Alpha の feature gate に頼る。image を更新するときに gate の有無を確かめる(上の「image の更新」)。
+- 「保管の設定を変えるとき」の順を守らないと、gate の無い container が新しい保管の設定を読み、`zstd -d` で読めない形で
+  書きうる。doctor は環境変数の違いと、magic で始まらない zstd の file を action にするが、防ぎはしない。直すときは
+  file を移す(上の手順)。
+- doctor の magic の確認は、file の先頭だけを見る。gate のある Collector が書き始めた file に、後から gate の無い
+  Collector が足した場合は見つけられない(この repo の定義から作った container では、gate と保管の設定が揃って
+  変わるので、手順を守れば起きない)。
 - 1 年を過ぎた telemetry は、backend からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
   では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
 - image は 3.6GB あり、production 向けではない。
@@ -464,9 +544,10 @@ byte 単位で不変)、managed-by の見出し(dashboard は description)、com
 どおり。pin とは別に、定義が守る性質も確かめる: image が版と digest の両方で固定、すべての port が `127.0.0.1`
 だけ、host の path は許可した bind だけ(compose の directory の下を読み取りだけで、保管の directory を `/archive` に
 書き込み可で、どれも `create_host_path: false`)、named volume の宣言の中身が空、Prometheus が delta の metric を
-変換する指定、Prometheus・Loki・Tempo が 1 年残す指定(引数ごとに完全一致)、Collector が bind した保管の設定を読む
-指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
-processor なしで file に書き、file は `/archive` の下の JSON、`max_days` が 365、`max_backups` が 0。provider は
+変換する指定、Prometheus・Loki・Tempo が 1 年残す指定(引数ごとに完全一致)、Collector が zstd の gate を有効にして
+bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
+processor なしで file に書き、file は `/archive` の下の zstd の JSON(`*.jsonl.zst`、`compression: zstd`)、`max_days` が
+365、`max_backups` が 0。provider は
 bind した dashboard の directory を指し、UI での変更を拒む。dashboard は strict な JSON の object で、uid が決まっていて、
 どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列は不合格)。保管の bind は
 ちょうど 1 つ。mode が file 0644 / directory 0755。container runtime とは
