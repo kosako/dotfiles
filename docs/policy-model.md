@@ -158,9 +158,11 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
 
 Claude Code に接続されていても日常で使っていない MCP を露出から外す capability(#341)。
 
-- `gateUnusedClaudeMcp`(boolean): managed `~/.claude/settings.json` の `permissions.deny` に次の 21 件を出す。
-  - claude.ai の hosted connector 4 つを server 単位で: `mcp__claude_ai_Gmail` / `mcp__claude_ai_Google_Calendar` /
-    `mcp__claude_ai_Google_Drive` / `mcp__claude_ai_Claude_Docs`。
+- `gateUnusedClaudeMcp`(boolean): managed `~/.claude/settings.json` の `permissions.deny` に次の 22 件を出す。
+  - claude.ai の hosted connector 5 つを server 単位で: `mcp__claude_ai_Gmail` / `mcp__claude_ai_Google_Calendar` /
+    `mcp__claude_ai_Google_Drive` / `mcp__claude_ai_Claude_Docs` / `mcp__claude_ai_Notion`。Notion は #530 で足した。
+    Claude Code は Notion を plugin で使う。connector にログインすると同じ tool が別の名前
+    (`mcp__claude_ai_Notion__…`)で出て、下の 17 個の deny に当たらないため。
   - Notion plugin の書込 tool のうち、利用が無いかまれな 17 個(`mcp__plugin_Notion_notion__<tool>`)。毎日使う
     `notion-update-page` / `notion-create-pages` と読取系は出さない。正確な一覧は template と
     `scripts/test-claude-settings.sh` の exact pin。

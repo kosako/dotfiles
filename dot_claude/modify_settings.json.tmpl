@@ -31,10 +31,14 @@
        2. gateGitHubMcp: deny the github MCP server.
           gateUnusedClaudeMcp (#341): deny the MCP that Claude Code is
           connected to but does not use day to day — the claude.ai hosted
-          connectors Gmail / Google Calendar / Google Drive / Claude Docs as
-          whole servers, and the Notion plugin's write tools with no or rare
-          use (the daily notion-update-page / notion-create-pages and every
-          read tool stay). Exposure reduction, not a boundary: it binds Claude
+          connectors Gmail / Google Calendar / Google Drive / Claude Docs /
+          Notion as whole servers, and the Notion plugin's write tools with no
+          or rare use (the daily notion-update-page / notion-create-pages and
+          every read tool stay). The Notion connector joined in #530: Claude
+          Code uses Notion through the plugin, and the connector, once logged
+          in, would offer the same tools under other names
+          (mcp__claude_ai_Notion__...) that the plugin's tool denies below do
+          not match. Exposure reduction, not a boundary: it binds Claude
           Code only (the web / mobile chat keep the connectors), and the
           rarely used three (move-pages / duplicate-page / create-file-upload)
           are meant to move to ask once an ask is confirmed to reach the human.
@@ -93,6 +97,21 @@
          options, MCP headers). doctor never prints their values; an agent may still
          have a legitimate reason to look (debugging a Codex setting), so
          approval rather than deny.
+       MCP login tools (#530, unconditional): deny mcp__*__authenticate and
+       mcp__*__complete_authentication, the tools Claude Code adds to an MCP
+       server that needs a login (often the only tool such a server shows, so
+       a model reaches for it whenever it wants the server). Starting a login
+       clears the stored OAuth token first, and every Claude Code session on
+       the machine shares that token, so one session's model logged every
+       session out (twice on 2026-11-13, with Notion). The human logs in from
+       /mcp in one place; a session that was not logged in picks the shared
+       token up when it calls the server's tools again. The `*` standing for
+       the server was read from Claude Code 2.1.323: in a running session a
+       deny of either form removed that tool from both Notion servers (the
+       plugin and the claude.ai connector), and removing the deny brought it
+       back. The docs show the MCP forms `mcp__<server>` and
+       `mcp__<server>__*` but no wildcard for the server, so a later version
+       may read the rule differently and match nothing.
        3. enforceAiSandbox (human-legit, stays gated): git push to main/master and
           reading .env are things the human does legitimately direct Claude to do,
           so they ride on enforceAiSandbox — which personal keeps false because its
@@ -204,10 +223,10 @@
        #524: the port range). The value is never printed. Secret
        headers do not belong in settings.json; otelHeadersHelper is the
        route when the destination needs them. */ -}}
-{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Edit(//**/.agent-context.local.md)" -}}
+{{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat ~/.ssh/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Edit(//**/.agent-context.local.md)" "mcp__*__authenticate" "mcp__*__complete_authentication" -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- if index $caps "gateUnusedClaudeMcp" -}}
-{{- $deny = concat $deny (list "mcp__claude_ai_Gmail" "mcp__claude_ai_Google_Calendar" "mcp__claude_ai_Google_Drive" "mcp__claude_ai_Claude_Docs") -}}
+{{- $deny = concat $deny (list "mcp__claude_ai_Gmail" "mcp__claude_ai_Google_Calendar" "mcp__claude_ai_Google_Drive" "mcp__claude_ai_Claude_Docs" "mcp__claude_ai_Notion") -}}
 {{- range list "notion-create-comment" "notion-create-attachment" "notion-create-database" "notion-create-view" "notion-update-view" "notion-update-data-source" "notion-create-folder" "notion-update-folder" "notion-restore-pages" "notion-convert-page-to-skill" "notion-upload-skill" "notion-spawn-session" "notion-send-message-to-session" "notion-stop-session" "notion-move-pages" "notion-duplicate-page" "notion-create-file-upload" -}}
 {{- $deny = append $deny (printf "mcp__plugin_Notion_notion__%s" .) -}}
 {{- end -}}
