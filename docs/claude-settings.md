@@ -201,8 +201,8 @@ enforcement boundary ではない**(射程と限界は
 - ログインは人が `/mcp` から 1 か所で行う。ログインしていない session も、server の tool を呼び直せば共有の token を拾う。
 - server の部分の `*` が全 server に当たることは、Claude Code 2.1.323 の動作で確かめた。動いている session で、
   どちらの書き方の deny も、2 つの Notion の server (plugin と claude.ai の connector) からその tool を消した。deny を
-  外すと tool は戻った。docs にある書き方は `mcp__<server>__*` だけなので、後の版で読み方が変わると、この deny は
-  何にも当たらなくなりうる。
+  外すと tool は戻った。docs にある MCP の書き方は `mcp__<server>` と `mcp__<server>__*` で、server の部分の
+  wildcard は書かれていない。後の版で読み方が変わると、この deny は何にも当たらなくなりうる。
 - `scripts/test-claude-settings.sh` は rule の文面を固定する。harness の挙動の証明ではない。
 
 ## sandbox(`enforceAiSandbox`)

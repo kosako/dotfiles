@@ -109,8 +109,9 @@
        the server was read from Claude Code 2.1.323: in a running session a
        deny of either form removed that tool from both Notion servers (the
        plugin and the claude.ai connector), and removing the deny brought it
-       back. The docs show only `mcp__<server>__*`, so a later version may
-       read the rule differently and match nothing.
+       back. The docs show the MCP forms `mcp__<server>` and
+       `mcp__<server>__*` but no wildcard for the server, so a later version
+       may read the rule differently and match nothing.
        3. enforceAiSandbox (human-legit, stays gated): git push to main/master and
           reading .env are things the human does legitimately direct Claude to do,
           so they ride on enforceAiSandbox — which personal keeps false because its
