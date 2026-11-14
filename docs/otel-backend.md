@@ -301,14 +301,15 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 - Loki は dashboard のほぼすべての panel が読む(下の「dashboard で 1 回に見られる期間」)。1 日に約 0.3MB で、1 年でも約
   0.1GB。
 - Prometheus は dashboard が読んでいない(数は log から数える。上の「dashboard」)。1 日に約 25MB 増え、1 年なら約 9GB に
-  なる見込みだった。7 割は image の Collector が自分を 1 秒ごとに測った metric(`prometheus/collector` の scrape)。30 日なら
+  なる見込みだった。sample の数の約 7 割は、image の Collector が自分を 1 秒ごとに測った metric(`prometheus/collector` の
+  scrape)。30 日なら
   約 0.75GB。所要時間の分布などは、直近の 30 日を Explore で見る。
 - Tempo は Codex の「trace (最近のもの)」の panel だけが読み、その検索は 7 日まで。1 日に約 14〜25MB で、1 年なら 5〜9GB に
   なる見込みだった。30 日なら 0.4〜0.8GB。30 日より前の trace は保管の file から読み戻す。
 - Pyroscope が持っていた profile は、Pyroscope 自身のもの(`service_name` が `pyroscope`)だけだった。3.5 日で約 128MB、
   既定の保持の 31 日で約 1GB になる。送るのを止めると新しい profile は入らず、今ある分は 31 日で消える。
-- Prometheus は別案も比べた。保持は 1 年のまま、Collector が自分を測る間隔を 1 秒から 60 秒にする案(1 年で約 3GB)。image
-  の Collector の設定の名前に頼るので採らない。
+- Prometheus は別案も比べた。保持は 1 年のまま、Collector が自分を測る間隔を 1 秒から 60 秒にする案(1 年で約 3GB。量が sample の数に
+  比例するとした概算)。image の Collector の設定の名前に頼るので採らない。
 
 指定の注意:
 
@@ -327,13 +328,14 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   docker exec otel-lgtm curl -s http://127.0.0.1:3100/config | grep -E '^\s+(retention_enabled|retention_period):'
   docker exec otel-lgtm curl -s http://127.0.0.1:3200/status/config | grep -E '^\s+block_retention:'
   now=$(date +%s); docker exec otel-lgtm curl -s -X POST -H 'Content-Type: application/json' \
-    -d "{\"name\":\"service_name\",\"start\":$(( (now - 3600) * 1000 )),\"end\":$(( now * 1000 ))}" \
+    -d "{\"name\":\"service_name\",\"start\":$(( (now - 600) * 1000 )),\"end\":$(( now * 1000 ))}" \
     http://127.0.0.1:4040/querier.v1.QuerierService/LabelValues
   ```
 
   Loki は `retention_period` を 2 行出す。`1y` が `limits_config` の値で、`0s` は今の storage(tsdb と compactor)では使われない
-  `table_manager` の項目。Tempo の 2 行はどちらも `720h0m0s`。Pyroscope の問い合わせは、直近 1 時間に profile を送った
-  `service_name` の一覧を返す。送るのを止めた後は `{}` になる(Pyroscope の 1 回の問い合わせの上限は 1 日)。
+  `table_manager` の項目。Tempo の 2 行はどちらも `720h0m0s`。Pyroscope の問い合わせは、直近 10 分に profile を送った
+  `service_name` の一覧を返す。volume は作り直しても残るので、作り直した直後は、止める前の `pyroscope` が範囲に入る。
+  作り直してから 10 分以上たってから見ると、送るのを止めた後は `{}` になる(Pyroscope の 1 回の問い合わせの上限は 1 日)。
 
 ### dashboard で 1 回に見られる期間
 
