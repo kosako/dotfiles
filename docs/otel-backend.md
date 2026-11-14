@@ -36,7 +36,7 @@ compose file の定義:
 | `volumes` | named volume `data` を `/data` に。bind は下の表の 4 つ | backend の data は VM の中、host から渡すのは決めた path だけ |
 | `restart` | `unless-stopped` | docker の daemon と一緒に戻る(常時起動の 2 段目) |
 | `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d` | 下の「metric の temporality」と「保存期間」 |
-| `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定) | 下の「保存期間」 |
+| `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定。Loki は 1 回の問い合わせの上限も) | 下の「保存期間」と「dashboard で 1 回に見られる期間」 |
 | `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline を重ねる。gate は保管の zstd に要る(下の「生データの保管と読み戻し」) |
 
 bind(どれも long syntax で `bind.create_host_path: false`):
@@ -311,6 +311,37 @@ Loki は消さない。
 
   Loki は `retention_period` を 2 行出す。`1y` が `limits_config` の値で、`0s` は今の storage(tsdb と compactor)では使われない
   `table_manager` の項目。
+
+### dashboard で 1 回に見られる期間
+
+dashboard の panel は、trace の 1 つを除いて Loki を読む。表示期間を「Last 1 year」にしても見られるように、Loki の
+1 回の問い合わせの上限を 1 年に広げる(#532)。
+
+| 対象 | 上限 | 指定 |
+| --- | --- | --- |
+| Loki(trace 以外の panel) | 366 日と 1 時間 | `LOKI_EXTRA_ARGS` に `-store.max-query-length=366d1h` |
+| Tempo(Codex の「trace (最近のもの)」) | 7 日 | image の既定(`query_frontend.search.max_duration: 168h`)のまま |
+
+- Loki の既定の上限は 30 日と 1 時間で、image の Loki の設定は `limits_config` を持たない。2026-11-14 に container の中から
+  問い合わせると、29 日は通り、31 日と 365 日は `the query time range exceeds the limit` で拒まれた。366 日と 1 時間に
+  したのは、うるう年の 1 年にも、既定と同じ 1 時間の余裕を残すため。
+- 速さ: 同じ image の Loki を単独で起動し、約 1KB の行を約 27 万行(約 250MB)入れて測った。365 日の集計(stat の panel の
+  形)は約 2 秒、6 時間ごとの推移(timeseries の panel の形)は約 0.5 秒だった。Loki の問い合わせの時間の上限
+  (`query_timeout`、既定 1 分)に十分収まるので、分割の間隔(`split_queries_by_interval`、既定 1h)は変えない。
+  入れた data は直近の 6 日に集まっている。Loki は取り込みで 7 日より古い行を拒むので、1 年に散らばった data では
+  測れていない。行が無い期間を含めた 1 年分の分割は、上の時間に入っている。
+- Tempo の検索は、8 日以上を `range specified by start and end exceeds 168h0m0s` で拒む。trace の panel は直近の
+  trace を見るためのもので、表示期間を 7 日より長くすると、この panel だけがエラーになる。古い trace は、Grafana の
+  Explore で 7 日以内の期間を指定して探す。
+- dashboard の既定の表示期間は 24 時間のまま。
+- 実効の値の確かめ方(container の中から):
+
+  ```sh
+  docker exec otel-lgtm curl -s http://127.0.0.1:3100/config | grep -E '^\s+max_query_length:'
+  docker exec otel-lgtm curl -s http://127.0.0.1:3200/status/config | grep -E '^\s+max_duration:'
+  ```
+
+  Tempo は `max_duration` を 2 行出す。`168h0m0s` が検索の上限で、`24h0m0s` は TraceQL の metric の問い合わせの上限。
 
 容量(2026-11-11 の観測): docker の data は VM の別の disk(`/var/lib/docker`、30GB)にあり、使用は 4.0GB(image 3.6GB、
 backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`colima ssh -- df -h /var/lib/docker` で見る。足りなく
