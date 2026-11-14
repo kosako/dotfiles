@@ -13,6 +13,10 @@
 # data (#520): Prometheus by its retention flag, Loki by the compactor's
 # retention (off in the image), Tempo by the block retention of both the
 # backend scheduler and the backend worker (the image's default is 14 days).
+# Loki also answers one query over up to 366d1h (#532): the dashboards read
+# Loki, and its default limit of 30d1h refused a dashboard range of a year.
+# Tempo's search keeps its default of 7 days, enough for the panel of
+# recent traces.
 # The Collector gets the archive config and, for its zstd files, the
 # exporter.file.nativeCompression feature gate (#527) in OTELCOL_EXTRA_ARGS.
 # Compose passes the environment only when it creates the container, and a
@@ -37,7 +41,7 @@ services:
     restart: unless-stopped
     environment:
       PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d
-      LOKI_EXTRA_ARGS: -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem
+      LOKI_EXTRA_ARGS: -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem -store.max-query-length=366d1h
       TEMPO_EXTRA_ARGS: -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h
       OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml
     ports:

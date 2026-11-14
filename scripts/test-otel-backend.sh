@@ -59,7 +59,7 @@ archive_rel=".config/otel-lgtm/otelcol/archive.yaml"
 provider_rel=".config/otel-lgtm/grafana/provisioning/agents.yaml"
 dashboard_rel=".config/otel-lgtm/grafana/dashboards/agents.json"
 claude_dashboard_rel=".config/otel-lgtm/grafana/dashboards/claude-code.json"
-expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem","OTELCOL_EXTRA_ARGS":"--feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
+expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem -store.max-query-length=366d1h","OTELCOL_EXTRA_ARGS":"--feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
 
@@ -348,6 +348,19 @@ if extra_args_have PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d \
   ok "test passed: Prometheus, Loki and Tempo keep one year of data"
 else
   fail "test failed: the backends must keep one year: PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d, LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem, TEMPO_EXTRA_ARGS both block-retention=8760h flags"
+  status=1
+fi
+
+# 4i) Loki answers one query over a whole year (#532). The dashboards read
+#     Loki, and its default limit on the length of one query (30d1h; the
+#     image sets no limits_config) refused a dashboard range of a year
+#     ("the query time range exceeds the limit"). 366d1h covers a leap
+#     year's "Last 1 year" with the same hour of slack as the default.
+#     Checked the same way as 4h, so a second spelling of the option fails.
+if extra_args_have LOKI_EXTRA_ARGS -store.max-query-length=366d1h; then
+  ok "test passed: Loki answers one query over a whole year, the dashboards' longest range"
+else
+  fail "test failed: LOKI_EXTRA_ARGS must carry -store.max-query-length=366d1h exactly once (#532)"
   status=1
 fi
 

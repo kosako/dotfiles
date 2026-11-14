@@ -1190,7 +1190,7 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 `OTELCOL_EXTRA_ARGS` が zstd の gate(`--feature-gates=exporter.file.nativeCompression`)を有効にして bind した保管の設定を指すこと(#527)、Prometheus・Loki・Tempo が 1 年残す指定(`*_EXTRA_ARGS` は 1 行の
 文字列であることを求め(image の起動 script は `read -ra` で 1 行目だけを読む)、空白で引数に分けて、保持に関わる各 option がちょうど 1 回、
 期待の `name=value` で書かれていることを確かめる。名前の書き方(`-` か `--`、`=` か次の引数)を問わず数えるので、矛盾する
-重複は不合格。#520)。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
+重複は不合格。#520)、Loki の 1 回の問い合わせの上限を 1 年に広げる `-store.max-query-length=366d1h`(同じ数え方。dashboard の表示期間の 1 年を通すため。#532)。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
 足すだけで(image の pipeline を上書きしない)、`otlp` から processor なしで `file` exporter に書き、file は `/archive`
 の下の別々の JSON を zstd で(`compression: zstd`、path は `*.jsonl.zst`。#527)、`max_megabytes` が 1 以上 1024 以下の整数、`max_days` が 365、`max_backups` が 0(実測で、0 は回した file を全部残す)。receivers と exporters は
 配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
