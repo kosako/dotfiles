@@ -357,6 +357,7 @@ backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`coli
   名前の違う pipeline を足すだけ(Collector の設定の重ね方では、list は置き換わり、map は足される)。
 - file は signal ごとに `traces.jsonl.zst`・`metrics.jsonl.zst`・`logs.jsonl.zst`。中身は改行区切りの OTLP JSON(1 行が
   1 回の export)を、標準の zstd で圧縮したもの(#527)。`zstd -d` で元の改行区切りの JSON に戻る。
+  - `zstd` の command は catalog(`.chezmoidata/packages.yaml`)にあり、`scripts/install-packages.sh` で入れる(#536)。
   - 圧縮するのは、Codex の trace が多いため。圧縮しないと 1 日に約 100MB 増え、1 年で約 36GB になる見込みだった
     (2026-11-11〜13 の観測。量の 8 割は `handle_responses`・`receiving`・`append_items` などの内部の span)。
   - 標準の zstd で書くには、Collector の feature gate `exporter.file.nativeCompression`(Alpha、既定は off)が要る。

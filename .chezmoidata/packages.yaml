@@ -68,6 +68,9 @@ packages:
   - { name: colima, source: brew_formula }
   - { name: docker, source: brew_formula }
   - { name: docker-compose, source: brew_formula }
+  # The otel archive is written as standard zstd (#527): reading it back
+  # (`zstd -d`, and collectors that recount from the archive) needs the CLI.
+  - { name: zstd, source: brew_formula }
   - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: iterm2, source: brew_cask }
   - { name: swiftbar, source: brew_cask }
