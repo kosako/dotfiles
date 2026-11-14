@@ -462,8 +462,10 @@ container runtime(Colima・docker の CLI・docker-compose)は software catalog 
   の pipeline を足すだけで、file は 1 年残す。`test-otel-backend.sh` が pin する。
 - Colima の VM は、host の directory を 2 つだけ mount する(`~/.config/otel-lgtm` を読み取りだけ、
   `~/.local/share/otel-lgtm/archive` を書き込み可)。`$HOME` 全体は見せない。
-- **保存期間は 1 年**(#520): Prometheus・Loki・Tempo は `*_EXTRA_ARGS` の保持の指定で、保管の file は
-  `max_days: 365` で。`test-otel-backend.sh` が 4 つとも 1 年であることを確かめる。
+- **保存期間は用途で決める**(#520、#528): dashboard が読む Loki と、生の telemetry を持つ保管の file は 1 年。dashboard が
+  長い期間では読まない Prometheus と Tempo は 30 日。Pyroscope は自分の profile を送らない。backend は `*_EXTRA_ARGS` の
+  指定で、保管の file は `max_days: 365` で。Loki は 1 回の問い合わせの上限も 1 年に広げる(#532)。`test-otel-backend.sh` が
+  それぞれの指定を確かめる。
 - **doctor**: compose file の presence。file があるときは、実行時の状態を読むだけで確かめる(何も起動しない):
   daemon に届くか、container が running か、image が定義の固定と同じか、公開した port がすべて `127.0.0.1` か、VM の
   host の share が設定(`ro`)と保管(`rw`)の 2 つだけか、Colima が login の常駐に登録されているか。保管の directory の

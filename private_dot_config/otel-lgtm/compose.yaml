@@ -9,10 +9,14 @@
 # address to every interface of the host. The image is pinned by version
 # AND digest; change both in one PR. Prometheus converts delta metrics to
 # cumulative on OTLP ingestion: Codex sends every metric as delta, which
-# Prometheus otherwise rejects (#517). Every backend keeps one year of
-# data (#520): Prometheus by its retention flag, Loki by the compactor's
-# retention (off in the image), Tempo by the block retention of both the
-# backend scheduler and the backend worker (the image's default is 14 days).
+# Prometheus otherwise rejects (#517). Each backend keeps data for what it
+# is used for (#520, #528): Loki, which the dashboards read, one year by the
+# compactor's retention (off in the image); Prometheus and Tempo 30 days,
+# Prometheus by its retention flag and Tempo by the block retention of both
+# the backend scheduler and the backend worker (the image's defaults are 15
+# and 14 days). The dashboards read neither for long ranges, and the archive
+# below keeps the raw telemetry for a year. Pyroscope does not push its own
+# profiles, the only ones it received (#528).
 # Loki also answers one query over up to 366d1h (#532): the dashboards read
 # Loki, and its default limit of 30d1h refused a dashboard range of a year.
 # Tempo's search keeps its default of 7 days, enough for the panel of
@@ -40,9 +44,10 @@ services:
     container_name: otel-lgtm
     restart: unless-stopped
     environment:
-      PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d
+      PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=30d
       LOKI_EXTRA_ARGS: -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem -store.max-query-length=366d1h
-      TEMPO_EXTRA_ARGS: -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h
+      TEMPO_EXTRA_ARGS: -backend-scheduler.provider.work.compaction.block-retention=720h -backend-worker.compaction.block-retention=720h
+      PYROSCOPE_EXTRA_ARGS: -self-profiling.disable-push=true
       OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml
     ports:
       - "127.0.0.1:3000:3000"
