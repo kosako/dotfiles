@@ -59,7 +59,7 @@ archive_rel=".config/otel-lgtm/otelcol/archive.yaml"
 provider_rel=".config/otel-lgtm/grafana/provisioning/agents.yaml"
 dashboard_rel=".config/otel-lgtm/grafana/dashboards/agents.json"
 claude_dashboard_rel=".config/otel-lgtm/grafana/dashboards/claude-code.json"
-expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem -store.max-query-length=366d1h","OTELCOL_EXTRA_ARGS":"--feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
+expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem -store.max-query-length=366d1h","OTELCOL_EXTRA_ARGS":"--feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=30d","PYROSCOPE_EXTRA_ARGS":"-self-profiling.disable-push=true","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=720h -backend-worker.compaction.block-retention=720h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
 
@@ -303,15 +303,18 @@ else
   status=1
 fi
 
-# 4h) Every backend keeps one year of data (#520), checked per argument the
-#     way the image's run-*.sh scripts split each *_EXTRA_ARGS (on
-#     whitespace), so a value that only contains the flag as a substring
-#     does not pass. Prometheus: its retention flag (deprecated in 3.15 in
-#     favour of the config file, but honoured). Loki: retention needs the
-#     compactor's retention switched on and a delete-request store, and the
-#     period. Tempo: the block retention of both the backend scheduler and
-#     the backend worker (both are set rather than guessing which one
-#     prunes). The archive's max_days (section 5) is the same year.
+# 4h) Each backend keeps data for what it is used for (#520, #528): Loki,
+#     which the dashboards read, one year; Prometheus and Tempo 30 days (the
+#     dashboards read neither for long ranges, and the archive keeps the raw
+#     telemetry for a year). Checked per argument the way the image's
+#     run-*.sh scripts split each *_EXTRA_ARGS (on whitespace), so a value
+#     that only contains the flag as a substring does not pass. Prometheus:
+#     its retention flag (deprecated in 3.15 in favour of the config file,
+#     but honoured). Loki: retention needs the compactor's retention switched
+#     on and a delete-request store, and the period. Tempo: the block
+#     retention of both the backend scheduler and the backend worker (both
+#     are set rather than guessing which one prunes), the same 720h in both.
+#     The archive's max_days (section 5) is Loki's year.
 # extra_args_have VAR NAME=VALUE... — VAR is one one-line string
 # (extra_args_of), and each option NAME appears in it exactly once, as
 # exactly NAME=VALUE. An option is matched by its name however it is
@@ -342,12 +345,25 @@ extra_args_have() {
     [[ "$count" -eq 1 && "$matched" -eq 1 ]] || return 1
   done
 }
-if extra_args_have PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d \
+if extra_args_have PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=30d \
   && extra_args_have LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem \
-  && extra_args_have TEMPO_EXTRA_ARGS -backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h; then
-  ok "test passed: Prometheus, Loki and Tempo keep one year of data"
+  && extra_args_have TEMPO_EXTRA_ARGS -backend-scheduler.provider.work.compaction.block-retention=720h -backend-worker.compaction.block-retention=720h; then
+  ok "test passed: Loki keeps one year of data, Prometheus and Tempo 30 days"
 else
-  fail "test failed: the backends must keep one year: PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=365d, LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem, TEMPO_EXTRA_ARGS both block-retention=8760h flags"
+  fail "test failed: the backends must keep their periods: PROMETHEUS_EXTRA_ARGS --storage.tsdb.retention.time=30d, LOKI_EXTRA_ARGS -store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem, TEMPO_EXTRA_ARGS both block-retention=720h flags"
+  status=1
+fi
+
+# 4j) Pyroscope does not push its own profiles (#528). They were the only
+#     profiles it held (service_name "pyroscope" alone), at about 128MB in
+#     3.5 days, so about 1GB of the VM's disk within its default 31-day
+#     retention. Checked the same way as 4h. A Pyroscope from this image
+#     without the option received its own profiles within seconds, and one
+#     with it received none (measured, #528).
+if extra_args_have PYROSCOPE_EXTRA_ARGS -self-profiling.disable-push=true; then
+  ok "test passed: Pyroscope does not push its own profiles"
+else
+  fail "test failed: PYROSCOPE_EXTRA_ARGS must carry -self-profiling.disable-push=true exactly once (#528)"
   status=1
 fi
 
@@ -391,7 +407,7 @@ section "otel-backend: archive config"
 #    Every exporter writes newline-delimited OTLP JSON in zstd under
 #    /archive as <signal>.jsonl.zst (#527; `zstd -d` gives back what a
 #    later Collector's otlpjsonfile receiver reads, with the gate of 4g),
-#    keeps one year (#520): max_days 365, the same year as the backends,
+#    keeps one year (#520): max_days 365, the same year as Loki's,
 #    and max_backups 0, which keeps every rotated file on this image's
 #    Collector (measured, #517; any other count deletes the oldest ones
 #    sooner), and max_megabytes an integer in 1..1024. receivers and exporters must be real lists: a string "[otlp]"

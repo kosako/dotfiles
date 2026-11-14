@@ -1187,7 +1187,7 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 書き込み可の bind・ほかの key は不合格)、named volume の宣言が空、権限を広げる key(`privileged`・`network_mode`・
 `pid`・`cap_add` など)が無い、restart policy が `unless-stopped`、Prometheus が delta の metric を変換する
 `--enable-feature=otlp-deltatocumulative`(空白で引数に分け、comma で分けた feature の名前で確かめる。#517)、
-`OTELCOL_EXTRA_ARGS` が zstd の gate(`--feature-gates=exporter.file.nativeCompression`)を有効にして bind した保管の設定を指すこと(#527)、Prometheus・Loki・Tempo が 1 年残す指定(`*_EXTRA_ARGS` は 1 行の
+`OTELCOL_EXTRA_ARGS` が zstd の gate(`--feature-gates=exporter.file.nativeCompression`)を有効にして bind した保管の設定を指すこと(#527)、Loki が 1 年・Prometheus と Tempo が 30 日残す指定と、Pyroscope が自分の profile を送らない `-self-profiling.disable-push=true`(#528)(`*_EXTRA_ARGS` は 1 行の
 文字列であることを求め(image の起動 script は `read -ra` で 1 行目だけを読む)、空白で引数に分けて、保持に関わる各 option がちょうど 1 回、
 期待の `name=value` で書かれていることを確かめる。名前の書き方(`-` か `--`、`=` か次の引数)を問わず数えるので、矛盾する
 重複は不合格。#520)、Loki の 1 回の問い合わせの上限を 1 年に広げる `-store.max-query-length=366d1h`(同じ数え方。dashboard の表示期間の 1 年を通すため。#532)。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ

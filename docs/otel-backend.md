@@ -35,8 +35,9 @@ compose file の定義:
 | `ports` | `127.0.0.1:3000`(Grafana)・`127.0.0.1:4317`(OTLP/gRPC)・`127.0.0.1:4318`(OTLP/HTTP) | 下の「port を 127.0.0.1 に限る理由」 |
 | `volumes` | named volume `data` を `/data` に。bind は下の表の 4 つ | backend の data は VM の中、host から渡すのは決めた path だけ |
 | `restart` | `unless-stopped` | docker の daemon と一緒に戻る(常時起動の 2 段目) |
-| `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=365d` | 下の「metric の temporality」と「保存期間」 |
+| `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=30d` | 下の「metric の temporality」と「保存期間」 |
 | `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定。Loki は 1 回の問い合わせの上限も) | 下の「保存期間」と「dashboard で 1 回に見られる期間」 |
+| `environment` | `PYROSCOPE_EXTRA_ARGS: -self-profiling.disable-push=true` | 下の「保存期間」(Pyroscope が自分の profile を送らない) |
 | `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline を重ねる。gate は保管の zstd に要る(下の「生データの保管と読み戻し」) |
 
 bind(どれも long syntax で `bind.create_host_path: false`):
@@ -283,15 +284,34 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 
 ## 保存期間
 
-telemetry は、backend も保管の file も 1 年残す(#520)。image の既定では、Prometheus は 15 日、Tempo は 14 日で消え、
-Loki は消さない。
+保存先ごとに、用途に合わせて期間を決める(#520 で 1 年にそろえた後、#528 で見直した)。生の telemetry は保管の file に
+1 年残るので、backend は「dashboard で見る期間」と「直近を調べる期間」だけを持てばよい。image の既定では、Prometheus は
+15 日、Tempo は 14 日で消え、Loki は消さない。
 
-| 対象 | 指定 | 実効の値(使い捨ての container で確認) |
-| --- | --- | --- |
-| Prometheus(metric) | `PROMETHEUS_EXTRA_ARGS` に `--storage.tsdb.retention.time=365d` | `storageRetention: 1y` |
-| Loki(log) | `LOKI_EXTRA_ARGS` に `-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem` | `compactor.retention_enabled: true`、`limits_config.retention_period: 1y` |
-| Tempo(trace) | `TEMPO_EXTRA_ARGS` に `-backend-scheduler.provider.work.compaction.block-retention=8760h -backend-worker.compaction.block-retention=8760h` | 2 か所の `block_retention` が `8760h` |
-| 保管の file | 保管の設定の `rotation.max_days: 365` | 下の「生データの保管と読み戻し」 |
+| 対象 | 期間 | 指定 | 実効の値 |
+| --- | --- | --- | --- |
+| Loki(log) | 1 年 | `LOKI_EXTRA_ARGS` に `-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem` | `compactor.retention_enabled: true`、`limits_config.retention_period: 1y` |
+| Prometheus(metric) | 30 日 | `PROMETHEUS_EXTRA_ARGS` に `--storage.tsdb.retention.time=30d` | `storageRetention: 30d` |
+| Tempo(trace) | 30 日 | `TEMPO_EXTRA_ARGS` に `-backend-scheduler.provider.work.compaction.block-retention=720h -backend-worker.compaction.block-retention=720h` | 2 か所の `block_retention` が `720h0m0s` |
+| Pyroscope(profile) | 既定の 31 日のまま | `PYROSCOPE_EXTRA_ARGS` に `-self-profiling.disable-push=true`(自分の profile を送らない) | 新しい profile が入らない |
+| 保管の file | 1 年 | 保管の設定の `rotation.max_days: 365` | 下の「生データの保管と読み戻し」 |
+
+期間の理由(量は 2026-11-10〜14 の使い方から container の中で測った見込み):
+
+- Loki は dashboard のほぼすべての panel が読む(下の「dashboard で 1 回に見られる期間」)。1 日に約 0.3MB で、1 年でも約
+  0.1GB。
+- Prometheus は dashboard が読んでいない(数は log から数える。上の「dashboard」)。1 日に約 25MB 増え、1 年なら約 9GB に
+  なる見込みだった。sample の数の約 7 割は、image の Collector が自分を 1 秒ごとに測った metric(`prometheus/collector` の
+  scrape)。30 日なら
+  約 0.75GB。所要時間の分布などは、直近の 30 日を Explore で見る。
+- Tempo は Codex の「trace (最近のもの)」の panel だけが読み、その検索は 7 日まで。1 日に約 14〜25MB で、1 年なら 5〜9GB に
+  なる見込みだった。30 日なら 0.4〜0.8GB。30 日より前の trace は保管の file から読み戻す。
+- Pyroscope が持っていた profile は、Pyroscope 自身のもの(`service_name` が `pyroscope`)だけだった。3.5 日で約 128MB、
+  既定の保持の 31 日で約 1GB になる。送るのを止めると新しい profile は入らず、今ある分は 31 日で消える。
+- Prometheus は別案も比べた。保持は 1 年のまま、Collector が自分を測る間隔を 1 秒から 60 秒にする案(1 年で約 3GB。量が sample の数に
+  比例するとした概算)。image の Collector の設定の名前に頼るので採らない。
+
+指定の注意:
 
 - 値は image の起動 script が空白で引数に分けて、各 backend の起動の引数の末尾に足す。
 - Prometheus の `--storage.tsdb.retention.time` は、3.15 で DEPRECATED になった(設定 file の項目が推奨)。この版では
@@ -299,18 +319,23 @@ Loki は消さない。
 - Loki は、compactor の保持を有効にしないと `-store.retention` が効かない(flag の help のとおり)。期間を過ぎた
   chunk は、compactor が既定の 2 時間の猶予の後に消す。
 - Tempo 3 は 1 つの process(`target: all`)で動き、`block_retention` が backend scheduler と backend worker の 2 か所に
-  ある。どちらが消す側かを決め打ちせず、両方を指定する。
-- `test-otel-backend.sh` が、4 つとも 1 年であることを確かめる(どれか 1 つだけ期間が違う状態を防ぐ)。
+  ある。どちらが消す側かを決め打ちせず、両方に同じ値を指定する。
+- `test-otel-backend.sh` が、それぞれの期間の指定と Pyroscope の指定を確かめる(期間が意図せず変わる状態を防ぐ)。
 - 実効の値の確かめ方(container の中から):
 
   ```sh
   docker exec otel-lgtm curl -s http://127.0.0.1:9090/api/v1/status/runtimeinfo | grep -o '"storageRetention":"[^"]*"'
   docker exec otel-lgtm curl -s http://127.0.0.1:3100/config | grep -E '^\s+(retention_enabled|retention_period):'
   docker exec otel-lgtm curl -s http://127.0.0.1:3200/status/config | grep -E '^\s+block_retention:'
+  now=$(date +%s); docker exec otel-lgtm curl -s -X POST -H 'Content-Type: application/json' \
+    -d "{\"name\":\"service_name\",\"start\":$(( (now - 600) * 1000 )),\"end\":$(( now * 1000 ))}" \
+    http://127.0.0.1:4040/querier.v1.QuerierService/LabelValues
   ```
 
   Loki は `retention_period` を 2 行出す。`1y` が `limits_config` の値で、`0s` は今の storage(tsdb と compactor)では使われない
-  `table_manager` の項目。
+  `table_manager` の項目。Tempo の 2 行はどちらも `720h0m0s`。Pyroscope の問い合わせは、直近 10 分に profile を送った
+  `service_name` の一覧を返す。volume は作り直しても残るので、作り直した直後は、止める前の `pyroscope` が範囲に入る。
+  作り直してから 10 分以上たってから見ると、送るのを止めた後は `{}` になる(Pyroscope の 1 回の問い合わせの上限は 1 日)。
 
 ### dashboard で 1 回に見られる期間
 
@@ -332,7 +357,7 @@ dashboard の panel は、trace の 1 つを除いて Loki を読む。表示期
   測れていない。行が無い期間を含めた 1 年分の分割は、上の時間に入っている。
 - Tempo の検索は、8 日以上を `range specified by start and end exceeds 168h0m0s` で拒む。trace の panel は直近の
   trace を見るためのもので、表示期間を 7 日より長くすると、この panel だけがエラーになる。古い trace は、Grafana の
-  Explore で 7 日以内の期間を指定して探す。
+  Explore で 7 日以内の期間を指定して探す。Tempo が持つのは 30 日分(上の表)で、それより前は保管の file から読み戻す。
 - dashboard の既定の表示期間は 24 時間のまま。
 - 実効の値の確かめ方(container の中から):
 
@@ -343,9 +368,13 @@ dashboard の panel は、trace の 1 つを除いて Loki を読む。表示期
 
   Tempo は `max_duration` を 2 行出す。`168h0m0s` が検索の上限で、`24h0m0s` は TraceQL の metric の問い合わせの上限。
 
-容量(2026-11-11 の観測): docker の data は VM の別の disk(`/var/lib/docker`、30GB)にあり、使用は 4.0GB(image 3.6GB、
-backend の volume 0.7GB)。1 年でどれだけ増えるかは未確認。`colima ssh -- df -h /var/lib/docker` で見る。足りなく
-なったら `colima stop` の後に `colima start --disk <GB>` で大きくする(増やすことしかできない)。
+### 容量
+
+docker の data は VM の別の disk(`/var/lib/docker`、30GB)にある。2026-11-14 の使用は 4.2GB(image 3.6GB と
+backend の volume。volume の中は Grafana の plugin 0.6GB、Pyroscope 0.13GB、Prometheus 0.09GB、Tempo 0.05GB、Loki 1MB)。
+上の期間なら、1 年後の backend の data は約 2GB(Grafana の 0.6GB を含む)で、ほぼ頭打ちになる見込み。保管の file は
+host の disk にあり、1 年で約 2.3GB の見込み(下の「生データの保管と読み戻し」)。`colima ssh -- df -h /var/lib/docker` で
+見る。足りなくなったら `colima stop` の後に `colima start --disk <GB>` で大きくする(増やすことしかできない)。
 
 ## 生データの保管と読み戻し
 
@@ -434,7 +463,8 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 読み戻すとき(将来の server の Collector で):
 
 - 保管に残るのは、おおむね直近の 1 年分。回した file は、名前の時刻(回した時刻)から 365 日で消える。今書いている
-  file と、回した file の中の古い data は、それより少し長く残る(上の注意)。backend の data も 1 年で消える。
+  file と、回した file の中の古い data は、それより少し長く残る(上の注意)。backend の data は、Loki が 1 年、
+  Prometheus と Tempo が 30 日で消える(上の「保存期間」)。
 - `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、改行区切りの OTLP JSON を読める(upstream の README)。
   signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build にも `otlp_json_file` の名前で
   入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。
@@ -498,8 +528,8 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 - 消すとき: `docker-compose -f ~/.config/otel-lgtm/compose.yaml down -v`(container と volume を消す)。VM ごと
   消すなら `colima delete`。**どちらも保管の file には触れない**(host にあるため)。保管の file は、回した file が
   365 日で消える(上の「生データの保管と読み戻し」)ほかは、`~/.local/share/otel-lgtm/archive/` を人が消すときだけ消える。
-- backend と保管の file は、どちらも 1 年で消える(上の「保存期間」。保管は回した file の単位で、今書いている file は期間
-  では消えない)。volume の増え方は未確認(起動の直後で約 0.7GB)。
+- 保管の file と Loki は 1 年、Prometheus と Tempo は 30 日で消える(上の「保存期間」。保管は回した file の単位で、今書いて
+  いる file は期間では消えない)。volume は 1 年後に約 2GB の見込み(上の「保存期間」の「容量」)。
 - telemetry には tool の出力の抜粋が入りうる(agent-tools#652)。data は手元に留め、外へは送らない。外部の
   backend への転送と項目の絞り込みは、この module の範囲外。
 
@@ -553,8 +583,11 @@ compose file があるときは、実行時の状態と保管の directory を**
 - loopback の port には、同じ Mac の process と browser から届く。Grafana は認証なしで、Admin の権限で応える。
 - docker の socket は、使える process にとって強い権限になる。VM に mount する host の directory を 2 つ(設定は
   読み取りだけ、保管だけ書き込み可)に限ることで、影響を狭めている。doctor がこの mount の形を確かめる。
-- 保存期間は 1 年なので、それまでは容量が増え続ける。保管の traces は、今の使い方で 1 年に約 2GB の見込み(上の
-  「生データの保管と読み戻し」)。backend の 1 年分の量は未確認で、Tempo の増え方は #528 で扱う。
+- 保管の file と Loki は 1 年残すので、それまでは容量が増え続ける。保管の traces は、今の使い方で 1 年に約 2GB の見込み
+  (上の「生データの保管と読み戻し」)。backend の量の見込み(上の「保存期間」とその「容量」)は 2026-11-10〜14 の使い方から
+  の推定で、使い方が変われば変わる。
+- Prometheus と Tempo は 30 日で消えるので、30 日より前の metric と trace を Grafana で見るには、保管の file から別の
+  backend へ読み戻す。
 - 保管の zstd は Alpha の feature gate に頼る。image を更新するときに gate の有無を確かめる(上の「image の更新」)。
 - 「保管の設定を変えるとき」の順を守らないと、gate の無い container が新しい保管の設定を読み、`zstd -d` で読めない形で
   書きうる。doctor は環境変数の違いと、magic で始まらない zstd の file を action にするが、防ぎはしない。直すときは
@@ -562,7 +595,7 @@ compose file があるときは、実行時の状態と保管の directory を**
 - doctor の magic の確認は、file の先頭だけを見る。gate のある Collector が書き始めた file に、後から gate の無い
   Collector が足した場合は見つけられない(この repo の定義から作った container では、gate と保管の設定が揃って
   変わるので、手順を守れば起きない)。
-- 1 年を過ぎた telemetry は、backend からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
+- 1 年を過ぎた telemetry は、Loki からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
   では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
@@ -575,7 +608,7 @@ byte 単位で不変)、managed-by の見出し(dashboard は description)、com
 どおり。pin とは別に、定義が守る性質も確かめる: image が版と digest の両方で固定、すべての port が `127.0.0.1`
 だけ、host の path は許可した bind だけ(compose の directory の下を読み取りだけで、保管の directory を `/archive` に
 書き込み可で、どれも `create_host_path: false`)、named volume の宣言の中身が空、Prometheus が delta の metric を
-変換する指定、Prometheus・Loki・Tempo が 1 年残す指定(引数ごとに完全一致)、Collector が zstd の gate を有効にして
+変換する指定、Loki が 1 年・Prometheus と Tempo が 30 日残す指定と Pyroscope が自分の profile を送らない指定(引数ごとに完全一致)、Collector が zstd の gate を有効にして
 bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
 processor なしで file に書き、file は `/archive` の下の zstd の JSON(`*.jsonl.zst`、`compression: zstd`)、`max_days` が
 365、`max_backups` が 0。provider は
