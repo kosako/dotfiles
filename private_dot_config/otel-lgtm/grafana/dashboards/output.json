@@ -42,7 +42,7 @@
       "title": "",
       "options": {
         "mode": "markdown",
-        "content": "**見ること**: token を使って何を作ったか。編集・commit・PR・変えた行・Codex の run の数の推移。\n\n- 編集は Claude Code の Edit と Write の成功、commit と PR は Bash で成功した `git commit` / `gh pr create` / `gh pr merge` の数です (log から。1 年分を見られます)。人が画面で merge したものは入りません。\n- 変えた行は Claude Code の metric (Prometheus、30 日分) で、**目安**です。metric は session ごとの短い系列で途中の数え直しがあり、数え方で 2 倍ほど違います。\n- Codex は review と委譲の worker が中心なので、生産は「回した run の数」で見ます。棒は日本時間の 1 日ごとです。既定の期間は 30 日前の朝から今日の終わりまでで、今日の棒は今の時刻までの分です。期間の終わりを「now」にすると、0 時から 9 時の間は今日の棒が出ません。"
+        "content": "**見ること**: token を使って何を作ったか。編集・commit・PR・変えた行・Codex の run の数の推移。\n\n- 編集は Claude Code の Edit と Write の成功、commit と PR は Bash で成功した `git commit` / `gh pr create` / `gh pr merge` の数です (log から。1 年分を見られます)。人が画面で merge したものは入りません。\n- 変えた行は Claude Code の metric (Prometheus、30 日分) で、**目安**です。metric は session ごとの短い系列で途中の数え直しがあり、数え方で 2 倍ほど違います。\n- Codex は review と委譲の worker が中心なので、生産は「回した run の数」で見ます。棒は日本時間の 1 日ごとです。既定の期間は 29 日前の 0 時から今日の終わりまでで、今日の棒は今の時刻までの分です。期間の終わりを「now」にすると、0 時から 9 時の間は今日の棒が出ません。"
       },
       "transparent": true,
       "id": 1,
