@@ -2682,6 +2682,30 @@ if [[ "$(id -u)" != "0" ]]; then
   la_case "local allow file's directory not enterable" personal "$la_unchecked" "$la_absent" "$la_not_file"
   chmod 755 "${la_file%/*}"
 fi
+#     LA-f) lines led by a blank that is not ASCII (U+3000 before a comment,
+#           NBSP alone) are rule lines, as the template reads them (it trims
+#           ASCII blanks only and stops the apply on them): with the one rule,
+#           three. Run in a UTF-8 locale when there is one, where grep would
+#           take those as blanks without the C locale (Codex review, PR #540).
+la_utf8=""
+for la_loc in C.UTF-8 en_US.UTF-8; do
+  if locale -a 2>/dev/null | grep -Fx -- "$la_loc" >/dev/null; then la_utf8="$la_loc"; break; fi
+done
+mkdir -p "${la_file%/*}"
+printf '\343\200\200# x\n\302\240\nWebFetch(domain:a.example.test)\n' > "$la_file"
+if [[ -n "$la_utf8" ]]; then
+  if la_out="$(HOME="$la_home" LC_ALL="$la_utf8" "$ct_root/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fxq -- "$la_ok3" <<< "$la_out"; then
+    ok "test passed: Claude Code local allow (blanks that are not ASCII count as rule lines, $la_utf8)"
+  else
+    printf '%s\n' "$la_out" >&2
+    fail "test failed: Claude Code local allow: blanks that are not ASCII were not counted as rule lines ($la_utf8)"
+    status=1
+  fi
+else
+  la_case "blanks that are not ASCII (no UTF-8 locale)" personal "$la_ok3" "$la_absent"
+fi
+rm -f "$la_file"
 #     LA-e) work (claude-settings inactive) with the file present -> the
 #           inactive ok and the present-but-unused item.
 printf 'WebFetch(domain:a.example.test)\n' > "$la_file"

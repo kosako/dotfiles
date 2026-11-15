@@ -2432,14 +2432,18 @@ section "Claude Code local allow (report-only)"
 # template alone checks the shape, and any other line stops chezmoi apply.
 # Like the other local files the rules are never shown here: the lines say
 # whether the file is there and how many rule lines it holds (lines that
-# are not blank and do not start with #, as the template reads them). Until
+# are not blank and do not start with #, as the template reads them). The
+# count runs grep in the C locale, whose [[:space:]] is the ASCII set the
+# template trims (space, tab, CR, VT, FF): in a UTF-8 locale grep would
+# also take U+3000 and NBSP as blanks, which the template does not (Codex
+# review, PR #540). Until
 # chezmoi apply a change shows as drift of settings.json in the managed
 # drift section.
 claude_allow_file="$HOME/.config/dotfiles/claude-permissions-allow.local"
 if module_active_for_profile "$profile" claude-settings; then
   if [[ -f "$claude_allow_file" && -r "$claude_allow_file" ]]; then
     claude_allow_rc=0
-    claude_allow_count="$(grep -c -v -E '^[[:space:]]*(#|$)' "$claude_allow_file" 2>/dev/null)" || claude_allow_rc=$?
+    claude_allow_count="$(LC_ALL=C grep -c -v -E '^[[:space:]]*(#|$)' "$claude_allow_file" 2>/dev/null)" || claude_allow_rc=$?
     if [[ "$claude_allow_rc" -le 1 ]]; then
       ok "local allow file present: $claude_allow_file ($claude_allow_count rule line(s), rules not shown) — after chezmoi apply, the managed ~/.claude/settings.json adds them to permissions.allow (WebFetch(domain:<host>) only; a line of another shape stops the apply; deny and ask still come first); a change not yet applied shows in the managed drift section"
     else

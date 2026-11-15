@@ -1088,7 +1088,8 @@ capability で出し入れする key で script の削除の一覧にあるこ�
 render が既定と byte で同じこと、rule は managed の allow の後ろに file の順で足され、deny・ask・ほかの key は変わらない
 こと、受け付ける形の端(IPv4、label の中の hyphen、数字、63 文字の label)はそのまま使うこと、形の違う行(ほかの
 tool・広い rule・`*`・label 1 つ・末尾の `.`・port・崩れた label・空白・後ろの文字・tool 名の大文字小文字・正しい行の
-後ろの違う行・4096 byte を超える・directory)では apply が失敗し live の file が byte で変わらないこと、error に file と
+後ろの違う行・4096 byte を超える・ASCII でない空白 (U+3000・NBSP)・directory)では apply が失敗し live の file が byte で
+変わらないこと、前後の ASCII の空白 (tab・CR・VT・FF を含む) は落とすこと、error に file と
 行の番号が出て rule が出ないこと、file を消すと前の rule と手で足した allow が消えること、rule が jq の引数に出ないこと。固定の home(`/dotfiles-render-test-home`)で `enableBridgeOneHook` を off にした personal の render は、
 `scripts/testdata/claude-settings.personal.json` と正規化せずに byte で同じで、on にした render は、その file に Bridge One の entry の
 行だけを足したものと byte で同じ(#508。正規化した比較では整形だけの変化を捕まえられないため)。commit された personal の render は、

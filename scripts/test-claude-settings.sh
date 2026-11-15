@@ -1769,10 +1769,11 @@ else
   status=1
 fi
 
-# LA2) Two rules among a comment, a blank line and surrounding blanks: allow
-#      is the managed two and then the rules as written (trimmed), in order;
-#      deny, ask and every other key are as in the default render.
-la_apply two $'# hosts I read\n\nWebFetch(domain:docs.example.test)\n  WebFetch(domain:Api.Example.test)  '
+# LA2) Two rules among comments, blank lines and surrounding ASCII blanks
+#      (space, tab, CR, VT, FF; a CRLF line end): allow is the managed two
+#      and then the rules as written (trimmed), in order; deny, ask and every
+#      other key are as in the default render.
+la_apply two $'# hosts I read\n\t# indented\n\t\r\nWebFetch(domain:docs.example.test)\r\n \t WebFetch(domain:Api.Example.test) \v\f'
 la_want="$(jq -c -n --argjson m "$la_managed" '$m + ["WebFetch(domain:docs.example.test)", "WebFetch(domain:Api.Example.test)"]')"
 if [[ "$la_rc" -eq 0 && "$(jq -c '.permissions.allow' "$la_file" 2>/dev/null)" == "$la_want" \
   && -n "$(norm "$off_file")" \
@@ -1802,7 +1803,9 @@ done
 #      tools and broad rules (the ai-policy reason for the narrow shape), any
 #      *, a single label, a trailing dot, a port, broken labels, blanks
 #      inside, trailing text, the tool name in another case, a good line
-#      before a bad one, and a file over 4096 bytes.
+#      before a bad one, a file over 4096 bytes, and blanks that are not
+#      ASCII (U+3000, NBSP) around a rule or before a comment: only ASCII
+#      blanks are trimmed, the set doctor counts with (Codex review, PR #540).
 la_seed="$(cat "$off_file")"
 la_long="#$(printf '%04100d' 0)"
 for la_bad in \
@@ -1832,7 +1835,10 @@ for la_bad in \
   'WebFetch(url:https://example.test/*)' \
   'webfetch(domain:example.test)' \
   $'WebFetch(domain:ok.example.test)\nBash(git push *)' \
-  "$la_long"$'\nWebFetch(domain:ok.example.test)'; do
+  "$la_long"$'\nWebFetch(domain:ok.example.test)' \
+  $'\343\200\200# a comment led by U+3000' \
+  $'\343\200\200WebFetch(domain:ok.example.test)' \
+  $'WebFetch(domain:ok.example.test)\302\240'; do
   la_apply bad "$la_bad" "$la_seed"
   if [[ "$la_rc" -ne 0 ]] && cmp -s "$la_root/seed.json" "$la_file"; then
     ok "test passed: a line of another shape fails the apply and leaves settings.json alone ($(printf '%s' "$la_bad" | head -c 48 | tr '\n' '|'))"

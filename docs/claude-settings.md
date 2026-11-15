@@ -281,7 +281,8 @@ template は出さない。`env` は object 全体を managed にするので、
 `.claude/settings.local.json` に置くと、その project でしか効かない。そこで、管理外の
 `~/.config/dotfiles/claude-permissions-allow.local` に書いた rule を、apply のときに `permissions.allow` の後ろに足す。
 
-- 1 行に rule を 1 つ書く。`#` で始まる行と空行は飛ばし、前後の空白は落とす。
+- 1 行に rule を 1 つ書く。`#` で始まる行と空行は飛ばし、前後の ASCII の空白 (space・tab・CR・VT・FF) は落とす。
+  全角の空白や NBSP は落とさないので、それが残る行は形の違う行になる (doctor の行の数え方とそろえるため)。
 - 受け付けるのは `WebFetch(domain:<host>)` の形だけ。host は 1 つずつ書く。DNS の名前か IPv4 の形で、label を 2 つ
   以上持ち、各 label は英数字で始まり英数字で終わる(63 文字まで)。`*`、末尾の `.`、port、IPv6 の literal は書けない。
 - 4096 byte 以下の通常の file にする(symlink は、先が通常の file ならよい)。
@@ -315,8 +316,8 @@ apply のときの動き:
 - 読む file は destination の下(`.chezmoi.destDir`)で、HOME の下ではない。test の使い捨ての destination への render は、
   この machine の file を読まない。
 
-doctor の「Claude Code local allow」の section は、file の有無と、rule の行の数(空でも `#` で始まりもしない行)だけを
-出す。rule は出さず、形も確かめない(形は apply が確かめる)。capability は持たない。claude-settings の module は
+doctor の「Claude Code local allow」の section は、file の有無と、rule の行の数(空でも `#` で始まりもしない行。C の
+locale の grep で数えるので、空白は template と同じ ASCII の空白)だけを出す。rule は出さず、形も確かめない(形は apply が確かめる)。capability は持たない。claude-settings の module は
 personal にしか入らないので、file を置くことが opt-in になる。module の入らない profile では、file があれば「使わない」
 と出す。Codex には同じ口を作らない(Codex の rules は command の承認で、WebFetch にあたる口が無いため)。
 

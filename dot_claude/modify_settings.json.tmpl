@@ -228,7 +228,10 @@
        time, so a host allowed by hand stays out of the public repo:
        <destination>/.config/dotfiles/claude-permissions-allow.local, one
        rule per line (# lines and blank lines skipped, as for the telemetry
-       file). Only WebFetch(domain:<host>) is accepted, with the host spelled
+       file, but only ASCII blanks are trimmed: space, tab, CR, VT, FF, the
+       set doctor counts with in the C locale, so a line led by another blank
+       such as U+3000 is a line of another shape; Codex review, PR #540).
+       Only WebFetch(domain:<host>) is accepted, with the host spelled
        out: a DNS name or IPv4 host of two or more labels, no * (a * widens
        the rule to subdomains or to every host). docs/ai-policy.md keeps
        every other outbound action prompting, so one local file cannot turn
@@ -291,7 +294,7 @@
 {{-     fail (printf "%s %s" $localAllowFile $localAllowHelp) -}}
 {{-   end -}}
 {{-   range $localAllowIndex, $localAllowRaw := splitList "\n" (include $localAllowFile) -}}
-{{-     $localAllowLine := trim $localAllowRaw -}}
+{{-     $localAllowLine := trimAll " \t\r\v\f" $localAllowRaw -}}
 {{-     if and $localAllowLine (not (hasPrefix "#" $localAllowLine)) -}}
 {{-       if not (regexMatch `^WebFetch\(domain:[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\)$` $localAllowLine) -}}
 {{-         fail (printf "%s line %d: %s" $localAllowFile (add1 $localAllowIndex) $localAllowHelp) -}}
