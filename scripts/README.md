@@ -1084,7 +1084,12 @@ file の値(前後の空白を落とす)と同じこと、ほかの key は変�
 先頭が 0 の port・崩れた host の label・4096 byte を超える・directory)では apply が失敗し live の file が byte で変わらないこと、
 受け付ける形の端(port 65535、label の中の hyphen、IPv4、port なし、末尾の slash)はそのまま使うこと、file を消すと前の apply の `env` が消えること、
 live の `env` に手で足した変数が消え 2 回目の apply と diff が何も変えないこと、送り先が jq の引数に出ないこと、`env` が
-capability で出し入れする key で script の削除の一覧にあること。固定の home(`/dotfiles-render-test-home`)で `enableBridgeOneHook` を off にした personal の render は、
+capability で出し入れする key で script の削除の一覧にあること。local の allow(#538): comment と空行だけの file では
+render が既定と byte で同じこと、rule は managed の allow の後ろに file の順で足され、deny・ask・ほかの key は変わらない
+こと、受け付ける形の端(IPv4、label の中の hyphen、数字、63 文字の label)はそのまま使うこと、形の違う行(ほかの
+tool・広い rule・`*`・label 1 つ・末尾の `.`・port・崩れた label・空白・後ろの文字・tool 名の大文字小文字・正しい行の
+後ろの違う行・4096 byte を超える・directory)では apply が失敗し live の file が byte で変わらないこと、error に file と
+行の番号が出て rule が出ないこと、file を消すと前の rule と手で足した allow が消えること、rule が jq の引数に出ないこと。固定の home(`/dotfiles-render-test-home`)で `enableBridgeOneHook` を off にした personal の render は、
 `scripts/testdata/claude-settings.personal.json` と正規化せずに byte で同じで、on にした render は、その file に Bridge One の entry の
 行だけを足したものと byte で同じ(#508。正規化した比較では整形だけの変化を捕まえられないため)。commit された personal の render は、
 profile の値に合うほうと byte で同じ(#510 で personal は on)。hooks の組み合わせの検査も flag を明示して off にした render を基準にするので、

@@ -2425,6 +2425,40 @@ else
   fi
 fi
 
+section "Claude Code local allow (report-only)"
+# The managed ~/.claude/settings.json adds to permissions.allow the rules in
+# the untracked ~/.config/dotfiles/claude-permissions-allow.local, read at
+# apply time (#538). Only WebFetch(domain:<host>) rules are accepted; the
+# template alone checks the shape, and any other line stops chezmoi apply.
+# Like the other local files the rules are never shown here: the lines say
+# whether the file is there and how many rule lines it holds (lines that
+# are not blank and do not start with #, as the template reads them). Until
+# chezmoi apply a change shows as drift of settings.json in the managed
+# drift section.
+claude_allow_file="$HOME/.config/dotfiles/claude-permissions-allow.local"
+if module_active_for_profile "$profile" claude-settings; then
+  if [[ -f "$claude_allow_file" && -r "$claude_allow_file" ]]; then
+    claude_allow_rc=0
+    claude_allow_count="$(grep -c -v -E '^[[:space:]]*(#|$)' "$claude_allow_file" 2>/dev/null)" || claude_allow_rc=$?
+    if [[ "$claude_allow_rc" -le 1 ]]; then
+      ok "local allow file present: $claude_allow_file ($claude_allow_count rule line(s), rules not shown) — after chezmoi apply, the managed ~/.claude/settings.json adds them to permissions.allow (WebFetch(domain:<host>) only; a line of another shape stops the apply; deny and ask still come first); a change not yet applied shows in the managed drift section"
+    else
+      warn "local allow file present but its rule lines could not be counted: $claude_allow_file (rules not shown)"
+    fi
+  elif [[ -e "$claude_allow_file" || -L "$claude_allow_file" ]]; then
+    warn "$claude_allow_file is not a readable regular file — chezmoi apply stops on it (a broken link counts as no file: nothing is added); make it a file with one WebFetch(domain:<host>) rule per line (docs/claude-settings.md)"
+  elif absence_confirmed "$claude_allow_file"; then
+    ok "no local allow file ($claude_allow_file): permissions.allow holds the managed rules only"
+  else
+    warn "whether $claude_allow_file exists is not checked (a directory on its path cannot be entered)"
+  fi
+else
+  ok "the claude-settings module is inactive for this profile: no managed settings read the local allow file"
+  if [[ -e "$claude_allow_file" || -L "$claude_allow_file" ]]; then
+    item "$claude_allow_file is present but not used (the claude-settings module is inactive for this profile)"
+  fi
+fi
+
 section "GitHub injection guard (report-only)"
 # gateGitHubMcp / enableGitHubIsolatedReader are safety-hardening capabilities for
 # the GitHub runtime prompt-injection defense (epic #119). Like enforceAiSandbox
