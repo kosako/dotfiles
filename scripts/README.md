@@ -1182,8 +1182,8 @@ test は umask 022 に固定して確かめる。#332 F38)、隣に置いた `se
 
 ## test-otel-backend.sh
 
-otel-backend module(#514 / #517 / #525)を検証する。personal で `~/.config/otel-lgtm/` の 5 つの file(compose file・
-`otelcol/archive.yaml`・`grafana/provisioning/agents.yaml`・`grafana/dashboards/agents.json`・`grafana/dashboards/claude-code.json`)が apply され work では
+otel-backend module(#514 / #517 / #525 / #541)を検証する。personal で `~/.config/otel-lgtm/` の file(compose file・
+`otelcol/archive.yaml`・`grafana/provisioning/agents.yaml`・`grafana/dashboards/` の 7 つの dashboard)が apply され work では
 されないこと(work が持つ自前の compose file は byte 単位で不変)、managed-by の header(dashboard は strict な JSON
 なので description)、compose file が YAML として parse でき定義が pin どおりであること(key を sort して比べる)。
 pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@sha256:<64 hex>`、すべての port が `127.0.0.1:` で
@@ -1201,9 +1201,13 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 の下の別々の JSON を zstd で(`compression: zstd`、path は `*.jsonl.zst`。#527)、`max_megabytes` が 1 以上 1024 以下の整数、`max_days` が 365、`max_backups` が 0(実測で、0 は回した file を全部残す)。receivers と exporters は
 配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
 directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard はどれも strict な JSON
-の object で、uid が `ai-agents-codex`(Codex)と `ai-agents-claude-code`(Claude Code、#525)、どの datasource の参照も
-`loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列は不合格)。bind する dashboard の directory には、この 2 つの
-file だけがある。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
+の object で、uid が file ごとに決めたもの(Codex の `ai-agents-codex`、Claude Code の `ai-agents-claude-code`(#525)、
+#541 の `ai-agents-tokens`・`ai-agents-output`・`ai-agents-efficiency`・`ai-agents-sessions`・`ai-agents-usage`)、どの datasource の参照も
+`loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列、Grafana の式の `__expr__` は不合格)。問い合わせる panel は
+どれも datasource を持つ(row と、説明の text panel は問い合わせないので除く)。bind する dashboard の directory には、test の
+一覧の 7 つの file だけがある。日ごとの panel(interval が `1d`)の問い合わせは、窓が `[1d] offset -15h` で日本時間の 1 日を
+数え、`$__interval` を使わない(UTC の 0 時の区切りでは今日の分が落ちる。#541)。日ごとの panel を持つ dashboard は
+timezone が `Asia/Tokyo` で、期間の終わりが `now/d`(0 時から 9 時の間も今日の点を入れる。PR #543)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
 directory 0755(umask 022 に固定して確かめる。#332 F38)。chezmoi・yq・jq が必要(render job)。実 home には触れず、
 container runtime とは通信しない。
 
