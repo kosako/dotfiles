@@ -2613,6 +2613,121 @@ if ! grep -Fxq "[info] - $ct_file is present but not used (enableClaudeTelemetry
 fi
 rm -f "$ct_file"
 
+# LA) Claude Code local allow (#538): the section says whether the local
+#     allow file is there and how many rule lines it holds, never the rules.
+#     It needs no capability, so the CT fixture serves (its telemetry flip
+#     does not touch this section). Each case has its own HOME and exits 0.
+la_home="$fixture_home/la"
+la_file="$la_home/.config/dotfiles/claude-permissions-allow.local"
+mkdir -p "$la_home"
+la_ok3="[ok] local allow file present: $la_file (3 rule line(s), rules not shown) — after chezmoi apply, the managed ~/.claude/settings.json adds them to permissions.allow (WebFetch(domain:<host>) only; a line of another shape stops the apply; deny and ask still come first); a change not yet applied shows in the managed drift section"
+la_absent="[ok] no local allow file ($la_file): permissions.allow holds the managed rules only"
+la_not_file="[warn] $la_file is not a readable regular file — chezmoi apply stops on it (a broken link counts as no file: nothing is added); make it a file with one WebFetch(domain:<host>) rule per line (docs/claude-settings.md)"
+la_unchecked="[warn] whether $la_file exists is not checked (a directory on its path cannot be entered)"
+la_inactive="[ok] the claude-settings module is inactive for this profile: no managed settings read the local allow file"
+la_unused="[info] - $la_file is present but not used (the claude-settings module is inactive for this profile)"
+# la_case LABEL PROFILE WANT [NOT...] — doctor (PROFILE) with HOME=$la_home
+# prints the line WANT and none of the lines NOT, and exits 0.
+la_case() {
+  local label="$1" la_profile="$2" want="$3" not
+  shift 3
+  if la_out="$(HOME="$la_home" "$ct_root/scripts/doctor.sh" "$la_profile" 2>&1)"; then
+    if ! grep -Fxq -- "$want" <<< "$la_out"; then
+      printf '%s\n' "$la_out" >&2
+      fail "test failed: Claude Code local allow ($label): missing line: $want"
+      status=1
+      return
+    fi
+    for not in "$@"; do
+      if grep -Fxq -- "$not" <<< "$la_out"; then
+        printf '%s\n' "$la_out" >&2
+        fail "test failed: Claude Code local allow ($label): unexpected line: $not"
+        status=1
+        return
+      fi
+    done
+    ok "test passed: Claude Code local allow ($label)"
+  else
+    printf '%s\n' "$la_out" >&2
+    fail "test failed: doctor must stay exit 0 (Claude Code local allow, $label)"
+    status=1
+  fi
+}
+#     LA-a) no file (no ~/.config at all) -> the no-file ok.
+la_case "no local allow file" personal "$la_absent" "$la_ok3" "$la_not_file" "$la_unchecked" "$la_inactive"
+#     LA-b) three rule lines among comments and blank lines (one indented
+#           comment, one blank-only line, no final newline) -> ok with the
+#           count; the marker host is not shown.
+mkdir -p "${la_file%/*}"
+printf '# hosts\n\nWebFetch(domain:dotfiles-allow-probe.example.test)\n  # indented\n   \nWebFetch(domain:a.example.test)\nWebFetch(domain:b.example.test)' > "$la_file"
+la_case "local allow file present" personal "$la_ok3" "$la_absent" "$la_not_file" "$la_unchecked"
+if grep -Fq 'dotfiles-allow-probe' <<< "$la_out"; then
+  fail "test failed: Claude Code local allow: doctor printed a rule"
+  status=1
+fi
+#     LA-c) a directory in the file's place -> the not-a-file warn; an
+#           unreadable file the same (skipped as root, which reads it).
+rm -f "$la_file"
+mkdir "$la_file"
+la_case "directory in the local allow file's place" personal "$la_not_file" "$la_ok3" "$la_absent"
+rmdir "$la_file"
+if [[ "$(id -u)" != "0" ]]; then
+  printf 'WebFetch(domain:a.example.test)\n' > "$la_file"
+  chmod 000 "$la_file"
+  la_case "unreadable local allow file" personal "$la_not_file" "$la_absent"
+  rm -f "$la_file"
+#     LA-d) a directory on the path that cannot be entered -> not checked,
+#           never "no file".
+  chmod 000 "${la_file%/*}"
+  la_case "local allow file's directory not enterable" personal "$la_unchecked" "$la_absent" "$la_not_file"
+  chmod 755 "${la_file%/*}"
+fi
+#     LA-f) lines led by a blank that is not ASCII (U+3000 before a comment,
+#           NBSP alone) are rule lines, as the template reads them (it trims
+#           ASCII blanks only and stops the apply on them): with the one rule,
+#           three. Run in a UTF-8 locale, where grep would take those as
+#           blanks without the C locale (Codex review, PR #540). locale -a
+#           spells the names differently (macOS C.UTF-8 / en_US.UTF-8, glibc
+#           C.utf8 / en_US.utf8), so they are compared lowercased and without
+#           "-" (Codex review R2, PR #540). Without one the case does not run:
+#           a skip locally and a failure on CI (ci_gate), so the C-locale
+#           count cannot go unchecked there.
+la_utf8=""
+while IFS= read -r la_loc; do
+  case "$(printf '%s' "$la_loc" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -d '-')" in
+    c.utf8|en_us.utf8) la_utf8="$la_loc"; break ;;
+  esac
+done < <(locale -a 2>/dev/null)
+la_gate="$(ci_gate test -n "$la_utf8")"
+mkdir -p "${la_file%/*}"
+printf '\343\200\200# x\n\302\240\nWebFetch(domain:a.example.test)\n' > "$la_file"
+if [[ "$la_gate" == run ]]; then
+  if la_out="$(HOME="$la_home" LC_ALL="$la_utf8" "$ct_root/scripts/doctor.sh" personal 2>&1)" \
+    && grep -Fxq -- "$la_ok3" <<< "$la_out"; then
+    ok "test passed: Claude Code local allow (blanks that are not ASCII count as rule lines, $la_utf8)"
+  else
+    printf '%s\n' "$la_out" >&2
+    fail "test failed: Claude Code local allow: blanks that are not ASCII were not counted as rule lines ($la_utf8)"
+    status=1
+  fi
+elif [[ "$la_gate" == fail ]]; then
+  fail "test failed: Claude Code local allow: no UTF-8 locale (C.UTF-8 or en_US.UTF-8, in any spelling) on CI, so the C-locale count of blanks that are not ASCII was not checked"
+  status=1
+else
+  item "no UTF-8 locale here (C.UTF-8 or en_US.UTF-8, in any spelling); the C-locale count of blanks that are not ASCII was not checked"
+fi
+rm -f "$la_file"
+#     LA-e) work (claude-settings inactive) with the file present -> the
+#           inactive ok and the present-but-unused item.
+printf 'WebFetch(domain:a.example.test)\n' > "$la_file"
+la_case "claude-settings inactive (work)" work "$la_inactive" "$la_absent" "$la_not_file"
+if ! grep -Fxq -- "$la_unused" <<< "$la_out"; then
+  printf '%s\n' "$la_out" >&2
+  fail "test failed: Claude Code local allow (work): the present-but-unused item is missing"
+  status=1
+fi
+rm -f "$la_file"
+
 # DR) enableDirenv selects the doctor check only (#401): with it false, the
 #     report says the check is skipped and that the shell hook still runs,
 #     not that direnv is off (the managed ~/.zshrc registers the hook

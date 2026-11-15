@@ -14,7 +14,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model の既定 / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 / `switchModelsOnFlag` 等の global preference) | public repo(`dot_claude/modify_settings.json.tmpl`。chezmoi の modify script。下記「apply の仕組み」) | ✅ chezmoi(**personal profile のみ**) |
-| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、MCP のログインの tool の無条件 deny 2 件(#530)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 22 件(#341・#530。どちらも personal 既定 true で deny は計 59 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
+| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、MCP のログインの tool の無条件 deny 2 件(#530)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 22 件(#341・#530。どちらも personal 既定 true で deny は計 59 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505。local の file に書いた `WebFetch(domain:<host>)` を後ろに足す。#538、下記「local の allow」)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225 / #353 / #497 / #505 / #508): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `^(startup\|resume\|clear\|compact\|fork)$`(herdr 0.9.3 の integration v10 と同じ。#274)に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。`enableToolCallRecordHook` 連動(#353、agent-tools#454)で SessionStart(matcher なし)と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest(matcher `*`。PermissionRequest は確認の回数を実測するため。#505、agent-tools#639)に agent-tools 配布の `personal-tool-call-record-hook` を `async: true`・timeout 10 で登録(tool 呼び出しの記録。引数は key だけ・fail-open。既存の entry の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない)。`enableJaReplyGuardHook` 連動(#497、agent-tools#588)で matcher なしの Stop に agent-tools 配布の `personal-ja-reply-guard` を timeout 10 で登録(最後の答えが英語に逸れたら 1 回だけ止めて日本語で書き直させる。fail-open で、`stop_hook_active` のときは止めない。`personal-changed-scope-qa` の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない。英語で答えさせたい session は env の `AGENT_TOOLS_JA_GUARD_DISABLE` で止める)。`enableBridgeOneHook` 連動(#508。personal は #510 で on、work は off)で PermissionRequest / matcher `*` に Bridge One の起動用の script `~/.local/share/bridge-one/hook/current/bin/permission-request` を timeout 600 で登録(`async` と `onFailure` は付けない。command は path を single quote で囲み ` 2>/dev/null` を付けた、Bridge One の `tools/hook-deploy/deploy.mjs` が表示するものと同じ文字列。記録 hook の後ろに 2 つ目の entry として足す。ほかの hook と違い決定 (allow / deny) を返しうる: Bridge One の host が答えたときだけ返し、host が動いていない間・起動用の script が無いときは何も出力せず、承認は端末の dialog に戻る。dotfiles が出す PermissionRequest の hook で決定を返しうるのはこれだけで、決定を返す hook を手で足したものとの併存は dotfiles の範囲の外。Claude だけで Codex には出さない。配備は Bridge One の repo が行う)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | telemetry の `env`(#523): `enableClaudeTelemetry` 連動で、Claude Code の OpenTelemetry(metric と event を OTLP/HTTP で送る)の変数を出す。送り先は管理外の local file から apply のときに読む(下記「telemetry」) | 方式は public repo(`dot_claude/modify_settings.json.tmpl`)、送り先は `~/.config/dotfiles/claude-telemetry.local`(非コミット) | ✅ chezmoi(**personal profile のみ**。file が無ければ出さない) |
 | 手元だけの key: `/model` で選んだ `model`(template の値は file に無いときの既定だけ)、`modelSettings`(model ごとの effort)、`autoMode`(auto mode の environment。repository 名などを含み public に出さない)、Claude Code が後から足す key | live の `~/.claude/settings.json` | ⚪ 管理外だが apply で消さない(modify script がそのまま残す。#360) |
@@ -99,8 +99,9 @@ project 自身の deny / ask が止めないものを warn する(rule の
 - live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON・NUL を含む)ときは、
   apply はその file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
 - live の file の中身は一時 file に書かず、shell の変数に保って jq には stdin で渡す(#446)。managed の JSON も、
-  live の file の前に同じ stdin で渡す(#523。telemetry の送り先は local の値なので、jq の引数に置かない)。jq の
-  引数は option と filter だけで、live にしかない値(`autoMode` など)も送り先も process の一覧(`ps`)に出ない。合成と比較は 1 回の jq で行う。script は live の中身を一時 file に置かないので、kill されても live の写しは
+  live の file の前に同じ stdin で渡す(#523。telemetry の送り先と local の allow の rule(#538)は local の値なので、
+  jq の引数に置かない)。jq の引数は option と filter だけで、live にしかない値(`autoMode` など)も送り先も local の rule
+  も process の一覧(`ps`)に出ない。合成と比較は 1 回の jq で行う。script は live の中身を一時 file に置かないので、kill されても live の写しは
   残らない。shell の変数は NUL を持てないので、NUL は `tr` で別の制御文字に置き換えて jq に渡し、上の「壊れた JSON」
   として止める(末尾の NUL も止める。jq は file を直に読むと末尾の NUL を通すが、ここでは通さない)。
   `tr` は `LC_ALL=C` で byte として読む(UTF-8 の locale の BSD の `tr` は、UTF-8 でない byte で止まるため。string の
@@ -272,6 +273,53 @@ template は出さない。`env` は object 全体を managed にするので、
 - 止めるときは file を消して `chezmoi apply` する。profile ごと止めるなら capability を false にする。
 - doctor は file の有無だけを見る(値は読まない)。表示は apply の後の状態で、apply までは前の apply の `env` が残って
   送り続ける(managed drift の section に出る)。
+
+## local の allow(#538)
+
+公開の repo に書きたくない host への `WebFetch` を、この machine の全 project で確認なしにする口。managed な
+`permissions.allow` は apply のたびに template の値に戻るので、live の file に手で足した allow は残らない。project の
+`.claude/settings.local.json` に置くと、その project でしか効かない。そこで、管理外の
+`~/.config/dotfiles/claude-permissions-allow.local` に書いた rule を、apply のときに `permissions.allow` の後ろに足す。
+
+- 1 行に rule を 1 つ書く。`#` で始まる行と空行は飛ばし、前後の ASCII の空白 (space・tab・CR・VT・FF) は落とす。
+  全角の空白や NBSP は落とさないので、それが残る行は形の違う行になる (doctor の行の数え方とそろえるため)。
+- 受け付けるのは `WebFetch(domain:<host>)` の形だけ。host は 1 つずつ書く。DNS の名前か IPv4 の形で、label を 2 つ
+  以上持ち、各 label は英数字で始まり英数字で終わる(63 文字まで)。`*`、末尾の `.`、port、IPv6 の literal は書けない。
+- 4096 byte 以下の通常の file にする(symlink は、先が通常の file ならよい)。
+- 値を変えたら `chezmoi apply` する。apply までは、managed drift の section に `settings.json` の差分として出る。
+
+形を絞る理由:
+
+- `Bash` やほかの tool の allow を足せると、`git push` や `Bash(*)` を file 1 つで確認なしにできてしまう。
+  [ai-policy](ai-policy.md) は、マシンの外に出る操作を都度承認にしている。WebFetch の読み取りを、人が選んだ host に
+  限って例外にする(ai-policy の「原則」)。ほかの種類が要るときは、別の Issue で範囲を決める。
+- Claude Code の `WebFetch(domain:...)` は、`*` を含むと subdomain や全部の host に広がる(`domain:*.example.com` は
+  subdomain の全部、`domain:*` は全部の host)。`*` を受け付けず、一致を書いた host だけにする。`domain:example.com` は
+  `example.com` だけに一致し、`api.example.com` には一致しない(Claude Code の permissions の docs)。
+- `domain:` の形の allow は、sandbox の通信の許可の一覧にも入る(同じ docs)。`enforceAiSandbox` を on にした machine
+  では、sandbox の中の command もその host に届く。personal は今 off。
+
+足しても変わらないもの:
+
+- deny と ask。Claude Code は deny、ask、allow の順に評価し、allow は deny や ask に例外を作れない。secret floor の
+  deny と、作業を捨てる git の ask は、そのまま効く。
+- managed の allow の 2 本。local の rule はその後ろに、file の順で足す。`permissions` のほかの key と、ほかの
+  top-level の key も変わらない。
+
+apply のときの動き:
+
+- file が無い、または rule の行が無い(comment と空行だけ): `settings.json` は file が無いときと byte で同じ。前の apply
+  で足した rule も、手で足した allow も消える(`permissions` は全体を managed にする)。
+- 形の正しい file: 上の rule を `permissions.allow` に足す。値は live の `settings.json` にだけ入る。
+- それ以外(形の違う行が 1 つでもある、通常の file でない、大きすぎる、読めない): render が失敗して apply が止まり、
+  `settings.json` は書き換わらない。error には file の path と行の番号が出て、rule は出ない。
+- 読む file は destination の下(`.chezmoi.destDir`)で、HOME の下ではない。test の使い捨ての destination への render は、
+  この machine の file を読まない。
+
+doctor の「Claude Code local allow」の section は、file の有無と、rule の行の数(空でも `#` で始まりもしない行。C の
+locale の grep で数えるので、空白は template と同じ ASCII の空白)だけを出す。rule は出さず、形も確かめない(形は apply が確かめる)。capability は持たない。claude-settings の module は
+personal にしか入らないので、file を置くことが opt-in になる。module の入らない profile では、file があれば「使わない」
+と出す。Codex には同じ口を作らない(Codex の rules は command の承認で、WebFetch にあたる口が無いため)。
 
 ## 後日 / 対象外
 

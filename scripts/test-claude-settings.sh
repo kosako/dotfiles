@@ -1732,6 +1732,185 @@ else
   status=1
 fi
 
+section "claude settings local allow (#538)"
+
+# la_apply renders the committed source into a fresh destination, with the
+# local allow file (CONTENT, written as given plus a newline; the default
+# <none> writes no file) and a live settings.json (SEED, none by default)
+# placed first. The file needs no capability: claude-settings is personal
+# only, and the file being there is the opt-in.
+la_apply() {
+  local label="$1" content="${2-<none>}" seed="${3-}"
+  la_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-allow-$label.XXXXXX")"
+  tmp_roots+=("$la_root")
+  mkdir -p "$la_root/home/.claude" "$la_root/home/.config/dotfiles"
+  la_file="$la_root/home/.claude/settings.json"
+  la_local="$la_root/home/.config/dotfiles/claude-permissions-allow.local"
+  if [[ "$content" != "<none>" ]]; then
+    printf '%s\n' "$content" > "$la_local"
+  fi
+  if [[ -n "$seed" ]]; then
+    printf '%s\n' "$seed" > "$la_file"
+    cp "$la_file" "$la_root/seed.json"
+  fi
+  la_rc=0
+  render_personal_into "$DOTFILES_ROOT" "$la_root" || la_rc=$?
+}
+la_managed='["mcp__pencil","Bash(~/.claude/agent-tools/scripts/personal-merged-branch-cleanup *)"]'
+
+# LA1) No file is the default render (4 pins its allow). A file with only a
+#      comment and blank lines adds nothing: settings.json is the default
+#      render byte for byte.
+la_apply comments $'# nothing allowed yet\n\n   '
+if [[ "$la_rc" -eq 0 ]] && cmp -s "$la_file" "$off_file"; then
+  ok "test passed: a local allow file with only comments and blank lines leaves settings.json as the default render (byte for byte)"
+else
+  fail "test failed: a comment-only local allow file changed settings.json or failed (rc=$la_rc)"
+  status=1
+fi
+
+# LA2) Two rules among comments, blank lines and surrounding ASCII blanks
+#      (space, tab, CR, VT, FF; a CRLF line end): allow is the managed two
+#      and then the rules as written (trimmed), in order; deny, ask and every
+#      other key are as in the default render.
+la_apply two $'# hosts I read\n\t# indented\n\t\r\nWebFetch(domain:docs.example.test)\r\n \t WebFetch(domain:Api.Example.test) \v\f'
+la_want="$(jq -c -n --argjson m "$la_managed" '$m + ["WebFetch(domain:docs.example.test)", "WebFetch(domain:Api.Example.test)"]')"
+if [[ "$la_rc" -eq 0 && "$(jq -c '.permissions.allow' "$la_file" 2>/dev/null)" == "$la_want" \
+  && -n "$(norm "$off_file")" \
+  && "$(norm "$la_file" 'del(.permissions.allow)')" == "$(norm "$off_file" 'del(.permissions.allow)')" ]]; then
+  ok "test passed: the local rules follow the managed allow in file order, and deny, ask and every other key stay as in the default render"
+else
+  fail "test failed: local allow wrong, or another key changed (rc=$la_rc allow=$(jq -c '.permissions.allow' "$la_file" 2>/dev/null))"
+  status=1
+fi
+
+# LA3) The edges of the accepted shape are used as written: an IPv4 host, a
+#      hyphen inside a label, digits, a 63-character label.
+la_label63="a$(printf '%061d' 0)z"
+for la_good in 'WebFetch(domain:10.0.0.1)' 'WebFetch(domain:docs-1.example.test)' 'WebFetch(domain:1a.example.test)' "WebFetch(domain:$la_label63.example.test)"; do
+  la_apply good "$la_good"
+  if [[ "$la_rc" -eq 0 && "$(jq -r '.permissions.allow[2]' "$la_file" 2>/dev/null)" == "$la_good" \
+    && "$(jq -r '.permissions.allow | length' "$la_file" 2>/dev/null)" == "3" ]]; then
+    ok "test passed: a rule of the accepted shape is added as written ($(printf '%s' "$la_good" | head -c 48))"
+  else
+    fail "test failed: a rule of the accepted shape was refused or changed (rc=$la_rc: $(printf '%s' "$la_good" | head -c 48))"
+    status=1
+  fi
+done
+
+# LA4) Any other line fails the apply, and the live file stays as it was
+#      (byte for byte, with cmp). Each value is one file's content: other
+#      tools and broad rules (the ai-policy reason for the narrow shape), any
+#      *, a single label, a trailing dot, a port, broken labels, blanks
+#      inside, trailing text, the tool name in another case, a good line
+#      before a bad one, a file over 4096 bytes, and blanks that are not
+#      ASCII (U+3000, NBSP) around a rule or before a comment: only ASCII
+#      blanks are trimmed, the set doctor counts with (Codex review, PR #540).
+la_seed="$(cat "$off_file")"
+la_long="#$(printf '%04100d' 0)"
+for la_bad in \
+  'Bash(git push *)' \
+  'Bash(*)' \
+  'Bash' \
+  'mcp__pencil__*' \
+  'Read(~/.ssh/**)' \
+  'WebFetch' \
+  'WebFetch(*)' \
+  'WebFetch(domain:*)' \
+  'WebFetch(domain:*.example.test)' \
+  'WebFetch(domain:example.*)' \
+  'WebFetch(domain:ex*mple.test)' \
+  'WebFetch(domain:example)' \
+  'WebFetch(domain:example.test.)' \
+  'WebFetch(domain:.example.test)' \
+  'WebFetch(domain:example.test:443)' \
+  'WebFetch(domain:-docs.example.test)' \
+  'WebFetch(domain:docs-.example.test)' \
+  'WebFetch(domain:docs..example.test)' \
+  "WebFetch(domain:a${la_label63}.example.test)" \
+  'WebFetch(domain:[::1])' \
+  'WebFetch(domain: example.test)' \
+  'WebFetch(domain:example.test) extra' \
+  'WebFetch(domain:example.test)WebFetch(domain:b.test)' \
+  'WebFetch(url:https://example.test/*)' \
+  'webfetch(domain:example.test)' \
+  $'WebFetch(domain:ok.example.test)\nBash(git push *)' \
+  "$la_long"$'\nWebFetch(domain:ok.example.test)' \
+  $'\343\200\200# a comment led by U+3000' \
+  $'\343\200\200WebFetch(domain:ok.example.test)' \
+  $'WebFetch(domain:ok.example.test)\302\240'; do
+  la_apply bad "$la_bad" "$la_seed"
+  if [[ "$la_rc" -ne 0 ]] && cmp -s "$la_root/seed.json" "$la_file"; then
+    ok "test passed: a line of another shape fails the apply and leaves settings.json alone ($(printf '%s' "$la_bad" | head -c 48 | tr '\n' '|'))"
+  else
+    fail "test failed: a line of another shape was accepted or settings.json changed (rc=$la_rc: $(printf '%s' "$la_bad" | head -c 48 | tr '\n' '|'))"
+    status=1
+  fi
+done
+#      A directory in the file's place fails the same way.
+la_apply dir '<none>' "$la_seed"
+mkdir "$la_local"
+la_rc=0
+render_personal_into "$DOTFILES_ROOT" "$la_root" || la_rc=$?
+if [[ "$la_rc" -ne 0 ]] && cmp -s "$la_root/seed.json" "$la_file"; then
+  ok "test passed: a directory in the local allow file's place fails the apply and leaves settings.json alone"
+else
+  fail "test failed: a directory in the local allow file's place was accepted (rc=$la_rc)"
+  status=1
+fi
+
+# LA5) The error names the file and the line, never the rule: a refused
+#      rule that holds a marker host, on the third line.
+la_apply message '<none>'
+la_marker="dotfiles-allow-probe-$$-$RANDOM"
+printf '# c\nWebFetch(domain:ok.example.test)\nWebFetch(domain:*.%s.test)\n' "$la_marker" > "$la_local"
+la_err="$(chezmoi --config "$la_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+  --destination "$la_root/home" apply 2>&1 >/dev/null)" && la_rc=0 || la_rc=$?
+if [[ "$la_rc" -ne 0 ]] && grep -Fq "claude-permissions-allow.local line 3: must be" <<< "$la_err" \
+  && ! grep -Fq "$la_marker" <<< "$la_err"; then
+  ok "test passed: the error names the local allow file and the line number, not the rule"
+else
+  fail "test failed: the error does not name the file and line, or it shows the rule (rc=$la_rc)"
+  status=1
+fi
+
+# LA6) permissions is managed as a whole: a live allow with a rule from an
+#      earlier apply (and one added by hand), and now no file, comes back to
+#      the managed two; every other key matches the default render.
+la_stale="$(jq '.permissions.allow += ["WebFetch(domain:old.example.test)", "Bash(git push *)"]' "$off_file")"
+la_apply stale '<none>' "$la_stale"
+if [[ "$la_rc" -eq 0 && "$(jq -c '.permissions.allow' "$la_file" 2>/dev/null)" == "$la_managed" \
+  && "$(norm "$la_file")" == "$(norm "$off_file")" ]]; then
+  ok "test passed: with the local allow file gone, apply brings allow back to the managed rules"
+else
+  fail "test failed: a stale or hand-added allow rule survived the apply, or another key changed (rc=$la_rc)"
+  status=1
+fi
+
+# LA7) A local rule never reaches jq's arguments: the 9j shim, over a live
+#      file with a stale managed key (diff, apply, diff again). The merged
+#      file carries the rule.
+la_apply argv '<none>' "$(jq '.tui = "default"' "$off_file")"
+mkdir -p "$la_root/bin"
+cp "$argv_root/bin/jq" "$la_root/bin/jq"
+la_marker="dotfiles-allow-argv-$$-$RANDOM"
+printf 'WebFetch(domain:%s.example.test)\n' "$la_marker" > "$la_local"
+la_log="$la_root/jq-argv.log"
+: > "$la_log"
+la_rc=0
+for la_step in diff apply diff; do
+  JQ_ARGV_LOG="$la_log" JQ_REAL="$argv_real_jq" PATH="$la_root/bin:$PATH" \
+    chezmoi --config "$la_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+    --destination "$la_root/home" "$la_step" >/dev/null 2>&1 || la_rc=1
+done
+if [[ "$la_rc" -eq 0 ]] && grep -Fqx -- '-s' "$la_log" && ! grep -Fq -- "$la_marker" "$la_log" \
+  && [[ "$(jq -r '.permissions.allow[2]' "$la_file")" == "WebFetch(domain:$la_marker.example.test)" ]]; then
+  ok "test passed: a rule from the local allow file never reaches jq's arguments (diff, apply and diff again)"
+else
+  fail "test failed: a local rule reached jq's arguments, the jq shim did not run, or the apply failed (rc=$la_rc)"
+  status=1
+fi
+
 if [[ "$status" -eq 0 ]]; then
   ok "claude settings tests passed"
 fi

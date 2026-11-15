@@ -200,6 +200,20 @@ managed な `~/.claude/settings.json` が telemetry を送る先(OTLP/HTTP の b
   apply が止まる。
 - **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
 
+## Claude Code の local の allow(#538)
+
+managed な `~/.claude/settings.json` の `permissions.allow` に足す rule は、managed file に焼かず
+**`~/.config/dotfiles/claude-permissions-allow.local`**(chezmoi 管理外・非コミット)に置く。公開の repo に書きたくない
+host への `WebFetch` を、この machine の全 project で確認なしにするため。
+
+- 行形式: 1 行に `WebFetch(domain:<host>)` を 1 つ。`#` 行と空行は飛ばす。形と制限と、形を絞る理由は
+  [claude-settings](claude-settings.md) の「local の allow」。
+- telemetry の送り先と同じく、**apply のときに template が中身を読み**、live の `settings.json` に書く。doctor は存在と
+  rule の行の数だけを見る。
+- 共通原則どおり managed 側はこの file が無くても壊れない(allow は managed の rule だけ)。形の正しくない file では
+  apply が止まる。
+- **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
+
 ## agent-tools の checkout path(#73)
 
 `dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`
