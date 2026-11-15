@@ -285,7 +285,8 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 
 ### token の消費と生産(#541)
 
-Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。既定の期間は 30 日(session ごとは 7 日)で、5 分ごとに読み直す。
+Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。timezone は Asia/Tokyo に固定する。既定の期間は 29 日前の 0 時から
+今日の終わりまで(`now-29d/d` から `now/d`。session ごとは直近 7 日)で、5 分ごとに読み直す。
 どれも上の段に、見ることと数え方の短い説明(text panel)を置く。
 
 | dashboard(uid、file) | 見ること |
@@ -307,7 +308,13 @@ Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。�
   (`/models`)の取得だけだった(上の Codex の dashboard の「API request」の誤りは #542)。
 - 日ごとの棒の窓は `[1d] offset -15h`。点の時刻(UTC の 0 時)から 15 時間後ろへずらすと、窓がその日付の日本時間の 1 日になり、
   今日の途中までが最後の点に入る。`[$__interval]` は UTC の 0 時で区切るので、今日の分が翌日の 9 時まで出ない。Loki も
-  Prometheus も負の offset を受け付ける。`test-otel-backend.sh` が、日ごとの panel の窓をこの形に固定する。
+  Prometheus も負の offset を受け付ける。
+- 評価の点は UTC の 0 時(日本時間の 9 時)にそろうので、0 時から 9 時の間は、今日の点が「now」より後になる。そのため期間の
+  終わりを今日の終わり(`now/d`)にし、offset が前提にする Asia/Tokyo を dashboard の timezone に固定する(Codex の review、
+  PR #543)。期間の終わりを「now」にした期間(Last 7 days など)では、0 時から 9 時の間は今日の棒が出ない。
+  `test-otel-backend.sh` が、日ごとの panel の窓と、その dashboard の timezone と期間の終わりを固定する。
+- 2 つの agent の和は `(A or vector(0)) + (B or vector(0))` と書く。片方に log が無い期間は vector が空で、そのまま足すと和も
+  空になる(Codex の review、PR #543)。
 - 比は 1 つの問い合わせの中で `(A) / (B > 0)` と割る。分母が 0 の日は点を出さない。Grafana の式(`__expr__`)は datasource
   の検査(loki・prometheus・tempo だけ)に合わないので使わない。Loki と Prometheus をまたぐ比(行あたりの token)は置かない。
 - 生産の数は log から数える(1 年分を見られる)。編集は成功した `Edit`・`Write`・`MultiEdit`・`NotebookEdit`。commit と PR は、

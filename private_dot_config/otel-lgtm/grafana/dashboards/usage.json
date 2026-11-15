@@ -9,13 +9,13 @@
   "editable": false,
   "graphTooltip": 1,
   "time": {
-    "from": "now-30d",
-    "to": "now"
+    "from": "now-29d/d",
+    "to": "now/d"
   },
   "refresh": "5m",
   "schemaVersion": 41,
   "version": 1,
-  "timezone": "browser",
+  "timezone": "Asia/Tokyo",
   "links": [
     {
       "title": "AI agents",
@@ -42,7 +42,7 @@
       "title": "",
       "options": {
         "mode": "markdown",
-        "content": "**見ること**: token と手間を、どの agent・model・作業に使ったか。日ごとの割合の変化を見る。\n\n- tool は種類にまとめています (調べる・書く・command を実行・任せる・人に聞く・MCP・その他)。\n- 割合の棒は 1 日の合計を 100% にしたもので、tooltip には数そのものが出ます。棒は日本時間の 1 日ごとで、今日の分は今の時刻までです。"
+        "content": "**見ること**: token と手間を、どの agent・model・作業に使ったか。日ごとの割合の変化を見る。\n\n- tool は種類にまとめています (調べる・書く・command を実行・任せる・人に聞く・MCP・その他)。\n- 割合の棒は 1 日の合計を 100% にしたもので、tooltip には数そのものが出ます。棒は日本時間の 1 日ごとです。既定の期間は 30 日前の朝から今日の終わりまでで、今日の棒は今の時刻までの分です。期間の終わりを「now」にすると、0 時から 9 時の間は今日の棒が出ません。"
       },
       "transparent": true,
       "id": 1,

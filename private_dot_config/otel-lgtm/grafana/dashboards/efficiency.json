@@ -9,13 +9,13 @@
   "editable": false,
   "graphTooltip": 1,
   "time": {
-    "from": "now-30d",
-    "to": "now"
+    "from": "now-29d/d",
+    "to": "now/d"
   },
   "refresh": "5m",
   "schemaVersion": 41,
   "version": 1,
-  "timezone": "browser",
+  "timezone": "Asia/Tokyo",
   "links": [
     {
       "title": "AI agents",
@@ -42,7 +42,7 @@
       "title": "",
       "options": {
         "mode": "markdown",
-        "content": "**見ること**: 1 つ作るのに token がどれだけ要ったか。消費 (棒) と生産 (線) を重ね、比の推移も見る。\n\n- token は cache を含めた全部です。cache の読み込みは安いので比は大きく出ます (1 日ごとの比には cache を除いた線も並べています)。\n- 生産の数が小さい日は比が大きく揺れます。生産が 0 の日は比を出しません。棒は日本時間の 1 日ごとで、今日の分は今の時刻までです。"
+        "content": "**見ること**: 1 つ作るのに token がどれだけ要ったか。消費 (棒) と生産 (線) を重ね、比の推移も見る。\n\n- token は cache を含めた全部です。cache の読み込みは安いので比は大きく出ます (1 日ごとの比には cache を除いた線も並べています)。\n- 生産の数が小さい日は比が大きく揺れます。生産が 0 の日は比を出しません。棒は日本時間の 1 日ごとです。既定の期間は 30 日前の朝から今日の終わりまでで、今日の棒は今の時刻までの分です。期間の終わりを「now」にすると、0 時から 9 時の間は今日の棒が出ません。"
       },
       "transparent": true,
       "id": 1,

@@ -1206,7 +1206,8 @@ directory に bind され、object 1 つの配列で、bind した dashboard の
 `loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列、Grafana の式の `__expr__` は不合格)。問い合わせる panel は
 どれも datasource を持つ(row と、説明の text panel は問い合わせないので除く)。bind する dashboard の directory には、test の
 一覧の 7 つの file だけがある。日ごとの panel(interval が `1d`)の問い合わせは、窓が `[1d] offset -15h` で日本時間の 1 日を
-数え、`$__interval` を使わない(UTC の 0 時の区切りでは今日の分が落ちる。#541)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
+数え、`$__interval` を使わない(UTC の 0 時の区切りでは今日の分が落ちる。#541)。日ごとの panel を持つ dashboard は
+timezone が `Asia/Tokyo` で、期間の終わりが `now/d`(0 時から 9 時の間も今日の点を入れる。PR #543)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
 directory 0755(umask 022 に固定して確かめる。#332 F38)。chezmoi・yq・jq が必要(render job)。実 home には触れず、
 container runtime とは通信しない。
 

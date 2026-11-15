@@ -15,7 +15,7 @@
   "refresh": "5m",
   "schemaVersion": 41,
   "version": 1,
-  "timezone": "browser",
+  "timezone": "Asia/Tokyo",
   "links": [
     {
       "title": "AI agents",

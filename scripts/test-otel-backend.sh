@@ -524,24 +524,29 @@ fi
 #    window is [1d] offset -15h, which ends at 00:00 JST after the point's
 #    UTC midnight, so today's partial day is the last point. A window of
 #    $__interval aligns to UTC midnight and leaves today out until 09:00
-#    JST the next day (found while building #541). There must be daily
-#    panels to check, so the rule cannot pass by losing them.
+#    JST the next day (found while building #541). Points still sit on
+#    UTC midnights, so between 00:00 and 09:00 JST today's point lies
+#    after "now": a dashboard with daily panels ends its default range at
+#    the end of today (now/d) in Asia/Tokyo, the zone the offset assumes
+#    (Codex review, PR #543). There must be daily panels to check, so the
+#    rule cannot pass by losing them.
 daily_panels=0
 daily_bad=""
 for dash_case in "${dashboard_cases[@]}"; do
   dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
   n="$(jq -r '[.panels[] | select(.interval == "1d")] | length' "$dash_file" 2>/dev/null || echo x)"
   bad="$(jq -r '[.panels[] | select(.interval == "1d") | .targets[] | (.expr // "") | select(test("\\$__interval") or (test("\\[1d\\] offset -15h") | not))] | length' "$dash_file" 2>/dev/null || echo x)"
-  if [[ "$n" == x || "$bad" != 0 ]]; then
+  zone_end="$(jq -r '"\(.timezone) \(.time.to)"' "$dash_file" 2>/dev/null || echo x)"
+  if [[ "$n" == x || "$bad" != 0 ]] || [[ "$n" != 0 && "$zone_end" != "Asia/Tokyo now/d" ]]; then
     daily_bad+="${dash_case%% *} "
   else
     daily_panels=$((daily_panels + n))
   fi
 done
 if [[ -z "$daily_bad" && "$daily_panels" -gt 0 ]]; then
-  ok "test passed: every daily panel ($daily_panels) counts Japan-time days with [1d] offset -15h"
+  ok "test passed: every daily panel ($daily_panels) counts Japan-time days with [1d] offset -15h, on dashboards in Asia/Tokyo that end at now/d"
 else
-  fail "test failed: daily panels must window [1d] offset -15h and not \$__interval (offending: ${daily_bad:-none}; daily panels found: $daily_panels)"
+  fail "test failed: daily panels must window [1d] offset -15h and not \$__interval, on a dashboard in Asia/Tokyo ending at now/d (offending: ${daily_bad:-none}; daily panels found: $daily_panels)"
   status=1
 fi
 
