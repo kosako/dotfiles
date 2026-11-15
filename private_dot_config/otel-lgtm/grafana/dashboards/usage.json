@@ -1,0 +1,610 @@
+{
+  "uid": "ai-agents-usage",
+  "title": "AI agents (使い方の内訳)",
+  "description": "Managed by chezmoi from kosako/dotfiles (otel-backend module, #541). Where the tokens and work went: share per agent and model, and the kinds of tools used per day (events in Loki). Edit the JSON in dotfiles, not in the UI.",
+  "tags": [
+    "ai-agents",
+    "usage"
+  ],
+  "editable": false,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "schemaVersion": 41,
+  "version": 1,
+  "timezone": "browser",
+  "links": [
+    {
+      "title": "AI agents",
+      "type": "dashboards",
+      "tags": [
+        "ai-agents"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**見ること**: token と手間を、どの agent・model・作業に使ったか。日ごとの割合の変化を見る。\n\n- tool は種類にまとめています (調べる・書く・command を実行・任せる・人に聞く・MCP・その他)。\n- 割合の棒は 1 日の合計を 100% にしたもので、tooltip には数そのものが出ます。棒は日本時間の 1 日ごとで、今日の分は今の時刻までです。"
+      },
+      "transparent": true,
+      "id": 1,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "row",
+      "title": "agent と model",
+      "collapsed": false,
+      "panels": [],
+      "id": 2,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "token の割合 (agent ごと、1 日ごと)",
+      "description": "cache を含む全部を 100% にした割合",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [1d] offset -15h)) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [1d] offset -15h)) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [1d] offset -15h)) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "Claude Code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap input_token_count [1d] offset -15h)) + sum (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "Codex"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "percent",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "token (model ごと、期間の合計)",
+      "description": "cache を含む全部",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (model) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [$__range])) + sum by (model) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [$__range])) + sum by (model) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [$__range])) + sum by (model) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (model) (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap input_token_count [$__range])) + sum by (model) (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "alias": "合計",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "Value #A",
+                "Value #B",
+                "Value"
+              ]
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "Value #A": true,
+              "Value #B": true
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "合計",
+                "desc": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "model",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "合計",
+                "handlerKey": "field.value"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "valueMode": "color",
+        "namePlacement": "left",
+        "sizing": "auto"
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      }
+    },
+    {
+      "type": "row",
+      "title": "作業の種類",
+      "collapsed": false,
+      "panels": [],
+      "id": 5,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Claude Code: tool の種類 (1 日ごとの割合)",
+      "description": "tool_result を種類にまとめた数",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (kind) (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | label_format kind=`{{ if eq .tool_name \"Read\" \"Grep\" \"Glob\" \"LS\" \"WebFetch\" \"WebSearch\" \"ToolSearch\" }}調べる{{ else if eq .tool_name \"Edit\" \"Write\" \"MultiEdit\" \"NotebookEdit\" }}書く{{ else if eq .tool_name \"Bash\" \"PowerShell\" }}command を実行{{ else if eq .tool_name \"Agent\" \"Task\" \"Skill\" \"SendMessage\" \"SubagentHandback\" \"ListAgents\" }}任せる{{ else if eq .tool_name \"AskUserQuestion\" }}人に聞く{{ else if eq .tool_name \"mcp_tool\" }}MCP{{ else }}その他{{ end }}` [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "percent",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 6,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Codex: tool の種類 (1 日ごとの割合)",
+      "description": "codex.tool_result を種類にまとめた数",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (kind) (count_over_time({service_name=~\"codex.*\"} | event_name=\"codex.tool_result\" | label_format kind=`{{ if eq .tool_name \"exec_command\" \"exec\" \"write_stdin\" \"run\" }}command を実行{{ else if eq .tool_name \"apply_patch\" }}書く{{ else }}その他{{ end }}` [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "percent",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Claude Code: よく使った tool (期間の合計)",
+      "description": "tool_result の数 (上位 12)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(12, sum by (tool_name) (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" [$__range])))",
+          "queryType": "instant"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "alias": "合計",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "Value #A",
+                "Value"
+              ]
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "Value #A": true
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "合計",
+                "desc": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "tool_name",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "合計",
+                "handlerKey": "field.value"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "valueMode": "color",
+        "namePlacement": "left",
+        "sizing": "auto"
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Claude Code: 1 日の prompt と subagent と skill",
+      "description": "user_prompt、subagent_completed、skill_activated の数",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"user_prompt\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "prompt"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"subagent_completed\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "subagent"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"skill_activated\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "skill"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      }
+    }
+  ]
+}

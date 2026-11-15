@@ -1,0 +1,558 @@
+{
+  "uid": "ai-agents-sessions",
+  "title": "AI agents (session ごと)",
+  "description": "Managed by chezmoi from kosako/dotfiles (otel-backend module, #541). Consumption and output per Claude Code session and per Codex run (events in Loki). Edit the JSON in dotfiles, not in the UI.",
+  "tags": [
+    "ai-agents",
+    "sessions"
+  ],
+  "editable": false,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "schemaVersion": 41,
+  "version": 1,
+  "timezone": "browser",
+  "links": [
+    {
+      "title": "AI agents",
+      "type": "dashboards",
+      "tags": [
+        "ai-agents"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**見ること**: どの session が重かったか。token をたくさん使ったのに編集や commit が少ない session を見つける。\n\n- Claude Code は session_id、Codex は conversation_id ごとに集めています。表の列の名前を押すと並べ替えられます。\n- session の中身は Explore で session_id を絞ると読めます。"
+      },
+      "transparent": true,
+      "id": 1,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "row",
+      "title": "Claude Code",
+      "collapsed": false,
+      "panels": [],
+      "id": 2,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "table",
+      "title": "Claude Code: session ごと",
+      "description": "表示している期間の合計",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"user_prompt\" [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=~\"Edit|Write|MultiEdit|NotebookEdit\" | success=\"true\" [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cost_usd [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binary",
+            "alias": "1 編集あたり",
+            "binary": {
+              "left": "Value #A",
+              "operator": "/",
+              "right": "Value #D"
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "session_id": "session",
+              "Value #A": "token (全部)",
+              "Value #B": "prompt",
+              "Value #C": "API request",
+              "Value #D": "編集",
+              "Value #E": "commit",
+              "Value #F": "cost"
+            },
+            "indexByName": {
+              "session_id": 0,
+              "Value #A": 1,
+              "Value #F": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 6,
+              "1 編集あたり": 7
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "token (全部)",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "unit": "short",
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "token (全部)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "1 編集あたり"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "histogram",
+      "title": "Claude Code: session の token の分布",
+      "description": "session ごとの token (全部) の分布",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 70
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "combine": true,
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Claude Code: token の多い session (上位 10)",
+      "description": "session ごとの token (全部)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(10, sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [$__range])) + sum by (session_id) (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [$__range])))",
+          "queryType": "instant"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "alias": "合計",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "Value #A",
+                "Value"
+              ]
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "Value #A": true
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "合計",
+                "desc": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "session_id",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "合計",
+                "handlerKey": "field.value"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "valueMode": "color",
+        "namePlacement": "left",
+        "sizing": "auto"
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      }
+    },
+    {
+      "type": "row",
+      "title": "Codex",
+      "collapsed": false,
+      "panels": [],
+      "id": 6,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
+    },
+    {
+      "type": "table",
+      "title": "Codex: run ごと",
+      "description": "表示している期間の合計 (conversation_id ごと)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (conversation_id) (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap input_token_count [$__range])) + sum by (conversation_id) (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (conversation_id) (sum_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (conversation_id) (count_over_time({service_name=~\"codex.*\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" [$__range]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (conversation_id) (count_over_time({service_name=~\"codex.*\"} | event_name=\"codex.tool_result\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "conversation_id": "run",
+              "Value #A": "token (全部)",
+              "Value #B": "output",
+              "Value #C": "応答",
+              "Value #D": "tool の呼び出し"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "token (全部)",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "unit": "short",
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "token (全部)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      }
+    }
+  ]
+}

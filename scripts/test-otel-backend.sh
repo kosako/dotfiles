@@ -5,7 +5,8 @@ set -euo pipefail
 # the managed files under ~/.config/otel-lgtm that define the local
 # OpenTelemetry backend (grafana/otel-lgtm): the compose file, the extra
 # Collector config that archives the raw telemetry, and the Grafana
-# dashboard provider and dashboards (Codex, Claude Code). They must (1) be applied for personal
+# dashboard provider and dashboards (Codex, Claude Code, and the five on
+# tokens and output of #541). They must (1) be applied for personal
 # and not for work, (2) carry the managed-by header (the doctor orphan scan
 # keys on it; the dashboard, strict JSON, carries it in its description),
 # (3) parse with exactly the pinned compose definition, (4) keep the
@@ -57,8 +58,25 @@ trap cleanup EXIT
 managed_rel=".config/otel-lgtm/compose.yaml"
 archive_rel=".config/otel-lgtm/otelcol/archive.yaml"
 provider_rel=".config/otel-lgtm/grafana/provisioning/agents.yaml"
-dashboard_rel=".config/otel-lgtm/grafana/dashboards/agents.json"
-claude_dashboard_rel=".config/otel-lgtm/grafana/dashboards/claude-code.json"
+dashboards_rel=".config/otel-lgtm/grafana/dashboards"
+# Every managed dashboard as "<file> <uid>", in LC_ALL=C order: the provider
+# serves every file in the bound directory, so this list is also the pin of
+# that directory (#517 Codex, #525 Claude Code, #541 tokens and output).
+dashboard_cases=(
+  "agents.json ai-agents-codex"
+  "claude-code.json ai-agents-claude-code"
+  "efficiency.json ai-agents-efficiency"
+  "output.json ai-agents-output"
+  "sessions.json ai-agents-sessions"
+  "tokens.json ai-agents-tokens"
+  "usage.json ai-agents-usage"
+)
+dashboard_rels=()
+dashboard_listing=""
+for dash_case in "${dashboard_cases[@]}"; do
+  dashboard_rels+=("$dashboards_rel/${dash_case%% *}")
+  dashboard_listing+="${dash_case%% *} "
+done
 expected_definition='{"name":"otel-lgtm","services":{"lgtm":{"container_name":"otel-lgtm","environment":{"LOKI_EXTRA_ARGS":"-store.retention=365d -compactor.retention-enabled=true -compactor.delete-request-store=filesystem -store.max-query-length=366d1h","OTELCOL_EXTRA_ARGS":"--feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml","PROMETHEUS_EXTRA_ARGS":"--enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=30d","PYROSCOPE_EXTRA_ARGS":"-self-profiling.disable-push=true","TEMPO_EXTRA_ARGS":"-backend-scheduler.provider.work.compaction.block-retention=720h -backend-worker.compaction.block-retention=720h"},"image":"grafana/otel-lgtm:0.39.0@sha256:4c8056c9c05fcb3c8fd93800e85334bfd79b4d0271b47a54a121a64af41fe1fe","ports":["127.0.0.1:3000:3000","127.0.0.1:4317:4317","127.0.0.1:4318:4318"],"restart":"unless-stopped","volumes":["data:/data",{"bind":{"create_host_path":false},"read_only":true,"source":"./otelcol/archive.yaml","target":"/otel-lgtm/otelcol-archive.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/provisioning/agents.yaml","target":"/otel-lgtm/grafana/conf/provisioning/dashboards/agents.yaml","type":"bind"},{"bind":{"create_host_path":false},"read_only":true,"source":"./grafana/dashboards","target":"/otel-lgtm/agent-dashboards","type":"bind"},{"bind":{"create_host_path":false},"source":"${HOME}/.local/share/otel-lgtm/archive","target":"/archive","type":"bind"}]}},"volumes":{"data":null}}'
 
 section "otel-backend: managed set per profile"
@@ -74,7 +92,7 @@ fi
 managed="$personal_root/home/$managed_rel"
 archive_cfg="$personal_root/home/$archive_rel"
 provider_cfg="$personal_root/home/$provider_rel"
-for rel in "$managed_rel" "$archive_rel" "$provider_rel" "$dashboard_rel" "$claude_dashboard_rel"; do
+for rel in "$managed_rel" "$archive_rel" "$provider_rel" "${dashboard_rels[@]}"; do
   if [[ -f "$personal_root/home/$rel" ]]; then
     ok "test passed: personal applies $rel"
   else
@@ -102,7 +120,7 @@ fi
 
 section "otel-backend: managed content"
 
-# 2) Header on line 1 (doctor's managed-path orphan scan keys on it). The
+# 2) Header on line 1 (doctor's managed-path orphan scan keys on it). A
 #    dashboard is strict JSON, so it carries the header in its description
 #    (the scan searches the whole file).
 for f in "$managed" "$archive_cfg" "$provider_cfg"; do
@@ -113,7 +131,7 @@ for f in "$managed" "$archive_cfg" "$provider_cfg"; do
     status=1
   fi
 done
-for rel in "$dashboard_rel" "$claude_dashboard_rel"; do
+for rel in "${dashboard_rels[@]}"; do
   if [[ "$(yq -p json -r '.description // ""' "$personal_root/home/$rel" 2>/dev/null)" == "Managed by chezmoi"* ]]; then
     ok "test passed: the description of $rel carries the managed-by header"
   else
@@ -470,18 +488,21 @@ fi
 
 # 7) Each dashboard is one JSON object (jq, as strict_json_object: yq's JSON
 #    reader accepts a trailing comma), keeps its uid (links and bookmarks
-#    use it; the two differ, as Grafana needs), and every datasource
+#    use it; each differs, as Grafana needs), and every datasource
 #    reference anywhere in it (panels, queries, variables) is an object
 #    naming one of the bundled datasources by its provisioned uid: a bare
 #    string (a datasource name) is refused, not skipped (Codex review, PR
-#    #519). Every non-row panel names one.
-for dash_case in "$dashboard_rel ai-agents-codex" "$claude_dashboard_rel ai-agents-claude-code"; do
-  dash_file="$personal_root/home/${dash_case%% *}"
+#    #519). Every panel that queries names one: a row and a text panel
+#    (the notes at the top of the #541 dashboards) do not query. Grafana's
+#    server-side expressions (__expr__) and the mixed datasource are not
+#    bundled datasources, so a ratio is divided inside one query (#541).
+for dash_case in "${dashboard_cases[@]}"; do
+  dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
   dash_uid="${dash_case##* }"
   if strict_json_object "$dash_file" \
     && [[ "$(jq -r '.uid' "$dash_file")" == "$dash_uid" ]] \
     && [[ "$(jq -r '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then (.uid // "<none>") else "<\(type)>" end] | map(select(. != "loki" and . != "prometheus" and . != "tempo")) | length' "$dash_file")" == "0" ]] \
-    && [[ "$(jq -r '[.panels[] | select(.type != "row") | .datasource.uid] | map(select(. == null)) | length' "$dash_file")" == "0" ]]; then
+    && [[ "$(jq -r '[.panels[] | select(.type != "row" and .type != "text") | .datasource.uid] | map(select(. == null)) | length' "$dash_file")" == "0" ]]; then
     ok "test passed: ${dash_case%% *} is a strict JSON object with uid $dash_uid, on the loki / prometheus / tempo datasources only"
   else
     fail "test failed: ${dash_case%% *} must be one strict JSON object with uid $dash_uid whose every datasource is an object with uid loki, prometheus or tempo"
@@ -489,18 +510,44 @@ for dash_case in "$dashboard_rel ai-agents-codex" "$claude_dashboard_rel ai-agen
   fi
 done
 #    The provider serves every file in the bound directory, so the render
-#    holds exactly these two dashboards: a new one must be pinned here too.
+#    holds exactly the dashboards of dashboard_cases: a new one must be
+#    listed there too.
 dash_listing="$(cd "$personal_root/home/.config/otel-lgtm/grafana/dashboards" && ls -A | LC_ALL=C sort | tr '\n' ' ')"
-if [[ "$dash_listing" == "agents.json claude-code.json " ]]; then
-  ok "test passed: the bound dashboards directory holds exactly the Codex and Claude Code dashboards"
+if [[ "$dash_listing" == "$dashboard_listing" ]]; then
+  ok "test passed: the bound dashboards directory holds exactly the listed dashboards ($dashboard_listing)"
 else
-  fail "test failed: the bound dashboards directory holds $dash_listing, not agents.json and claude-code.json"
+  fail "test failed: the bound dashboards directory holds $dash_listing, not $dashboard_listing"
+  status=1
+fi
+
+#    A daily panel (interval 1d) counts one Japan-time day per point: its
+#    window is [1d] offset -15h, which ends at 00:00 JST after the point's
+#    UTC midnight, so today's partial day is the last point. A window of
+#    $__interval aligns to UTC midnight and leaves today out until 09:00
+#    JST the next day (found while building #541). There must be daily
+#    panels to check, so the rule cannot pass by losing them.
+daily_panels=0
+daily_bad=""
+for dash_case in "${dashboard_cases[@]}"; do
+  dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
+  n="$(jq -r '[.panels[] | select(.interval == "1d")] | length' "$dash_file" 2>/dev/null || echo x)"
+  bad="$(jq -r '[.panels[] | select(.interval == "1d") | .targets[] | (.expr // "") | select(test("\\$__interval") or (test("\\[1d\\] offset -15h") | not))] | length' "$dash_file" 2>/dev/null || echo x)"
+  if [[ "$n" == x || "$bad" != 0 ]]; then
+    daily_bad+="${dash_case%% *} "
+  else
+    daily_panels=$((daily_panels + n))
+  fi
+done
+if [[ -z "$daily_bad" && "$daily_panels" -gt 0 ]]; then
+  ok "test passed: every daily panel ($daily_panels) counts Japan-time days with [1d] offset -15h"
+else
+  fail "test failed: daily panels must window [1d] offset -15h and not \$__interval (offending: ${daily_bad:-none}; daily panels found: $daily_panels)"
   status=1
 fi
 
 # 8) Modes under the stock umask pinned above: files 0644 in 0755 directories.
 modes_ok=1
-for rel in "$managed_rel" "$archive_rel" "$provider_rel" "$dashboard_rel" "$claude_dashboard_rel"; do
+for rel in "$managed_rel" "$archive_rel" "$provider_rel" "${dashboard_rels[@]}"; do
   [[ "$(file_mode "$personal_root/home/$rel")" == "644" ]] || modes_ok=0
 done
 for rel in .config/otel-lgtm .config/otel-lgtm/otelcol .config/otel-lgtm/grafana .config/otel-lgtm/grafana/provisioning .config/otel-lgtm/grafana/dashboards; do

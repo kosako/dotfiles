@@ -235,7 +235,8 @@ cumulative に直す(使い捨ての container で、捕まえた Codex の payl
 ## dashboard
 
 Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-codex`)と「AI agents (Claude Code)」
-(uid `ai-agents-claude-code`。#525)を provisioning する。
+(uid `ai-agents-claude-code`。#525)を provisioning する。#541 で、2 つの agent の token の消費と生産を並べて見る 5 つを
+足した(下の「token の消費と生産」)。
 
 ### Codex
 
@@ -281,6 +282,43 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   `api_error`(model・status_code・attempt・error)、`tool_result`(tool_name・success・duration_ms・tool_input)、
   `tool_decision`(tool_name・decision・source)。event の名前は structured metadata の `event_name` で、`claude_code.`
   を付けない。
+
+### token の消費と生産(#541)
+
+Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。既定の期間は 30 日(session ごとは 7 日)で、5 分ごとに読み直す。
+どれも上の段に、見ることと数え方の短い説明(text panel)を置く。
+
+| dashboard(uid、file) | 見ること |
+| --- | --- |
+| token の消費(`ai-agents-tokens`、`tokens.json`) | 1 日に処理した token の量と内訳(新しい入力・cache の読み込みと書き込み・output・reasoning)、cache の割合、Claude Code の cost |
+| 生産(`ai-agents-output`、`output.json`) | 編集・commit・PR の作成と merge・変えた行(目安)・編集した file の言語(目安)・Codex の run の数 |
+| 消費と生産の比(`ai-agents-efficiency`、`efficiency.json`) | 1 編集・1 commit・1 prompt・1 run あたりの token、1 編集・1 PR あたりの cost、消費(棒)と生産(線)を重ねたもの |
+| session ごと(`ai-agents-sessions`、`sessions.json`) | Claude Code の session と Codex の run ごとの token・cost・編集・commit の表、token の分布と上位 10 |
+| 使い方の内訳(`ai-agents-usage`、`usage.json`) | agent と model ごとの token の割合、tool の種類(調べる・書く・command を実行・任せる・人に聞く・MCP・その他)の推移 |
+
+数え方の決め事。2026-11-15 に、手元の data で確かめた。
+
+- input token の意味が agent で違う。Claude Code の `input_tokens` は cache を含まないので、`input_tokens`・`cache_read_tokens`・
+  `cache_creation_tokens` の和を「実際の入力」にする(直近 7 日で input は約 176 万、cache の読み込みは約 4.2 億)。Codex の
+  `input_token_count` は cache の分を含む(`cached_token_count` が input を超えた行は 0)。`reasoning_token_count` は
+  `output_token_count` の内数。cache を除いた量は、Claude Code は input・cache の書き込み・output の和、Codex は input から
+  cached を引き output を足したもの。
+- Codex の応答の数は `codex.sse_event` の `event_kind="response.completed"` で数える。`codex.api_request` は model の一覧
+  (`/models`)の取得だけだった(上の Codex の dashboard の「API request」の誤りは #542)。
+- 日ごとの棒の窓は `[1d] offset -15h`。点の時刻(UTC の 0 時)から 15 時間後ろへずらすと、窓がその日付の日本時間の 1 日になり、
+  今日の途中までが最後の点に入る。`[$__interval]` は UTC の 0 時で区切るので、今日の分が翌日の 9 時まで出ない。Loki も
+  Prometheus も負の offset を受け付ける。`test-otel-backend.sh` が、日ごとの panel の窓をこの形に固定する。
+- 比は 1 つの問い合わせの中で `(A) / (B > 0)` と割る。分母が 0 の日は点を出さない。Grafana の式(`__expr__`)は datasource
+  の検査(loki・prometheus・tempo だけ)に合わないので使わない。Loki と Prometheus をまたぐ比(行あたりの token)は置かない。
+- 生産の数は log から数える(1 年分を見られる)。編集は成功した `Edit`・`Write`・`MultiEdit`・`NotebookEdit`。commit と PR は、
+  Bash の `tool_input` に `git commit`・`gh pr create`・`gh pr merge` を含む成功した呼び出し(`OTEL_LOG_TOOL_DETAILS=1` で
+  command が入る。[claude-settings](claude-settings.md) の「telemetry」)。すべての repo の分を数え、人が画面で merge したものは
+  入らない。Codex は review と委譲の worker が中心なので、生産は `codex.conversation_starts` の数(run)で見る。
+- 変えた行と編集した file の言語は、Claude Code の metric(`claude_code_lines_of_code_count_total` と
+  `claude_code_code_edit_tool_decision_total`。Prometheus なので 30 日まで)で、目安として出す。metric は session ごとの
+  短い系列で、delta を cumulative に直す状態が途中で切れて数え直しが起きる。30 日の足した行は、系列ごとの最大の和で 3113、
+  `increase()` で 6305 と、数え方で 2 倍ほど違った。日ごとの値は、系列ごとにその日の最大から前の日の最大を引く。
+- session は、Claude Code は `session_id`、Codex は `conversation_id` ごと。session_id で Explore を絞ると中身を読める。
 
 ## 保存期間
 

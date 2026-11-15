@@ -1,0 +1,899 @@
+{
+  "uid": "ai-agents-output",
+  "title": "AI agents (生産)",
+  "description": "Managed by chezmoi from kosako/dotfiles (otel-backend module, #541). What Claude Code and Codex produced per day: edits, commits, pull requests, changed lines and Codex runs (Loki and Prometheus). Edit the JSON in dotfiles, not in the UI.",
+  "tags": [
+    "ai-agents",
+    "output"
+  ],
+  "editable": false,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "schemaVersion": 41,
+  "version": 1,
+  "timezone": "browser",
+  "links": [
+    {
+      "title": "AI agents",
+      "type": "dashboards",
+      "tags": [
+        "ai-agents"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**見ること**: token を使って何を作ったか。編集・commit・PR・変えた行・Codex の run の数の推移。\n\n- 編集は Claude Code の Edit と Write の成功、commit と PR は Bash で成功した `git commit` / `gh pr create` / `gh pr merge` の数です (log から。1 年分を見られます)。人が画面で merge したものは入りません。\n- 変えた行は Claude Code の metric (Prometheus、30 日分) で、**目安**です。metric は session ごとの短い系列で途中の数え直しがあり、数え方で 2 倍ほど違います。\n- Codex は review と委譲の worker が中心なので、生産は「回した run の数」で見ます。棒は日本時間の 1 日ごとで、今日の分は今の時刻までです。"
+      },
+      "transparent": true,
+      "id": 1,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "row",
+      "title": "期間の合計",
+      "collapsed": false,
+      "panels": [],
+      "id": 2,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "編集 (Claude Code)",
+      "description": "成功した Edit / Write / MultiEdit / NotebookEdit の数",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=~\"Edit|Write|MultiEdit|NotebookEdit\" | success=\"true\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "commit",
+      "description": "Bash で成功した git commit の数",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "PR の作成",
+      "description": "Bash で成功した gh pr create の数",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "PR の merge",
+      "description": "Bash で成功した gh pr merge の数 (人が画面で merge したものは入らない)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr merge.*\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "足した行 (目安)",
+      "description": "Claude Code の metric の lines_of_code (added)。30 日まで。数え方に揺れがある目安",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max_over_time(claude_code_lines_of_code_count_total{type=\"added\"}[$__range]))",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Codex の run",
+      "description": "codex.conversation_starts の数 (ほぼ review と委譲の worker)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"codex.*\"} | event_name=\"codex.conversation_starts\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 6
+      }
+    },
+    {
+      "type": "row",
+      "title": "1 日ごと",
+      "collapsed": false,
+      "panels": [],
+      "id": 9,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Claude Code: 1 日の編集と commit と PR",
+      "description": "編集は左の軸、commit と PR は右の軸",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=~\"Edit|Write|MultiEdit|NotebookEdit\" | success=\"true\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "編集"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "commit"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "PR の作成"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr merge.*\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "PR の merge"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "commit"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PR の作成"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PR の merge"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Claude Code: 1 日に変えた行 (目安)",
+      "description": "metric の lines_of_code。session ごとの系列の、その日に増えた分",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(clamp_min(max_over_time(claude_code_lines_of_code_count_total{type=\"added\"}[1d] offset -15h) - max_over_time(claude_code_lines_of_code_count_total{type=\"added\"}[1d] offset 9h), 0) or max_over_time(claude_code_lines_of_code_count_total{type=\"added\"}[1d] offset -15h))",
+          "instant": false,
+          "range": true,
+          "legendFormat": "足した行"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(clamp_min(max_over_time(claude_code_lines_of_code_count_total{type=\"removed\"}[1d] offset -15h) - max_over_time(claude_code_lines_of_code_count_total{type=\"removed\"}[1d] offset 9h), 0) or max_over_time(claude_code_lines_of_code_count_total{type=\"removed\"}[1d] offset -15h))",
+          "instant": false,
+          "range": true,
+          "legendFormat": "消した行"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Codex: 1 日の run と編集",
+      "description": "run は conversation_starts (左の軸)、編集は apply_patch の成功 (右の軸)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"codex.*\"} | event_name=\"codex.conversation_starts\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "run"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service_name=~\"codex.*\"} | event_name=\"codex.tool_result\" | tool_name=\"apply_patch\" | success=\"true\" [1d] offset -15h))",
+          "queryType": "range",
+          "legendFormat": "編集 (apply_patch)"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "編集 (apply_patch)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Claude Code: 編集した file の言語 (目安)",
+      "description": "metric の code_edit_tool_decision の accept を言語ごとに (30 日まで)",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (language) (clamp_min(max_over_time(claude_code_code_edit_tool_decision_total{decision=\"accept\"}[1d] offset -15h) - max_over_time(claude_code_code_edit_tool_decision_total{decision=\"accept\"}[1d] offset 9h), 0) or max_over_time(claude_code_code_edit_tool_decision_total{decision=\"accept\"}[1d] offset -15h))",
+          "instant": false,
+          "range": true,
+          "legendFormat": "{{language}}"
+        }
+      ],
+      "interval": "1d",
+      "maxDataPoints": 400,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      }
+    }
+  ]
+}
