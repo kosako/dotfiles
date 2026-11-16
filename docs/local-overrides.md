@@ -214,6 +214,18 @@ host への `WebFetch` を、この machine の全 project で確認なしにす
   apply が止まる。
 - **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。
 
+## agent-tools の local の指示の断片(#545)
+
+公開の repo に置けない手元だけの指示(使い方の決まりなど)は、agent-tools の口(agent-tools#689)を使い、
+**`~/.config/agent-tools/instructions.local.md`**(chezmoi 管理外・非コミット)に人が書く。agent-tools の sync が、
+Claude Code と Codex の instruction の末尾にその節を足す。
+
+- 置き場所・形の検査・配り方は agent-tools の契約で、正本は agent-tools の `docs/instruction-artifact-kind.md` の
+  「local の断片」。dotfiles は中身を読まず、template にも doctor にも足さない(状態は agent-tools の doctor が出す)。
+- 中身は agent も書かない(agent が自分への指示を自分で足せないようにするため。agent-tools の規約)。
+- **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。一覧は home の下の固定の
+  path なので、`XDG_CONFIG_HOME` を `~/.config` 以外にした machine では対象から外れる。
+
 ## agent-tools の checkout path(#73)
 
 `dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`

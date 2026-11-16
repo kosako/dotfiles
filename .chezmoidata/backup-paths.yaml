@@ -63,6 +63,14 @@ backup_paths:
   # hosts stay out of the public repo; the encrypted archive carries them.
   # Absent => allow holds the managed rules only.
   - { path: .config/dotfiles/claude-permissions-allow.local, type: file, category: ai-tools }
+  # agent-tools local instructions (#545, agent-tools#689): a fragment the
+  # user writes by hand; agent-tools' sync appends it to the Claude Code and
+  # Codex instructions. It holds rules kept out of public repos; the
+  # encrypted archive carries it. The location is agent-tools' public
+  # contract, ${XDG_CONFIG_HOME:-$HOME/.config}/agent-tools/; a machine with
+  # XDG_CONFIG_HOME set elsewhere is not covered by this home path.
+  # Absent => the instructions carry no local section.
+  - { path: .config/agent-tools/instructions.local.md, type: file, category: ai-tools }
   # GitHub injection-guard trust list (#119). Holds the self trust basis only
   # (GitHub login + numeric id); the trust basis is is_self and there are no
   # opt-in trusted accounts (docs/ai-policy.md). Read by agent-tools'
