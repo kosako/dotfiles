@@ -189,6 +189,19 @@ profiles:
       # Registration=dotfiles, body and deployment=the Bridge One repo
       # (tools/hook-deploy/deploy.mjs). Claude only.
       enableBridgeOneHook: true
+      # #547 (agent-tools#688): register agent-tools'
+      # personal-instruction-update-notice in the managed
+      # ~/.claude/settings.json on SessionStart (no matcher, after the herdr
+      # and record entries) and UserPromptSubmit (its only entry), timeout 10
+      # on both. SessionStart records the section hashes of the deployed
+      # ~/.claude/agent-tools/CLAUDE.md for the session and prints nothing;
+      # UserPromptSubmit compares, and only when the file changed after the
+      # session read it, names the changed sections so the session re-reads
+      # it. Steering, not a gate: exit 0 always, no network, no external
+      # command, fail-open on a missing body. Claude only: Codex reads the
+      # global AGENTS.md per request, so the Codex hooks.json is unchanged.
+      # Same split as the hooks above: registration=dotfiles, body=agent-tools.
+      enableInstructionUpdateNoticeHook: true
       # #523: Claude Code's OpenTelemetry (metrics and events over OTLP/HTTP)
       # in the managed ~/.claude/settings.json env. The how is fixed here;
       # the destination is not: the template reads the OTLP base endpoint
@@ -287,6 +300,9 @@ profiles:
       # Before the work Mac's session-host is connected to the cloud, Bridge
       # One must show that it refuses decisions from the cloud.
       enableBridgeOneHook: false
+      # #547: off — claude-settings is not part of work, so no managed file
+      # could carry the registration (the work Mac is out of the Issue's scope).
+      enableInstructionUpdateNoticeHook: false
       # #523: off and forbidden for environmentKind work (agent telemetry
       # is not sent from work machines; decided 2026-11-11).
       enableClaudeTelemetry: false

@@ -189,6 +189,17 @@
        claude-settings is not part of work, so this file never renders it
        there: the registration is made by hand. Claude only.
 
+       enableInstructionUpdateNoticeHook (#547, agent-tools#688) registers
+       agent-tools' personal-instruction-update-notice on SessionStart (no
+       matcher, after the herdr and record entries) and UserPromptSubmit
+       (its only entry), timeout 10 on both. A session started before a
+       deploy keeps the old operating instruction; the hook records the
+       section hashes of the deployed ~/.claude/agent-tools/CLAUDE.md at
+       SessionStart and, on the next prompt after that file changed, names
+       the changed sections so the session re-reads it. Exit 0 always, no
+       network, no external command, fail-open, Claude only (Codex reads the
+       global AGENTS.md per request; the Codex hooks.json is unchanged).
+
        permissions.allow holds one Bash rule beside mcp__pencil (#505,
        agent-tools#640): personal-merged-branch-cleanup, the deployed script
        that checks a branch is merged (tip = the merged PR's head, personal
@@ -359,7 +370,7 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 {{- end }}
     ]
   },
-{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") (index $caps "enableJaReplyGuardHook") (index $caps "enableBridgeOneHook") }}
+{{- if or (index $caps "enableGitHubIsolatedReader") (index $caps "enableQualityLoopHooks") (index $caps "enableHerdrIntegration") (index $caps "enableToolCallRecordHook") (index $caps "enableJaReplyGuardHook") (index $caps "enableBridgeOneHook") (index $caps "enableInstructionUpdateNoticeHook") }}
 {{ template "agent-hooks-json" (dict "caps" $caps "homeDir" .chezmoi.homeDir "agentDir" ".claude") }},
 {{- end }}
 {{- if $telemetryEndpoint }}

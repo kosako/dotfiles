@@ -2258,6 +2258,102 @@ else
   status=1
 fi
 
+# UN) Instruction update notice (#547): committed personal has
+#     enableInstructionUpdateNoticeHook ON with claude-settings active. The
+#     section reports the registration and whether the deployed body is an
+#     executable file (absent in the shared fixture HOME, a stub that is or is
+#     not executable in its own HOME), with the item on what it watches;
+#     flipped off it reports the declared-off state. Every run stays exit 0
+#     (report-only).
+notice_item='[info] - it watches only the deployed ~/.claude/agent-tools/CLAUDE.md; a change to ~/.claude/CLAUDE.md or a project'"'"'s CLAUDE.md / AGENTS.md is not noticed'
+notice_warn_prefix='[warn] enableInstructionUpdateNoticeHook=true; managed ~/.claude/settings.json registers personal-instruction-update-notice on SessionStart and UserPromptSubmit but the body is absent or not an executable file: '
+notice_warn_suffix=' (agent-tools sync deploys it) — fail-open no-op until deployed'
+#     UN-a) no body in the fixture HOME -> the body-absent warn naming the path.
+if grep -Fxq "${notice_warn_prefix}$fixture_home/.claude/agent-tools/scripts/personal-instruction-update-notice${notice_warn_suffix}" <<< "$gh_out" \
+  && grep -Fxq "$notice_item" <<< "$gh_out"; then
+  ok "test passed: enableInstructionUpdateNoticeHook=true with no deployed body warns body-absent (fail-open) and names what it watches"
+else
+  fail "test failed: enableInstructionUpdateNoticeHook=true body-absent state not reported"
+  status=1
+fi
+#     UN-b / UN-c) a stub body in its own HOME: executable -> ok with "body
+#     present"; the same file without the execute bit -> the body-absent warn.
+notice_home="$fixture_home/notice"
+notice_body="$notice_home/.claude/agent-tools/scripts/personal-instruction-update-notice"
+mkdir -p "${notice_body%/*}"
+printf '#!/bin/sh\nexit 0\n' > "$notice_body"
+chmod +x "$notice_body"
+notice_ok='[ok] enableInstructionUpdateNoticeHook=true; managed ~/.claude/settings.json registers personal-instruction-update-notice on SessionStart and UserPromptSubmit (one re-read notice per deployed change, exit 0 always, Claude Code only, not a boundary); body present'
+if notice_out="$(HOME="$notice_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "$notice_ok" <<< "$notice_out" && grep -Fxq "$notice_item" <<< "$notice_out" \
+    && ! grep -Fq "registers personal-instruction-update-notice on SessionStart and UserPromptSubmit but the body is absent" <<< "$notice_out"; then
+    ok "test passed: enableInstructionUpdateNoticeHook=true with an executable body reports the registration with the body present"
+  else
+    printf '%s\n' "$notice_out" >&2
+    fail "test failed: enableInstructionUpdateNoticeHook=true with a deployed body not reported as present"
+    status=1
+  fi
+else
+  printf '%s\n' "$notice_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableInstructionUpdateNoticeHook, body present)"
+  status=1
+fi
+chmod -x "$notice_body"
+if notice_out="$(HOME="$notice_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "${notice_warn_prefix}${notice_body}${notice_warn_suffix}" <<< "$notice_out" \
+    && ! grep -Fxq "$notice_ok" <<< "$notice_out"; then
+    ok "test passed: enableInstructionUpdateNoticeHook=true with a non-executable body warns like an absent one"
+  else
+    printf '%s\n' "$notice_out" >&2
+    fail "test failed: enableInstructionUpdateNoticeHook=true with a non-executable body not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$notice_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableInstructionUpdateNoticeHook, non-executable body)"
+  status=1
+fi
+#     UN-e) a searchable directory under the body's name passes -x but is no
+#     body -> the same warn.
+rm -f "$notice_body"
+mkdir "$notice_body"
+chmod 755 "$notice_body"
+if notice_out="$(HOME="$notice_home" "$gh_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "${notice_warn_prefix}${notice_body}${notice_warn_suffix}" <<< "$notice_out" \
+    && ! grep -Fxq "$notice_ok" <<< "$notice_out"; then
+    ok "test passed: enableInstructionUpdateNoticeHook=true with a directory in the body's place warns like an absent body"
+  else
+    printf '%s\n' "$notice_out" >&2
+    fail "test failed: enableInstructionUpdateNoticeHook=true with a directory in the body's place not warned"
+    status=1
+  fi
+else
+  printf '%s\n' "$notice_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableInstructionUpdateNoticeHook, directory in the body's place)"
+  status=1
+fi
+rmdir "$notice_body"
+#     UN-d) capability off -> the declared-off ok, and neither the registration
+#     nor the item.
+notice_root="$fixture_home/.dotfiles-notice"
+copy_repo_fixture "$notice_root"
+set_capability_all "$notice_root" enableInstructionUpdateNoticeHook false
+if notice_out="$(HOME="$fixture_home" "$notice_root/scripts/doctor.sh" personal 2>&1)"; then
+  if grep -Fxq "[ok] enableInstructionUpdateNoticeHook not active (false)" <<< "$notice_out" \
+    && ! grep -Fq "registers personal-instruction-update-notice" <<< "$notice_out" \
+    && ! grep -Fxq "$notice_item" <<< "$notice_out"; then
+    ok "test passed: enableInstructionUpdateNoticeHook=false reported as not active"
+  else
+    printf '%s\n' "$notice_out" >&2
+    fail "test failed: enableInstructionUpdateNoticeHook=false not reported"
+    status=1
+  fi
+else
+  printf '%s\n' "$notice_out" >&2
+  fail "test failed: doctor must stay exit 0 (enableInstructionUpdateNoticeHook=false)"
+  status=1
+fi
+
 # BR) Bridge One hook (#508): the committed value may be either (#510 turned
 #     it on for personal), so the shared run is checked against whatever the
 #     profile says, and OFF is checked in its own repo copy with the value set
@@ -2985,6 +3081,7 @@ for ql_dangling in \
   "gateUnusedClaudeMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
   "enableToolCallRecordHook=true but the claude-settings module is inactive for this profile; no managed settings carry the record hook (dangling capability)" \
   "enableJaReplyGuardHook=true but the claude-settings module is inactive for this profile; no managed settings carry the Japanese reply guard (dangling capability)" \
+  "enableInstructionUpdateNoticeHook=true but the claude-settings module is inactive for this profile; no managed settings carry the instruction update notice (dangling capability)" \
   "enableClaudeTelemetry=true but the claude-settings module is inactive for this profile; no managed settings carry the telemetry env (dangling capability)" \
   "gateGitHubMcp=true but the claude-settings module is inactive for this profile; no managed settings carry the MCP deny (dangling capability)" \
   "enableGitHubIsolatedReader=true but the claude-settings module is inactive for this profile; no managed settings carry the hook registration (dangling capability)"; do

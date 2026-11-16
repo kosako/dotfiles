@@ -300,6 +300,27 @@ else
   status=1
 fi
 
+# 2d') enableInstructionUpdateNoticeHook (#547, agent-tools#688) is
+#     Claude-only: Codex reads the global AGENTS.md per request, so the Codex
+#     render must not carry it and must not change with it. Committed personal
+#     (the notice ON) names no personal-instruction-update-notice, flipping it
+#     off leaves hooks.json byte-identical, and the notice as the only hook
+#     capability on (every other one off) renders no ~/.codex/hooks.json.
+render_codex_hook_flip notice-off enableInstructionUpdateNoticeHook
+notice_off_hooks="$hook_flip_file"
+render_codex_hook_flip notice-alone enableGitHubIsolatedReader enableQualityLoopHooks enableHerdrIntegration \
+  enableToolCallRecordHook enableJaReplyGuardHook enableBridgeOneHook
+notice_alone_hooks="$hook_flip_file"
+if [[ -f "$hooks_file" && -f "$notice_off_hooks" ]] \
+  && ! grep -Fq "personal-instruction-update-notice" "$hooks_file" \
+  && cmp -s "$hooks_file" "$notice_off_hooks" \
+  && [[ ! -e "$notice_alone_hooks" && ! -L "$notice_alone_hooks" ]]; then
+  ok "test passed: enableInstructionUpdateNoticeHook never reaches ~/.codex/hooks.json (absent from the committed render, byte-identical when flipped off, no file when it is the only one on)"
+else
+  fail "test failed: enableInstructionUpdateNoticeHook leaked into the Codex render (named in hooks.json, the render changed with it, or the notice alone rendered a file)"
+  status=1
+fi
+
 # 2e) enableBridgeOneHook (#508) is Claude-only: Bridge One connects to
 #     Claude Code's PermissionRequest hook only, so the Codex render must not
 #     carry it and must not change with it. It is set explicitly both ways
