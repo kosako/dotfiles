@@ -2632,8 +2632,9 @@ else
   status=1
 fi
 
-# CT) Claude Code telemetry (#523): the section looks only at whether the
-#     endpoint file is there (never its value). Each case has its own HOME,
+# CT) Claude Code telemetry (#523): the endpoint file is checked for presence
+#     (never its value); disabled telemetry also checks the live enable key
+#     (#556). Each case uses a fixture HOME,
 #     and the capability is flipped by name for personal so the cases do not
 #     depend on the committed value. Every run stays exit 0 (report-only).
 ct_root="$fixture_home/.dotfiles-claude-telemetry"
@@ -2708,6 +2709,104 @@ if ! grep -Fxq "[info] - $ct_file is present but not used (enableClaudeTelemetry
   status=1
 fi
 rm -f "$ct_file"
+
+#     CT-f) personal -> work leaves the telemetry env in the same HOME.
+#           Work cannot remove it with apply; personal with the capability
+#           off can. Check the actions and exit status, without pinning the
+#           explanatory prose. Neither the env value nor unrelated settings
+#           may be printed, and the report must not modify the live file.
+ct_live="$ct_home/.claude/settings.json"
+ct_inactive="[ok] enableClaudeTelemetry not active (false)"
+ct_lingering_case() {
+  local label="$1" case_profile="$2" expected="$3" ct_section
+  shift 3
+  if ! ct_out="$(HOME="$ct_home" "$ct_off_root/scripts/doctor.sh" "$case_profile" "$@" 2>&1)"; then
+    fail "test failed: doctor must stay exit 0 (lingering telemetry, $label)"
+    status=1
+    return
+  fi
+  ct_section="$(printf '%s\n' "$ct_out" | sed -n '/^\[info\] == Claude Code telemetry (report-only) ==$/,/^\[info\] == Claude Code local allow (report-only) ==$/p')"
+  if grep -Fq 'CANARY_CT_' <<< "$ct_out"; then
+    fail "test failed: lingering telemetry ($label): live settings value leaked"
+    status=1
+    return
+  fi
+  case "$expected" in
+    clean)
+      if grep -Fxq "$ct_inactive" <<< "$ct_out" \
+        && ! grep -Fq '[warn]' <<< "$ct_section"; then
+        ok "test passed: lingering telemetry ($label)"
+        return
+      fi
+      ;;
+    manual|apply)
+      if grep -F 'enableClaudeTelemetry=false' <<< "$ct_out" | grep -Fq "$ct_live" \
+        && ! grep -Fxq "$ct_inactive" <<< "$ct_out"; then
+        if [[ "$expected" == manual ]] \
+          && grep -F "edit $(shell_quote_safe "$ct_live")" <<< "$ct_out" | grep -Fq 'delete CLAUDE_CODE_ENABLE_TELEMETRY, OTEL_METRICS_EXPORTER, OTEL_LOGS_EXPORTER, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_LOG_TOOL_DETAILS from env'; then
+          ok "test passed: lingering telemetry ($label)"
+          return
+        elif [[ "$expected" == apply ]] \
+          && grep -F 'enableClaudeTelemetry=false' <<< "$ct_out" | grep -Fq 'chezmoi apply' \
+          && grep -Fq '$ chezmoi apply' <<< "$ct_out"; then
+          ok "test passed: lingering telemetry ($label)"
+          return
+        fi
+      fi
+      ;;
+    unchecked)
+      if grep -F '[warn] enableClaudeTelemetry=false' <<< "$ct_section" | grep -F "$ct_live" | grep -Fq 'unchecked' \
+        && ! grep -Fxq "$ct_inactive" <<< "$ct_out"; then
+        ok "test passed: lingering telemetry ($label)"
+        return
+      fi
+      ;;
+  esac
+  printf '%s\n' "$ct_out" >&2
+  fail "test failed: lingering telemetry ($label): expected $expected"
+  status=1
+}
+ct_lingering_case "work, no live file" work clean
+mkdir -p "${ct_live%/*}"
+printf '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://CANARY_CT_ENDPOINT.invalid:4318"},"model":"CANARY_CT_MODEL"}\n' > "$ct_live"
+cp "$ct_live" "$ct_home/settings.before"
+ct_lingering_case "work, env left by personal" work manual
+ct_lingering_case "work, actions only" work manual --actions-only
+ct_lingering_case "personal, capability flipped off" personal apply
+ct_lingering_case "personal, actions only" personal apply --actions-only
+if ! cmp -s "$ct_live" "$ct_home/settings.before"; then
+  fail "test failed: lingering telemetry: doctor modified live settings"
+  status=1
+fi
+#     CT-g) only key presence matters, even if its value is zero. Without
+#           that key, unrelated env settings must not trigger an action.
+printf '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}\n' > "$ct_live"
+ct_lingering_case "work, enable key with zero value" work manual
+printf '{"env":{"OTHER_ENV":"CANARY_CT_OTHER"}}\n' > "$ct_live"
+ct_lingering_case "work, no telemetry env" work clean
+ct_lingering_case "personal, no telemetry env" personal clean
+#     CT-h) match the hook probe's treatment of unreadable/non-regular
+#           files and unsearchable parents. Never open a FIFO.
+if [[ "$(id -u)" -ne 0 ]]; then
+  chmod 000 "$ct_live"
+  ct_lingering_case "unreadable live file" work unchecked
+  chmod 600 "$ct_live"
+  chmod 000 "${ct_live%/*}"
+  ct_lingering_case "live parent not enterable" work unchecked
+  chmod 755 "${ct_live%/*}"
+else
+  item "skipped lingering telemetry unreadable file/parent (root bypasses permissions)"
+fi
+rm -f "$ct_live"
+mkdir "$ct_live"
+ct_lingering_case "directory in live file's place" work unchecked
+rmdir "$ct_live"
+mkfifo "$ct_live"
+ct_lingering_case "FIFO in live file's place" work unchecked
+rm -f "$ct_live"
+ln -s "$ct_home/missing-settings.json" "$ct_live"
+ct_lingering_case "broken live symlink" work unchecked
+rm -f "$ct_live"
 
 # LA) Claude Code local allow (#538): the section says whether the local
 #     allow file is there and how many rule lines it holds, never the rules.

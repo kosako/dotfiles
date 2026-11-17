@@ -288,9 +288,16 @@ template は出さない。`env` は object 全体を managed にするので、
 - Claude Code は `OTEL_*` の変数を、Bash の tool や hook などの子 process に渡さない(Claude Code の docs)。
 - 送り先に認証の header が要るようになったら、秘密は `settings.json` に書かず、Claude Code の `otelHeadersHelper`
   (header を出す script)で渡す。その配線は別の Issue で行う。
-- 止めるときは file を消して `chezmoi apply` する。profile ごと止めるなら capability を false にする。
-- doctor は file の有無だけを見る(値は読まない)。表示は apply の後の状態で、apply までは前の apply の `env` が残って
-  送り続ける(managed drift の section に出る)。
+- 止めるときは file を消して `chezmoi apply` する。profile ごと止めるなら capability を false にして apply する。
+  work など `claude-settings` module を持たない profile へ切り替えた場合、apply では前の設定は消えない。
+  live の `settings.json` の `env` から、上の表の 6 つの変数を手で消す。ほかの設定は残す。
+- doctor は送り先の file の有無だけを見る(値は読まない)。capability が true の表示は apply の後の状態を示す。
+  apply までは前の `env` が残って送り続ける(managed drift の section に出る)。
+- capability が false のときは、live の `~/.claude/settings.json` に `"CLAUDE_CODE_ENABLE_TELEMETRY"` があるかを
+  固定文字列で探す(#556)。JSON の解釈や値の判定はせず、読んだ値も表示しない。
+  残っていれば action にし、管理している profile では apply を、管理していない profile では上記の手作業を案内する。
+  `--actions-only` にも出る。通常の file でない、読めない、親の directory を辿れず存在を確かめられない場合は warn にする。
+  残置や未確認があれば `not active` の ok は出さない。
 
 ## local の allow(#538)
 

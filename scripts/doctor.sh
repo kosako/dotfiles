@@ -2462,6 +2462,38 @@ else
 fi
 
 section "Claude Code telemetry (report-only)"
+# Match the enable key without reading its value, as report_lingering_hook
+# matches registrations. A disabled profile may no longer manage this file
+# after a profile switch (#556). Report an unchecked file instead of an ok.
+# Return success when an action or warning was reported.
+report_lingering_telemetry() {
+  local live="$HOME/.claude/settings.json" rc=2
+  if [[ ! -e "$live" && ! -L "$live" ]]; then
+    absence_confirmed "$live" && return 1
+    warn "enableClaudeTelemetry=false but whether $live exists cannot be told (a parent directory could not be entered), so lingering telemetry env there is unchecked"
+    return 0
+  fi
+  if [[ -f "$live" ]]; then
+    rc=0
+    grep -Fq '"CLAUDE_CODE_ENABLE_TELEMETRY"' "$live" 2>/dev/null || rc=$?
+  fi
+  case "$rc" in
+    0) ;;
+    1) return 1 ;;
+    *)
+      warn "enableClaudeTelemetry=false but $live is not a regular file or could not be read, so lingering telemetry env there is unchecked"
+      return 0
+      ;;
+  esac
+  if module_active_for_profile "$profile" claude-settings; then
+    action "enableClaudeTelemetry=false but telemetry env lingers in $live (this profile manages the file); run chezmoi apply to remove it" \
+      "\$ chezmoi apply"
+  else
+    action "enableClaudeTelemetry=false but telemetry env lingers in $live (applied by another profile; this profile does not manage the file, so apply will not remove it); remove the telemetry env by hand" \
+      "edit $(shell_quote_safe "$live") and delete CLAUDE_CODE_ENABLE_TELEMETRY, OTEL_METRICS_EXPORTER, OTEL_LOGS_EXPORTER, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_LOG_TOOL_DETAILS from env, keeping the rest of the file"
+  fi
+  return 0
+}
 # enableClaudeTelemetry (#523) emits, in the managed ~/.claude/settings.json,
 # an env block that turns on Claude Code's OpenTelemetry (metrics and events
 # over OTLP/HTTP, tool details on; prompts, responses, tool output, API
@@ -2472,7 +2504,9 @@ section "Claude Code telemetry (report-only)"
 # value is never read or shown. So the lines say what the managed file does
 # after chezmoi apply: until then an env from an earlier apply stays (and
 # keeps sending), which shows as drift of settings.json in the managed drift
-# section (Codex review, PR #524). A malformed file stops chezmoi apply.
+# section when managed (Codex review, PR #524). While disabled, also probe
+# the live file for the enable key even if unmanaged. A malformed endpoint
+# file stops chezmoi apply.
 # Whether the backend answers is the otel backend section's job.
 claude_telemetry_file="$HOME/.config/dotfiles/claude-telemetry.local"
 if [[ "$(capability_value "$profile" enableClaudeTelemetry)" == "true" ]]; then
@@ -2490,7 +2524,9 @@ if [[ "$(capability_value "$profile" enableClaudeTelemetry)" == "true" ]]; then
     warn "enableClaudeTelemetry=true but the claude-settings module is inactive for this profile; no managed settings carry the telemetry env (dangling capability)"
   fi
 else
-  ok "enableClaudeTelemetry not active (false)"
+  if ! report_lingering_telemetry; then
+    ok "enableClaudeTelemetry not active (false)"
+  fi
   if [[ -e "$claude_telemetry_file" || -L "$claude_telemetry_file" ]]; then
     item "$claude_telemetry_file is present but not used (enableClaudeTelemetry=false)"
   fi
