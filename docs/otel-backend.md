@@ -242,8 +242,8 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 
 | 段 | panel | 出どころ |
 | --- | --- | --- |
-| 概要 | 会話・API request・API request の失敗・input / output / cached token(表示している期間の合計) | Loki |
-| token と request | token(model と種類ごと)、API request(endpoint と status ごと) | Loki |
+| 概要 | 会話・model の応答・request の失敗・input / output / cached token(表示している期間の合計) | Loki |
+| token と応答 | token(model と種類ごと)、model の応答(model ごと) | Loki |
 | 応答の速さと turn | turn の TTFT(p50 / p95)、turn の数(model ごと) | Loki |
 | tool | tool の呼び出し(tool と成否ごと)、tool の所要時間(p95) | Loki |
 | 最近の動き | 会話の開始、失敗した request、trace | Loki、Tempo |
@@ -259,9 +259,16 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
   metric の増分は実際の回数より小さくなる(実測: 2 回の run で `codex_conversation_turn_count_total` が 1 → 1、増分 0)。
   metric は Prometheus に残るので、所要時間の分布などは Grafana の Explore で見る。
 - Codex の event と attribute(LogQL で使うもの): `codex.conversation_starts`(model・reasoning_effort・originator・
-  approval_policy・sandbox_policy)、`codex.api_request`(endpoint・http_response_status_code・success・duration_ms)、
-  `codex.sse_event` の `event_kind="response.completed"`(input / output / cached / reasoning_token_count)、
+  approval_policy・sandbox_policy)、`codex.sse_event` の `event_kind="response.completed"`(model・input / output /
+  cached / reasoning_token_count)、`codex.websocket_request`(model・success・duration_ms)、`codex.websocket_connect`
+  (endpoint・success・duration_ms)、`codex.api_request`(endpoint・http_response_status_code・success・duration_ms)、
   `codex.turn_ttft`(duration_ms)、`codex.tool_result`(tool_name・success・duration_ms)。
+- model への request は websocket で、`codex.websocket_request` と `codex.sse_event` の `response.completed` に出る。
+  `codex.api_request` は HTTP の request で、手元の data では model の一覧(`/models`)の取得だけだった(2026-11-17 に
+  直近 7 日で確かめた。`codex_exec` が 431 件、`codex-app-server` が 493 件で、どれも `/models`)。そのため「model の応答」は
+  `response.completed` で数え、「request の失敗」は websocket の 2 つと `api_request` のうち `success="false"` を数える(#542)。
+- `codex-app-server` は `codex.api_request` しか出さず、`codex.sse_event` を出さない。その service の応答と token は、
+  この dashboard にも下の 5 つにも入らない。
 
 ### Claude Code
 
@@ -305,7 +312,7 @@ Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。t
   `output_token_count` の内数。cache を除いた量は、Claude Code は input・cache の書き込み・output の和、Codex は input から
   cached を引き output を足したもの。
 - Codex の応答の数は `codex.sse_event` の `event_kind="response.completed"` で数える。`codex.api_request` は model の一覧
-  (`/models`)の取得だけだった(上の Codex の dashboard の「API request」の誤りは #542)。
+  (`/models`)の取得だけだった(#542 で、上の Codex の dashboard も応答の数に直した)。
 - 日ごとの棒の窓は `[1d] offset -15h`。点の時刻(UTC の 0 時)から 15 時間後ろへずらすと、窓がその日付の日本時間の 1 日になり、
   今日の途中までが最後の点に入る。`[$__interval]` は UTC の 0 時で区切るので、今日の分が翌日の 9 時まで出ない。Loki も
   Prometheus も負の offset を受け付ける。
