@@ -928,12 +928,12 @@ rm -rf "$gi_home"
 mkdir -p "$gi_home/.config/git"
 # GI-1) managed file present and read by git -> ok.
 cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
-gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo" "managed file in effect -> ok"
+gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/, .agent-session-progress/ and **/.claude/settings.local.json in every repo" "managed file in effect -> ok"
 # GI-2) missing -> action (mkdir then apply, %q-escaped like the identity
 #       reset): the warn line and the two steps, consecutive, from one run.
 rm -f "$gi_managed"
 if out="$(env -i PATH="$PATH" HOME="$gi_home" GIT_CONFIG_NOSYSTEM=1 "$SCRIPT_DIR/doctor.sh" personal 2>&1)" \
-  && grep -Fxq -- "[warn] global gitignore missing: $gi_managed (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" <<< "$out" \
+  && grep -Fxq -- "[warn] global gitignore missing: $gi_managed (git-ignore module) — agent local-only files (.agent-packets/, .agent-session-progress/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" <<< "$out" \
   && steps_consecutive "$out" "        \$ mkdir -p $(printf '%q' "$gi_home/.config")" \
     "        \$ chezmoi apply $(printf '%q' "$gi_home/.config/git") $(printf '%q' "$gi_managed")"; then
   ok "test passed: global gitignore missing -> action, steps mkdir then apply, consecutive and %q-escaped"
@@ -957,7 +957,7 @@ printf '[core]\n\texcludesFile = %s\n' "$gi_other" > "$gi_home/system.gitconfig"
 gi_check personal "$gi_redirect" "redirected by core.excludesFile (system scope only) -> warn" GIT_CONFIG_SYSTEM="$gi_home/system.gitconfig"
 # GI-3c) ... but GIT_CONFIG_NOSYSTEM=1 makes git skip the system scope, and
 #        so must the lookup (git config --system does not honour it itself).
-gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo" "system-scope value is ignored under GIT_CONFIG_NOSYSTEM=1 -> ok" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM="$gi_home/system.gitconfig"
+gi_check personal "[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/, .agent-session-progress/ and **/.claude/settings.local.json in every repo" "system-scope value is ignored under GIT_CONFIG_NOSYSTEM=1 -> ok" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM="$gi_home/system.gitconfig"
 rm -f "$gi_home/system.gitconfig"
 # GI-3d) XDG_CONFIG_HOME moves git's default location away from ~/.config.
 gi_check personal "[warn] global gitignore: git reads $gi_home/xdg/git/ignore, not the managed $gi_managed (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect" "redirected by XDG_CONFIG_HOME -> warn" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="$gi_home/xdg"
@@ -966,7 +966,7 @@ gi_check personal "[warn] global gitignore: git reads $gi_home/xdg/git/ignore, n
 #         symlink to ~/.config (-ef) — no false redirect warn (#309). doctor
 #         compares only while the file exists, where -ef already matches the
 #         slashed spelling, so the stripping is pinned on the helper itself.
-gi_ok="[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
+gi_ok="[ok] global gitignore: managed $gi_managed is what git reads; excludes .agent-packets/, .agent-session-progress/ and **/.claude/settings.local.json in every repo"
 if [[ "$(XDG_CONFIG_HOME="$gi_home/.config//" git_default_excludes_file)" == "$gi_managed" ]]; then
   ok "test passed: global gitignore XDG_CONFIG_HOME=~/.config// resolves to the managed path (every trailing slash stripped)"
 else
@@ -989,6 +989,9 @@ rm -f "$gi_home/.gitconfig"
 # GI-4) present, read by git, but a managed pattern line is gone -> drift action.
 grep -Fxv -- ".agent-packets/" "$DOTFILES_ROOT/private_dot_config/git/ignore" > "$gi_managed"
 gi_check personal "[warn] global gitignore: $gi_managed lacks: .agent-packets/ (drifted from the managed file)" "pattern removed -> drift action"
+# GI-4b) the session-progress pattern is required independently (#551).
+grep -Fxv -- ".agent-session-progress/" "$DOTFILES_ROOT/private_dot_config/git/ignore" > "$gi_managed"
+gi_check personal "[warn] global gitignore: $gi_managed lacks: .agent-session-progress/ (drifted from the managed file)" "session-progress pattern removed -> drift action"
 # GI-5) work does not list the module -> not managed, whatever is on disk.
 cp "$DOTFILES_ROOT/private_dot_config/git/ignore" "$gi_managed"
 gi_check work "[ok] global gitignore not managed (git-ignore module inactive for profile work)" "work -> not managed"

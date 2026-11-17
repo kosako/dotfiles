@@ -43,7 +43,7 @@ personal project として段階的に作っている。現時点の実装状況
 | Git hook gates 配線(commit 境界の public-safety / git-identity / AI trailer gate、実体は agent-tools、[docs/git-hook-gates.md](docs/git-hook-gates.md)) | 実装済み・実機適用済み(personal のみ、#196/#239) |
 | 品質ループ hook 配線(PostToolUse fast-edit-check / Stop changed-scope-qa、実体は agent-tools・宣言は `checks.local.json`、[docs/policy-model.md](docs/policy-model.md) の「quality loop hooks」) | 実装済み・実機適用済み(personal のみ、#199) |
 | herdr integration hook 配線(SessionStart → herdr-agent-state.sh、実体は `herdr integration install` が配置・版管理、[docs/policy-model.md](docs/policy-model.md) の「herdr integration」) | 実装済み・実機適用済み(personal のみ、#225) |
-| Git global ignore(AI agent の local-only file `.agent-packets/` / `.claude/settings.local.json` を全 repo から除外、[docs/git-ignore.md](docs/git-ignore.md)) | 実装済み・実機適用済み(personal のみ、#248) |
+| Git global ignore(AI agent の local-only file `.agent-packets/` / `.agent-session-progress/` / `.claude/settings.local.json` を全 repo から除外、[docs/git-ignore.md](docs/git-ignore.md)) | 実装済み・実機適用済み(personal のみ、#248) |
 | herdr config(UI の設定と OS 通知の配信先、[docs/herdr-config.md](docs/herdr-config.md)) | 実装済み・実機適用済み(personal のみ、#261) |
 | agent-tools の残量の読み取り口の設定(`usage-reader.json`、[docs/agent-tools-usage-reader.md](docs/agent-tools-usage-reader.md)) | 実装済み・実機適用済み(personal のみ、#301) |
 | local の OpenTelemetry backend の定義(grafana/otel-lgtm の compose file。image は版と digest で固定、port は 127.0.0.1 だけ、[docs/otel-backend.md](docs/otel-backend.md)) | 実装済み・実機適用済み(personal のみ、#514) |

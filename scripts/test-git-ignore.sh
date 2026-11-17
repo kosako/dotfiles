@@ -5,8 +5,8 @@ set -euo pipefail
 # global gitignore at git's DEFAULT excludes location (~/.config/git/ignore).
 # It must (1) be applied for personal and not for work, (2) carry the
 # managed-by header (the doctor orphan scan keys on it) and exactly the agent
-# local-only patterns, and (3) actually make git hide .agent-packets/ and
-# .claude/settings.local.json in a repository that has NO .gitignore of its
+# local-only patterns, and (3) actually make git hide .agent-packets/,
+# .agent-session-progress/ and .claude/settings.local.json in a repository that has NO .gitignore of its
 # own — the acceptance criterion of #248 — while ordinary files and
 # .agent-context.local.md (per-repo .gitignore by design) stay visible.
 # That the file survives enableGitSigning=false (the #207 allowlist derives
@@ -47,7 +47,7 @@ trap cleanup EXIT
 # there).
 
 managed_rel=".config/git/ignore"
-expected_patterns=$'.agent-packets/\n**/.claude/settings.local.json'
+expected_patterns=$'.agent-packets/\n.agent-session-progress/\n**/.claude/settings.local.json'
 
 section "git-ignore: managed set per profile"
 
@@ -83,8 +83,8 @@ fi
 section "git-ignore: managed content"
 
 # 2) Header on line 1 (orphan scan), and the pattern set pinned EXACTLY:
-#    every non-comment, non-blank line is one of the two agent local-only
-#    patterns and both are present. A pattern added later must be added
+#    every non-comment, non-blank line is one of the three agent local-only
+#    patterns and all are present. A pattern added later must be added
 #    here and in doctor's list on purpose.
 if head -n 1 "$managed" | grep -Fq "Managed by chezmoi"; then
   ok "test passed: line 1 carries the managed-by header"
@@ -94,10 +94,10 @@ else
 fi
 patterns="$(grep -v '^#' "$managed" | grep -v '^[[:space:]]*$' || true)"
 if [[ "$patterns" == "$expected_patterns" ]]; then
-  ok "test passed: pattern lines are exactly .agent-packets/ and **/.claude/settings.local.json"
+  ok "test passed: pattern lines are exactly .agent-packets/, .agent-session-progress/ and **/.claude/settings.local.json"
 else
   printf 'expected:\n%s\nactual:\n%s\n' "$expected_patterns" "$patterns" >&2
-  fail "test failed: pattern set drifted from the pinned two lines"
+  fail "test failed: pattern set drifted from the pinned three lines"
   status=1
 fi
 if grep -Fxq -- ".agent-context.local.md" "$managed"; then
@@ -132,8 +132,11 @@ git_in() {
 }
 
 git_in "$empty_home" init -q --template="$empty_template"
-mkdir -p "$repo/.agent-packets" "$repo/.claude" "$repo/pkg/sub/.claude"
+mkdir -p "$repo/.agent-packets" "$repo/.claude" "$repo/pkg/sub/.claude" \
+  "$repo/.agent-session-progress" "$repo/pkg/sub/.agent-session-progress"
 printf 'private packet\n' > "$repo/.agent-packets/123.md"
+printf '{}\n' > "$repo/.agent-session-progress/x.json"
+printf '{}\n' > "$repo/pkg/sub/.agent-session-progress/x.json"
 printf '{}\n' > "$repo/.claude/settings.local.json"
 printf '{}\n' > "$repo/pkg/sub/.claude/settings.local.json"
 printf 'context\n' > "$repo/.agent-context.local.md"
@@ -145,10 +148,10 @@ git_status() {
 }
 
 expected_visible=$'?? .agent-context.local.md\n?? keep.md'
-expected_control=$'?? .agent-context.local.md\n?? .agent-packets/123.md\n?? .claude/settings.local.json\n?? keep.md\n?? pkg/sub/.claude/settings.local.json'
+expected_control=$'?? .agent-context.local.md\n?? .agent-packets/123.md\n?? .agent-session-progress/x.json\n?? .claude/settings.local.json\n?? keep.md\n?? pkg/sub/.agent-session-progress/x.json\n?? pkg/sub/.claude/settings.local.json'
 
 if control="$(git_status "$empty_home")" && [[ "$control" == "$expected_control" ]]; then
-  ok "test passed: control (empty home) lists all five files, including the agent local-only ones"
+  ok "test passed: control (empty home) lists all seven files, including the agent local-only ones"
 else
   printf '%s\n' "${control:-<no output>}" >&2
   fail "test failed: control run must list every file (the assertion below would otherwise be vacuous)"
@@ -156,18 +159,28 @@ else
 fi
 
 if visible="$(git_status "$personal_home")" && [[ "$visible" == "$expected_visible" ]]; then
-  ok "test passed: with the managed global gitignore, .agent-packets/ and .claude/settings.local.json (any depth) are hidden; keep.md and .agent-context.local.md stay visible"
+  ok "test passed: with the managed global gitignore, .agent-packets/, .agent-session-progress/ and .claude/settings.local.json (any depth) are hidden; keep.md and .agent-context.local.md stay visible"
 else
   printf '%s\n' "${visible:-<no output>}" >&2
-  fail "test failed: git status under the rendered home must hide exactly the two agent local-only patterns"
+  fail "test failed: git status under the rendered home must hide exactly the three agent local-only patterns"
   status=1
 fi
 
+# The progress writer requires check-ignore -q to succeed at any depth.
+for progress_path in .agent-session-progress/x.json pkg/sub/.agent-session-progress/x.json; do
+  if git_in "$personal_home" check-ignore -q -- "$progress_path"; then
+    ok "test passed: git check-ignore -q accepts $progress_path"
+  else
+    fail "test failed: git check-ignore -q must accept $progress_path"
+    status=1
+  fi
+done
+
 # The decision must come from the managed file itself (check-ignore -v names
 # the source), not from anything else in the rendered home.
-if src_line="$(git_in "$personal_home" check-ignore -v --no-index -- .agent-packets/123.md pkg/sub/.claude/settings.local.json)" \
-  && [[ "$(grep -c -F "$managed:" <<< "$src_line")" == "2" ]]; then
-  ok "test passed: git check-ignore attributes both decisions to $managed_rel"
+if src_line="$(git_in "$personal_home" check-ignore -v --no-index -- .agent-packets/123.md .agent-session-progress/x.json pkg/sub/.agent-session-progress/x.json pkg/sub/.claude/settings.local.json)" \
+  && [[ "$(grep -c -F "$managed:" <<< "$src_line")" == "4" ]]; then
+  ok "test passed: git check-ignore attributes all four decisions to $managed_rel"
 else
   printf '%s\n' "${src_line:-<no output>}" >&2
   fail "test failed: check-ignore must attribute the decisions to the managed global gitignore"

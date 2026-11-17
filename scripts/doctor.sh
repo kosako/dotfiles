@@ -277,7 +277,7 @@ if command -v git >/dev/null 2>&1; then
       *) effective_ignore="" ;;
     esac
     if [[ ! -f "$managed_ignore" ]]; then
-      action "global gitignore missing: $managed_ignore (git-ignore module) — agent local-only files (.agent-packets/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" \
+      action "global gitignore missing: $managed_ignore (git-ignore module) — agent local-only files (.agent-packets/, .agent-session-progress/, .claude/settings.local.json) are excluded only where a repo's own .gitignore says so" \
         "\$ mkdir -p $(shell_quote_safe "$HOME/.config")" \
         "\$ chezmoi apply $(shell_quote_safe "$HOME/.config/git") $(shell_quote_safe "$managed_ignore")"
     elif [[ "$excludes_setting" == error ]]; then
@@ -288,12 +288,12 @@ if command -v git >/dev/null 2>&1; then
       warn "global gitignore: git reads $(display_safe "$effective_ignore"), not the managed $managed_ignore (core.excludesFile in the global or system config, or XDG_CONFIG_HOME, redirects it) — the managed agent local-only patterns are not in effect"
     else
       missing_ignore_patterns=""
-      for ignore_pattern in '.agent-packets/' '**/.claude/settings.local.json'; do
+      for ignore_pattern in '.agent-packets/' '.agent-session-progress/' '**/.claude/settings.local.json'; do
         grep -Fxq -- "$ignore_pattern" "$managed_ignore" \
           || missing_ignore_patterns="${missing_ignore_patterns:+$missing_ignore_patterns }$ignore_pattern"
       done
       if [[ -z "$missing_ignore_patterns" ]]; then
-        ok "global gitignore: managed $managed_ignore is what git reads; excludes .agent-packets/ and **/.claude/settings.local.json in every repo"
+        ok "global gitignore: managed $managed_ignore is what git reads; excludes .agent-packets/, .agent-session-progress/ and **/.claude/settings.local.json in every repo"
       else
         action "global gitignore: $managed_ignore lacks: $missing_ignore_patterns (drifted from the managed file)" \
           "\$ chezmoi apply $(shell_quote_safe "$managed_ignore")"

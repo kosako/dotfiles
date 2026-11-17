@@ -13,6 +13,10 @@
 # private details (paths, reasons, capacity). Local only, never committed.
 .agent-packets/
 
+# Agent session progress (agent-tools personal-session-progress): local
+# in-progress state for display during a session. Never committed.
+.agent-session-progress/
+
 # Claude Code's per-project local settings (the dynamic permissions the agent
 # writes itself). Claude Code excludes it per repo when it creates the file;
 # this line is the global belt-and-braces, at any depth (monorepo packages).
