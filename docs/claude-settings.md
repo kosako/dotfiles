@@ -116,6 +116,9 @@ project 自身の deny / ask が止めないものを warn する(rule の
   書く形と同じ)。
 - live の file がちょうど 1 つの JSON の object でない(空白だけ・値が 2 つ以上・配列・壊れた JSON・NUL を含む)ときは、
   apply はその file を書き換えずに止まる。live の file があるときは jq が要る(macOS は `/usr/bin/jq` を同梱)。
+  合成の前に、doctor の Bridge One の節と同じ基準で raw の text を検査する(#557)。string の外の token は
+  `true` / `false` / `null` か JSON の数値だけを認める。jq が受け入れる `NaN`・`Infinity`・`01`・`.5`・`+1` も拒む。
+  続く `fromjson` と型の検査で、構造の誤り・2 つ目の値・object 以外を拒む。検査の error に live の中身は出さない。
 - live の file の中身は一時 file に書かず、shell の変数に保って jq には stdin で渡す(#446)。managed の JSON も、
   live の file の前に同じ stdin で渡す(#523。telemetry の送り先と local の allow の rule(#538)は local の値なので、
   jq の引数に置かない)。jq の引数は option と filter だけで、live にしかない値(`autoMode` など)も送り先も local の rule
