@@ -190,8 +190,9 @@ hook 活用計画 Phase 2(agent-tools#203)の品質ループ 2 本を **登録**
   `.chezmoitemplates/agent-hooks-json` で両 home 共有(`enableGitHubIsolatedReader` の
   PreToolUse・`enableHerdrIntegration` の SessionStart と同居。各 capability は自分の event だけを
   足し、hook capability が全部 false のとき、Claude は `hooks` キー自体を出さず、Codex は file ごと
-  消える。全部の数は Claude が `enableToolCallRecordHook`(#353)と `enableJaReplyGuardHook`(#497)の
-  Claude だけの 2 つを含む 5 つ、Codex はそれを除く 3 つ)。
+  消える。全部の数は Claude が `enableToolCallRecordHook`(#353)・`enableJaReplyGuardHook`(#497)・
+  `enableBridgeOneHook`(#508)・`enableInstructionUpdateNoticeHook`(#547)の Claude だけの 4 つを含む 7 つ、
+  Codex はそれを除く 3 つ)。
   - `PostToolUse` / matcher `Edit|Write` → `personal-fast-edit-check`(steering。失敗要約を
     `additionalContext` で返すだけで block しない・自動 fix しない)。
   - `Stop`(matcher なし。Claude Code は非対応・Codex は無視)→ `personal-changed-scope-qa`
@@ -327,6 +328,17 @@ Bridge One(個人用の Control Center。repo は kosako/BridgeOne)の Permissio
 - **work は、その Mac の中からだけ決定を受ける形に限って true にできる**(#512)。Bridge One は work の Mac の Claude Code の session も扱う方針に変えた(Bridge One 側の判断 D42)。ただし work の session の承認に答えるのは、その Mac の中の端末の dialog と、その Mac で動く Bridge One の端末の画面(TUI)だけにする。cloud からの決定は、その Mac の session-host と cloud の両方で拒む。work の Mac から外に出すのは、別名・状態・時刻などの最小限の情報だけにする。#508 が禁じた理由は「個人の Bridge One が仕事の環境の承認に答える」ことなので、答える場所が work の Mac の中に閉じるこの形とは両立する。この制限を守るのは Bridge One の側で、dotfiles の flag は local と cloud を区別しない。
 - **work の登録は dotfiles の外で行う**。work は claude-settings の module を持たず、`~/.claude/settings.json` は管理の外にある。work で true にしても dotfiles は何も render しない。登録は、Bridge One の配備の script が表示する文字列を、その Mac の `~/.claude/settings.json` の PermissionRequest に手で足す。flag は意図の宣言で、doctor は、管理外の `~/.claude/settings.json` の PermissionRequest の command に起動用の script の path が何回現れるかだけを読む(中身は表示しない)。読めない file、厳密な JSON の object 1 つでない file (jq で読む。jq が無い・失敗するときも)、不在を確かめられない file は、未登録ではなく未確認と report する。あわせて起動用の script の有無と、決定の出どころは Bridge One の側の制限であることを report する。personal や sandbox で claude-settings が無いときは、今までどおり dangling と report する。
 - **状態**: personal=true(#510。利用者が Bridge One の試験(K13)を始めた 2026-11-08 に on にした)、work=false。work は、Bridge One の K13 の 2 段目(cloud に繋がない、work の Mac の中だけの試験)で、利用者が true にして手で登録してよい。この試験の host は network に繋がないので、決定は Mac の中からしか来ない。試験の項目に登録が入るので、true にするのは試験の前になる。work の Mac の session-host を cloud に繋ぐ前に、cloud からの決定を拒むことを Bridge One の側で確かめる(dotfiles は確かめない)。起動用の script が未配備でも承認は端末に戻るので、先に登録しても安全。登録と起動用の script の有無と dangling は doctor が report。test は commit された値に依らないので、off に戻すときは profile の値とこの行を変える。
+
+## 運用 instruction の更新の知らせ(`enableInstructionUpdateNoticeHook`、#547)
+
+配備で運用 instruction を変えても、配備の前から続いている Claude Code の session は古い版のまま動く(agent-tools#688)。それを知らせる agent-tools の hook の body `personal-instruction-update-notice` を、managed `~/.claude/settings.json` に登録する capability。
+
+- `enableInstructionUpdateNoticeHook`(boolean): on のとき、`SessionStart`(matcher なし)と `UserPromptSubmit` に body を `timeout: 10` で登録する。`async` は付けない。値は agent-tools の `docs/instruction-update-notice.md` の「登録 (dotfiles)」と同じ。`SessionStart` では herdr と記録 hook の entry の後ろ(最後)に足し、既存の entry は変えない。`UserPromptSubmit` はこの hook だけが使い、`SessionStart` の直後に出す。off のときの出力が従来と byte 単位で同じことは `test-claude-settings.sh` が pin する。
+- body の契約は agent-tools の docs が正本。`SessionStart` では、配備済みの `~/.claude/agent-tools/CLAUDE.md` の節ごとの hash を session ごとに記録し、何も出さない。`UserPromptSubmit` では記録と今の file を比べ、違うときだけ、変わった節と file の場所を `additionalContext` と `systemMessage` で出す。exit は常に 0 で、network に触れず、外部の command も起動しない。記録は `${XDG_STATE_HOME:-~/.local/state}/agent-tools/personal-instruction-update-notice/` の下に置く(dotfiles は管理しない)。
+- **強度ラベル**: steering。読み直しを促すだけで、読み直しを強制しない。enforcement boundary ではない。
+- **Claude だけ**。Codex は global の `AGENTS.md` を request のたびに読み直すので対象外で、agent-tools の manifest の target も claude-code だけ。`.chezmoitemplates/agent-hooks-json` が `agentDir == ".claude"` のときだけ出す。
+- **極性は `enableJaReplyGuardHook` と同じ**(権限を付与しない)。`environment_kind_forbidden_capabilities` には**入れない**(`test-policy.sh` が pin)。
+- **状態**: personal=true、work=false(work は claude-settings を管理しない。会社の Mac への配備は #547 の範囲の外)。body が未配備でも hook の欠落は non-blocking なので、先に登録しても安全。body の有無と dangling は doctor が report。
 
 ## Claude Code の telemetry(`enableClaudeTelemetry`、#523)
 

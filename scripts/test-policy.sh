@@ -1088,6 +1088,16 @@ run_ok \
   "enableJaReplyGuardHook=true is allowed for every environmentKind (not forbidden)" \
   "$fixture/scripts/validate-policy.sh" --all
 
+# enableInstructionUpdateNoticeHook (#547) only registers agent-tools' hook
+# that asks a running session to re-read the deployed operating instruction
+# (exit 0 always), and grants no install / secret / network privilege, so it
+# must NOT be in the forbidden table either.
+make_fixture
+set_capability_all "$fixture" enableInstructionUpdateNoticeHook true
+run_ok \
+  "enableInstructionUpdateNoticeHook=true is allowed for every environmentKind (not forbidden)" \
+  "$fixture/scripts/validate-policy.sh" --all
+
 # enableBridgeOneHook (#508) lets a personal Bridge One host answer the AI
 # agent's permission prompts (it can return allow / deny), so client / agent
 # forbid it (the loop above pins that). personal and sandbox may set it.

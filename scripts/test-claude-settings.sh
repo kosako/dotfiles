@@ -32,9 +32,12 @@ set -euo pipefail
 # (timeout 10, Claude only); enableBridgeOneHook (#508; ON for personal since
 # #510, and the cases take either committed value) ->
 # Bridge One's launcher as a second PermissionRequest entry (timeout 600, no
-# async, the only decision-capable PermissionRequest hook, Claude only); each
-# capability adds exactly its own entries, and all six false -> no hooks key
-# at all.
+# async, the only decision-capable PermissionRequest hook, Claude only);
+# enableInstructionUpdateNoticeHook (#547; ON for personal, and the cases take
+# either committed value) -> personal-instruction-update-notice as the last
+# SessionStart entry and the only UserPromptSubmit entry (timeout 10, no
+# matcher, no async, Claude only); each capability adds exactly its own
+# entries, and all seven false -> no hooks key at all.
 # It also fixes the telemetry env (#523): enableClaudeTelemetry with an
 # endpoint file under the destination -> exactly the six telemetry
 # variables, the endpoint as the file holds it; no file, the capability off,
@@ -763,7 +766,7 @@ if [[ "$bypass_hit" -eq 0 ]]; then
   ok "test passed: known equivalent read/exfil paths are NOT covered (matchers are steering, not a boundary)"
 fi
 
-section "claude settings hook registration (#137 / #199 / #225 / #353 / #497 / #508)"
+section "claude settings hook registration (#137 / #199 / #225 / #353 / #497 / #508 / #547)"
 
 # 8a) Committed personal: enableGitHubIsolatedReader, enableQualityLoopHooks,
 #     enableHerdrIntegration, enableToolCallRecordHook AND
@@ -796,11 +799,12 @@ section "claude settings hook registration (#137 / #199 / #225 / #353 / #497 / #
 #     entry, or a key added to an entry (an "async" on safe-gh would take its
 #     steer out of the pre-call path; a "timeout" on it is Codex-only) must
 #     fail the test (#129 lesson).
-#     enableBridgeOneHook (#508) is pinned in 8g; the shape above is the one
-#     with it OFF. The committed value may be either (#510 turned it on for
-#     personal), so the matrix below renders it OFF explicitly (hook_base)
-#     and the committed render must be hook_base, or hook_base plus exactly
-#     Bridge One's entry, as the committed profile says.
+#     enableBridgeOneHook (#508) is pinned in 8g and
+#     enableInstructionUpdateNoticeHook (#547) in 8j; the shape above is the
+#     one with both OFF. The committed values may be either (#510 turned the
+#     Bridge hook on for personal, #547 the notice), so the matrix below
+#     renders both OFF explicitly (hook_base) and the committed render must be
+#     hook_base plus exactly the entries the committed profile turns on.
 expected_hook_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-safe-gh-hook")"
 expected_edit_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-fast-edit-check")"
 expected_stop_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-changed-scope-qa")"
@@ -824,6 +828,8 @@ expected_hooks="$(jq -n -S --arg gh "$expected_hook_cmd" --arg edit "$expected_e
   }')"
 expected_bridge_cmd="$(shell_single_quote "$HOME/.local/share/bridge-one/hook/current/bin/permission-request") 2>/dev/null"
 expected_bridge_entry="$(jq -n -S --arg cmd "$expected_bridge_cmd" '{matcher: "*", hooks: [{type: "command", command: $cmd, timeout: 600}]}')"
+expected_notice_cmd="$(shell_word "$HOME/.claude/agent-tools/scripts/personal-instruction-update-notice")"
+expected_notice_entry="$(jq -n -S --arg cmd "$expected_notice_cmd" '{hooks: [{type: "command", command: $cmd, timeout: 10}]}')"
 committed_bridge="$(yq '.profiles.personal.capabilities.enableBridgeOneHook' "$DOTFILES_ROOT/.chezmoidata/profiles.yaml" 2>/dev/null)" || committed_bridge=""
 case "$committed_bridge" in
   true) expected_committed_hooks="$(jq -S --argjson e "$expected_bridge_entry" '.PermissionRequest += [$e]' <<< "$expected_hooks")" ;;
@@ -833,34 +839,45 @@ case "$committed_bridge" in
     exit 1
     ;;
 esac
-render_flip hook-base enableBridgeOneHook=false
+committed_notice="$(yq '.profiles.personal.capabilities.enableInstructionUpdateNoticeHook' "$DOTFILES_ROOT/.chezmoidata/profiles.yaml" 2>/dev/null)" || committed_notice=""
+case "$committed_notice" in
+  true) expected_committed_hooks="$(jq -S --argjson e "$expected_notice_entry" '.SessionStart += [$e] | .UserPromptSubmit = [$e]' <<< "$expected_committed_hooks")" ;;
+  false) ;;
+  *)
+    fail "test failed: the committed personal enableInstructionUpdateNoticeHook is neither true nor false ('$committed_notice')"
+    exit 1
+    ;;
+esac
+render_flip hook-base enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 hook_base_file="$flip_file"
-render_flip bridge-on enableBridgeOneHook=true
+render_flip bridge-on enableBridgeOneHook=true enableInstructionUpdateNoticeHook=false
 bridge_on_file="$flip_file"
+render_flip committed-twin enableBridgeOneHook="$committed_bridge" enableInstructionUpdateNoticeHook="$committed_notice"
+committed_twin="$flip_file"
 base_hooks="$(jq -S '.hooks' "$hook_base_file" 2>/dev/null)" || base_hooks=""
 if [[ -n "$base_hooks" && "$base_hooks" == "$expected_hooks" ]]; then
-  ok "test passed: personal with enableBridgeOneHook off registers exactly the pinned hooks object (seven events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
+  ok "test passed: personal with enableBridgeOneHook and enableInstructionUpdateNoticeHook off registers exactly the pinned hooks object (seven events; safe-gh / fast-edit-check / scope-qa / herdr first, the record hook second or alone, async + timeout 10; the ja guard second in Stop, timeout 10; absolute paths; no other key)"
 else
-  fail "test failed: hook registration (enableBridgeOneHook off) differs from the pinned hooks object (diff on stderr: expected, then rendered)"
+  fail "test failed: hook registration (enableBridgeOneHook and enableInstructionUpdateNoticeHook off) differs from the pinned hooks object (diff on stderr: expected, then rendered)"
   diff <(printf '%s\n' "$expected_hooks") <(printf '%s\n' "$base_hooks") >&2 || true
   status=1
 fi
 actual_hooks="$(jq -S '.hooks' "$off_file" 2>/dev/null)" || actual_hooks=""
 if [[ -n "$actual_hooks" && "$actual_hooks" == "$expected_committed_hooks" ]]; then
-  ok "test passed: committed personal (enableBridgeOneHook=$committed_bridge) registers exactly the pinned hooks object"
+  ok "test passed: committed personal (enableBridgeOneHook=$committed_bridge, enableInstructionUpdateNoticeHook=$committed_notice) registers exactly the pinned hooks object"
 else
-  fail "test failed: committed hook registration (enableBridgeOneHook=$committed_bridge) differs from the pinned hooks object (diff on stderr: expected, then rendered)"
+  fail "test failed: committed hook registration (enableBridgeOneHook=$committed_bridge, enableInstructionUpdateNoticeHook=$committed_notice) differs from the pinned hooks object (diff on stderr: expected, then rendered)"
   diff <(printf '%s\n' "$expected_committed_hooks") <(printf '%s\n' "$actual_hooks") >&2 || true
   status=1
 fi
-# The committed render is hook_base or bridge_on as a whole, not only in its
-# hooks (normalized compare; 8i compares bytes).
+# The committed render equals, as a whole and not only in its hooks, the
+# render with both values set explicitly (normalized compare; 8i compares
+# bytes).
 committed_whole="$(jq -S '.' "$off_file" 2>/dev/null)" || committed_whole=""
-if [[ "$committed_bridge" == true ]]; then committed_twin="$bridge_on_file"; else committed_twin="$hook_base_file"; fi
 if [[ -n "$committed_whole" && "$committed_whole" == "$(jq -S '.' "$committed_twin" 2>/dev/null)" ]]; then
-  ok "test passed: the committed personal render equals the render with enableBridgeOneHook=$committed_bridge set explicitly"
+  ok "test passed: the committed personal render equals the render with enableBridgeOneHook=$committed_bridge and enableInstructionUpdateNoticeHook=$committed_notice set explicitly"
 else
-  fail "test failed: the committed personal render differs from the render with enableBridgeOneHook=$committed_bridge set explicitly"
+  fail "test failed: the committed personal render differs from the render with enableBridgeOneHook=$committed_bridge and enableInstructionUpdateNoticeHook=$committed_notice set explicitly"
   status=1
 fi
 
@@ -876,6 +893,7 @@ if [[ ! -e "$off_home/.claude/agent-tools/scripts/personal-safe-gh-hook" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-changed-scope-qa" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-tool-call-record-hook" \
   && ! -e "$off_home/.claude/agent-tools/scripts/personal-ja-reply-guard" \
+  && ! -e "$off_home/.claude/agent-tools/scripts/personal-instruction-update-notice" \
   && ! -e "$off_home/.claude/hooks/herdr-agent-state.sh" ]]; then
   ok "test passed: registration renders without any hook body present (agent-tools sync / herdr integration install can come later; runtime is fail-open)"
 else
@@ -896,21 +914,22 @@ fi
 #     false (and enableBridgeOneHook, #508) -> no hooks key at all (an empty
 #     "hooks": {} must never be emitted), and the all-off render is the
 #     all-on render minus the whole hooks key. Here and in 8d every render
-#     sets enableBridgeOneHook=false and the "on-render" is 8a's hook_base,
-#     so the matrix holds whatever the committed value is (8g covers the
-#     Bridge One entry).
-render_flip reader-off enableGitHubIsolatedReader=false enableBridgeOneHook=false
+#     sets enableBridgeOneHook=false and enableInstructionUpdateNoticeHook=
+#     false and the "on-render" is 8a's hook_base, so the matrix holds
+#     whatever the committed values are (8g covers the Bridge One entry, 8j
+#     the notice).
+render_flip reader-off enableGitHubIsolatedReader=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 reader_off_file="$flip_file"
-render_flip quality-off enableQualityLoopHooks=false enableBridgeOneHook=false
+render_flip quality-off enableQualityLoopHooks=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 quality_off_file="$flip_file"
-render_flip herdr-off enableHerdrIntegration=false enableBridgeOneHook=false
+render_flip herdr-off enableHerdrIntegration=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 herdr_off_file="$flip_file"
-render_flip record-off enableToolCallRecordHook=false enableBridgeOneHook=false
+render_flip record-off enableToolCallRecordHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 record_off_file="$flip_file"
-render_flip ja-off enableJaReplyGuardHook=false enableBridgeOneHook=false
+render_flip ja-off enableJaReplyGuardHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 ja_off_file="$flip_file"
 render_flip hooks-off enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
-  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
+  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 both_off_file="$flip_file"
 hooks_off_src="$flip_src"
 # check_hook_flip_off LABEL FILE EXPECTED_EVENTS DEL_FILTER
@@ -972,15 +991,15 @@ fi
 #     separator from SessionStart (#353); ja-only is the path where the ja
 #     entry is the FIRST (and only) element of Stop and Stop is the first
 #     event emitted (#497).
-render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
+render_flip reader-only enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 reader_only_file="$flip_file"
-render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
+render_flip quality-only enableGitHubIsolatedReader=false enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 quality_only_file="$flip_file"
-render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
+render_flip herdr-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 herdr_only_file="$flip_file"
-render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableJaReplyGuardHook=false enableBridgeOneHook=false
+render_flip record-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableJaReplyGuardHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 record_only_file="$flip_file"
-render_flip ja-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableBridgeOneHook=false
+render_flip ja-only enableGitHubIsolatedReader=false enableQualityLoopHooks=false enableHerdrIntegration=false enableToolCallRecordHook=false enableBridgeOneHook=false enableInstructionUpdateNoticeHook=false
 ja_only_file="$flip_file"
 # check_hook_single_on LABEL FILE EXPECTED_EVENTS DEL_FILTER
 check_hook_single_on() {
@@ -1049,10 +1068,10 @@ fi
 #     the only event. Bridge One's design forbids a second decision-capable
 #     PermissionRequest hook, so in every render at most one PermissionRequest
 #     hook lacks "async": true, and that one is Bridge One's.
-render_flip bridge-record-off enableBridgeOneHook=true enableToolCallRecordHook=false
+render_flip bridge-record-off enableBridgeOneHook=true enableToolCallRecordHook=false enableInstructionUpdateNoticeHook=false
 bridge_record_off_file="$flip_file"
 render_flip bridge-only enableBridgeOneHook=true enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
-  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false
+  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableInstructionUpdateNoticeHook=false
 bridge_only_file="$flip_file"
 # json_or_empty FILTER FILE — jq -S FILTER of FILE when FILE is one strict JSON
 # object, else empty (a broken render must fail the compare, not the suite).
@@ -1108,11 +1127,13 @@ fi
 # 8h) A home with a space, quotes, `&` and `$` (#329's case): the Bridge One
 #     command still comes back from a shell as ONE word, the launcher path
 #     (the ` 2>/dev/null` is a redirect, not an argument). Rendered with that
-#     HOME so chezmoi's homeDir carries it.
+#     HOME so chezmoi's homeDir carries it. The same render turns the notice
+#     (#547) on, whose command must come back as the one body path as well.
 bridge_odd_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-bridge-odd.XXXXXX")"
 tmp_roots+=("$bridge_odd_src")
 make_flipped_source "$bridge_odd_src"
 flip_personal_capability "$bridge_odd_src/src" enableBridgeOneHook true
+flip_personal_capability "$bridge_odd_src/src" enableInstructionUpdateNoticeHook true
 bridge_odd_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
 tmp_roots+=("$bridge_odd_root")
 # chezmoi cleans the home path (a TMPDIR with a trailing slash leaves `//`).
@@ -1126,6 +1147,19 @@ if HOME="$bridge_odd_home" render_personal_into "$bridge_odd_src/src" "$bridge_o
   else
     printf 'command: %s\nwords:\n%s\n' "$bridge_odd_cmd" "$bridge_odd_words" >&2
     fail "test failed: with an unusual home the Bridge One command does not split into the one launcher path"
+    status=1
+  fi
+  notice_odd_words=""
+  for notice_event in SessionStart UserPromptSubmit; do
+    notice_odd_cmd="$(json_or_empty ".hooks.${notice_event}[-1].hooks[0].command" "$bridge_odd_root/home/.claude/settings.json" | jq -r '.' 2>/dev/null)" || notice_odd_cmd=""
+    notice_odd_words+="$(bash -c 'eval "set -- $1" && printf "%s|" "$@"' _ "$notice_odd_cmd" 2>/dev/null || printf '<shell error>')"
+  done
+  notice_odd_path="$bridge_odd_home/.claude/agent-tools/scripts/personal-instruction-update-notice"
+  if [[ "$notice_odd_words" == "$notice_odd_path|$notice_odd_path|" ]]; then
+    ok "test passed: with an unusual home the notice command on SessionStart and UserPromptSubmit is one shell word, the body path"
+  else
+    printf 'words: %s\n' "$notice_odd_words" >&2
+    fail "test failed: with an unusual home the notice command does not split into the one body path"
     status=1
   fi
 else
@@ -1142,14 +1176,20 @@ fi
 #     must leave the output unchanged. With the Bridge hook ON, the render
 #     must equal that file with exactly the Bridge One entry's lines inserted
 #     after the record hook's PermissionRequest entry (built here as text, not
-#     by a JSON tool). The committed render must equal the one of the two its
-#     profile selects (on for personal since #510). To update the file after
-#     an INTENDED template change, render personal as this case does
-#     (HOME=/dotfiles-render-test-home, enableBridgeOneHook=false, a throwaway
-#     destination) and copy its .claude/settings.json over the file.
+#     by a JSON tool). The file is the render with
+#     enableInstructionUpdateNoticeHook OFF too (#547 left it unchanged); with
+#     the notice ON the render must equal it with exactly the notice entry's
+#     lines appended to SessionStart and a UserPromptSubmit event holding the
+#     same entry right after SessionStart (also built as text). The committed
+#     render must equal the one of the four its profile selects (both on for
+#     personal since #510 / #547). To update the file after an INTENDED
+#     template change, render personal as this case does
+#     (HOME=/dotfiles-render-test-home, enableBridgeOneHook=false,
+#     enableInstructionUpdateNoticeHook=false, a throwaway destination) and
+#     copy its .claude/settings.json over the file.
 golden_home="/dotfiles-render-test-home"
 golden_settings="$DOTFILES_ROOT/scripts/testdata/claude-settings.personal.json"
-golden_hint="if the template change is intended, render personal with HOME=$golden_home and enableBridgeOneHook=false into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json (see 8i)"
+golden_hint="if the template change is intended, render personal with HOME=$golden_home, enableBridgeOneHook=false and enableInstructionUpdateNoticeHook=false into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json (see 8i)"
 golden_bridge_expected_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
 tmp_roots+=("$golden_bridge_expected_root")
 golden_bridge_expected="$golden_bridge_expected_root/expected.json"
@@ -1203,16 +1243,134 @@ golden_case() {
     status=1
   fi
 }
-for golden_value in false true; do
-  golden_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-golden-$golden_value.XXXXXX")"
+# golden_add_notice IN OUT — IN plus the notice entry (#547): the last
+# SessionStart entry's closing "}" gets a comma and the entry's lines follow,
+# and a UserPromptSubmit event holding the same entry follows SessionStart's
+# closing "],". Fails (exit 1) when IN has no SessionStart followed by
+# another event. The command needs no JSON escape for the plain golden home.
+golden_notice_cmd="$golden_home/.claude/agent-tools/scripts/personal-instruction-update-notice"
+golden_add_notice() {
+  NOTICE_CMD="$golden_notice_cmd" awk '
+    function entry() {
+      print "      {"
+      print "        \"hooks\": ["
+      print "          {"
+      print "            \"type\": \"command\","
+      print "            \"command\": \"" ENVIRON["NOTICE_CMD"] "\","
+      print "            \"timeout\": 10"
+      print "          }"
+      print "        ]"
+      print "      }"
+    }
+    NR > 1 {
+      if (in_ss && $0 == "    ],") {
+        print prev ","
+        entry()
+        in_ss = 0
+        ups = 1
+      } else {
+        print prev
+        if (ups) {
+          print "    \"UserPromptSubmit\": ["
+          entry()
+          print "    ],"
+          ups = 0
+          inserted = 1
+        }
+      }
+    }
+    { if ($0 == "    \"SessionStart\": [") in_ss = 1; prev = $0 }
+    END { print prev; if (!inserted) exit 1 }
+  ' "$1" > "$2"
+}
+golden_notice_expected="$golden_bridge_expected_root/expected-notice.json"
+golden_both_expected="$golden_bridge_expected_root/expected-bridge-notice.json"
+if ! golden_add_notice "$golden_settings" "$golden_notice_expected"; then
+  fail "test failed: could not build the expected enableInstructionUpdateNoticeHook=true file from scripts/testdata/claude-settings.personal.json (no SessionStart followed by another event; $golden_hint)"
+  status=1
+  : > "$golden_notice_expected"
+fi
+if [[ ! -s "$golden_bridge_expected" ]] || ! golden_add_notice "$golden_bridge_expected" "$golden_both_expected"; then
+  fail "test failed: could not build the expected file with both enableBridgeOneHook and enableInstructionUpdateNoticeHook on ($golden_hint)"
+  status=1
+  : > "$golden_both_expected"
+fi
+# golden_expected_for BRIDGE NOTICE — the expected file for that pair of values.
+golden_expected_for() {
+  case "$1/$2" in
+    false/false) printf '%s\n' "$golden_settings" ;;
+    true/false) printf '%s\n' "$golden_bridge_expected" ;;
+    false/true) printf '%s\n' "$golden_notice_expected" ;;
+    true/true) printf '%s\n' "$golden_both_expected" ;;
+  esac
+}
+for golden_pair in false/false true/false false/true true/true; do
+  golden_bridge_value="${golden_pair%/*}"
+  golden_notice_value="${golden_pair#*/}"
+  golden_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings-golden-${golden_bridge_value}-${golden_notice_value}.XXXXXX")"
   tmp_roots+=("$golden_src")
   make_flipped_source "$golden_src"
-  flip_personal_capability "$golden_src/src" enableBridgeOneHook "$golden_value"
-  if [[ "$golden_value" == true ]]; then golden_expected="$golden_bridge_expected"; else golden_expected="$golden_settings"; fi
-  golden_case "enableBridgeOneHook=$golden_value" "$golden_src/src" "$golden_expected"
+  flip_personal_capability "$golden_src/src" enableBridgeOneHook "$golden_bridge_value"
+  flip_personal_capability "$golden_src/src" enableInstructionUpdateNoticeHook "$golden_notice_value"
+  golden_case "enableBridgeOneHook=$golden_bridge_value enableInstructionUpdateNoticeHook=$golden_notice_value" \
+    "$golden_src/src" "$(golden_expected_for "$golden_bridge_value" "$golden_notice_value")"
 done
-if [[ "$committed_bridge" == true ]]; then golden_expected="$golden_bridge_expected"; else golden_expected="$golden_settings"; fi
-golden_case "committed (enableBridgeOneHook=$committed_bridge)" "$DOTFILES_ROOT" "$golden_expected"
+golden_case "committed (enableBridgeOneHook=$committed_bridge, enableInstructionUpdateNoticeHook=$committed_notice)" \
+  "$DOTFILES_ROOT" "$(golden_expected_for "$committed_bridge" "$committed_notice")"
+
+# 8j) enableInstructionUpdateNoticeHook (#547, agent-tools#688): set
+#     explicitly (8a renders hook_base with it off; the committed render is
+#     pinned there too). On, SessionStart gains
+#     personal-instruction-update-notice as its LAST entry (no matcher, so
+#     every SessionStart source records; timeout 10; no async: the
+#     UserPromptSubmit side must run in the prompt's path for its
+#     additionalContext to reach the turn) and UserPromptSubmit holds the same
+#     entry as its only one, and nothing else changes. With the record hook
+#     off it follows herdr's entry, with herdr off it follows the record
+#     entry, and alone (the other six off) SessionStart and UserPromptSubmit
+#     are the only events, each with just the notice: the three separator
+#     paths of the SessionStart list and the first-event path.
+render_flip notice-on enableInstructionUpdateNoticeHook=true enableBridgeOneHook=false
+notice_on_file="$flip_file"
+render_flip notice-record-off enableInstructionUpdateNoticeHook=true enableToolCallRecordHook=false enableBridgeOneHook=false
+notice_record_off_file="$flip_file"
+render_flip notice-herdr-off enableInstructionUpdateNoticeHook=true enableHerdrIntegration=false enableBridgeOneHook=false
+notice_herdr_off_file="$flip_file"
+render_flip notice-only enableInstructionUpdateNoticeHook=true enableGitHubIsolatedReader=false enableQualityLoopHooks=false \
+  enableHerdrIntegration=false enableToolCallRecordHook=false enableJaReplyGuardHook=false enableBridgeOneHook=false
+notice_only_file="$flip_file"
+notice_list="$(jq -S -n --argjson e "$expected_notice_entry" '[$e]')"
+# check_notice_on LABEL FILE BASE_FILE SESSION_LEN — FILE must be BASE_FILE
+# plus the notice as the last of SESSION_LEN SessionStart entries and as the
+# one UserPromptSubmit entry, and nothing else.
+check_notice_on() {
+  local label="$1" file="$2" base_file="$3" session_len="$4" base
+  base="$(json_or_empty '.' "$base_file")"
+  if [[ -n "$base" \
+    && "$(json_or_empty '.hooks.SessionStart | length' "$file")" == "$session_len" \
+    && "$(json_or_empty '.hooks.SessionStart[-1]' "$file")" == "$expected_notice_entry" \
+    && "$(json_or_empty '.hooks.UserPromptSubmit' "$file")" == "$notice_list" \
+    && "$(json_or_empty 'del(.hooks.SessionStart[-1]) | del(.hooks.UserPromptSubmit)' "$file")" == "$base" ]]; then
+    ok "test passed: $label adds exactly the notice as the last of $session_len SessionStart entries and the one UserPromptSubmit entry (timeout 10, no matcher, no async) and nothing else"
+  else
+    fail "test failed: $label render is not its base render plus the notice on SessionStart (last of $session_len) and UserPromptSubmit"
+    diff <(printf '%s\n' "$expected_notice_entry") <(json_or_empty '.hooks.SessionStart[-1]' "$file") >&2 || true
+    status=1
+  fi
+}
+check_notice_on "enableInstructionUpdateNoticeHook=true" "$notice_on_file" "$hook_base_file" 3
+check_notice_on "enableInstructionUpdateNoticeHook=true with the record hook off" "$notice_record_off_file" "$record_off_file" 2
+check_notice_on "enableInstructionUpdateNoticeHook=true with herdr off" "$notice_herdr_off_file" "$herdr_off_file" 2
+if [[ "$(json_or_empty '.hooks | keys' "$notice_only_file" | tr -d ' \n')" == '["SessionStart","UserPromptSubmit"]' \
+  && "$(json_or_empty '.hooks.SessionStart' "$notice_only_file")" == "$notice_list" \
+  && "$(json_or_empty '.hooks.UserPromptSubmit' "$notice_only_file")" == "$notice_list" \
+  && -n "$base_norm" \
+  && "$(json_or_empty 'del(.hooks)' "$notice_only_file")" == "$(json_or_empty 'del(.hooks)' "$hook_base_file")" ]]; then
+  ok "test passed: the notice alone renders SessionStart and UserPromptSubmit as the only events, each with just the notice (valid JSON, nothing else changes)"
+else
+  fail "test failed: enableInstructionUpdateNoticeHook as the only hook capability does not render SessionStart and UserPromptSubmit with just the notice (or the JSON is broken)"
+  status=1
+fi
 
 section "claude settings keep the keys the template does not manage (#360)"
 

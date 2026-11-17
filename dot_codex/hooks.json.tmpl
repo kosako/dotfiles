@@ -28,6 +28,9 @@
        way: the agent-tools body targets claude-code only.
        enableBridgeOneHook (#508) is Claude-only too: Bridge One connects to
        Claude Code's PermissionRequest hook only.
+       enableInstructionUpdateNoticeHook (#547, agent-tools#688) is
+       Claude-only as well: Codex reads the global AGENTS.md per request, so
+       a running session sees a deploy without a notice.
        enableHerdrIntegration (#225) registers herdr's SessionStart hook
        (matcher-less on Codex) the same way; the body is herdr's, written by
        `herdr integration install codex` to ~/.codex/herdr-agent-state.sh.

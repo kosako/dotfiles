@@ -2390,6 +2390,31 @@ else
   ok "enableBridgeOneHook not active (false)"
 fi
 
+section "Instruction update notice (report-only)"
+# enableInstructionUpdateNoticeHook (#547, agent-tools#688) registers, in the
+# managed ~/.claude/settings.json, agent-tools' personal-instruction-update-
+# notice on SessionStart (no matcher, after the herdr and record entries) and
+# UserPromptSubmit, timeout 10. SessionStart records the section hashes of the
+# deployed ~/.claude/agent-tools/CLAUDE.md for the session; UserPromptSubmit
+# names the changed sections once the file changed after the session read it.
+# Exit 0 always, Claude only (Codex reads AGENTS.md per request). Report
+# registration + body presence; the live settings file is not probed here.
+if [[ "$(capability_value "$profile" enableInstructionUpdateNoticeHook)" == "true" ]]; then
+  if module_active_for_profile "$profile" claude-settings; then
+    notice_body="$HOME/.claude/agent-tools/scripts/personal-instruction-update-notice"
+    if [[ -f "$notice_body" && -x "$notice_body" ]]; then
+      ok "enableInstructionUpdateNoticeHook=true; managed ~/.claude/settings.json registers personal-instruction-update-notice on SessionStart and UserPromptSubmit (one re-read notice per deployed change, exit 0 always, Claude Code only, not a boundary); body present"
+    else
+      warn "enableInstructionUpdateNoticeHook=true; managed ~/.claude/settings.json registers personal-instruction-update-notice on SessionStart and UserPromptSubmit but the body is absent or not an executable file: $notice_body (agent-tools sync deploys it) — fail-open no-op until deployed"
+    fi
+    item "it watches only the deployed ~/.claude/agent-tools/CLAUDE.md; a change to ~/.claude/CLAUDE.md or a project's CLAUDE.md / AGENTS.md is not noticed"
+  else
+    warn "enableInstructionUpdateNoticeHook=true but the claude-settings module is inactive for this profile; no managed settings carry the instruction update notice (dangling capability)"
+  fi
+else
+  ok "enableInstructionUpdateNoticeHook not active (false)"
+fi
+
 section "Claude Code telemetry (report-only)"
 # enableClaudeTelemetry (#523) emits, in the managed ~/.claude/settings.json,
 # an env block that turns on Claude Code's OpenTelemetry (metrics and events

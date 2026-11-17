@@ -86,6 +86,9 @@ capabilities:
   enableBridgeOneHook:
     type: boolean
     implemented: true
+  enableInstructionUpdateNoticeHook:
+    type: boolean
+    implemented: true
   enableClaudeTelemetry:
     type: boolean
     implemented: true
