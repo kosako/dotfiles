@@ -340,9 +340,9 @@
 # formatting, never show as a diff); otherwise jq prints the result with
 # two-space indentation, which is also how Claude Code writes the file.
 # A live file that is not exactly one JSON object (whitespace only, several
-# values, an array, broken JSON, a NUL byte) stops the apply instead of
-# being replaced; only an empty one (0 bytes, also what chezmoi passes when
-# there is none) gets the managed JSON.
+# values, an array, broken JSON, a non-JSON number, a NUL byte) stops the
+# apply instead of being replaced; only an empty one (0 bytes, also what
+# chezmoi passes when there is none) gets the managed JSON.
 set -eu
 managed=$(cat <<'CLAUDE_SETTINGS_JSON'
 {
@@ -445,7 +445,30 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "dotfiles: jq is required to update the existing ~/.claude/settings.json (it keeps the keys the template does not manage)" >&2
   exit 1
 fi
-# One jq run checks, merges and compares: it prints the merged JSON, or
+# Match doctor's Bridge One check (#557): jq's parser accepts non-JSON
+# numbers such as NaN, Infinity, 01, .5 and +1. Read raw text first, remove
+# strings, and require every remaining token to be a JSON literal or
+# number. Only JSON whitespace and structural characters split tokens.
+# fromjson then rejects structural errors and a second value. Discard the
+# parsed result so valid live bytes (including non-UTF-8 inside strings)
+# still reach the merge unchanged. Suppress jq's errors: they can quote
+# live content. Keep this inline because chezmoi runs the script alone.
+if ! printf '%s' "$live" | jq -R -s -e '
+  . as $raw
+  | if ($raw
+      | gsub("\"(?:[^\"\\\\]|\\\\.)*\""; " ")
+      | [splits("[ \t\n\r{}\\[\\]:,]+")]
+      | map(select(. != ""))
+      | all(test("^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$")))
+    then $raw | fromjson
+    else error("not strict JSON")
+    end
+  | type == "object"
+' >/dev/null 2>&1; then
+  echo "dotfiles: ~/.claude/settings.json is not exactly one strict JSON object" >&2
+  exit 1
+fi
+# One more jq run merges and compares: it prints the merged JSON, or
 # nothing when that is the live file's JSON again. The managed JSON goes
 # through stdin too, ahead of the live file, so it never reaches jq's
 # arguments either: it holds the telemetry endpoint from the local file

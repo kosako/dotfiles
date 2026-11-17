@@ -1565,12 +1565,54 @@ fi
 #     broken JSON, whitespace only (jq would run no filter and print
 #     nothing), two objects, and a lone newline (not 0 bytes, so not the
 #     no-file case) (Codex review R1, PR #377).
-for bad_seed in '[]' '{"model": ' '   ' '{} {}' ''; do
+for bad_seed in '[]' 'true' 'null' '1' '"text"' '{"model": ' '   ' '{} {}' ''; do
   apply_over bad "$DOTFILES_ROOT" "$bad_seed"
   if [[ "$over_rc" -ne 0 ]] && cmp -s "$over_root/seed.json" "$over_file"; then
     ok "test passed: a live file of '$bad_seed' (plus a newline) stops the apply and stays byte-identical"
   else
     fail "test failed: a live file of '$bad_seed' (plus a newline) was changed or the apply did not fail (rc=$over_rc)"
+    status=1
+  fi
+done
+# Valid raw spellings survive the stricter check, both when the managed
+# values are equal (keep every byte) and when they need adding. Tokens in
+# strings, escaped quotes/backslashes and nested literals are not numbers
+# to reject. Keep the number spellings raw until apply runs.
+strict_probe='{"numbers":[0,-0,1,-12,0.5,-0.25,1e2,1E+2,1e-2],"literals":[true,false,null],"text":"NaN Infinity 01 .5 +1 {} [] : , \" \\ \n \u0041"}'
+strict_seed="$(printf '{"probe":%s,' "$strict_probe"; tail -c +2 "$off_file")"
+apply_over strict-valid-unchanged "$DOTFILES_ROOT" "$strict_seed"
+if [[ "$over_rc" -eq 0 ]] && cmp -s "$over_root/seed.json" "$over_file"; then
+  ok "test passed: valid JSON numbers, literals and escaped strings keep every byte when managed values match"
+else
+  fail "test failed: strict JSON validation rejected or changed a valid live file (rc=$over_rc)"
+  status=1
+fi
+apply_over strict-valid-merge "$DOTFILES_ROOT" "$(printf '{"probe":%s}' "$strict_probe")"
+if [[ "$over_rc" -eq 0 && "$(jq -S '.probe' "$over_file")" == "$(printf '%s' "$strict_probe" | jq -S '.')" ]] \
+  && [[ "$(jq -S 'del(.probe)' "$over_file")" == "$(jq -S '.' "$off_file")" ]]; then
+  ok "test passed: valid JSON numbers, literals and escaped strings survive a managed merge"
+else
+  fail "test failed: strict JSON validation rejected valid JSON or changed the merged values (rc=$over_rc)"
+  status=1
+fi
+# jq 1.7.1 accepts these non-JSON numbers and normalizes them when a
+# managed key changes (#557). Keep the raw spelling in the seed: building
+# it with jq would hide the bug. Each seed is missing managed keys, so an
+# accepted seed would be rewritten. A live-only marker must not leak in
+# the error, including a fromjson error for structurally broken JSON.
+for bad_value in 'NaN' 'Infinity' '01' '.5' '+1' \
+  '[true false]' '{"x":1,}' '"\q"' 'true false'; do
+  bad_seed="$(printf '{"probe":"dotfiles-live-error-probe","value":%s}' "$bad_value")"
+  apply_over strict-json "$DOTFILES_ROOT" "$bad_seed"
+  strict_rc=0
+  chezmoi --config "$over_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+    --destination "$over_root/home" apply >"$over_root/apply.log" 2>&1 || strict_rc=$?
+  if [[ "$over_rc" -ne 0 && "$strict_rc" -ne 0 ]] \
+    && cmp -s "$over_root/seed.json" "$over_file" \
+    && ! grep -Fq 'dotfiles-live-error-probe' "$over_root/apply.log"; then
+    ok "test passed: non-JSON value $bad_value stops apply, keeps every byte and hides live content"
+  else
+    fail "test failed: non-JSON value $bad_value was accepted, changed or exposed (rc=$over_rc/$strict_rc)"
     status=1
   fi
 done
