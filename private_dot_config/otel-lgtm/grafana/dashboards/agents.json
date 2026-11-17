@@ -137,8 +137,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "API request",
-      "description": "codex.api_request の数",
+      "title": "model の応答",
+      "description": "codex.sse_event の event_kind=response.completed の数 (model への request 1 回に 1 つ)。codex-app-server はこの event を出さないので、その分は入らない。codex.api_request は model の一覧 (/models) の取得なので数えない (#542)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -156,7 +156,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({service_name=~\"$service\"} | event_name=\"codex.api_request\" [$__range]))",
+          "expr": "sum(count_over_time({service_name=~\"$service\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -200,8 +200,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "API request の失敗",
-      "description": "codex.api_request のうち success=false の数",
+      "title": "request の失敗",
+      "description": "codex.websocket_request (model への request)・codex.websocket_connect (接続)・codex.api_request (HTTP。今は model の一覧の取得) のうち success=false の数。下の「失敗した request」と同じ範囲 (#542)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -219,7 +219,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({service_name=~\"$service\"} | event_name=\"codex.api_request\" | success=\"false\" [$__range]))",
+          "expr": "sum(count_over_time({service_name=~\"$service\"} | event_name=~\"codex.websocket_request|codex.websocket_connect|codex.api_request\" | success=\"false\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -452,7 +452,7 @@
     {
       "id": 8,
       "type": "row",
-      "title": "token と request",
+      "title": "token と応答",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -545,8 +545,8 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "API request (endpoint と status ごと)",
-      "description": "codex.api_request の数を、endpoint と HTTP の status ごとに数えたもの",
+      "title": "model の応答 (model ごと)",
+      "description": "codex.sse_event の event_kind=response.completed の数を、model ごとに数えたもの。codex-app-server の分は入らない (#542)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -560,8 +560,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, http_response_status_code) (count_over_time({service_name=~\"$service\"} | event_name=\"codex.api_request\" [$__interval]))",
-          "legendFormat": "{{endpoint}} {{http_response_status_code}}",
+          "expr": "sum by (model) (count_over_time({service_name=~\"$service\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" [$__interval]))",
+          "legendFormat": "{{model}}",
           "queryType": "range",
           "datasource": {
             "type": "loki",
