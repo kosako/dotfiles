@@ -1256,6 +1256,17 @@ config.local の解決)を確認する。chezmoi が必要(render job)。
 
 ## test-agent-launch-guard.sh
 
+Claude の起動基準(#539)は stub が受け取った argv で検証する。
+新しい session、明示の model / effort(独立指定と `=` 形)、再開の全 flag、subcommand、help / version、
+`-p` / `--print` / `--bg`、`--` 以後の引数、空白と空の引数、基準 file の欠落・不正・読めない状態を含む。
+基準があっても guard の拒否が優先することを確かめる。実 CLI は起動しない。
+`test-claude-settings.sh` は同じ profile data の変更が settings.json と配布 file の両方に届くことを確かめる。
+既存の personal golden は byte で維持する。`test-render.sh` は配布 file を含む managed 一覧を確かめる。
+`test-doctor.sh` の part 3 は基準との一致・差分・欠落・壊れた file を情報表示し、exit 0 を保つことを確かめる。
+doctor の「Claude launch baseline」は基準、`~/.config/dotfiles/claude-launch-baseline` の状態、
+live settings の `model` / `effortLevel` との違いだけを報告する。他の key や live の値は表示しない。
+起動 flag の追加は zsh の関数を通るときだけで、herdr の直接起動や script には効かない([shell](../docs/shell.md))。
+
 dot_zshrc の agent launch guard(#491)をマーカー抽出 + fixture HOME + `zsh -f` で検証する。`claude` / `codex` /
 `opencode` は呼び出しを記録する stub で、実の CLI は起動しない。既定の root(`~/src` と `~/dotfiles`。root そのものと
 その下)では引数と exit status をそのまま渡して起動し、`~/Downloads`・HOME・接頭辞が同じ別の dir(`~/srcx`)・HOME の外・

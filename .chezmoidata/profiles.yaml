@@ -1,6 +1,10 @@
 profiles:
   personal:
     environmentKind: personal
+    # #539: one baseline for fresh shell sessions and managed settings defaults.
+    claudeLaunchBaseline:
+      model: opus[1m]
+      effort: xhigh
     modules:
       - base
       - git-profile

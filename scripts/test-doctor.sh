@@ -5393,6 +5393,33 @@ al_doctor() {
 doctor_expect "agent launch guard with the default roots -> ok" al_doctor "$PATH" -- \
   "[ok] agent launch guard in ~/.zshrc: claude / codex / opencode start only under ~/src and ~/dotfiles (refused in: ~, ~/Downloads)" \
   "$al_item"
+# CB) #539: every state is informational and doctor still exits zero.
+cb_file="$al_home/.config/dotfiles/claude-launch-baseline"
+mkdir -p "$al_home/.claude"
+printf 'opus[1m]\nxhigh\n' > "$cb_file"
+printf '{"model":"opus[1m]","effortLevel":"xhigh","privateCanary":"DO_NOT_SHOW_BASELINE_CANARY"}\n' > "$al_home/.claude/settings.json"
+doctor_expect "Claude launch baseline matches profile and live settings" al_doctor "$PATH" -- \
+  "~Claude launch baseline: model=opus[1m] effort=xhigh" \
+  "~Claude launch baseline file: matches profile" \
+  "~Claude live settings model: matches baseline" \
+  "~Claude live settings effortLevel: matches baseline" ! "DO_NOT_SHOW_BASELINE_CANARY"
+printf 'sonnet\nlow\n' > "$cb_file"
+printf '{"model":"fable","effortLevel":"low"}\n' > "$al_home/.claude/settings.json"
+doctor_expect "Claude launch baseline drift is informational" al_doctor "$PATH" -- \
+  "~Claude launch baseline file: differs from profile" \
+  "~Claude live settings model: differs from baseline" \
+  "~Claude live settings effortLevel: differs from baseline" ! "[warn] Claude launch baseline" ! "[fail]"
+printf 'opus[1m]\n' > "$cb_file"
+printf 'invalid json\n' > "$al_home/.claude/settings.json"
+doctor_expect "Claude launch baseline malformed files" al_doctor "$PATH" -- \
+  "~Claude launch baseline file: unavailable or malformed" \
+  "~Claude live settings model: not checked (unreadable JSON)" \
+  "~Claude live settings effortLevel: not checked (unreadable JSON)"
+rm "$cb_file" "$al_home/.claude/settings.json"
+doctor_expect "Claude launch baseline missing files" al_doctor "$PATH" -- \
+  "~Claude launch baseline file: absent" \
+  "~Claude live settings model / effortLevel: not checked"
+
 # AL-2) a roots file with two roots (one a canary), Desktop present too ->
 #       ok with the count, the canary never shown.
 mkdir -p "$al_home/Desktop"
@@ -5439,7 +5466,7 @@ doctor_expect "agent launch guard block without the codex wrapper -> action chez
   "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
 # AL-6e) ... and a claude wrapper that does not call the guard -> the same.
 awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' "$DOTFILES_ROOT/dot_zshrc" \
-  | sed 's/^function claude .*/function claude { command claude "$@" }/' > "$al_home/.zshrc"
+  | sed 's/_agent_launch_guard claude || return/: # guard omitted for test/' > "$al_home/.zshrc"
 doctor_expect "agent launch guard with a claude wrapper that skips the guard -> action chezmoi apply" al_doctor "$PATH" -- \
   "[warn] $al_incomplete" "$al_step" ! "[ok] agent launch guard"
 # AL-6c) ... and a judge that fails with another status (2) -> the same.
@@ -5495,8 +5522,10 @@ doctor_expect "agent launch guard with no zsh on PATH -> item" al_doctor "$al_no
 al_nomod="$fixture_home/.dotfiles-al-nomod"
 copy_repo_fixture "$al_nomod"
 remove_module_all "$al_nomod" shell-extra
+yq -i 'del(.profiles.personal.claudeLaunchBaseline)' "$al_nomod/.chezmoidata/profiles.yaml"
 doctor_expect "agent launch guard on a profile without shell-extra -> item not managed" al_doctor "$PATH" "$al_nomod" -- \
-  "[info] - agent launch guard not managed for this profile (shell-extra module inactive)" ! "[ok] agent launch guard"
+  "[info] - agent launch guard not managed for this profile (shell-extra module inactive)" \
+  "[info] - Claude launch baseline: not configured for this profile" ! "[ok] agent launch guard"
 
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/

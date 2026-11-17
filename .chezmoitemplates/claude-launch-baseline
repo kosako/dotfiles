@@ -1,0 +1,18 @@
+{{- /* Optional profile data, not an authority or install capability. Both
+       consumers use the same validated pair. Empty/missing means disabled. */ -}}
+{{- $baseline := get (index .profiles .profile) "claudeLaunchBaseline" | default dict -}}
+{{- $model := get $baseline "model" -}}
+{{- $effort := get $baseline "effort" -}}
+{{- range $value := list $model $effort -}}
+{{-   if not (kindIs "string" $value) -}}
+{{-     fail "claudeLaunchBaseline values must be strings" -}}
+{{-   end -}}
+{{-   if regexMatch "[[:cntrl:]]" $value -}}
+{{-     fail "claudeLaunchBaseline values must not contain control characters" -}}
+{{-   end -}}
+{{- end -}}
+{{- if and $model $effort -}}
+{{-   dict "model" $model "effort" $effort | toJson -}}
+{{- else -}}
+{}
+{{- end -}}
