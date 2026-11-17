@@ -1224,7 +1224,10 @@ work ではされないこと(work が持つ自前の file は byte 単位で不
 `argv` / `timeout_sec` だけであること(知らない key は wrapper が拒否する)・`argv` が `[<home>/go/bin/tacho, "status",
 "--json"]`・`timeout_sec` が整数 20、`"` `\` `&` `<` を含む home の path が JSON の escape を経ても壊れないこと、
 mode が file 0644 / directory 0755 であること(umask 022 に固定して確かめる。#332 F38)、`~/.config/agent-tools/` の隣の
-file が apply で変わらないこと。chezmoi と yq が必要(render job)。実 home には触れない。
+file が apply で変わらないこと。`strict_json_object`(jq)で JSON の object がちょうど 1 つあることを確かめ、
+内容は yq で読む。先頭に余分な comma を入れた file を `check_content` が拒否する対照の case も含む。
+対照の失敗は subshell に閉じ、期待どおりの拒否を ok として数える。
+chezmoi、yq、jq が必要(render job)。実 home には触れない。
 
 ## test-git-hook-gates.sh
 

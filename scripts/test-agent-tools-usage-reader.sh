@@ -22,6 +22,11 @@ source "$SCRIPT_DIR/test-lib.sh"
 
 require_yq || exit 1
 
+if ! command -v jq >/dev/null 2>&1; then
+  fail "jq not found; agent-tools-usage-reader tests require it for strict JSON validation"
+  exit 1
+fi
+
 if ! command -v chezmoi >/dev/null 2>&1; then
   fail "chezmoi not found; agent-tools-usage-reader tests require it"
   exit 1
@@ -102,8 +107,8 @@ section "agent-tools-usage-reader: managed content (agent-tools contract)"
 #    no usage reader.
 check_content() {
   local label="$1" file="$2" home_dir="$3" got
-  if ! json_query "$file" '.' >/dev/null 2>&1; then
-    fail "test failed: $label: not valid JSON"
+  if ! strict_json_object "$file"; then
+    fail "test failed: $label: not exactly one strict JSON object"
     status=1
   elif [[ "$(json_query "$file" 'keys')" != '["argv","timeout_sec"]' ]]; then
     fail "test failed: $label: keys must be exactly argv and timeout_sec, got $(json_query "$file" 'keys')"
@@ -129,6 +134,20 @@ check_content() {
   fi
 }
 check_content "committed personal" "$managed" "$HOME"
+
+# A leading comma preserves every content value but is not strict JSON.
+# Isolate check_content's status so an expected failure cannot fail the suite.
+sed 's/^{/{,/' "$managed" > "$personal_root/leading-comma.json"
+if (
+  status=0
+  check_content "leading comma" "$personal_root/leading-comma.json" "$HOME" >/dev/null 2>&1
+  [[ "$status" -eq 1 ]]
+); then
+  ok "test passed: check_content rejects a leading comma"
+else
+  fail "test failed: check_content accepted a leading comma"
+  status=1
+fi
 
 # 3) A home path with JSON-special characters survives (toJson escapes it).
 odd_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-usage-reader-odd.XXXXXX")"
