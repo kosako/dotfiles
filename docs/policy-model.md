@@ -409,7 +409,8 @@ skill は `~/.claude/skills` を OpenCode が直接読むので再配布しな�
 
 ## Git global ignore(`git-ignore` module、#248)
 
-AI agent の local-only file(agent packet `.agent-packets/`、Claude Code の `**/.claude/settings.local.json`)を
+AI agent の local-only file(agent packet `.agent-packets/`、session 状態 `.agent-session-progress/`、
+Claude Code の `**/.claude/settings.local.json`)を
 全 repo から除外する managed な global gitignore `~/.config/git/ignore`。git 既定の excludes 場所に置き、
 managed `~/.gitconfig` は `core.excludesFile` を pin しない(明示値は host 自身の設定を黙って上書きする)。
 git は global excludes を 1 file しか読まないので `.local` は無く、host 固有の除外は各 repo の

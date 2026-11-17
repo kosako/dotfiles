@@ -7,13 +7,15 @@ dotfiles 側で実装したもの。
 
 ## 何を除外するか
 
-managed file `~/.config/git/ignore`(source: `private_dot_config/git/ignore`)が持つ pattern は 2 行だけ:
+managed file `~/.config/git/ignore`(source: `private_dot_config/git/ignore`)が持つ pattern は 3 行だけ:
 
 ```text
 .agent-packets/                    agent packet(Issue 単位の作業状態。private な path / 理由 / 残量を含む)
+.agent-session-progress/           session 途中の状態(personal-session-progress が表示用に記録する)
 **/.claude/settings.local.json     Claude Code の project local settings(agent が動的許可を書く。深さ問わず)
 ```
 
+- `.agent-packets/` と `.agent-session-progress/` は先頭に `/` を付けず、どの深さでも除外する。
 - `.agent-context.local.md`(repo ごとの user 正本)は**入れない**。従来どおり各 repo の `.gitignore` の
   責務(#248 の受け入れ条件)。
 - pattern の追加は `test-git-ignore.sh`(exact pin)と `doctor.sh`(pattern list)の両方を意図して
@@ -51,7 +53,7 @@ managed file `~/.config/git/ignore`(source: `private_dot_config/git/ignore`)が�
   空なら「global excludes を読まない」の warn、config が読めなければその旨の warn。非 active profile
   では left-as-is の item。
 - `doctor`(apply 後、Git section): managed file の presence、git が**実際に読む** excludes path が
-  managed file と一致するか、2 つの pattern 行が残っているか(drift)。excludes path の解決は
+  managed file と一致するか、3 つの pattern 行が残っているか(drift)。excludes path の解決は
   `lib-policy.sh` の `git_excludes_file_setting`(preflight と共有)で、git と同じく **global scope が
   system scope に勝ち**、`GIT_CONFIG_NOSYSTEM` が真なら system を飛ばす(`git config --system` 自体は
   この変数を見ないので自前で飛ばす。system だけに `core.excludesFile` がある host は `--global` だけの
@@ -64,10 +66,12 @@ managed file `~/.config/git/ignore`(source: `private_dot_config/git/ignore`)が�
 ## 検証
 
 `scripts/test-git-ignore.sh`: personal で apply される / work でされない、header と pattern の exact
-pin、そして **`.gitignore` を持たない throwaway repo** で `git status` が `.agent-packets/x.md` と
-`.claude/settings.local.json`(深さ問わず)を出さず、`keep.md` と `.agent-context.local.md` は出すこと
-(空 home の control run で全 file が出ることを先に確認し、`git check-ignore -v` で判定源が managed
-file であることまで確認)。git は `git init` を含めて `env -i` の throwaway HOME + `GIT_CONFIG_NOSYSTEM`
+pin、そして **`.gitignore` を持たない throwaway repo** で `git status` が `.agent-packets/x.md`、
+`.agent-session-progress/x.json` と `.claude/settings.local.json`(深さ問わず)を出さないことを確認する。
+`keep.md` と `.agent-context.local.md` は出す。session progress は root と下位の両方で
+`git check-ignore -q` の exit 0 も確認する。
+空 home の control run で全 file が出ることを先に確認し、`git check-ignore -v` で判定源が managed
+file であることまで確認する。git は `git init` を含めて `env -i` の throwaway HOME + `GIT_CONFIG_NOSYSTEM`
 + 空の `--template` で動かし(host の `init.templateDir` が `info/exclude` を仕込めない)、実 home や
 実 global / system config には触れない。doctor / preflight の case(`test-doctor.sh` / `test-preflight.sh`)
 も同じく `env -i` で、system scope だけの設定は `GIT_CONFIG_SYSTEM` の fixture file で再現する。

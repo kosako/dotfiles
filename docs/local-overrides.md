@@ -270,8 +270,8 @@ export AGENT_TOOLS="$HOME/path/to/agent-tools"
 
 ## Git global ignore: managed-only(local 無し、#248)
 
-managed な `~/.config/git/ignore`(`git-ignore` module。AI agent の local-only file `.agent-packets/` と
-`**/.claude/settings.local.json` を全 repo から除外)には **local override file が無い**。git は global
+managed な `~/.config/git/ignore`(`git-ignore` module。AI agent の local-only file `.agent-packets/`、
+`.agent-session-progress/` と `**/.claude/settings.local.json` を全 repo から除外)には **local override file が無い**。git は global
 excludes を **1 file しか読まない**(`core.excludesFile`、未設定なら XDG 既定の `~/.config/git/ignore`)ので、
 zsh の末尾 source や SSH の末尾 Include に当たる合成の仕組みが git 側に存在しないため。
 

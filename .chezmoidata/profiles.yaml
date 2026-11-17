@@ -29,8 +29,9 @@ profiles:
       - git-signing
       - git-hook-gates
       # #248: managed global gitignore (~/.config/git/ignore) excluding AI
-      # agent local-only files (.agent-packets/ packets, .claude/
-      # settings.local.json) from every repo. Module-gated, personal only:
+      # agent local-only files (.agent-packets/ packets, .agent-session-progress/
+      # session state, .claude/settings.local.json) from every repo.
+      # Module-gated, personal only:
       # the packet convention is agent-tools', and a work machine's existing
       # global ignore must not be replaced without a diff (preflight warns).
       - git-ignore
