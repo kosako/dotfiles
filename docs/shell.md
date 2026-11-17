@@ -80,6 +80,29 @@
   あるかは `whence -w claude`(`claude: function` と出る)で見る。`scripts/test-agent-launch-guard.sh` が隔離した zsh で
   振る舞いを固定する。
 
+### Claude の新しい session の基準(#539)
+
+`claude` 関数は起動場所の guard を通った後、基準の `--model` と `--effort` を利用者の引数より前に足す。
+基準の正本は `.chezmoidata/profiles.yaml` の `claudeLaunchBaseline`。personal は `opus[1m]` / `xhigh`。
+同じ data から settings.json の既定と `~/.config/dotfiles/claude-launch-baseline` を render する。
+後者は model、effort の順の 2 行で、各行の末尾に改行を持つ。関数は起動のたびに値だけを読み、shell code として実行しない。
+file が無い、読めない、値が空、形式が違うときは flag を足さない。data を持たない profile にも足さない。
+
+- `--model` / `--model=…` の明示は model の追加だけを止める。`--effort` / `--effort=…` も独立に扱う。
+- `-r` / `--resume` / `--resume=…` / `-c` / `--continue` / `--from-pr` / `--from-pr=…` /
+  `--teleport` / `--teleport=…` による再開には両方とも足さない。中断した session の設定で続ける。
+- 最初の引数が subcommand のときも足さない。対象は Claude Code 2.1.326 の Commands:
+  `agents`、`attach`、`auth`、`auto-mode`、`doctor`、`gateway`、`import`、`install`、`logs`、`mcp`、
+  `plugin`、`plugins`、`purge`、`respawn`、`rm`、`setup-token`、`stop`、`kill`、`ultrareview`、`update`、`upgrade`。
+- `--version` / `-v` / `--help` / `-h` にも足さない。引数の検査は `--` の前まで。
+- `-p` / `--print` と `--bg` は新しい session として基準を足す。
+
+環境変数 `ANTHROPIC_MODEL` と `CLAUDE_CODE_EFFORT_LEVEL` は設定しない。
+session 内の `/model` や `/effort` による変更を使えるままにするため。
+関数を通さない `command claude`、herdr が直接起動する形、script、desktop app、IDE からの起動には効かない。
+doctor の「Claude launch baseline」は基準、file の状態、live settings の 2 key との違いを情報として表示する。
+違いで fail にはしない。apply 後の実機確認は、session の値を変更して保存し、新しく起動した `/status` で基準に戻るかを見る。
+
 ### 出力のコピー(AI 連携)
 
 - `Ctrl-O` … **Enter の代わりに**押すと、そのコマンドを実行しつつ「`$ コマンド` + 出力 + `[exit status]`」をクリップボードへコピーする(AI チャットに貼って相談する用途)。普段は今までどおり Enter、コピーしたいコマンドだけ Ctrl-O。`&&` 連結 / pipe / 複数行コマンドも行全体を捕捉する。

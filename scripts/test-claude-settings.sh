@@ -135,6 +135,63 @@ else
   status=1
 fi
 
+# #539: profile data drives both consumers; the existing golden below stays
+# byte-identical. A changed pair and an absent pair exercise the data path.
+baseline_src="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-baseline-src.XXXXXX")"
+tmp_roots+=("$baseline_src")
+make_flipped_source "$baseline_src"
+for variant in changed absent empty; do
+  case "$variant" in
+    changed) yq -i '.profiles.personal.claudeLaunchBaseline = {"model": "sonnet", "effort": "low"}' "$baseline_src/src/.chezmoidata/profiles.yaml" ;;
+    absent) yq -i 'del(.profiles.personal.claudeLaunchBaseline)' "$baseline_src/src/.chezmoidata/profiles.yaml" ;;
+    empty) yq -i '.profiles.personal.claudeLaunchBaseline = {"model": "", "effort": ""}' "$baseline_src/src/.chezmoidata/profiles.yaml" ;;
+  esac
+  baseline_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-baseline.XXXXXX")"
+  tmp_roots+=("$baseline_root")
+  if ! render_personal_into "$baseline_src/src" "$baseline_root"; then
+    fail "baseline $variant render failed"
+    exit 1
+  fi
+  baseline_settings="$baseline_root/home/.claude/settings.json"
+  baseline_file="$baseline_root/home/.config/dotfiles/claude-launch-baseline"
+  if [[ "$variant" == changed ]]; then
+    if jq -e '.model == "sonnet" and .effortLevel == "low"' "$baseline_settings" >/dev/null \
+      && cmp -s "$baseline_file" <(printf 'sonnet\nlow\n'); then
+      ok "profile baseline changes both settings defaults and shell data"
+    else
+      fail "profile baseline did not reach both consumers"
+      status=1
+    fi
+  elif jq -e 'has("model") == false and has("effortLevel") == false' "$baseline_settings" >/dev/null \
+    && [[ ! -s "$baseline_file" ]]; then
+    ok "baseline $variant adds no settings defaults or shell data"
+  else
+    fail "baseline $variant unexpectedly adds defaults"
+    status=1
+  fi
+done
+if ! cmp -s "$off_root/home/.config/dotfiles/claude-launch-baseline" <(printf 'opus[1m]\nxhigh\n'); then
+  fail "personal shell baseline differs from expected pair"
+  status=1
+fi
+for invalid_baseline in false '"sonnet\nextra"'; do
+  value="$invalid_baseline" yq -i '.profiles.personal.claudeLaunchBaseline = {"model": env(value), "effort": "low"}' "$baseline_src/src/.chezmoidata/profiles.yaml"
+  baseline_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-baseline-invalid.XXXXXX")"
+  tmp_roots+=("$baseline_root")
+  mkdir -p "$baseline_root/home"
+  printf '[data]\nprofile = "personal"\n' > "$baseline_root/chezmoi.toml"
+  if chezmoi --config "$baseline_root/chezmoi.toml" --source "$baseline_src/src" \
+    --destination "$baseline_root/home" apply > "$baseline_root/output" 2>&1; then
+    fail "invalid baseline unexpectedly rendered"
+    status=1
+  elif grep -q 'claudeLaunchBaseline values must' "$baseline_root/output"; then
+    ok "baseline rejects non-string or control-character data"
+  else
+    fail "invalid baseline failed for an unexpected reason"
+    status=1
+  fi
+done
+
 # 2) enforceAiSandbox=true (personal only) -> strict, public-safe sandbox
 #    block. Flip the capability in a throwaway source copy so the committed
 #    default stays false.

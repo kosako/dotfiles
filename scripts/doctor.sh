@@ -1843,6 +1843,52 @@ else
   ok "AI tool install/sync not managed (enableAiTools=false)"
 fi
 
+section "Claude launch baseline (report-only)"
+report_claude_launch_baseline() {
+  local model effort file file_model file_effort extra live key expected comparison
+  model="$(p="$profile" yq '.profiles[strenv(p)].claudeLaunchBaseline.model // ""' "$PROFILES_FILE")"
+  effort="$(p="$profile" yq '.profiles[strenv(p)].claudeLaunchBaseline.effort // ""' "$PROFILES_FILE")"
+  if [[ -z "$model" || -z "$effort" ]]; then
+    item "Claude launch baseline: not configured for this profile"
+    return
+  fi
+  item "Claude launch baseline: model=$(display_safe "$model") effort=$(display_safe "$effort")"
+  file="$HOME/.config/dotfiles/claude-launch-baseline"
+  if [[ ! -e "$file" && ! -L "$file" && -x "${file%/*}" ]]; then
+    item "Claude launch baseline file: absent (~/.config/dotfiles/claude-launch-baseline); shell adds no flags"
+  elif [[ -f "$file" && -r "$file" ]] && {
+    IFS= read -r file_model && IFS= read -r file_effort &&
+      ! IFS= read -r extra && [[ -z "$extra" ]]
+  } 2>/dev/null < "$file" && [[ -n "$file_model" && -n "$file_effort" && "$file_model$file_effort" != *[[:cntrl:]]* ]]; then
+    if [[ "$file_model" == "$model" && "$file_effort" == "$effort" ]]; then
+      item "Claude launch baseline file: matches profile (~/.config/dotfiles/claude-launch-baseline)"
+    else
+      item "Claude launch baseline file: differs from profile (~/.config/dotfiles/claude-launch-baseline); chezmoi apply refreshes it"
+    fi
+  else
+    item "Claude launch baseline file: unavailable or malformed (~/.config/dotfiles/claude-launch-baseline); shell adds no flags"
+  fi
+  live="$HOME/.claude/settings.json"
+  # Select only these two preferences. Never print other settings or live values.
+  if [[ -f "$live" && -r "$live" ]] && command -v jq >/dev/null 2>&1; then
+    for key in model effortLevel; do
+      expected="$model"
+      [[ "$key" != effortLevel ]] || expected="$effort"
+      if comparison="$(jq -ser --arg key "$key" --arg expected "$expected" '
+        if length != 1 or (.[0] | type) != "object" then error("invalid settings")
+        elif .[0][$key] == $expected then "matches baseline"
+        else "differs from baseline (or unset)" end' "$live" 2>/dev/null)"; then
+        item "Claude live settings $key: $comparison (informational; session changes may persist)"
+      else
+        item "Claude live settings $key: not checked (unreadable JSON)"
+      fi
+    done
+  else
+    item "Claude live settings model / effortLevel: not checked (file or jq unavailable)"
+  fi
+}
+report_claude_launch_baseline
+
 section "agent launch guard (report-only)"
 # The managed ~/.zshrc wraps claude / codex / opencode so an interactive shell
 # starts them only under an agent launch root (#491, docs/shell.md). doctor

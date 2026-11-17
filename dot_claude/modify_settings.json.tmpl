@@ -1,5 +1,6 @@
 {{- template "require-profile" . -}}
 {{- $caps := index .profiles .profile "capabilities" -}}
+{{- $launchBaseline := includeTemplate "claude-launch-baseline" . | fromJson -}}
 {{- /* GitHub injection guard (epic #119). Best-effort / steering only:
        command-string matchers are bypassable ($(), equivalent read paths like
        xxd / python open(), MCP by other means) and are NOT an enforcement
@@ -383,7 +384,9 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
     "OTEL_LOG_TOOL_DETAILS": "1"
   },
 {{- end }}
-  "model": "opus[1m]",
+{{- if $launchBaseline }}
+  "model": {{ $launchBaseline.model | toJson }},
+{{- end }}
   "statusLine": {
     "type": "command",
     "command": {{ printf "%s statusline" (includeTemplate "shell-word" (printf "%s/go/bin/tacho" .chezmoi.homeDir)) | toJson }},
@@ -404,7 +407,9 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
       "autoUpdate": false
     }
   },
-  "effortLevel": "xhigh",
+{{- if $launchBaseline }}
+  "effortLevel": {{ $launchBaseline.effort | toJson }},
+{{- end }}
   "agentPushNotifEnabled": true,
   "remoteControlAtStartup": true,
   "skipWorkflowUsageWarning": true,

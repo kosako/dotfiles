@@ -31,6 +31,24 @@ cost posture のような抽象化・共通化はしない。差分が大きく�
 profile ごとに独立した settings を持つ。今 dotfiles が管理するのは **personal のみ**で、
 work / client は別系統(上表)。
 
+## 新しい session の model / effort(#539)
+
+`.chezmoidata/profiles.yaml` の profile data `claudeLaunchBaseline` が基準の正本。
+personal の `model: opus[1m]` と `effort: xhigh` から、settings.json の `model` / `effortLevel` を render する。
+基準が無い、またはどちらかが空の profile には、この 2 key の既定を出さない。
+`claude-settings` module は、同じ値を `~/.config/dotfiles/claude-launch-baseline` にも配る。
+これは model、effort の順の改行付き 2 行で、shell code ではない。値に制御文字を含む data は render で拒否する。
+
+live の `model` を apply で残す既存の動作は維持する。`effortLevel` は従来どおり apply で基準に揃える。
+session 中の変更を保存しても、次の新しい session は zsh の `claude` 関数が付ける起動 flag で基準から始まる。
+session 中の切り替えを妨げる effort の環境変数は使わない。
+明示の flag、再開、subcommand の扱いは [shell](shell.md#claude-の新しい-session-の基準539) を参照。
+herdr の直接起動や script など、zsh の関数を通さない起動には効かない。
+
+doctor は profile の基準と配布 file の状態を表示する。
+live settings から選ぶ key は `model` と `effortLevel` だけで、値そのものや他の key は表示しない。
+基準との違いや読めない状態は情報表示だけに留め、fail にしない。
+
 ## public-safety
 
 - `settings.json` を public repo に載せるので、commit 前に secret / 社内 path /

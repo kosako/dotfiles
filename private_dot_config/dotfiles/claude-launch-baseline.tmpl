@@ -1,0 +1,6 @@
+{{- template "require-profile" . -}}
+{{- $baseline := includeTemplate "claude-launch-baseline" . | fromJson -}}
+{{- if $baseline -}}
+{{ $baseline.model }}
+{{ $baseline.effort }}
+{{ end -}}

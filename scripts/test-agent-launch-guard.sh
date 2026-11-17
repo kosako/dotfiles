@@ -62,7 +62,7 @@ fi
 fn_file="$fixture_root/guard.zsh"
 awk '/^# --- agent-launch-guard begin ---$/,/^# --- agent-launch-guard end ---$/' \
   "$DOTFILES_ROOT/dot_zshrc" > "$fn_file"
-for fn in claude codex opencode; do
+for fn in codex opencode; do
   if ! grep -q "^function $fn { _agent_launch_guard $fn || return; command $fn \"\$@\" }\$" "$fn_file"; then
     fail "agent-launch-guard extraction broke (the $fn wrapper is missing)"
     exit 1
@@ -271,5 +271,59 @@ if [[ "$probe_out" == $'allowed default\nrefused default\nrefused default\nrefus
 else
   miss "_agent_launch_allowed judges absolute directories physically and refuses a relative one (got: $probe_out)"
 fi
+
+# 9. Claude fresh-session baseline. Assertions inspect actual stub argv and
+# exit status; the real CLI is never run.
+baseline_file="$h/.config/dotfiles/claude-launch-baseline"
+printf 'opus[1m]\nxhigh\n' > "$baseline_file"
+expect_claude_args() {
+  local label="$1" expected="$2"
+  shift 2
+  guard_run "$h/src/personal/repo" claude "$@"
+  if [[ "$run_rc" == 3 && "$run_calls" == "claude$expected" && -z "$run_err" && -z "$run_out" ]]; then
+    pass "$label"
+  else
+    miss "$label (rc=$run_rc calls=$run_calls err=$run_err)"
+  fi
+}
+both=' [--model] [opus[1m]] [--effort] [xhigh]'
+expect_claude_args "new session" "$both"
+expect_claude_args "model override" ' [--effort] [xhigh] [--model] [sonnet]' --model sonnet
+expect_claude_args "effort override" ' [--model] [opus[1m]] [--effort] [low]' --effort low
+expect_claude_args "both overrides" ' [--model] [sonnet] [--effort] [low]' --model sonnet --effort low
+expect_claude_args "model equals override" ' [--effort] [xhigh] [--model=sonnet]' --model=sonnet
+expect_claude_args "effort equals override" ' [--model] [opus[1m]] [--effort=low]' --effort=low
+expect_claude_args "both equals overrides" ' [--model=sonnet] [--effort=low]' --model=sonnet --effort=low
+for flag in -r --resume --resume=session -c --continue --from-pr --from-pr=123 --teleport --teleport=session; do
+  expect_claude_args "resume $flag" " [$flag]" "$flag"
+done
+for flag in -p --print --bg; do
+  expect_claude_args "new session $flag preserves arguments" "$both [$flag] [a b] []" "$flag" 'a b' ''
+done
+for subcommand in agents attach auth auto-mode doctor gateway import install logs mcp plugin plugins purge respawn rm setup-token stop kill ultrareview update upgrade; do
+  expect_claude_args "subcommand $subcommand" " [$subcommand]" "$subcommand"
+done
+for flag in --version -v --help -h; do
+  expect_claude_args "info $flag" " [$flag]" "$flag"
+done
+expect_claude_args "subcommand only in first argument" "$both [-p] [doctor]" -p doctor
+expect_claude_args "stop parsing at double dash" "$both [--] [--resume] [--model=sonnet] [--effort] [low] [--help]" -- --resume --model=sonnet --effort low --help
+expect_refused "baseline does not bypass guard" "$h/Downloads/site" claude "$(refused_line claude "~/Downloads/site" "$default_roots")"
+printf 'sonnet\nlow\n' > "$baseline_file"
+expect_claude_args "read changed baseline on each launch" ' [--model] [sonnet] [--effort] [low]'
+for contents in '' $'opus[1m]\n' $'\nxhigh\n' $'opus[1m]\n\n' $'opus[1m]\nxhigh\nextra' $'opus[1m]\nxhigh\n\n' $'opus[1m]\nxhigh\r\n'; do
+  printf '%s' "$contents" > "$baseline_file"
+  expect_claude_args "empty or malformed baseline" ' [-p] [a b]' -p 'a b'
+done
+chmod 000 "$baseline_file"
+if [[ ! -r "$baseline_file" ]]; then
+  expect_claude_args "unreadable baseline" ' [-p]' -p
+fi
+chmod 600 "$baseline_file"
+rm "$baseline_file"
+expect_claude_args "absent baseline" ' [-p]' -p
+mkdir "$baseline_file"
+expect_claude_args "baseline is a directory" ' [-p]' -p
+rmdir "$baseline_file"
 
 exit "$status"

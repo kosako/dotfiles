@@ -464,7 +464,35 @@ _agent_launch_guard() {
 }
 # `function NAME` keeps an alias of the same name from rewriting the name
 # while this is parsed.
-function claude { _agent_launch_guard claude || return; command claude "$@" }
+function claude {
+  emulate -L zsh
+  _agent_launch_guard claude || return
+  local arg model effort extra
+  local -i skip=0 has_model=0 has_effort=0
+  local -a baseline=()
+  case "${1-}" in
+    agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) skip=1 ;;
+  esac
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      -r|--resume|--resume=*|-c|--continue|--from-pr|--from-pr=*|--teleport|--teleport=*|--version|-v|--help|-h) skip=1 ;;
+      --model|--model=*) has_model=1 ;;
+      --effort|--effort=*) has_effort=1 ;;
+    esac
+  done
+  # Read two literal lines, never source shell code. Missing/partial/unreadable
+  # data keeps the old launch behavior. Read on each launch so apply takes effect.
+  local file="$HOME/.config/dotfiles/claude-launch-baseline"
+  if (( ! skip )) && [[ -f "$file" && -r "$file" ]] && {
+    IFS= read -r model && IFS= read -r effort &&
+      ! IFS= read -r extra && [[ -z "$extra" ]]
+  } 2>/dev/null < "$file" && [[ -n "$model" && -n "$effort" && "$model$effort" != *[[:cntrl:]]* ]]; then
+    (( has_model )) || baseline+=(--model "$model")
+    (( has_effort )) || baseline+=(--effort "$effort")
+  fi
+  command claude "${baseline[@]}" "$@"
+}
 function codex { _agent_launch_guard codex || return; command codex "$@" }
 function opencode { _agent_launch_guard opencode || return; command opencode "$@" }
 # --- agent-launch-guard end ---
