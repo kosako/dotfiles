@@ -98,6 +98,10 @@ main 直 commit は例外扱いにする。
 
 以下は GitHub Actions(`.github/workflows/validate.yml`)が PR ごとに自動実行する(shellcheck は warning 以上で fail)。手元での事前実行も引き続き推奨する。
 
+CI の yq・age・chezmoi・codex の取得は、`curl -fsSL --retry 3 --retry-all-errors --retry-delay 1` で失敗時に最大 3 回再試行する。
+通信の失敗 (exit 56 など) も対象にし、待ち時間は 1 秒にする。版の pin と取得後の SHA-256 検査は維持する。
+runner 自体が GitHub との通信を失う障害は、この再試行の対象外とする。
+
 ```sh
 ./scripts/validate-policy.sh --all
 ./scripts/test-policy.sh
