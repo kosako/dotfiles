@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
 
+# Retries keep version pins and checksum verification, so different content is rejected.
 env:
   YQ_VERSION: 4.54.1
   YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
@@ -40,7 +41,7 @@ jobs:
       - name: install yq (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
           echo "${YQ_SHA256}  yq" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           install -m 0755 yq "$HOME/.local/bin/yq"
@@ -51,7 +52,7 @@ jobs:
       - name: install age (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o age.tar.gz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o age.tar.gz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz"
           echo "${AGE_SHA256}  age.tar.gz" | sha256sum -c -
           tar -xzf age.tar.gz age/age age/age-keygen
           mkdir -p "$HOME/.local/bin"
@@ -182,7 +183,7 @@ jobs:
       - name: install yq (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_darwin_arm64"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_darwin_arm64"
           echo "${YQ_SHA256_DARWIN_ARM64}  yq" | shasum -a 256 -c -
           mkdir -p "$HOME/.local/bin"
           install -m 0755 yq "$HOME/.local/bin/yq"
@@ -191,7 +192,7 @@ jobs:
       - name: install age (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o age.tar.gz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-darwin-arm64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o age.tar.gz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-darwin-arm64.tar.gz"
           echo "${AGE_SHA256_DARWIN_ARM64}  age.tar.gz" | shasum -a 256 -c -
           tar -xzf age.tar.gz age/age age/age-keygen
           mkdir -p "$HOME/.local/bin"
@@ -203,7 +204,7 @@ jobs:
         if: matrix.group == 'render'
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o chezmoi.tar.gz "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_darwin_arm64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o chezmoi.tar.gz "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_darwin_arm64.tar.gz"
           echo "${CHEZMOI_SHA256_DARWIN_ARM64}  chezmoi.tar.gz" | shasum -a 256 -c -
           mkdir -p "$HOME/.local/bin"
           tar -xzf chezmoi.tar.gz -C "$HOME/.local/bin" chezmoi
@@ -213,7 +214,7 @@ jobs:
         if: matrix.group == 'render'
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-aarch64-apple-darwin.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-aarch64-apple-darwin.tar.gz"
           echo "${CODEX_SHA256_DARWIN_ARM64}  codex.tar.gz" | shasum -a 256 -c -
           tar -xzf codex.tar.gz codex-aarch64-apple-darwin
           mkdir -p "$HOME/.local/bin"
@@ -283,7 +284,7 @@ jobs:
       - name: install chezmoi (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o chezmoi.tar.gz "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o chezmoi.tar.gz "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_linux_amd64.tar.gz"
           echo "${CHEZMOI_SHA256}  chezmoi.tar.gz" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           tar -xzf chezmoi.tar.gz -C "$HOME/.local/bin" chezmoi
@@ -292,7 +293,7 @@ jobs:
       - name: install yq (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
           echo "${YQ_SHA256}  yq" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           install -m 0755 yq "$HOME/.local/bin/yq"
@@ -306,7 +307,7 @@ jobs:
       - name: install codex (pinned, checksum verified)
         working-directory: ${{ runner.temp }}
         run: |
-          curl -fsSL -o codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 -o codex.tar.gz "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz"
           echo "${CODEX_SHA256}  codex.tar.gz" | sha256sum -c -
           tar -xzf codex.tar.gz codex-x86_64-unknown-linux-musl
           mkdir -p "$HOME/.local/bin"
