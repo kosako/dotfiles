@@ -226,6 +226,25 @@ Claude Code と Codex の instruction の末尾にその節を足す。
 - **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。一覧は home の下の固定の
   path なので、`XDG_CONFIG_HOME` を `~/.config` 以外にした machine では対象から外れる。
 
+## agent-tools の local の設定 file(#544)
+
+agent-tools は、公開の repo に置けない手元の設定を、断片と同じ `~/.config/agent-tools/` の下の file から読む。どれも
+人が手で書く唯一の写しで、chezmoi の管理にも commit にもしない。
+
+| file | 用途 | 正本(agent-tools) |
+| --- | --- | --- |
+| `public-safety-patterns.local` | 公開の前の public-safety の gate が使う、手元だけの検出の pattern | `docs/git-hook-gates.md` |
+| `checks.local.json` | 品質ループの hook が走らせる check の宣言(repo の実 path ごと) | `docs/quality-loop-hooks.md` |
+| `maintenance-sweep.json` | maintenance sweep の規模と、始める・止める閾値 | skill `personal-maintenance-sweep` の `BUDGET.md` |
+| `repo-baseline.json` | repo の設定の検査から外す repo の一覧 | `docs/repo-baseline.md` |
+
+- 形と読み方は agent-tools の契約。dotfiles は中身を読まない(`checks.local.json` の存在だけは doctor が見る。上の
+  共通原則)。
+- **`backup-paths.yaml`(category `ai-tools`)に載せ**、暗号化バックアップ(#60)の対象にする。無い file は backup が
+  飛ばす。`XDG_CONFIG_HOME` の限界は、上の断片と同じ。
+- 同じ dir の `usage-reader.json` は dotfiles が managed で配る file なので、backup には載せない(下の「agent-tools の
+  残量の読み取り口」)。
+
 ## agent-tools の checkout path(#73)
 
 `dotfiles` の `doctor` は agent-tools の presence を既定 path `~/src/agent/agent-tools`
