@@ -15,6 +15,9 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
   例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)
   だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
   中身を読む検査を足すときは、この一覧も直す。
+  - `~/.claude/settings.json` は、`enableClaudeTelemetry=false` のとき、telemetry の残置を調べる。
+    profile が file を管理していなくても、`"CLAUDE_CODE_ENABLE_TELEMETRY"` を固定文字列で探す(#556)。
+    JSON の解釈や値の判定はせず、値は表示しない。通常の file でない、読めない、存在を確かめられない場合は warn にする。
   - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`。
     `opencode-settings` module が非 active な profile では managed でない `~/.config/opencode/opencode.json` も)は、
     agent-tools の plugin(`~/.config/opencode/plugins/personal-*.js`)が配置されているときだけ JSON として
