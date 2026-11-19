@@ -468,19 +468,33 @@ function claude {
   emulate -L zsh
   _agent_launch_guard claude || return
   local arg model effort extra
-  local -i skip=0 has_model=0 has_effort=0 has_advisor=0 is_print=0
+  local -i skip=0 has_model=0 has_effort=0 has_advisor=0 is_print=0 is_value=0
   local -a baseline=()
   case "${1-}" in
     agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) skip=1 ;;
   esac
   for arg in "$@"; do
+    # An option with a required value takes the next argument as that value,
+    # even when it looks like a flag or `--` (`--system-prompt -p`). Skip it so
+    # it is not read as a flag (#553).
+    if (( is_value )); then
+      is_value=0
+      continue
+    fi
     case "$arg" in
       --) break ;;
       -r|--resume|--resume=*|-c|--continue|--from-pr|--from-pr=*|--teleport|--teleport=*|--version|-v|--help|-h) skip=1 ;;
-      --model|--model=*) has_model=1 ;;
-      --effort|--effort=*) has_effort=1 ;;
-      --advisor|--advisor=*) has_advisor=1 ;;
+      --model) has_model=1 is_value=1 ;;
+      --model=*) has_model=1 ;;
+      --effort) has_effort=1 is_value=1 ;;
+      --effort=*) has_effort=1 ;;
+      --advisor) has_advisor=1 is_value=1 ;;
+      --advisor=*) has_advisor=1 ;;
       -p|--print) is_print=1 ;;
+      # The options with a required value in Claude Code 2.1.328 --help, plus
+      # the documented ones it does not list (*-file, --permission-prompt-tool).
+      # An optional value (`[value]`) never takes an argument starting with `-`.
+      --add-dir|--agent|--agents|--allowedTools|--allowed-tools|--append-system-prompt|--append-system-prompt-file|--autocompact|--betas|--debug-file|--disallowedTools|--disallowed-tools|--environment|--fallback-model|--file|--input-format|--json-schema|--max-budget-usd|--mcp-config|-n|--name|--output-format|--permission-mode|--permission-prompt-tool|--permission-prompts|--plugin-dir|--plugin-url|--remote-control-session-name-prefix|--session-id|--setting-sources|--settings|--system-prompt|--system-prompt-file|--system-prompt-snapshot|--tools) is_value=1 ;;
     esac
   done
   # Read two literal lines, never source shell code. Missing/partial/unreadable

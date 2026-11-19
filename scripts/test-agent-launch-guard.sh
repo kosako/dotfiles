@@ -313,6 +313,16 @@ done
 expect_claude_args "subcommand only in first argument" "$base [-p] [doctor]" -p doctor
 expect_claude_args "stop parsing at double dash" "$both [--] [--resume] [--model=sonnet] [--effort] [low] [--help]" -- --resume --model=sonnet --effort low --help
 expect_claude_args "print after double dash does not suppress advisor" "$both [--] [-p]" -- -p
+# An option with a required value takes the next argument even when it looks
+# like a flag or `--` (Codex review R1, PR #563).
+expect_claude_args "option value -p is not print" "$both [--system-prompt] [-p]" --system-prompt -p
+expect_claude_args "option value --advisor=off is not an override" "$both [--system-prompt] [--advisor=off]" --system-prompt --advisor=off
+expect_claude_args "option value --model is not an override" "$both [--append-system-prompt] [--model]" --append-system-prompt --model
+expect_claude_args "option value --resume is not a resume" "$both [-n] [--resume]" -n --resume
+expect_claude_args "option value -- does not stop parsing" "$base [--system-prompt] [--] [-p] [q]" --system-prompt -- -p q
+expect_claude_args "equals value does not take the next argument" "$base [--system-prompt=x] [-p]" --system-prompt=x -p
+expect_claude_args "variadic option value then print" "$base [--add-dir] [a] [-p]" --add-dir a -p
+expect_claude_args "model value -p is not print" ' [--effort] [xhigh] [--advisor] [fable] [--model] [-p]' --model -p
 expect_refused "baseline does not bypass guard" "$h/Downloads/site" claude "$(refused_line claude "~/Downloads/site" "$default_roots")"
 printf 'sonnet\nlow\n' > "$baseline_file"
 expect_claude_args "read changed baseline on each launch" ' [--model] [sonnet] [--effort] [low] [--advisor] [fable]'

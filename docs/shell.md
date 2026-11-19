@@ -95,6 +95,12 @@ file が無い、読めない、値が空、形式が違うときは flag を足
   `agents`、`attach`、`auth`、`auto-mode`、`doctor`、`gateway`、`import`、`install`、`logs`、`mcp`、
   `plugin`、`plugins`、`purge`、`respawn`、`rm`、`setup-token`、`stop`、`kill`、`ultrareview`、`update`、`upgrade`。
 - `--version` / `-v` / `--help` / `-h` にも足さない。引数の検査は `--` の前まで。
+- 値を必ず取る option (`--system-prompt <prompt>` など) の次の引数は、その値として読み飛ばす。
+  `claude --system-prompt -p` は対話の起動で、`claude --system-prompt -- -p q` の `--` は値なので検査は続く。
+  対象は Claude Code 2.1.328 の `--help` で `<…>` の値を取る option と、help に出ない
+  `--system-prompt-file`、`--append-system-prompt-file`、`--permission-prompt-tool`、`--advisor`。
+  値を省ける option (`[value]` の形) は、`-` で始まる引数を値にしないので読み飛ばさない。
+  新しい version で増えた option は、一覧に足すまで読み飛ばされない。
 - `-p` / `--print` と `--bg` は新しい session として基準を足す。ただし `-p` / `--print` には advisor を足さない (下の advisor)。
 
 advisor (#553): 基準を足す場面では `--advisor fable` も足す。値は関数に固定で、基準の file と同じ条件
