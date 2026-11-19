@@ -480,13 +480,14 @@ function claude {
     --allowedTools --append-subagent-system-prompt --append-subagent-system-prompt-file
     --append-system-prompt --append-system-prompt-file --attach-serve --autocompact --betas
     --channels --client-data-url --correlation-id --dangerously-load-development-channels
-    --debug-file --deep-link-last-fetch --deep-link-repo --disallowed-tools --disallowedTools
+    --debug-file --deep-link-cwd-b64 --deep-link-last-fetch --deep-link-repo --disallowed-tools
+    --disallowedTools
     --environment --fallback-model --fast-mode --file --forward-home-settings
     --inherit-permission-mode --initialize-fields --input-format --json-schema --lead-verify-key
     --managed-settings --max-budget-usd --max-thinking-tokens --max-turns --mcp-config
     --messaging-socket-path --metadata --name --on-branch --output-format --parent-session-id
     --permission-mode --permission-prompt-tool --permission-prompts --plan-mode-instructions
-    --plugin-dir --plugin-dir-no-mcp --plugin-url --pool --prefill --proactivity
+    --plugin-dir --plugin-dir-no-mcp --plugin-url --pool --prefill --prefill-b64 --proactivity
     --project-config-root --ref --remote-control-session-name-prefix --resume-drops-turn
     --resume-session-at --rewind-files --runner-declares --sdk-url --session-began-as-copy
     --session-id --setting-sources --settings --system-prompt --system-prompt-file
