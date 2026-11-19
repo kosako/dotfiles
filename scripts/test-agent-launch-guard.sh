@@ -286,31 +286,50 @@ expect_claude_args() {
     miss "$label (rc=$run_rc calls=$run_calls err=$run_err)"
   fi
 }
-both=' [--model] [opus[1m]] [--effort] [xhigh]'
+base=' [--model] [opus[1m]] [--effort] [xhigh]'
+both="$base [--advisor] [fable]"
 expect_claude_args "new session" "$both"
-expect_claude_args "model override" ' [--effort] [xhigh] [--model] [sonnet]' --model sonnet
-expect_claude_args "effort override" ' [--model] [opus[1m]] [--effort] [low]' --effort low
-expect_claude_args "both overrides" ' [--model] [sonnet] [--effort] [low]' --model sonnet --effort low
-expect_claude_args "model equals override" ' [--effort] [xhigh] [--model=sonnet]' --model=sonnet
-expect_claude_args "effort equals override" ' [--model] [opus[1m]] [--effort=low]' --effort=low
-expect_claude_args "both equals overrides" ' [--model=sonnet] [--effort=low]' --model=sonnet --effort=low
+expect_claude_args "model override" ' [--effort] [xhigh] [--advisor] [fable] [--model] [sonnet]' --model sonnet
+expect_claude_args "effort override" ' [--model] [opus[1m]] [--advisor] [fable] [--effort] [low]' --effort low
+expect_claude_args "both overrides" ' [--advisor] [fable] [--model] [sonnet] [--effort] [low]' --model sonnet --effort low
+expect_claude_args "model equals override" ' [--effort] [xhigh] [--advisor] [fable] [--model=sonnet]' --model=sonnet
+expect_claude_args "effort equals override" ' [--model] [opus[1m]] [--advisor] [fable] [--effort=low]' --effort=low
+expect_claude_args "both equals overrides" ' [--advisor] [fable] [--model=sonnet] [--effort=low]' --model=sonnet --effort=low
 for flag in -r --resume --resume=session -c --continue --from-pr --from-pr=123 --teleport --teleport=session; do
   expect_claude_args "resume $flag" " [$flag]" "$flag"
 done
-for flag in -p --print --bg; do
-  expect_claude_args "new session $flag preserves arguments" "$both [$flag] [a b] []" "$flag" 'a b' ''
+for flag in -p --print; do
+  expect_claude_args "new session $flag preserves arguments and adds no advisor" "$base [$flag] [a b] []" "$flag" 'a b' ''
 done
+expect_claude_args "new session --bg preserves arguments" "$both [--bg] [a b] []" --bg 'a b' ''
+expect_claude_args "advisor override" "$base [--advisor] [opus]" --advisor opus
+expect_claude_args "advisor equals override" "$base [--advisor=off]" --advisor=off
 for subcommand in agents attach auth auto-mode doctor gateway import install logs mcp plugin plugins purge respawn rm setup-token stop kill ultrareview update upgrade; do
   expect_claude_args "subcommand $subcommand" " [$subcommand]" "$subcommand"
 done
 for flag in --version -v --help -h; do
   expect_claude_args "info $flag" " [$flag]" "$flag"
 done
-expect_claude_args "subcommand only in first argument" "$both [-p] [doctor]" -p doctor
+expect_claude_args "subcommand only in first argument" "$base [-p] [doctor]" -p doctor
 expect_claude_args "stop parsing at double dash" "$both [--] [--resume] [--model=sonnet] [--effort] [low] [--help]" -- --resume --model=sonnet --effort low --help
+expect_claude_args "print after double dash does not suppress advisor" "$both [--] [-p]" -- -p
+# An option with a required value takes the next argument even when it looks
+# like a flag or `--` (Codex review R1, PR #563).
+expect_claude_args "option value -p is not print" "$both [--system-prompt] [-p]" --system-prompt -p
+expect_claude_args "option value --advisor=off is not an override" "$both [--system-prompt] [--advisor=off]" --system-prompt --advisor=off
+expect_claude_args "option value --model is not an override" "$both [--append-system-prompt] [--model]" --append-system-prompt --model
+expect_claude_args "option value --resume is not a resume" "$both [-n] [--resume]" -n --resume
+expect_claude_args "option value -- does not stop parsing" "$base [--system-prompt] [--] [-p] [q]" --system-prompt -- -p q
+expect_claude_args "equals value does not take the next argument" "$base [--system-prompt=x] [-p]" --system-prompt=x -p
+expect_claude_args "variadic option value then print" "$base [--add-dir] [a] [-p]" --add-dir a -p
+expect_claude_args "hidden option value -- does not stop parsing" "$base [--prefill] [--] [-p] [q]" --prefill -- -p q
+expect_claude_args "hidden option value -p is not print" "$both [--plan-mode-instructions] [-p]" --plan-mode-instructions -p
+expect_claude_args "option with a digit in its name takes a value" "$base [--prefill-b64] [--] [-p] [q]" --prefill-b64 -- -p q
+expect_claude_args "another option with a digit takes a value" "$both [--deep-link-cwd-b64] [-p]" --deep-link-cwd-b64 -p
+expect_claude_args "model value -p is not print" ' [--effort] [xhigh] [--advisor] [fable] [--model] [-p]' --model -p
 expect_refused "baseline does not bypass guard" "$h/Downloads/site" claude "$(refused_line claude "~/Downloads/site" "$default_roots")"
 printf 'sonnet\nlow\n' > "$baseline_file"
-expect_claude_args "read changed baseline on each launch" ' [--model] [sonnet] [--effort] [low]'
+expect_claude_args "read changed baseline on each launch" ' [--model] [sonnet] [--effort] [low] [--advisor] [fable]'
 for contents in '' $'opus[1m]\n' $'\nxhigh\n' $'opus[1m]\n\n' $'opus[1m]\nxhigh\nextra' $'opus[1m]\nxhigh\n\n' $'opus[1m]\nxhigh\r\n'; do
   printf '%s' "$contents" > "$baseline_file"
   expect_claude_args "empty or malformed baseline" ' [-p] [a b]' -p 'a b'
