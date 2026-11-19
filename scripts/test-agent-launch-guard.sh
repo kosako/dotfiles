@@ -322,6 +322,8 @@ expect_claude_args "option value --resume is not a resume" "$both [-n] [--resume
 expect_claude_args "option value -- does not stop parsing" "$base [--system-prompt] [--] [-p] [q]" --system-prompt -- -p q
 expect_claude_args "equals value does not take the next argument" "$base [--system-prompt=x] [-p]" --system-prompt=x -p
 expect_claude_args "variadic option value then print" "$base [--add-dir] [a] [-p]" --add-dir a -p
+expect_claude_args "hidden option value -- does not stop parsing" "$base [--prefill] [--] [-p] [q]" --prefill -- -p q
+expect_claude_args "hidden option value -p is not print" "$both [--plan-mode-instructions] [-p]" --plan-mode-instructions -p
 expect_claude_args "model value -p is not print" ' [--effort] [xhigh] [--advisor] [fable] [--model] [-p]' --model -p
 expect_refused "baseline does not bypass guard" "$h/Downloads/site" claude "$(refused_line claude "~/Downloads/site" "$default_roots")"
 printf 'sonnet\nlow\n' > "$baseline_file"

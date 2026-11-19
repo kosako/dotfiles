@@ -470,6 +470,29 @@ function claude {
   local arg model effort extra
   local -i skip=0 has_model=0 has_effort=0 has_advisor=0 is_print=0 is_value=0
   local -a baseline=()
+  # The root options that require a value in Claude Code 2.1.328, hidden ones
+  # included, taken from the root command's definition in the binary (#553).
+  # --model, --effort and --advisor have their own cases below. An optional
+  # value (`[value]`) never takes an argument starting with `-`, so those are
+  # left out.
+  local -a value_options=(
+    --add-dir --agent --agent-color --agent-id --agent-name --agent-type --agents --allowed-tools
+    --allowedTools --append-subagent-system-prompt --append-subagent-system-prompt-file
+    --append-system-prompt --append-system-prompt-file --attach-serve --autocompact --betas
+    --channels --client-data-url --correlation-id --dangerously-load-development-channels
+    --debug-file --deep-link-last-fetch --deep-link-repo --disallowed-tools --disallowedTools
+    --environment --fallback-model --fast-mode --file --forward-home-settings
+    --inherit-permission-mode --initialize-fields --input-format --json-schema --lead-verify-key
+    --managed-settings --max-budget-usd --max-thinking-tokens --max-turns --mcp-config
+    --messaging-socket-path --metadata --name --on-branch --output-format --parent-session-id
+    --permission-mode --permission-prompt-tool --permission-prompts --plan-mode-instructions
+    --plugin-dir --plugin-dir-no-mcp --plugin-url --pool --prefill --proactivity
+    --project-config-root --ref --remote-control-session-name-prefix --resume-drops-turn
+    --resume-session-at --rewind-files --runner-declares --sdk-url --session-began-as-copy
+    --session-id --setting-sources --settings --system-prompt --system-prompt-file
+    --system-prompt-snapshot --task-budget --team-name --teammate-mode --thinking
+    --thinking-display --tools --watch-artifact --watch-artifact-no-autoreact --workload -n
+  )
   case "${1-}" in
     agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) skip=1 ;;
   esac
@@ -491,10 +514,7 @@ function claude {
       --advisor) has_advisor=1 is_value=1 ;;
       --advisor=*) has_advisor=1 ;;
       -p|--print) is_print=1 ;;
-      # The options with a required value in Claude Code 2.1.328 --help, plus
-      # the documented ones it does not list (*-file, --permission-prompt-tool).
-      # An optional value (`[value]`) never takes an argument starting with `-`.
-      --add-dir|--agent|--agents|--allowedTools|--allowed-tools|--append-system-prompt|--append-system-prompt-file|--autocompact|--betas|--debug-file|--disallowedTools|--disallowed-tools|--environment|--fallback-model|--file|--input-format|--json-schema|--max-budget-usd|--mcp-config|-n|--name|--output-format|--permission-mode|--permission-prompt-tool|--permission-prompts|--plugin-dir|--plugin-url|--remote-control-session-name-prefix|--session-id|--setting-sources|--settings|--system-prompt|--system-prompt-file|--system-prompt-snapshot|--tools) is_value=1 ;;
+      *) (( ${value_options[(Ie)$arg]} )) && is_value=1 ;;
     esac
   done
   # Read two literal lines, never source shell code. Missing/partial/unreadable
