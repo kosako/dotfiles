@@ -274,13 +274,17 @@ image の設定への依存。image の `logs` pipeline の processor の list �
 
 残るもの。どの event にも付く `user.email`・account の id・session の id、Codex の `host.name`、MCP の server の名前
 (Codex の `codex.tool_result` の `mcp_server` と、Claude Code の `api_request` の `mcp_server_name`)、hook の名前、
-commit したときの branch の名前(`vcs.ref.head.name`)。数、時間、成否、token、cost も残る。
+commit したときの branch の名前(`vcs.ref.head.name`)。数、時間、成否、token、cost も残る。trace と metric は
+この処理を通らない。Codex の trace の span の `cwd` には、作業した directory の path(home の下の path と repo の名前)が
+入る(2026-11-21 に、保管の trace の file 2 つの attribute を値を出さずに数えた。直近の回した file では 1,674,575 の span の
+うち 1,351 にあり、1,334 がこの Mac の home の下だった)。数えた中に、tool の中身ほど長い値は無かった(どの値も 140
+文字に満たない)。
 
 変更より前の data。Loki と保管には、変更の前に受けた分がそのまま残り、1 年かけて消えていく(下の「保存期間」)。
 早くは消さないと決めた(2026-11-21、#569)。消すと、変更より前の dashboard の履歴(token、cost、commit の数など)も
-なくなる。今は手元の外へ何も送っていない。保管の file を別の server に読み戻すときは、同じ処理を通してから送る(下の
-「生データの保管と読み戻し」)。dashboard の数え方は、その分も数えるため、`tool_input` の正規表現と印の両方を見る。古い分が消えた後(2027-11 の
-下旬)は、印だけにできる。`test-otel-backend.sh` が、`tool_input` を読む問い合わせを、印と組にした 3 つの数え方だけに
+なくなる。今は手元の外へ何も送っていない。保管の file を別の server に読み戻すときは、手元で同じ処理を通してから
+外へ出す(下の「生データの保管と読み戻し」)。dashboard の数え方は、その分も数えるため、`tool_input` の正規表現と印の
+両方を見る。古い分が消えた後(2027-11 の下旬)は、印だけにできる。`test-otel-backend.sh` が、`tool_input` を読む問い合わせを、印と組にした 3 つの数え方だけに
 限る。
 
 確かめ方(2026-11-21、0.39.0 で実施):
@@ -578,7 +582,7 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 
 - gzip にした file(`*.jsonl.gz`)も期間では消えない。要らなくなったら人が消す。
 
-読み戻すとき(将来の server の Collector で):
+読み戻すとき(別の server の backend へ):
 
 - 保管に残るのは、おおむね直近の 1 年分。回した file は、名前の時刻(回した時刻)から 365 日で消える。今書いている
   file と、回した file の中の古い data は、それより少し長く残る(上の注意)。backend の data は、Loki が 1 年、
@@ -594,11 +598,14 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 - 元の時刻のまま送られるので、読み戻す先の backend が古い時刻を受け付けるか(Prometheus の
   `out_of_order_time_window` など)を確かめる。
 - metric は Codex が送った delta のまま保管している。読み戻す先が delta を受け付けないときは、そちらで変換する。
-- log は、上の「tool の中身を落とす」と同じ処理を通してから送る(#569)。#564 より前の file には、tool の中身がそのまま
-  入っているため。読み戻す Collector の logs の pipeline に、`archive.yaml` の `transform/agent-tool-content` の block を
-  そのまま写して入れる。印もそこで付くので、読み戻した先の dashboard は印だけで数えられる。#564 の後の file に通しても、
-  落とす項目がもう無いので変わらない。送る前に、送り先の代わりに `file` exporter に書いて、`tool_input`・
-  `tool_parameters`・`arguments` が残っていないことを確かめる。
+- log は、保管の file のある Mac の上で、上の「tool の中身を落とす」と同じ処理を通してから外へ出す(#569)。#564 より
+  前の file には、tool の中身がそのまま入っているため。処理する前の file を別の server に渡すと、そこで処理しても中身は
+  もう渡っている。手元で読み戻し用の Collector(使い捨ての container でよい)を動かし、その logs の pipeline に、
+  `archive.yaml` の `transform/agent-tool-content` の block をそのまま写して入れる。その Collector から送り先へ export
+  するか、`file` exporter に書いた処理の後の file だけを送る。印もそこで付くので、読み戻した先の dashboard は印だけで
+  数えられる。#564 の後の file に通しても、落とす項目がもう無いので変わらない。外へ出す前に、一度 `file` exporter に
+  書いて、上の「落とすもの」の表の項目が残っていないことを確かめる。trace と metric は、この処理の対象ではない(trace に
+  残る `cwd` は、上の「残るもの」)。
 
   ```yaml
   receivers:
@@ -621,7 +628,7 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
   `start_at` を外すと、file は 1 行も読まれなかった。
 
 保管の file には、Loki と同じ中身が入る(account の email などの attribute。#564 より前の file には tool の中身も)。
-directory は 0700 にし、読み戻すときのほかは外へ送らない。
+directory は 0700 にし、file のままでは外へ出さない(読み戻すときも、上の処理を通した後のものだけを出す)。
 
 ## image の更新
 
@@ -748,8 +755,8 @@ compose file があるときは、実行時の状態と保管の directory を**
 - tool の中身は、attribute の名前で選んで落とす(上の「tool の中身を落とす」)。Claude Code や Codex が別の名前で中身を
   送り始めたら、足すまでは残る。版を上げたときに、保管の file の tool の event の attribute の名前を見直す。
 - #564 より前に受けた tool の中身は、Loki と保管に残り、1 年かけて消える。早くは消さないと決めた(#569)。保管の file を
-  読み戻すときに処理を通し忘れると、中身が送り先に出る(上の「読み戻すとき」)。早く消すには、保管の file と Loki の
-  data を消すしかない(この repo の手順は持たない)。
+  読み戻すときに、手元で処理を通す前の file や data を外へ出すと、中身が送り先に出る(上の「読み戻すとき」)。早く
+  消すには、保管の file と Loki の data を消すしかない(この repo の手順は持たない)。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。
