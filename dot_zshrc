@@ -470,8 +470,10 @@ function claude {
   local arg model effort extra
   local -i skip=0 has_model=0 has_effort=0 has_advisor=0 is_print=0 is_value=0
   local -a baseline=()
-  # The root options that require a value in Claude Code 2.1.328, hidden ones
-  # included, taken from the root command's definition in the binary (#553).
+  # The root options that require a value, hidden ones included, taken from
+  # the root command's definition in the binary (#553) of the Claude Code
+  # version recorded in .chezmoidata/cli-checked-versions.yaml (#566; how to
+  # re-check: docs/shell.md). The subcommands below are from the same version.
   # --model, --effort and --advisor have their own cases below. An optional
   # value (`[value]`) never takes an argument starting with `-`, so those are
   # left out.

@@ -7,6 +7,9 @@ MODULES_FILE="$DOTFILES_ROOT/.chezmoidata/modules.yaml"
 CAPABILITIES_FILE="$DOTFILES_ROOT/.chezmoidata/capabilities.schema.yaml"
 PACKAGES_FILE="$DOTFILES_ROOT/.chezmoidata/packages.yaml"
 BACKUP_PATHS_FILE="$DOTFILES_ROOT/.chezmoidata/backup-paths.yaml"
+# Not in require_data_files: only doctor reads it, and reports its absence (#566).
+# shellcheck disable=SC2034 # read by the sourcing doctor.sh and its tests
+CLI_VERSIONS_FILE="$DOTFILES_ROOT/.chezmoidata/cli-checked-versions.yaml"
 
 # Report line helpers. POLICY_REPORT_QUIET=1 (doctor --actions-only) mutes
 # every informational line so only the next-actions summary and any [fail]
@@ -1441,4 +1444,49 @@ npm_before_within_age_window() {
   days=$(( 10#$days )); tolerance=$(( 10#$tolerance ))
   local expected=$(( now_epoch - days * 86400 ))
   (( before_epoch >= expected - tolerance && before_epoch <= expected + tolerance ))
+}
+
+# cli_checked_version_state CHECKED FOUND OUTPUT
+# Pure judgment for doctor's "CLI checked versions" section (#566), kept apart
+# from the collection (the data read, `command -v`, the bounded probe) so it is
+# testable on fixed inputs (scripts/test-cli-checked-versions.sh; the #565
+# direction). CHECKED is the recorded version, FOUND is 1 when the CLI is on
+# PATH, OUTPUT is what `<cli> --version` printed on a clean exit (empty when it
+# failed or timed out). The version is the first word of OUTPUT's first line
+# that is a dotted number (`2.1.329 (Claude Code)`, `codex-cli 0.169.1`).
+# Prints one state, and never reads a missing answer as a match:
+#   unrecorded        CHECKED is empty or not a dotted number
+#   absent            the CLI is not on PATH
+#   unreadable        no version in OUTPUT
+#   matches VERSION   VERSION equals CHECKED exactly
+#   differs VERSION   any other VERSION (a patch release can add options)
+cli_checked_version_state() {
+  local checked="$1" found="$2" output="$3" line word version=""
+  local re='^[0-9]+(\.[0-9]+)+$'
+  local -a words
+  if [[ ! "$checked" =~ $re ]]; then
+    printf 'unrecorded\n'
+    return 0
+  fi
+  if [[ "$found" != 1 ]]; then
+    printf 'absent\n'
+    return 0
+  fi
+  IFS= read -r line <<< "$output" || true
+  # read -a splits on IFS without pathname expansion, so a `*` in the
+  # output stays a word instead of matching files.
+  IFS=$' \t' read -r -a words <<< "$line" || true
+  for word in ${words[@]+"${words[@]}"}; do
+    if [[ "$word" =~ $re ]]; then
+      version="$word"
+      break
+    fi
+  done
+  if [[ -z "$version" ]]; then
+    printf 'unreadable\n'
+  elif [[ "$version" == "$checked" ]]; then
+    printf 'matches %s\n' "$version"
+  else
+    printf 'differs %s\n' "$version"
+  fi
 }

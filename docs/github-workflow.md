@@ -126,6 +126,7 @@ runner 自体が GitHub との通信を失う障害は、この再試行の対�
 ./scripts/test-preflight.sh
 ./scripts/test-gclone.sh
 ./scripts/test-agent-launch-guard.sh
+./scripts/test-cli-checked-versions.sh
 ./scripts/test-shell-syntax.sh
 ./scripts/test-ai-clip.sh
 ./scripts/test-zshrc-compinit.sh

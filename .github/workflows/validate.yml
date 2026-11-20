@@ -19,6 +19,9 @@ env:
   # group (macOS arm64): one version each, a checksum per platform.
   CHEZMOI_VERSION: 2.73.0
   CHEZMOI_SHA256: b597729b687af4488a848240134cb633de8ca0f04e0d26d48f400ee2ac338ffa
+  # Must equal cliCheckedVersions.codex in .chezmoidata/cli-checked-versions.yaml,
+  # the version doctor compares the local codex with (#566;
+  # test-cli-checked-versions.sh pins it).
   CODEX_VERSION: 0.162.1
   CODEX_SHA256: 86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057
   # The same versions for the macOS (arm64) runner of the bash32 job.
@@ -96,6 +99,9 @@ jobs:
       - name: agent launch guard tests
         run: ./scripts/test-agent-launch-guard.sh
 
+      - name: CLI checked versions tests
+        run: ./scripts/test-cli-checked-versions.sh
+
       - name: shellcheck (warning and above)
         run: shellcheck -S warning scripts/*.sh
 
@@ -166,6 +172,7 @@ jobs:
             suites: >-
               test-shell-syntax.sh test-ai-clip.sh test-zshrc-compinit.sh
               test-zshrc-order.sh test-gclone.sh test-agent-launch-guard.sh
+              test-cli-checked-versions.sh
               test-policy.sh test-gitconfig.sh
               test-npmrc.sh test-install-packages.sh test-preflight.sh
           # The render job's suites (test-npmrc again: its rendered-content

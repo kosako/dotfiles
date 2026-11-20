@@ -1,0 +1,16 @@
+# The CLI versions that the version-bound lists and checks of this repo were
+# last confirmed against (#566). doctor's "CLI checked versions" section
+# compares the local CLIs with these (report-only). Change a value only after
+# re-checking what depends on it:
+# - claudeCode: the subcommand list and value_options of the claude function
+#   in dot_zshrc (how to re-check: docs/shell.md, the section on the baseline
+#   of a new Claude session).
+# - codex: the CI's execpolicy check. CODEX_VERSION in
+#   .github/workflows/validate.yml must equal it
+#   (scripts/test-cli-checked-versions.sh pins that).
+# Claude Code updates itself in the background (docs/update-policy.md), so the
+# local claude often runs ahead of claudeCode; doctor shows the pair, it does
+# not fail on it.
+cliCheckedVersions:
+  claudeCode: "2.1.329"
+  codex: "0.162.1"

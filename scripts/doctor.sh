@@ -1889,6 +1889,44 @@ report_claude_launch_baseline() {
 }
 report_claude_launch_baseline
 
+section "CLI checked versions (report-only)"
+# #566: lists and checks in this repo were confirmed against a recorded CLI
+# version (.chezmoidata/cli-checked-versions.yaml). A local CLI that moved on
+# (Claude Code updates itself) may have options or rules behavior they do not
+# cover, so the pair is shown. Informational only: a differing version is not
+# a defect by itself, and Claude Code would differ most days. Collection
+# (data read, command -v, the bounded probe) stays here; the judgment is
+# cli_checked_version_state in lib-policy.sh, tested on fixed inputs.
+# report_cli_checked_version CLI KEY WHAT
+report_cli_checked_version() {
+  local cli="$1" key="$2" what="$3" checked found=0 output="" state
+  checked="$(K="$key" yq '.cliCheckedVersions[strenv(K)] // ""' "$CLI_VERSIONS_FILE" 2>/dev/null)" || checked=""
+  if command -v "$cli" >/dev/null 2>&1; then
+    found=1
+    bounded_probe "$cli" --version
+    [[ "$probe_rc" != "0" ]] || output="$probe_lines"
+  fi
+  state="$(cli_checked_version_state "$checked" "$found" "$output")"
+  case "$state" in
+    "matches "*)
+      item "$cli ${state#matches }: matches the checked version ($what)" ;;
+    "differs "*)
+      item "$cli ${state#differs }: differs from the checked version $checked ($what); re-check, then update .chezmoidata/cli-checked-versions.yaml" ;;
+    absent)
+      item "$cli: not on PATH; checked version $checked ($what)" ;;
+    unreadable)
+      item "$cli: version not checked (\`$cli --version\` failed, timed out or printed no version); checked version $checked ($what)" ;;
+    *)
+      item "$cli: no valid checked version for $key in .chezmoidata/cli-checked-versions.yaml ($what)" ;;
+  esac
+}
+if [[ -f "$CLI_VERSIONS_FILE" ]]; then
+  report_cli_checked_version claude claudeCode "the claude function's subcommand list and value_options; docs/shell.md"
+  report_cli_checked_version codex codex "the CI execpolicy check; local rules are evaluated by the local codex"
+else
+  item "CLI checked versions: not checked (.chezmoidata/cli-checked-versions.yaml is missing)"
+fi
+
 section "agent launch guard (report-only)"
 # The managed ~/.zshrc wraps claude / codex / opencode so an interactive shell
 # starts them only under an agent launch root (#491, docs/shell.md). doctor

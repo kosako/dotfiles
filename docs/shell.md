@@ -91,13 +91,13 @@ file が無い、読めない、値が空、形式が違うときは flag を足
 - `--model` / `--model=…` の明示は model の追加だけを止める。`--effort` / `--effort=…` も独立に扱う。
 - `-r` / `--resume` / `--resume=…` / `-c` / `--continue` / `--from-pr` / `--from-pr=…` /
   `--teleport` / `--teleport=…` による再開には両方とも足さない。中断した session の設定で続ける。
-- 最初の引数が subcommand のときも足さない。対象は Claude Code 2.1.326 の Commands:
+- 最初の引数が subcommand のときも足さない。対象は Claude Code の `--help` の Commands (確かめた版は下の「一覧と版」):
   `agents`、`attach`、`auth`、`auto-mode`、`doctor`、`gateway`、`import`、`install`、`logs`、`mcp`、
   `plugin`、`plugins`、`purge`、`respawn`、`rm`、`setup-token`、`stop`、`kill`、`ultrareview`、`update`、`upgrade`。
 - `--version` / `-v` / `--help` / `-h` にも足さない。引数の検査は `--` の前まで。
 - 値を必ず取る option (`--system-prompt <prompt>` など) の次の引数は、その値として読み飛ばす。
   `claude --system-prompt -p` は対話の起動で、`claude --system-prompt -- -p q` の `--` は値なので検査は続く。
-  対象は Claude Code 2.1.328 の root の command が `<…>` で値を取る option で、help に出ない
+  対象は Claude Code の root の command が `<…>` で値を取る option で、help に出ない
   `--prefill` などを含む。一覧は binary の中の root の command の定義から拾った (関数の `value_options`)。
   値を省ける option (`[value]` の形) は、`-` で始まる引数を値にしないので読み飛ばさない。
   新しい version で増えた option は、一覧に足すまで読み飛ばされない。
@@ -111,6 +111,19 @@ advisor (#553): 基準を足す場面では `--advisor fable` も足す。値は
 - 再開と subcommand と `--version` / `--help` には、model や effort と同じく足さない。
 - 起動が error で終わる条件 (docs 参照): main の model が advisor に対応しない、Fable の usage credits の同意が未了、`availableModels` が除いている。
   `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` や、flag の取得を止める `DISABLE_TELEMETRY` のような env があると advisor は効かない。
+
+一覧と版 (#566): subcommand の一覧と `value_options` は、`.chezmoidata/cli-checked-versions.yaml` の
+`cliCheckedVersions.claudeCode` の版で確かめたもの。Claude Code は自分で更新するので
+([update-policy](update-policy.md))、doctor の「CLI checked versions」が手元の `claude --version` とこの版を情報として並べる。
+違うと出たら、次の 2 つを手元の版で拾い直し、関数と違いがあれば関数を直してから、data の版を上げる。
+
+- subcommand: `command claude --help` の `Commands:` の節にある名前 (`stop|kill` のような別名も含む)。
+- 値を必ず取る root の option: `command claude --help` には隠しの option が出ないので、binary
+  (`~/.local/bin/claude` の symlink の先) の文字列から拾う。root の command の定義は、`"-h, --help"` から
+  `"--remote-control-session-name-prefix <prefix>"` までの範囲にまとまっている (2.1.329 で確認)。その範囲の
+  `"--<name> <…>"` と `"-n, --name <name>"` の形の文字列を、名前に数字を含むもの (`--prefill-b64`) も漏らさずに拾う。
+  `--model` / `--effort` / `--advisor` は関数で別の case にしているので、配列には入れない。
+  範囲の端の文字列が見つからないときは、定義の形が変わっているので、この手順をそのまま使わない。
 
 環境変数 `ANTHROPIC_MODEL` と `CLAUDE_CODE_EFFORT_LEVEL` は設定しない。
 session 内の `/model` や `/effort` による変更を使えるままにするため。
