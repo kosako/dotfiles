@@ -139,7 +139,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "(sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [$__range])) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [$__range])) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [$__range])) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [$__range]))) / (sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" [$__range])) > 0)",
+          "expr": "(sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap input_tokens [$__range])) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_read_tokens [$__range])) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cache_creation_tokens [$__range])) + sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap output_tokens [$__range]))) / (sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" or command_git_commit=\"true\" [$__range])) > 0)",
           "queryType": "instant"
         }
       ],
@@ -388,7 +388,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "(sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cost_usd [$__range]))) / (sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" [$__range])) > 0)",
+          "expr": "(sum (sum_over_time({service_name=~\"claude-code.*\"} | event_name=\"api_request\" | unwrap cost_usd [$__range]))) / (sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" or command_gh_pr_create=\"true\" [$__range])) > 0)",
           "queryType": "instant"
         }
       ],

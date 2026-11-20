@@ -139,7 +139,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" [$__range]))",
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" or command_git_commit=\"true\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -201,7 +201,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" [$__range]))",
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" or command_gh_pr_create=\"true\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -263,7 +263,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr merge.*\" [$__range]))",
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr merge.*\" or command_gh_pr_merge=\"true\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -473,7 +473,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" [1d] offset -15h))",
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*git( -C [^ ]+)? commit.*\" or command_git_commit=\"true\" [1d] offset -15h))",
           "queryType": "range",
           "legendFormat": "commit"
         },
@@ -483,7 +483,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" [1d] offset -15h))",
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr create.*\" or command_gh_pr_create=\"true\" [1d] offset -15h))",
           "queryType": "range",
           "legendFormat": "PR の作成"
         },
@@ -493,7 +493,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr merge.*\" [1d] offset -15h))",
+          "expr": "sum (count_over_time({service_name=~\"claude-code.*\"} | event_name=\"tool_result\" | tool_name=\"Bash\" | success=\"true\" | tool_input=~\".*gh pr merge.*\" or command_gh_pr_merge=\"true\" [1d] offset -15h))",
           "queryType": "range",
           "legendFormat": "PR の merge"
         }

@@ -279,7 +279,9 @@ apply のときの動き:
   `api_request` など)。service の名前は `claude-code`(Desktop の Code tab の session は `claude-code-desktop`)。
 - `OTEL_LOG_TOOL_DETAILS=1` で、tool の event に Bash の command(切り詰めない)、skill と MCP の名前、tool の入力が入る。
   tool の入力は、値ごとに 512 文字、合わせて約 4K 文字で切られる。tool の出力は自分の server に出してよいと決めたので
-  (2026-11-11)、この範囲は出す。
+  (2026-11-11)、この範囲は出す。ただし手元の Collector が、Loki と保管に入る前に command と tool の入力を落とし、
+  `git commit`・`gh pr create`・`gh pr merge` の印だけを残す(#564。[otel-backend](otel-backend.md) の「tool の中身を
+  落とす」)。送るのを止めないのは、印を付けるのに command が要るため。
 - どの event にも、session の id、account の uuid、`user.email` などの標準の attribute が付く。
 
 送らないもの: prompt の本文(`OTEL_LOG_USER_PROMPTS`)、assistant の応答(`OTEL_LOG_ASSISTANT_RESPONSES`)、tool の出力の

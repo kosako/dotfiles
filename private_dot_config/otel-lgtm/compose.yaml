@@ -15,7 +15,9 @@
 # Prometheus by its retention flag and Tempo by the block retention of both
 # the backend scheduler and the backend worker (the image's defaults are 15
 # and 14 days). The dashboards read neither for long ranges, and the archive
-# below keeps the raw telemetry for a year. Pyroscope does not push its own
+# below keeps the raw telemetry for a year (the logs without what the agents
+# put in their tool events, which the Collector drops before Loki and the
+# archive keep it, #564). Pyroscope does not push its own
 # profiles, the only ones it received (#528).
 # Loki also answers one query over up to 366d1h (#532): the dashboards read
 # Loki, and its default limit of 30d1h refused a dashboard range of a year.
