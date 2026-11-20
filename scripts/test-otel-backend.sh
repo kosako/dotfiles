@@ -19,10 +19,13 @@ set -euo pipefail
 # directory), every bind failing instead of being created in the VM, and
 # none of the keys that widen what the container can touch — (5) keep the
 # archive config to added */archive pipelines writing replayable files
-# kept for one year, (6) keep the dashboard provider pointed at the bound
-# dashboards and closed to UI edits, (7) keep each dashboard on the bundled
-# datasources under its own uid, with no other dashboard in the bound
-# directory, and (8) land 0644 in 0755 directories. Renders into
+# kept for one year, and to the one transform that drops the agents' tool
+# content from the logs before both Loki and the archive (#564), (6) keep
+# the dashboard provider pointed at the bound dashboards and closed to UI
+# edits, (7) keep each dashboard on the bundled datasources under its own
+# uid, with no other dashboard in the bound directory, and counting
+# commands by the transform's attributes, and (8) land 0644 in 0755
+# directories. Renders into
 # throwaway destinations; never touches the real home and never talks to a
 # container runtime.
 
@@ -419,9 +422,15 @@ fi
 
 section "otel-backend: archive config"
 
-# 5) The archive config only ADDS */archive pipelines (it must not replace
-#    the image's own traces / metrics / logs ones), one per signal, each
-#    taking the otlp receiver's data unprocessed into a file exporter.
+# 5) The archive config ADDS */archive pipelines (it must not replace the
+#    image's own traces / metrics / logs ones), one per signal, each taking
+#    the otlp receiver's data into a file exporter: traces and metrics
+#    unprocessed, logs through the transform of 5b only. Of the image's own
+#    pipelines it sets only the processors of logs (#564), so what Loki
+#    keeps goes through the same transform: logs holds processors and no
+#    other key (receivers or exporters there would replace the image's
+#    lists, as the Collector replaces lists when it layers configs), and
+#    the list is the transform, then the image's own batch.
 #    Every exporter writes newline-delimited OTLP JSON in zstd under
 #    /archive as <signal>.jsonl.zst (#527; `zstd -d` gives back what a
 #    later Collector's otlpjsonfile receiver reads, with the gate of 4g),
@@ -433,11 +442,18 @@ section "otel-backend: archive config"
 archive_ok=1
 # yq lists keys (and unique values) in document order, so every list is
 # sorted before it is compared.
-[[ "$(yq -r 'keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "exporters,service" ]] || archive_ok=0
+[[ "$(yq -r 'keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "exporters,processors,service" ]] || archive_ok=0
 [[ "$(yq -r '.service | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "pipelines" ]] || archive_ok=0
-[[ "$(yq -r '.service.pipelines | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "logs/archive,metrics/archive,traces/archive" ]] || archive_ok=0
-if ! bad_pipelines="$(yq -r '.service.pipelines | to_entries | .[]
-    | select((.value | keys | sort | join(",")) != "exporters,receivers"
+[[ "$(yq -r '.service.pipelines | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "logs,logs/archive,metrics/archive,traces/archive" ]] || archive_ok=0
+# Each list as "<keys of the pipeline>|<its tag>|<its items' tags>|<items>":
+# a string "[a, b]" is not a list, and a list of maps is not one of names.
+[[ "$(yq -r '.service.pipelines.logs | (keys | sort | join(",")) + "|" + (.processors | tag) + "|" + ([.processors[] | tag] | unique | join(",")) + "|" + (.processors | join(","))' "$archive_cfg" 2>/dev/null)" \
+  == "processors|!!seq|!!str|transform/agent-tool-content,batch" ]] || archive_ok=0
+[[ "$(yq -r '.service.pipelines["logs/archive"].processors | (tag) + "|" + ([.[] | tag] | unique | join(",")) + "|" + (. | join(","))' "$archive_cfg" 2>/dev/null)" \
+  == "!!seq|!!str|transform/agent-tool-content" ]] || archive_ok=0
+if ! bad_pipelines="$(yq -r '.service.pipelines | to_entries | .[] | select(.key != "logs")
+    | select(((.value | keys | sort | join(",")) != "exporters,receivers" and .key != "logs/archive")
+      or ((.value | keys | sort | join(",")) != "exporters,processors,receivers" and .key == "logs/archive")
       or (.value.receivers | tag) != "!!seq" or (.value.receivers | length) != 1
       or (.value.receivers[0] | tag) != "!!str" or .value.receivers[0] != "otlp"
       or (.value.exporters | tag) != "!!seq" or (.value.exporters | length) != 1
@@ -462,9 +478,40 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
 fi
 [[ "$(yq -r '[.exporters[].path] | unique | length' "$archive_cfg" 2>/dev/null)" == "3" ]] || archive_ok=0
 if [[ "$archive_ok" -eq 1 ]]; then
-  ok "test passed: the archive config adds one unprocessed */archive pipeline per signal, each to its own zstd JSON file under /archive kept for one year"
+  ok "test passed: the archive config adds one */archive pipeline per signal (logs through the tool-content transform, the others unprocessed), each to its own zstd JSON file under /archive kept for one year, and sets the image's logs processors to that transform then batch"
 else
-  fail "test failed: the archive config must hold only exporters and three */archive pipelines (otlp -> one file exporter each, as lists), with json files in zstd under /archive (*.jsonl.zst), rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
+  fail "test failed: the archive config must hold only processors, exporters and the pipelines logs (processors [transform/agent-tool-content, batch] and no other key) and three */archive ones (otlp -> one file exporter each, as lists; logs/archive with processors [transform/agent-tool-content]), with json files in zstd under /archive (*.jsonl.zst), rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
+  status=1
+fi
+
+# 5b) The one processor is the transform that drops what the agents put in
+#     their tool events before Loki and the archive keep it (#564), after
+#     marking the Bash calls the dashboards count (7b). The statements are
+#     pinned in order: the marks read tool_input, so they come before it
+#     goes; tool_input, tool_parameters and arguments go from every record,
+#     error only from Claude Code's tool_result (api_error keeps the API's
+#     message) and output only from Codex's tool_result. A change here is
+#     measured again on the image's Collector with synthetic events (the
+#     steps are in docs/otel-backend.md). error_mode ignore keeps a record
+#     whose statement fails, where propagate would drop the whole payload.
+expected_statements='set(log.attributes["command.git_commit"], true) where log.attributes["event.name"] == "tool_result" and log.attributes["tool_name"] == "Bash" and IsMatch(log.attributes["tool_input"], "git( -C [^ ]+)? commit")
+set(log.attributes["command.gh_pr_create"], true) where log.attributes["event.name"] == "tool_result" and log.attributes["tool_name"] == "Bash" and IsMatch(log.attributes["tool_input"], "gh pr create")
+set(log.attributes["command.gh_pr_merge"], true) where log.attributes["event.name"] == "tool_result" and log.attributes["tool_name"] == "Bash" and IsMatch(log.attributes["tool_input"], "gh pr merge")
+delete_key(log.attributes, "error") where log.attributes["event.name"] == "tool_result"
+delete_key(log.attributes, "output") where log.attributes["event.name"] == "codex.tool_result"
+delete_key(log.attributes, "tool_input")
+delete_key(log.attributes, "tool_parameters")
+delete_key(log.attributes, "arguments")'
+transform_ok=1
+[[ "$(yq -r '.processors | keys | join(",")' "$archive_cfg" 2>/dev/null)" == "transform/agent-tool-content" ]] || transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-tool-content"] | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "error_mode,log_statements" ]] || transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-tool-content"].error_mode | (tag) + "|" + .' "$archive_cfg" 2>/dev/null)" == "!!str|ignore" ]] || transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-tool-content"].log_statements | (tag) + "|" + ([.[] | tag] | unique | join(","))' "$archive_cfg" 2>/dev/null)" == "!!seq|!!str" ]] || transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-tool-content"].log_statements[]' "$archive_cfg" 2>/dev/null)" == "$expected_statements" ]] || transform_ok=0
+if [[ "$transform_ok" -eq 1 ]]; then
+  ok "test passed: the one processor marks the counted Bash calls, then drops tool_input, tool_parameters, arguments and the tool events' error and output, keeping a record whose statement fails"
+else
+  fail "test failed: the only processor must be transform/agent-tool-content with error_mode ignore and exactly the pinned log_statements, in order (marks first, then the deletes)"
   status=1
 fi
 
@@ -517,6 +564,39 @@ if [[ "$dash_listing" == "$dashboard_listing" ]]; then
   ok "test passed: the bound dashboards directory holds exactly the listed dashboards ($dashboard_listing)"
 else
   fail "test failed: the bound dashboards directory holds $dash_listing, not $dashboard_listing"
+  status=1
+fi
+
+# 7b) The Collector drops tool_input, tool_parameters and arguments (5b), so
+#     a query reads them only to count the data Loki kept from before that
+#     (#564, up to a year), always with the transform's mark beside it:
+#     each read of tool_input is one of the three counts below, as written,
+#     and no query reads tool_parameters or arguments (a line_format of
+#     {{.tool_input}} is a read too). There must be such counts to check,
+#     so the rule cannot pass by losing them.
+count_forms=(
+  'tool_input=~".*git( -C [^ ]+)? commit.*" or command_git_commit="true"'
+  'tool_input=~".*gh pr create.*" or command_gh_pr_create="true"'
+  'tool_input=~".*gh pr merge.*" or command_gh_pr_merge="true"'
+)
+reads_bad=""
+form_counts=(0 0 0)
+for dash_case in "${dashboard_cases[@]}"; do
+  dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
+  left="$(jq -r --arg f1 "${count_forms[0]}" --arg f2 "${count_forms[1]}" --arg f3 "${count_forms[2]}" \
+    '[.. | objects | select(has("expr")) | .expr | strings
+      | split($f1) | join("") | split($f2) | join("") | split($f3) | join("")
+      | select(test("tool_input|tool_parameters|arguments"))] | length' "$dash_file" 2>/dev/null || echo x)"
+  [[ "$left" == 0 ]] || reads_bad+="${dash_case%% *} "
+  for i in 0 1 2; do
+    n="$(jq -r --arg f "${count_forms[$i]}" '[.. | objects | select(has("expr")) | .expr | strings | select(contains($f))] | length' "$dash_file" 2>/dev/null || echo 0)"
+    form_counts[i]=$(( form_counts[i] + n ))
+  done
+done
+if [[ -z "$reads_bad" && "${form_counts[0]}" -gt 0 && "${form_counts[1]}" -gt 0 && "${form_counts[2]}" -gt 0 ]]; then
+  ok "test passed: the dashboards read tool_input only in the commit / PR counts that also take the Collector's marks (${form_counts[0]}, ${form_counts[1]}, ${form_counts[2]}), and never tool_parameters or arguments"
+else
+  fail "test failed: a dashboard query may read tool_input only as one of the three counts with the command_* mark beside it, and never tool_parameters or arguments (offending: ${reads_bad:-none}; counts found: ${form_counts[*]})"
   status=1
 fi
 

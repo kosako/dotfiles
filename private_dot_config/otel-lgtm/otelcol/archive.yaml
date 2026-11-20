@@ -1,29 +1,70 @@
 # Managed by chezmoi from kosako/dotfiles (otel-backend module, #517).
 # Extra OpenTelemetry Collector config for the otel-lgtm container, layered
 # on the image's own otelcol-config.yaml through OTELCOL_EXTRA_ARGS
-# (--config=file:...). It only ADDS pipelines (*/archive) next to the
-# image's traces / metrics / logs ones, so it does not depend on how the
-# image names its own exporters. Each archive pipeline takes what the otlp
-# receiver got, unprocessed, and writes it as newline-delimited OTLP JSON
-# inside a standard zstd stream (#527: Codex's traces are about 100MB a day
-# uncompressed, about 21 times less in zstd) to /archive, which compose
-# binds to ~/.local/share/otel-lgtm/archive on the host. That stream needs
-# the Collector's exporter.file.nativeCompression feature gate, which
-# compose passes in OTELCOL_EXTRA_ARGS: without it `compression: zstd`
-# compresses each batch on its own and length-prefixes it, a framing
-# `zstd -d` cannot read. With the gate each batch is its own zstd frame, so
-# the file being written is readable at any time and a restarted Collector
-# appends to it; `zstd -d` gives back the lines a later Collector's
-# otlpjsonfile receiver reads (it reads gzip, not zstd). max_megabytes is
-# the compressed size (measured on this image's Collector, #527). Files are
-# kept for one year (#520): max_days 365 deletes a rotated file 365 days
-# after the time in its name (when it was rotated; measured on this image's
-# Collector: with max_days 1, a file named two years back was deleted at
-# the next rotation and the new ones were kept; again with zstd in #527),
-# and max_backups is 0, so no other limit applies (with 1MB files, 0 kept
-# all 7 rotated files while 1 kept only the newest one, #517; the upstream
-# README does not say what 0 means). The file being written is never
-# deleted by age. See docs/otel-backend.md.
+# (--config=file:...). It ADDS pipelines (*/archive) next to the image's
+# traces / metrics / logs ones, and sets one thing of the image's own: the
+# processors of its logs pipeline (#564, below). Collector configs layer
+# maps key by key and replace lists, so the logs pipeline keeps the image's
+# receivers and exporters, and its processors become exactly this list,
+# which repeats the image's own batch (0.39.0). An image update checks that
+# the image's logs pipeline is still named logs with processors [batch]
+# (docs/otel-backend.md).
+#
+# What the agents put in their tool events is dropped before Loki and the
+# archive keep it (#564): Claude Code's tool_input and tool_parameters (the
+# command, the file content Write and Edit get, the URL WebFetch gets) and
+# the error of its tool_result (it can name a path or a host), and Codex's
+# arguments (the command, the whole apply_patch) and the output of its
+# tool_result. Before they go, a Bash tool_result whose tool_input holds
+# git commit, gh pr create or gh pr merge gets the attribute
+# command.git_commit, command.gh_pr_create or command.gh_pr_merge (true),
+# whether it succeeded or not: the dashboards count the successful ones
+# (#541; Loki shows them as command_git_commit and so on), with the same
+# patterns they used on tool_input. tool_input, tool_parameters and
+# arguments go from every log record, whichever event carries them. error
+# goes only from Claude Code's tool_result, so api_error keeps the API's
+# message, and error_type stays; output goes only from Codex's
+# tool_result. error_mode ignore keeps a record whose statement fails (it
+# is logged, and the next statements still run), instead of dropping the
+# whole payload. test-otel-backend.sh pins the statements in order; a
+# change is measured again with synthetic events on the image's Collector
+# (docs/otel-backend.md).
+#
+# Each archive pipeline takes what the otlp receiver got (logs/archive
+# through the processor above, traces and metrics unprocessed) and writes it
+# as newline-delimited OTLP JSON inside a standard zstd stream (#527:
+# Codex's traces are about 100MB a day uncompressed, about 21 times less in
+# zstd) to /archive, which compose binds to ~/.local/share/otel-lgtm/archive
+# on the host. That stream needs the Collector's
+# exporter.file.nativeCompression feature gate, which compose passes in
+# OTELCOL_EXTRA_ARGS: without it `compression: zstd` compresses each batch
+# on its own and length-prefixes it, a framing `zstd -d` cannot read. With
+# the gate each batch is its own zstd frame, so the file being written is
+# readable at any time and a restarted Collector appends to it; `zstd -d`
+# gives back the lines a later Collector's otlpjsonfile receiver reads (it
+# reads gzip, not zstd). max_megabytes is the compressed size (measured on
+# this image's Collector, #527). Files are kept for one year (#520):
+# max_days 365 deletes a rotated file 365 days after the time in its name
+# (when it was rotated; measured on this image's Collector: with max_days
+# 1, a file named two years back was deleted at the next rotation and the
+# new ones were kept; again with zstd in #527), and max_backups is 0, so no
+# other limit applies (with 1MB files, 0 kept all 7 rotated files while 1
+# kept only the newest one, #517; the upstream README does not say what 0
+# means). The file being written is never deleted by age. See
+# docs/otel-backend.md.
+processors:
+  transform/agent-tool-content:
+    error_mode: ignore
+    log_statements:
+      - set(log.attributes["command.git_commit"], true) where log.attributes["event.name"] == "tool_result" and log.attributes["tool_name"] == "Bash" and IsMatch(log.attributes["tool_input"], "git( -C [^ ]+)? commit")
+      - set(log.attributes["command.gh_pr_create"], true) where log.attributes["event.name"] == "tool_result" and log.attributes["tool_name"] == "Bash" and IsMatch(log.attributes["tool_input"], "gh pr create")
+      - set(log.attributes["command.gh_pr_merge"], true) where log.attributes["event.name"] == "tool_result" and log.attributes["tool_name"] == "Bash" and IsMatch(log.attributes["tool_input"], "gh pr merge")
+      - delete_key(log.attributes, "error") where log.attributes["event.name"] == "tool_result"
+      - delete_key(log.attributes, "output") where log.attributes["event.name"] == "codex.tool_result"
+      - delete_key(log.attributes, "tool_input")
+      - delete_key(log.attributes, "tool_parameters")
+      - delete_key(log.attributes, "arguments")
+
 exporters:
   file/archive-traces:
     path: /archive/traces.jsonl.zst
@@ -52,6 +93,8 @@ exporters:
 
 service:
   pipelines:
+    logs:
+      processors: [transform/agent-tool-content, batch]
     traces/archive:
       receivers: [otlp]
       exporters: [file/archive-traces]
@@ -60,4 +103,5 @@ service:
       exporters: [file/archive-metrics]
     logs/archive:
       receivers: [otlp]
+      processors: [transform/agent-tool-content]
       exporters: [file/archive-logs]

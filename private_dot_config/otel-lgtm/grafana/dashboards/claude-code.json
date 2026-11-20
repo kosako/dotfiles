@@ -996,7 +996,7 @@
       "id": 19,
       "type": "logs",
       "title": "tool の呼び出し",
-      "description": "tool_result。tool の入力 (tool_input) は OTEL_LOG_TOOL_DETAILS で送られ、値ごとに 512 文字で切られる",
+      "description": "tool_result。tool の入力と失敗の文は、Loki と保管に入る前に Collector が落とす (#564)。失敗は error_type だけが残る",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -1014,7 +1014,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service_name=~\"$service\"} | event_name=\"tool_result\" | line_format \"{{.tool_name}} success={{.success}} {{.duration_ms}}ms {{.tool_input}}\"",
+          "expr": "{service_name=~\"$service\"} | event_name=\"tool_result\" | line_format \"{{.tool_name}} success={{.success}} {{.duration_ms}}ms {{.error_type}}\"",
           "queryType": "range"
         }
       ],

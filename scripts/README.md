@@ -1215,7 +1215,9 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 文字列であることを求め(image の起動 script は `read -ra` で 1 行目だけを読む)、空白で引数に分けて、保持に関わる各 option がちょうど 1 回、
 期待の `name=value` で書かれていることを確かめる。名前の書き方(`-` か `--`、`=` か次の引数)を問わず数えるので、矛盾する
 重複は不合格。#520)、Loki の 1 回の問い合わせの上限を 1 年に広げる `-store.max-query-length=366d1h`(同じ数え方。dashboard の表示期間の 1 年を通すため。#532)。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
-足すだけで(image の pipeline を上書きしない)、`otlp` から processor なしで `file` exporter に書き、file は `/archive`
+足し(image の pipeline は、`logs` の processor の list を `[transform/agent-tool-content, batch]` にするほかは上書きしない。
+#564)、`otlp` から `file` exporter に書き(trace と metric は processor なし、log は tool の中身を落とす transform だけ)、
+transform は `error_mode: ignore` で statement を順番どおりに固定し、file は `/archive`
 の下の別々の JSON を zstd で(`compression: zstd`、path は `*.jsonl.zst`。#527)、`max_megabytes` が 1 以上 1024 以下の整数、`max_days` が 365、`max_backups` が 0(実測で、0 は回した file を全部残す)。receivers と exporters は
 配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
 directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard はどれも strict な JSON
@@ -1225,7 +1227,9 @@ directory に bind され、object 1 つの配列で、bind した dashboard の
 どれも datasource を持つ(row と、説明の text panel は問い合わせないので除く)。bind する dashboard の directory には、test の
 一覧の 7 つの file だけがある。日ごとの panel(interval が `1d`)の問い合わせは、窓が `[1d] offset -15h` で日本時間の 1 日を
 数え、`$__interval` を使わない(UTC の 0 時の区切りでは今日の分が落ちる。#541)。日ごとの panel を持つ dashboard は
-timezone が `Asia/Tokyo` で、期間の終わりが `now/d`(0 時から 9 時の間も今日の点を入れる。PR #543)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
+timezone が `Asia/Tokyo` で、期間の終わりが `now/d`(0 時から 9 時の間も今日の点を入れる。PR #543)。問い合わせが
+`tool_input` を読むのは、Collector の印(`command_git_commit` など)と組にした commit と PR の 3 つの数え方だけで、
+`tool_parameters` と `arguments` は読まない(#564)。書き込み可の bind(保管)はちょうど 1 つ。mode は file 0644 /
 directory 0755(umask 022 に固定して確かめる。#332 F38)。chezmoi・yq・jq が必要(render job)。実 home には触れず、
 container runtime とは通信しない。
 

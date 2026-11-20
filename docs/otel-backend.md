@@ -16,7 +16,7 @@ upstream は、この image を開発・demo・検証向けとしている(produ
 | --- | --- | --- |
 | container runtime(`colima`・`docker`・`docker-compose`) | dotfiles の software catalog(#515) | `install-packages.sh --apply`(人が明示して実行) |
 | container の定義 `~/.config/otel-lgtm/compose.yaml` | dotfiles(`private_dot_config/otel-lgtm/compose.yaml`、静的 file) | `chezmoi apply` |
-| Collector の保管の設定 `~/.config/otel-lgtm/otelcol/archive.yaml` | dotfiles(#517) | `chezmoi apply` |
+| Collector の保管の設定 `~/.config/otel-lgtm/otelcol/archive.yaml`(tool の中身を落とす処理を含む) | dotfiles(#517・#564) | `chezmoi apply` |
 | Grafana の dashboard と provider `~/.config/otel-lgtm/grafana/` | dotfiles(#517) | `chezmoi apply` |
 | 生データの保管の directory `~/.local/share/otel-lgtm/archive/` | 人(中身は Collector が書く。管理しない) | `mkdir`(初回の手順) |
 | Colima の VM と設定(`~/.colima/`)、docker の context(`~/.docker/config.json`) | Colima / docker(管理しない) | `colima start`(初回の引数は下記) |
@@ -38,7 +38,7 @@ compose file の定義:
 | `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=30d` | 下の「metric の temporality」と「保存期間」 |
 | `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定。Loki は 1 回の問い合わせの上限も) | 下の「保存期間」と「dashboard で 1 回に見られる期間」 |
 | `environment` | `PYROSCOPE_EXTRA_ARGS: -self-profiling.disable-push=true` | 下の「保存期間」(Pyroscope が自分の profile を送らない) |
-| `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline を重ねる。gate は保管の zstd に要る(下の「生データの保管と読み戻し」) |
+| `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline と、tool の中身を落とす処理を重ねる。gate は保管の zstd に要る(下の「tool の中身を落とす」と「生データの保管と読み戻し」) |
 
 bind(どれも long syntax で `bind.create_host_path: false`):
 
@@ -232,6 +232,66 @@ cumulative に直す(使い捨ての container で、捕まえた Codex の payl
 - Codex の resource には process を区別する attribute が無いので、同じ service の複数の process の値は 1 つの系列に
   足し合わされる。
 
+## tool の中身を落とす(#564)
+
+agent が tool の event に入れる中身は、Loki と保管に入る前に Collector が落とす。保管の設定(`archive.yaml`)の
+`transform/agent-tool-content` が、image の `logs` pipeline と `logs/archive` の両方で動く。
+
+落とすもの:
+
+| agent | event | attribute | 中身 |
+| --- | --- | --- | --- |
+| Claude Code | どれでも(今は `tool_result` と `tool_decision`) | `tool_input` | tool の入力。Bash の command、Write の file の中身、Edit の前後の文字列、WebFetch の URL など(値ごとに 512 文字で切られている) |
+| Claude Code | どれでも | `tool_parameters` | Bash の command 全体(切り詰めない)と説明の文、MCP の server と tool の名前、skill の名前、subagent の種類 |
+| Claude Code | `tool_result` | `error` | 失敗の文。path や接続先の host を含むことがある。種類(`error_type`)は残す |
+| Codex | どれでも(今は `codex.tool_result`) | `arguments` | tool の引数。command、`apply_patch` の patch 全体、動いている process に送った入力(切り詰めない) |
+| Codex | `codex.tool_result` | `output` | tool の出力の抜粋。agent-tools の worker は 0 byte にしているので、今は切り詰めの印だけ |
+
+印を付けるもの。Claude Code の Bash の `tool_result` で、`tool_input` が `git commit`(`git -C <dir> commit` を含む)、
+`gh pr create`、`gh pr merge` を含むものに、`command.git_commit`・`command.gh_pr_create`・`command.gh_pr_merge`(true)
+を付ける。Loki では `command_git_commit` などの名前で見える。成否は問わずに付け、dashboard が成功したものを数える。
+判定の正規表現は、dashboard がそれまで `tool_input` に使っていたものと同じ。
+
+決めたこと(2026-11-21):
+
+- 本物の Loki の直近 7 日分を、値を出さずに数えた。Claude Code の `tool_input` の 5000 件のうち、home の path を含むものが
+  1695、heredoc の文面が 205、commit や PR の文面が 91 あった。token・API key・秘密鍵の形は 0 だった。秘密の値が無いのは
+  使い方(op で読んだ値を command に直接書かない)によるもので、仕組みで防いでいるわけではない。
+- 外部の server へ転送するときに、path、repo の名前、file の中身が出ていかないよう、転送を始める前の今のうちに落とす。
+  image の外部への転送(`OTEL_EXPORTER_OTLP_*_ENDPOINT`)は、image の `logs` pipeline に exporter を足す形なので、同じ
+  処理を通る。
+- 送る側の `OTEL_LOG_TOOL_DETAILS=1` は止めない。印を付けるのに command が要るため。中身は loopback の Collector まで
+  届き、そこで落ちる。
+- `tool_input`・`tool_parameters`・`arguments` は、どの event からも落とす。同じ名前で中身を運ぶ event が増えても落ちる。
+  `error` は `tool_result` からだけ落とし、`api_error` の API の文は残す。`output` は `codex.tool_result` からだけ落とし、
+  `codex.sse_event` などのほかの event には触れない。
+- statement が失敗しても record は捨てない(`error_mode: ignore`)。失敗は Collector の log に出て、続く statement は
+  動く。`propagate` だと、その payload を丸ごと捨てる。
+
+image の設定への依存。image の `logs` pipeline の processor の list を、`[transform/agent-tool-content, batch]` に
+置き換える(Collector の設定を重ねると、list は置き換わる)。`batch` は image の設定にある processor で、0.39.0 では `logs`
+の processor はこれだけ。image を更新するときに確かめる(下の「image の更新」)。
+
+残るもの。どの event にも付く `user.email`・account の id・session の id、Codex の `host.name`、MCP の server の名前
+(Codex の `codex.tool_result` の `mcp_server` と、Claude Code の `api_request` の `mcp_server_name`)、hook の名前、
+commit したときの branch の名前(`vcs.ref.head.name`)。数、時間、成否、token、cost も残る。
+
+変更より前の data。Loki と保管には、変更の前に受けた分がそのまま残り、1 年かけて消えていく(下の「保存期間」)。
+dashboard の数え方は、その分も数えるため、`tool_input` の正規表現と印の両方を見る。古い分が消えた後(2027-11 の
+下旬)は、印だけにできる。`test-otel-backend.sh` が、`tool_input` を読む問い合わせを、印と組にした 3 つの数え方だけに
+限る。
+
+確かめ方(2026-11-21、0.39.0 で実施):
+
+1. 使い捨ての container(host の bind なし、port は `127.0.0.1:14318` だけ)を作り、`archive.yaml` を `docker cp` で
+   `/otel-lgtm/otelcol-archive.yaml` に入れ、compose と同じ `OTELCOL_EXTRA_ARGS` で起動する。
+2. Claude Code と Codex の tool の event を模した OTLP の JSON を、canary の文字列を入れて `/v1/logs` に送る。attribute の
+   名前は、保管の file にある本物のものに合わせる。
+3. Loki と保管の file のどちらにも canary が無いこと、印が付くこと、落とさない項目(`error_type`、`api_error` の
+   `error`、`codex.sse_event` の `output`)が残ることを確かめる。dashboard の数え方の LogQL も、その Loki で期待どおりの
+   数を返した。
+4. container は `docker rm -f -v` で消す。
+
 ## dashboard
 
 Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-codex`)と「AI agents (Claude Code)」
@@ -278,7 +338,7 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 | token と cost | token(model と種類ごと)、cost(model ごと) | Loki |
 | 応答の速さ | TTFT(p50 / p95)、API request の所要時間(p50 / p95) | Loki |
 | tool | tool の呼び出し(tool と成否ごと)、tool の許可(判定と出どころごと)、tool の所要時間(p95) | Loki |
-| 最近の動き | tool の呼び出し(tool の入力を含む)、API error | Loki |
+| 最近の動き | tool の呼び出し(tool・成否・時間・失敗の種類。入力は残さない)、API error | Loki |
 
 - `service` の変数は `claude-code` で始まるもの全部(Desktop の Code tab の session は `claude-code-desktop`)。
 - 数は Codex と同じく log から数える。cost は Claude Code が見積もった API の料金で、plan で使うときは請求額ではない。
@@ -286,7 +346,8 @@ Grafana の「AI agents」folder に、「AI agents (Codex)」(uid `ai-agents-co
 - trace は送っていない(beta。[claude-settings](claude-settings.md) の「telemetry」)ので、trace の panel は無い。
 - Claude Code の event と attribute(LogQL で使うもの。2.1.322 で実測。`api_error` はまだ届いていないので Claude Code の docs による): `user_prompt`(session_id・prompt_length)、
   `api_request`(model・input / output / cache_read / cache_creation_tokens・cost_usd・duration_ms・ttft_ms)、
-  `api_error`(model・status_code・attempt・error)、`tool_result`(tool_name・success・duration_ms・tool_input)、
+  `api_error`(model・status_code・attempt・error)、`tool_result`(tool_name・success・duration_ms・error_type と、
+  Collector が付ける `command_*`。上の「tool の中身を落とす」)、
   `tool_decision`(tool_name・decision・source)。event の名前は structured metadata の `event_name` で、`claude_code.`
   を付けない。
 
@@ -325,9 +386,10 @@ Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。t
 - 比は 1 つの問い合わせの中で `(A) / (B > 0)` と割る。分母が 0 の日は点を出さない。Grafana の式(`__expr__`)は datasource
   の検査(loki・prometheus・tempo だけ)に合わないので使わない。Loki と Prometheus をまたぐ比(行あたりの token)は置かない。
 - 生産の数は log から数える(1 年分を見られる)。編集は成功した `Edit`・`Write`・`MultiEdit`・`NotebookEdit`。commit と PR は、
-  Bash の `tool_input` に `git commit`・`gh pr create`・`gh pr merge` を含む成功した呼び出し(`OTEL_LOG_TOOL_DETAILS=1` で
-  command が入る。[claude-settings](claude-settings.md) の「telemetry」)。すべての repo の分を数え、人が画面で merge したものは
-  入らない。Codex は review と委譲の worker が中心なので、生産は `codex.conversation_starts` の数(run)で見る。
+  Bash の成功した呼び出しのうち、Collector が `command_git_commit`・`command_gh_pr_create`・`command_gh_pr_merge` の印を
+  付けたもの(上の「tool の中身を落とす」。#564)。印より前の data は、`tool_input` に `git commit`・`gh pr create`・
+  `gh pr merge` を含むもので数える(`OTEL_LOG_TOOL_DETAILS=1` で command が入る。[claude-settings](claude-settings.md) の
+  「telemetry」)。すべての repo の分を数え、人が画面で merge したものは入らない。Codex は review と委譲の worker が中心なので、生産は `codex.conversation_starts` の数(run)で見る。
 - 変えた行と編集した file の言語は、Claude Code の metric(`claude_code_lines_of_code_count_total` と
   `claude_code_code_edit_tool_decision_total`。Prometheus なので 30 日まで)で、目安として出す。metric は session ごとの
   短い系列で、delta を cumulative に直す状態が途中で切れて数え直しが起きる。30 日の足した行は、系列ごとの最大の和で 3113、
@@ -434,8 +496,9 @@ host の disk にあり、1 年で約 2.3GB の見込み(下の「生データ�
 `~/.local/share/otel-lgtm/archive/` に書く(#517)。backend の volume や VM を作り直しても残る。
 
 - 書くのは image の Collector に重ねた 3 つの pipeline(`traces/archive`・`metrics/archive`・`logs/archive`)。receiver は
-  `otlp` だけで processor を通さないので、Codex が送ったままの形になる。image の既存の pipeline の定義には触れず、
-  名前の違う pipeline を足すだけ(Collector の設定の重ね方では、list は置き換わり、map は足される)。
+  `otlp` だけ。trace と metric は processor を通さないので、送られたままの形になる。log は、上の「tool の中身を落とす」の
+  処理だけを通る。image の既存の pipeline は、`logs` の processor の list のほかは触れず、名前の違う pipeline を足す
+  (Collector の設定の重ね方では、list は置き換わり、map は足される)。
 - file は signal ごとに `traces.jsonl.zst`・`metrics.jsonl.zst`・`logs.jsonl.zst`。中身は改行区切りの OTLP JSON(1 行が
   1 回の export)を、標準の zstd で圧縮したもの(#527)。`zstd -d` で元の改行区切りの JSON に戻る。
   - `zstd` の command は catalog(`.chezmoidata/packages.yaml`)にあり、`scripts/install-packages.sh` で入れる(#536)。
@@ -545,8 +608,11 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
 
    通れば、その digest が upstream の repository の workflow で作られたものと分かる(0.39.0 で確認。digest を
    変えると失敗する)。依存先の中身の安全を示すものではない。
-3. 新しい image の Collector が保管の設定を受け付けるかを確かめる(`otlp` receiver の名前と `file` exporter が在る
-   こと、zstd の gate が在ること)。
+3. 新しい image の Collector が保管の設定を受け付けるかを確かめる(`otlp` receiver の名前と、`file` exporter・
+   `transform` processor が在ること、zstd の gate が在ること)。image の設定の `service.pipelines.logs` が同じ名前で、
+   processor が `[batch]` だけであることも見る(`docker run --rm --entrypoint cat grafana/otel-lgtm@sha256:<digest>
+   /otel-lgtm/otelcol-config.yaml`)。違っていたら、保管の設定の `logs` の list を image に合わせ、上の「tool の中身を
+   落とす」の確かめ方で、canary が Loki と保管に残らないことを確かめる。
 
    ```sh
    docker run --rm -i --entrypoint sh grafana/otel-lgtm@sha256:<digest> -c \
@@ -650,6 +716,10 @@ compose file があるときは、実行時の状態と保管の directory を**
   変わるので、手順を守れば起きない)。
 - 1 年を過ぎた telemetry は、Loki からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
   では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
+- tool の中身は、attribute の名前で選んで落とす(上の「tool の中身を落とす」)。Claude Code や Codex が別の名前で中身を
+  送り始めたら、足すまでは残る。版を上げたときに、保管の file の tool の event の attribute の名前を見直す。
+- #564 より前に受けた tool の中身は、Loki と保管に残り、1 年かけて消える。早く消すには、保管の file と Loki の data を
+  消すしかない(この repo の手順は持たない)。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。
@@ -662,9 +732,11 @@ byte 単位で不変)、managed-by の見出し(dashboard は description)、com
 だけ、host の path は許可した bind だけ(compose の directory の下を読み取りだけで、保管の directory を `/archive` に
 書き込み可で、どれも `create_host_path: false`)、named volume の宣言の中身が空、Prometheus が delta の metric を
 変換する指定、Loki が 1 年・Prometheus と Tempo が 30 日残す指定と Pyroscope が自分の profile を送らない指定(引数ごとに完全一致)、Collector が zstd の gate を有効にして
-bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足すだけで、`otlp` から
-processor なしで file に書き、file は `/archive` の下の zstd の JSON(`*.jsonl.zst`、`compression: zstd`)、`max_days` が
-365、`max_backups` が 0。provider は
+bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足し、`otlp` から
+file に書く(trace と metric は processor なし、log は tool の中身を落とす処理だけを通す)。image の `logs` pipeline に
+置くのは processor の list(その処理と `batch`)だけ。処理の statement は順番どおりに固定する。file は `/archive` の下の
+zstd の JSON(`*.jsonl.zst`、`compression: zstd`)、`max_days` が 365、`max_backups` が 0。dashboard の問い合わせが
+`tool_input` を読むのは、印と組にした commit と PR の 3 つの数え方だけで、`tool_parameters` と `arguments` は読まない。provider は
 bind した dashboard の directory を指し、UI での変更を拒む。dashboard は strict な JSON の object で、uid が決まっていて、
 どの datasource の参照も `loki`・`prometheus`・`tempo` の uid を持つ object(名前の文字列は不合格)。保管の bind は
 ちょうど 1 つ。mode が file 0644 / directory 0755。container runtime とは
