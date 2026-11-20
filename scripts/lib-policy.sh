@@ -1452,8 +1452,11 @@ npm_before_within_age_window() {
 # testable on fixed inputs (scripts/test-cli-checked-versions.sh; the #565
 # direction). CHECKED is the recorded version, FOUND is 1 when the CLI is on
 # PATH, OUTPUT is what `<cli> --version` printed on a clean exit (empty when it
-# failed or timed out). The version is the first word of OUTPUT's first line
-# that is a dotted number (`2.1.329 (Claude Code)`, `codex-cli 0.169.1`).
+# failed or timed out). The version is the first word of OUTPUT's first
+# non-empty line that is a dotted number (`2.1.329 (Claude Code)`,
+# `codex-cli 0.169.1`). Non-empty, not first: bounded_probe drops empty lines,
+# so this is the line doctor hands over as well, and a direct call and a
+# probed one agree (Codex review, PR #567).
 # Prints one state, and never reads a missing answer as a match:
 #   unrecorded        CHECKED is empty or not a dotted number
 #   absent            the CLI is not on PATH
@@ -1472,7 +1475,9 @@ cli_checked_version_state() {
     printf 'absent\n'
     return 0
   fi
-  IFS= read -r line <<< "$output" || true
+  while IFS= read -r line; do
+    [[ -z "$line" ]] || break
+  done <<< "$output"
   # read -a splits on IFS without pathname expansion, so a `*` in the
   # output stays a word instead of matching files.
   IFS=$' \t' read -r -a words <<< "$line" || true

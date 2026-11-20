@@ -35,7 +35,10 @@ check_state "a patch release differs" "differs 2.1.330" 2.1.329 1 "2.1.330 (Clau
 check_state "a prefix of the checked version differs" "differs 2.1.32" 2.1.329 1 "2.1.32 (Claude Code)"
 check_state "the first dotted word of the line is the version" "matches 1.2.3" 1.2.3 1 "tool 1.2.3 built with 4.5.6"
 check_state "a tab separates words" "matches 1.2.3" 1.2.3 1 $'tool\t1.2.3'
-check_state "only the first line is read" "unreadable" 1.2.3 1 $'error: no version here\n1.2.3'
+check_state "only the first non-empty line is read" "unreadable" 1.2.3 1 $'error: no version here\n1.2.3'
+check_state "leading empty lines are skipped (bounded_probe drops them too)" "matches 1.2.3" 1.2.3 1 $'\n\n1.2.3\n'
+check_state "a line of spaces is not empty" "unreadable" 1.2.3 1 $'   \n1.2.3'
+check_state "only empty lines are unreadable" "unreadable" 1.2.3 1 $'\n\n'
 check_state "empty output (failed or timed out probe) is unreadable" "unreadable" 1.2.3 1 ""
 check_state "output without a version is unreadable" "unreadable" 1.2.3 1 "error: unknown option '--version'"
 check_state "a v-prefixed word is not a version" "unreadable" 1.2.3 1 "v1.2.3"

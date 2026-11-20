@@ -5479,8 +5479,11 @@ rm -rf "$na_home" "$hi_fakebin"
 #     answer --version and fail anything else (doctor also runs `codex
 #     execpolicy check`, which then reads as a failed probe, as with the
 #     host stub).
-#     CV-a) claude prints the recorded version, codex another one -> one
-#           matches line and one differs line naming both versions.
+#     CV-a) claude prints the recorded version after an empty line, codex
+#           another one -> one matches line and one differs line naming both
+#           versions (bounded_probe drops the empty line and the judgment
+#           skips it as well, so both read the same line; Codex review, PR
+#           #567).
 #     CV-b) claude prints the recorded version but exits 3, codex is the
 #           host stub (exit 1, no output) -> neither answer is adopted, both
 #           read as not checked.
@@ -5495,7 +5498,8 @@ write_fake_version_cli() {
     "'%s\n'" "$(shell_single_quote "$2")" "$3" > "$cv_fakebin/$1"
   chmod +x "$cv_fakebin/$1"
 }
-write_fake_version_cli claude "$cv_claude (Claude Code)" 0
+write_fake_version_cli claude "
+$cv_claude (Claude Code)" 0
 write_fake_version_cli codex "codex-cli $cv_codex_other" 0
 if cv_out="$(HOME="$fixture_home" PATH="$cv_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
   if grep -Fq "[info] - claude $cv_claude: matches the checked version (" <<< "$cv_out" \
