@@ -91,8 +91,9 @@ doctor_exit_fail() {
 status=0
 fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-test.XXXXXX")"
 # Host tools doctor would otherwise launch for real on a developer machine
-# (`op whoami`, `herdr integration status`, codex / opencode probes, and the
-# brew / npm queries of the software catalog and npm hardening): hundreds of
+# (`op whoami`, `herdr integration status`, claude / codex / opencode probes,
+# and the brew / npm queries of the software catalog and npm hardening; claude
+# since the CLI checked versions section, #566): hundreds of
 # runs below inherit this PATH, and the real tools are credential-bearing,
 # slow to answer, or write to the fixture HOME (brew fetches its formula API
 # into a fresh HOME's cache, npm writes logs there). A PATH-front dir of stubs
@@ -137,7 +138,7 @@ fi
 fi
 host_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-host-stubs.XXXXXX")"
 mkdir -p "$host_stub_dir/bin"
-write_call_recorders "$host_stub_dir/bin" "$host_stub_dir/calls" 1 op herdr codex opencode brew npm gh
+write_call_recorders "$host_stub_dir/bin" "$host_stub_dir/calls" 1 op herdr claude codex opencode brew npm gh
 PATH="$host_stub_dir/bin:$PATH"
 export PATH
 # The go install target check (#305) reads `go env GOBIN` / `GOPATH`: a GOBIN
@@ -145,7 +146,7 @@ export PATH
 # otherwise turn every fixture run into an extra action. Unset, Go answers
 # for the fixture HOME ($HOME/go); the GO cases below use their own fake go.
 unset GOBIN GOPATH
-for host_tool in op herdr codex opencode brew npm gh; do
+for host_tool in op herdr claude codex opencode brew npm gh; do
   if [[ "$(command -v "$host_tool")" != "$host_stub_dir/bin/$host_tool" ]]; then
     fail "test failed: the host-tool stub for $host_tool is not what PATH resolves first"
     exit 1
@@ -5470,6 +5471,65 @@ else
   status=1
 fi
 rm -rf "$na_home" "$hi_fakebin"
+
+# CV) CLI checked versions (#566). doctor compares the local claude / codex
+#     with .chezmoidata/cli-checked-versions.yaml through bounded_probe and
+#     cli_checked_version_state (whose states test-cli-checked-versions.sh
+#     covers on fixed inputs). These two runs pin the wiring only. The fakes
+#     answer --version and fail anything else (doctor also runs `codex
+#     execpolicy check`, which then reads as a failed probe, as with the
+#     host stub).
+#     CV-a) claude prints the recorded version after an empty line, codex
+#           another one -> one matches line and one differs line naming both
+#           versions (bounded_probe drops the empty line and the judgment
+#           skips it as well, so both read the same line; Codex review, PR
+#           #567).
+#     CV-b) claude prints the recorded version but exits 3, codex is the
+#           host stub (exit 1, no output) -> neither answer is adopted, both
+#           read as not checked.
+cv_fakebin="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor-cv.XXXXXX")"
+cv_claude="$(yq '.cliCheckedVersions.claudeCode' "$CLI_VERSIONS_FILE")"
+cv_codex="$(yq '.cliCheckedVersions.codex' "$CLI_VERSIONS_FILE")"
+cv_codex_other="999.0.0"
+# write_fake_version_cli NAME OUTPUT RC — NAME prints OUTPUT and exits RC for
+# --version, and exits 1 for anything else.
+write_fake_version_cli() {
+  printf '#!/bin/sh\nif [ "$1" = --version ]; then printf %s %s; exit %s; fi\nexit 1\n' \
+    "'%s\n'" "$(shell_single_quote "$2")" "$3" > "$cv_fakebin/$1"
+  chmod +x "$cv_fakebin/$1"
+}
+write_fake_version_cli claude "
+$cv_claude (Claude Code)" 0
+write_fake_version_cli codex "codex-cli $cv_codex_other" 0
+if cv_out="$(HOME="$fixture_home" PATH="$cv_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "[info] - claude $cv_claude: matches the checked version (" <<< "$cv_out" \
+    && grep -Fq "[info] - codex $cv_codex_other: differs from the checked version $cv_codex (" <<< "$cv_out"; then
+    ok "test passed: CLI checked versions reports a matching claude and a differing codex with both versions"
+  else
+    printf '%s\n' "$cv_out" >&2
+    fail "test failed: CLI checked versions did not report claude as matching and codex as differing"
+    status=1
+  fi
+else
+  doctor_exit_fail "CLI checked versions, match and differ" "$?" "$cv_out"
+fi
+rm -f "$cv_fakebin/codex"
+write_fake_version_cli claude "$cv_claude (Claude Code)" 3
+if cv_out="$(HOME="$fixture_home" PATH="$cv_fakebin:$PATH" "$SCRIPT_DIR/doctor.sh" personal 2>&1)"; then
+  if grep -Fq "[info] - claude: version not checked (" <<< "$cv_out" \
+    && grep -Fq "[info] - codex: version not checked (" <<< "$cv_out" \
+    && ! grep -Fq "matches the checked version" <<< "$cv_out"; then
+    ok "test passed: CLI checked versions does not adopt a failed --version (non-zero exit, or no output)"
+  else
+    printf '%s\n' "$cv_out" >&2
+    fail "test failed: CLI checked versions adopted a failed --version or did not report it as not checked"
+    status=1
+  fi
+else
+  doctor_exit_fail "CLI checked versions, failed probes" "$?" "$cv_out"
+fi
+rm -rf "$cv_fakebin"
+unset -f write_fake_version_cli
 
 fi # end of part 2
 

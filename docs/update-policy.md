@@ -18,6 +18,8 @@ claude-code は catalog 外の native installer(`claude.ai/install.sh` → `~/.l
 auto-update が hardened `~/.npmrc`(ignore-scripts=true)と両立しないための採用で、
 「npm hardening を維持したまま自動更新も動く」ことを優先した唯一の例外。経緯と詳細は
 [supply-chain-npm](supply-chain-npm.md)。
+自動で上がった版が、この repo が版に結び付けて確かめた一覧 (`claude` 関数の option の一覧など) とずれていないかは、
+doctor の「CLI checked versions」が `.chezmoidata/cli-checked-versions.yaml` の版と並べて示す (#566。[shell](shell.md))。
 
 ## 取得の方針(install で入る版)
 
