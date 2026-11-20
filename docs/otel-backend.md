@@ -277,7 +277,9 @@ image の設定への依存。image の `logs` pipeline の processor の list �
 commit したときの branch の名前(`vcs.ref.head.name`)。数、時間、成否、token、cost も残る。
 
 変更より前の data。Loki と保管には、変更の前に受けた分がそのまま残り、1 年かけて消えていく(下の「保存期間」)。
-dashboard の数え方は、その分も数えるため、`tool_input` の正規表現と印の両方を見る。古い分が消えた後(2027-11 の
+早くは消さないと決めた(2026-11-21、#569)。消すと、変更より前の dashboard の履歴(token、cost、commit の数など)も
+なくなる。今は手元の外へ何も送っていない。保管の file を別の server に読み戻すときは、同じ処理を通してから送る(下の
+「生データの保管と読み戻し」)。dashboard の数え方は、その分も数えるため、`tool_input` の正規表現と印の両方を見る。古い分が消えた後(2027-11 の
 下旬)は、印だけにできる。`test-otel-backend.sh` が、`tool_input` を読む問い合わせを、印と組にした 3 つの数え方だけに
 限る。
 
@@ -583,16 +585,43 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
   Prometheus と Tempo が 30 日で消える(上の「保存期間」)。
 - `otlpjsonfile` receiver(opentelemetry-collector-contrib)が、改行区切りの OTLP JSON を読める(upstream の README)。
   signal ごとに receiver を分け、file を `include` で指す。この image の Collector の build にも `otlp_json_file` の名前で
-  入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。
+  入っている(#517 の時点では名前の下線を見落として「無い」としていた。2026-11-11 に訂正)。この build(0.164.0)では
+  `otlpjsonfile` は古い別名で、使うと Collector が警告を出す(#569)。設定には `otlp_json_file` と書く。`start_at` の
+  既定は `end`(file の末尾から読む)なので、`beginning` にする。
 - この receiver が読める圧縮は gzip だけで、zstd は読めない(upstream の README)。`*.zst` は、先に `zstd -d` で展開して
   から読ませる(#527 で、この image の Collector が書いた file を展開し、送った行と span がすべて戻ることを確かめた)。
   #527 より前の `*.jsonl` はそのまま、`*.jsonl.gz` は `compression: gzip` で読める。
 - 元の時刻のまま送られるので、読み戻す先の backend が古い時刻を受け付けるか(Prometheus の
   `out_of_order_time_window` など)を確かめる。
 - metric は Codex が送った delta のまま保管している。読み戻す先が delta を受け付けないときは、そちらで変換する。
+- log は、上の「tool の中身を落とす」と同じ処理を通してから送る(#569)。#564 より前の file には、tool の中身がそのまま
+  入っているため。読み戻す Collector の logs の pipeline に、`archive.yaml` の `transform/agent-tool-content` の block を
+  そのまま写して入れる。印もそこで付くので、読み戻した先の dashboard は印だけで数えられる。#564 の後の file に通しても、
+  落とす項目がもう無いので変わらない。送る前に、送り先の代わりに `file` exporter に書いて、`tool_input`・
+  `tool_parameters`・`arguments` が残っていないことを確かめる。
 
-保管の file には、Loki と同じ中身が入る(tool の出力の抜粋、account の email などの attribute)。directory は 0700 に
-し、外へは送らない。
+  ```yaml
+  receivers:
+    otlp_json_file/logs:
+      include: [<zstd -d で展開した logs の file>]
+      start_at: beginning
+  processors:
+    transform/agent-tool-content: # archive.yaml の同じ名前の block を写す
+  service:
+    pipelines:
+      logs:
+        receivers: [otlp_json_file/logs]
+        processors: [transform/agent-tool-content]
+        exporters: [<送り先の exporter>]
+  ```
+
+  確かめたこと(2026-11-21、0.39.0 の Collector で)。上の「tool の中身を落とす」の確かめ方と同じ模した event を、
+  #564 より前の形(中身あり)で 1 行の file にした。network の無い使い捨ての container で、`otlp_json_file` から
+  この処理を通して `file` exporter に書いた。11 件のどれにも canary が無く、印が付き、落とさない項目が残った。
+  `start_at` を外すと、file は 1 行も読まれなかった。
+
+保管の file には、Loki と同じ中身が入る(account の email などの attribute。#564 より前の file には tool の中身も)。
+directory は 0700 にし、読み戻すときのほかは外へ送らない。
 
 ## image の更新
 
@@ -718,8 +747,9 @@ compose file があるときは、実行時の状態と保管の directory を**
   では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
 - tool の中身は、attribute の名前で選んで落とす(上の「tool の中身を落とす」)。Claude Code や Codex が別の名前で中身を
   送り始めたら、足すまでは残る。版を上げたときに、保管の file の tool の event の attribute の名前を見直す。
-- #564 より前に受けた tool の中身は、Loki と保管に残り、1 年かけて消える。早く消すには、保管の file と Loki の data を
-  消すしかない(この repo の手順は持たない)。
+- #564 より前に受けた tool の中身は、Loki と保管に残り、1 年かけて消える。早くは消さないと決めた(#569)。保管の file を
+  読み戻すときに処理を通し忘れると、中身が送り先に出る(上の「読み戻すとき」)。早く消すには、保管の file と Loki の
+  data を消すしかない(この repo の手順は持たない)。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。
