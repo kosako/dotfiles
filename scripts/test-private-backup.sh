@@ -2768,6 +2768,78 @@ else
 fi
 chmod 700 "$sx_home/.config/dotfiles" "$sx_home/lists" "$sx_home/tree/private" # so the EXIT trap can clean up
 
+# 42. The baseline catalog is tracked in the repo, not optional like the
+#     supplement (#575). collect_declared skips a missing file, so a checkout
+#     without .chezmoidata/backup-paths.yaml backed up only what the
+#     supplement lists and recorded that as complete. A catalog that is
+#     missing, is not a regular file, or declares nothing stops the backup
+#     with no archive and the marker kept. The runs use a copy of the script
+#     and its data, so the real catalog stays in place; the control backs up
+#     from the same copy with the catalog there, so the refusals come from the
+#     catalog, not from the copy.
+nb_root="$fixture_home/no-baseline-root"
+nb_home="$fixture_home/no-baseline-home"
+mkdir -p "$nb_root/scripts" "$nb_home/.config/dotfiles"
+# The path as the copied script prints it (cd normalizes a TMPDIR that ends
+# with "/").
+nb_root="$(cd "$nb_root" && pwd)"
+cp "$PB" "$SCRIPT_DIR/lib-policy.sh" "$nb_root/scripts/"
+cp -R "$DOTFILES_ROOT/.chezmoidata" "$nb_root/.chezmoidata"
+nb_catalog="$nb_root/.chezmoidata/backup-paths.yaml"
+printf 'fixture\n' > "$nb_home/.zshrc.local"
+printf 'config\n' > "$nb_home/private.conf"
+printf 'backup_paths:\n  - { path: "private.conf", type: file }\n' > "$nb_home/.config/dotfiles/backup-paths.local"
+nb_marker="$nb_home/.local/state/dotfiles/private-backup.json"
+# nb_backup NAME — back up nb_home to NAME.age with the copied script. Sets
+# nb_rc, nb_out, and nb_marker_before to the marker right before the run.
+nb_backup() {
+  nb_marker_before="$(cat "$nb_marker" 2>/dev/null || true)"
+  nb_rc=0
+  nb_out="$(HOME="$nb_home" PATH="$fixture_home/fakebin:$PATH" "$nb_root/scripts/private-backup.sh" \
+    backup --out "$nb_home/$1.age" --recipient "$recipient" --yes 2>&1)" || nb_rc=$?
+}
+# nb_refused NAME MESSAGE — the last run exited 1 with MESSAGE, wrote no
+# archive and no partial output, and left the marker as it was.
+nb_refused() {
+  [[ "$nb_rc" -eq 1 ]] && grep -Fq -- "$2" <<< "$nb_out" \
+    && [[ ! -e "$nb_home/$1.age" ]] && no_partial "$nb_home/$1.age" \
+    && [[ -n "$nb_marker_before" && "$(cat "$nb_marker")" == "$nb_marker_before" ]]
+}
+nb_backup control
+if [[ "$nb_rc" -eq 0 && -f "$nb_home/control.age" && -f "$nb_marker" ]]; then
+  pass "control: the copied script backs up with the baseline catalog in place"
+else
+  printf '%s\n' "$nb_out" >&2
+  miss "control: the copied script did not back up with the baseline catalog in place (rc=$nb_rc)"
+fi
+mv "$nb_catalog" "$nb_catalog.real"
+nb_backup missing
+if nb_refused missing "backup catalog not found or not a regular file: $nb_catalog"; then
+  pass "a missing baseline catalog stops the backup (exit 1): no archive of the supplement alone, marker kept"
+else
+  printf '%s\n' "$nb_out" >&2
+  miss "a missing baseline catalog was not refused as missing (rc=$nb_rc)"
+fi
+mkdir "$nb_catalog"
+nb_backup directory
+if nb_refused directory "backup catalog not found or not a regular file: $nb_catalog"; then
+  pass "a baseline catalog that is a directory stops the backup (exit 1): no archive, marker kept"
+else
+  printf '%s\n' "$nb_out" >&2
+  miss "a baseline catalog that is a directory was not refused as not a regular file (rc=$nb_rc)"
+fi
+rmdir "$nb_catalog"
+printf 'backup_paths: []\n' > "$nb_catalog"
+nb_backup empty
+if nb_refused empty "backup catalog declares no paths: $nb_catalog"; then
+  pass "a baseline catalog that declares nothing stops the backup (exit 1): no archive, marker kept"
+else
+  printf '%s\n' "$nb_out" >&2
+  miss "a baseline catalog that declares nothing was not refused as empty (rc=$nb_rc)"
+fi
+rm -f "$nb_catalog"
+mv "$nb_catalog.real" "$nb_catalog"
+
 if [[ "$status" -eq 0 ]]; then
   ok "private-backup tests passed"
 fi
