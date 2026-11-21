@@ -1215,9 +1215,10 @@ pin とは別に、定義が守る性質も確かめる: image が `name:X.Y.Z@s
 文字列であることを求め(image の起動 script は `read -ra` で 1 行目だけを読む)、空白で引数に分けて、保持に関わる各 option がちょうど 1 回、
 期待の `name=value` で書かれていることを確かめる。名前の書き方(`-` か `--`、`=` か次の引数)を問わず数えるので、矛盾する
 重複は不合格。#520)、Loki の 1 回の問い合わせの上限を 1 年に広げる `-store.max-query-length=366d1h`(同じ数え方。dashboard の表示期間の 1 年を通すため。#532)。保管の設定は、`*/archive` の pipeline を signal ごとに 1 つ
-足し(image の pipeline は、`logs` の processor の list を `[transform/agent-tool-content, batch]` にするほかは上書きしない。
-#564)、`otlp` から `file` exporter に書き(trace と metric は processor なし、log は tool の中身を落とす transform だけ)、
-transform は `error_mode: ignore` で statement を順番どおりに固定し、file は `/archive`
+足し(image の pipeline は、`logs` の processor の list を `[transform/agent-tool-content, batch]` に、`traces` の list を
+`[transform/agent-trace-paths, batch]` にするほかは上書きしない。#564・#571)、`otlp` から `file` exporter に書き(metric は
+processor なし、log は tool の中身を落とす transform だけ、trace は span の `cwd` を落とす transform だけ)、
+2 つの transform は `error_mode: ignore` で statement を順番どおりに固定し、file は `/archive`
 の下の別々の JSON を zstd で(`compression: zstd`、path は `*.jsonl.zst`。#527)、`max_megabytes` が 1 以上 1024 以下の整数、`max_days` が 365、`max_backups` が 0(実測で、0 は回した file を全部残す)。receivers と exporters は
 配列であること(文字列の `"[otlp]"` は不合格)。provider は Grafana の provisioning の
 directory に bind され、object 1 つの配列で、bind した dashboard の directory を指し、`allowUiUpdates: false`。dashboard はどれも strict な JSON
