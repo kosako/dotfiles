@@ -815,6 +815,19 @@ catalog_packages() {
   yq '.packages[]? | [(.name // ""), (.source // ""), (.pkg // ""), (.bin // ""), ((.track_only // false) | tostring)] | join("|")' "$PACKAGES_FILE"
 }
 
+# catalog_track_only_valid VALUE — whether VALUE, a row's track_only field as
+# catalog_packages prints it, is one validate-policy accepts: true or false
+# (empty when the entry gives an empty string). validate-policy and the
+# installer share it (#577): the installer re-checks the catalog it reads, as
+# it does the profile (#357), so a mistyped value in an uncommitted edit is
+# never read as "install".
+catalog_track_only_valid() {
+  case "$1" in
+    true | false | "") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Map a catalog source to the capability that gates installing it (#53 stage
 # 2). brew_formula / npm_global / go_install are package installs
 # (installPackages); brew_cask / mas are GUI apps (installGuiApps). manual and
