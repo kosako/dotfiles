@@ -142,7 +142,7 @@ context file の状態ごとの config 層の結果(git hook gates を通さな�
 identity file は当面、完全手動・local only とする。
 
 - chezmoi の prompt による半管理(`promptStringOnce` で値を聞いて local state に保存)は採用しない。
-- 1Password など secret store からの参照も採用しない。identity は secret というより設定値で、`allowSecretsAccess=false` の profile で使えなくなるため。secret 全般の供給規約は [secrets](secrets.md) にあるが、identity はその対象外(secret = op 供給可 / identity = 手動 local の二層)。
+- 1Password など secret store からの参照も採用しない。identity は secret というより設定値で、`allowSecretsAccess=false` の profile では secret store からの供給を使わない約束なので、その profile で identity が欠けるため。secret 全般の供給規約は [secrets](secrets.md) にあるが、identity はその対象外(secret = op 供給可 / identity = 手動 local の二層)。
 - 新 host のセットアップで手動作成が実際に苦になった時点で、personal context に限った prompt 半管理を別 Issue として再検討する。
 - 作り忘れは該当 context での commit 失敗(fail-closed)と `doctor.sh` の warning で検知できる。
 
