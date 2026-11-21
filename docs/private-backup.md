@@ -31,6 +31,9 @@ public な dotfiles git には置けない **private な設定**(`.local` 上書
 - **public baseline**(`.chezmoidata/backup-paths.yaml`、本 repo にコミット):
   誰の環境でも当たり障りない public-safe なパスのみ。「何を追っているか」を repo で
   可視化する。shell の上書きファイル `.zshrc.local` / `.zprofile.local` も含む。
+  local 補足と違って任意ではないので、この file が無い、regular file でない、1 件も宣言しないときは、何も書かずに
+  backup を止める(exit 1)。tracked file の欠けた checkout で、補足の分だけの archive を完全と記録し、前の backup を
+  置き換えないため(#575)。
 - **local 補足**(`~/.config/dotfiles/backup-paths.local`、非コミット):
   client 固有・private なパスはここだけに書く。backup はこの file 自体を**通常の payload として
   canonical path `.config/dotfiles/backup-paths.local` に捕捉**する(manifest の `files[]` に

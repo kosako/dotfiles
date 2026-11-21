@@ -291,7 +291,8 @@ require_tools() {
 # Append the declared paths of a backup-paths file to a staging list as
 # "origin|type|category|path" rows. Fails closed on a parse error so a
 # broken supplement never silently captures nothing. A missing optional
-# file is not an error (returns 0, emits nothing).
+# file is not an error (returns 0, emits nothing); the baseline catalog is
+# not optional, and cmd_backup checks it before calling this (#575).
 collect_declared() {
   local file="$1" origin="$2" out="$3"
   [[ -f "$file" ]] || return 0
@@ -403,6 +404,15 @@ cmd_backup() {
     return 2
   fi
 
+  # The baseline catalog is tracked in the repo, not optional like the
+  # supplement. collect_declared skips a missing file, so a checkout without
+  # it backed up only what the supplement lists, recorded that as complete
+  # and replaced the previous archive (#575). Stop before anything is written.
+  if [[ ! -f "$BACKUP_PATHS_FILE" ]]; then
+    fail "backup catalog not found or not a regular file: $BACKUP_PATHS_FILE (it is tracked in the repo; restore the checkout)"
+    return 1
+  fi
+
   section "private-backup: resolve targets"
 
   # Script-global; cleanup_temps removes them (the 0700 staging holds
@@ -418,6 +428,12 @@ cmd_backup() {
   chmod 700 "$staging"
 
   collect_declared "$BACKUP_PATHS_FILE" baseline "$declared" || return 1
+  # A catalog that declares nothing drops the baseline the same way
+  # (validate-policy refuses one too).
+  if ! grep -q '^baseline|' "$declared"; then
+    fail "backup catalog declares no paths: $BACKUP_PATHS_FILE"
+    return 1
+  fi
   if [[ "$supplement_present" -eq 1 ]]; then
     collect_declared "$local_supplement" local "$declared" || return 1
     item "local supplement present (captured as $SUPPLEMENT_HOME_PATH; entries not listed)"
