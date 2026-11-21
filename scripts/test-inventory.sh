@@ -13,7 +13,9 @@ source "$SCRIPT_DIR/lib-policy.sh"
 source "$SCRIPT_DIR/test-lib.sh"
 
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-inventory-test.XXXXXX")"
-trap 'rm -rf "$fixture"' EXIT
+# The #576 case takes search permission away from a dir; give it back first
+# so an interrupted run still removes the whole fixture.
+trap 'chmod -R u+rwX "$fixture" 2>/dev/null || true; rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/bin" "$fixture/repo/scripts" "$fixture/repo/.chezmoidata" \
   "$fixture/gobin" "$fixture/gopath/bin" "$fixture/caller" "$fixture/home"
 cp "$SCRIPT_DIR/lib-policy.sh" "$SCRIPT_DIR/install-packages.sh" "$fixture/repo/scripts/"
@@ -107,6 +109,7 @@ case "$2:${INVENTORY_TEST_GO_STATE:-gobin}" in
   GOBIN:failure) exit 1 ;;
   GOBIN:gobin) printf '%s/gobin\n' "$INVENTORY_TEST_ROOT" ;;
   GOBIN:relative) printf 'relative/bin\n' ;;
+  GOBIN:locked) printf '%s/locked/gobin\n' "$INVENTORY_TEST_ROOT" ;;
   GOBIN:*) printf '\n' ;;
   GOPATH:gopath-failure) exit 1 ;;
   GOPATH:empty-gopath) printf '\n' ;;
@@ -188,6 +191,41 @@ fi
 rm "$fixture/gobin"
 mv "$fixture/saved-gobin" "$fixture/gobin"
 ok "GOPATH presence and uninspectable Go bin locations are handled safely"
+
+# #576: a Go bin dir under a parent without search permission looks absent
+# ([[ -e ]] is false there too), and was read as an empty inventory, so the
+# installer planned and ran `go install`. It is unknown: nothing is planned
+# or installed. The control reads the same dir with the parent searchable.
+# Skipped where permissions do not bind (root).
+mkdir -p "$fixture/locked/gobin"
+cp "$fixture/gobin/fixture-go" "$fixture/locked/gobin/fixture-go"
+: > "$fixture/installs"
+INVENTORY_TEST_GO_STATE=locked expect_ok "installer --apply with fixture-go under a searchable parent" "$installer" --apply
+if ! grep -Fq 'already installed: fixture-go' <<< "$output" || [[ -s "$fixture/installs" ]]; then
+  printf '%s\n' "$output" >&2
+  fail "control: a Go bin dir under a searchable parent must be read"
+  exit 1
+fi
+chmod 600 "$fixture/locked"
+if [[ -e "$fixture/locked/gobin" ]]; then
+  chmod 700 "$fixture/locked"
+  warn "a directory without search permission is still searchable here (root?); the unsearchable Go bin case is skipped"
+else
+  for mode in dry-run apply; do
+    args=("$installer")
+    [[ "$mode" = apply ]] && args+=(--apply)
+    if output="$(INVENTORY_TEST_GO_STATE=locked run_fixture "${args[@]}" 2>&1)" || [[ -s "$fixture/installs" ]] \
+      || ! grep -Fq 'go_install inventory unavailable' <<< "$output" \
+      || grep -Fq 'install: fixture-go' <<< "$output"; then
+      chmod 700 "$fixture/locked"
+      printf '%s\n' "$output" >&2
+      fail "a Go bin dir under a parent without search permission must be unknown, never an empty inventory ($mode)"
+      exit 1
+    fi
+  done
+  chmod 700 "$fixture/locked"
+  ok "a Go bin dir under a parent without search permission is unknown: no install is planned or run"
+fi
 
 # #305: a copy only on PATH (e.g. in a toolchain dir that used to be GOBIN)
 # is not "installed": the Go bin dir is, so the installer puts it there.
