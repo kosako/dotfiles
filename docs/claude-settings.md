@@ -259,7 +259,8 @@ client / agent で false 必須。[policy-model](policy-model.md))。
 apply のときの動き:
 
 - file が無い: `env` を出さない(何も送らない)。前の apply で出した `env` も消す。
-- 形の正しい file: `env` に下の表の 6 つを出す。値は live の `settings.json` にだけ入る。
+- 形の正しい file: `env` に下の表の変数を出す(送り先の host が `127.0.0.1` でなければ、`OTEL_LOG_TOOL_DETAILS` を除く 5 つ)。
+  値は live の `settings.json` にだけ入る。
 - それ以外(値が無い・2 つ以上、形が違う、通常の file でない、大きすぎる、読めない): render が失敗して apply が止まり、
   `settings.json` は書き換わらない。error には file の path が出て、値は出ない。
 - 読む file は destination の下(`.chezmoi.destDir`)で、HOME の下ではない。test の使い捨ての destination への render は、
@@ -271,7 +272,7 @@ apply のときの動き:
 | `OTEL_METRICS_EXPORTER` / `OTEL_LOGS_EXPORTER` | `otlp` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | file の値 |
-| `OTEL_LOG_TOOL_DETAILS` | `1` |
+| `OTEL_LOG_TOOL_DETAILS` | `1`(送り先の host が `127.0.0.1` のときだけ。#573) |
 
 送るもの(Claude Code の docs による。2.1.322 の時点):
 
@@ -282,6 +283,10 @@ apply のときの動き:
   (2026-11-11)、この範囲は出す。ただし手元の Collector が、Loki と保管に入る前に command と tool の入力を落とし、
   `git commit`・`gh pr create`・`gh pr merge` の印だけを残す(#564。[otel-backend](otel-backend.md) の「tool の中身を
   落とす」)。送るのを止めないのは、印を付けるのに command が要るため。
+- 送り先の host が `127.0.0.1`(手元の Collector)でないときは、template が `OTEL_LOG_TOOL_DETAILS` を出さない。中身を
+  落とす処理は手元の Collector にしか無く、送り先を直接外部へ向けると command や file の中身がそのまま出るため(#573)。
+  その送り先では commit と PR の数の印も付かない。自分の server へ移すときも、送り先は `127.0.0.1` のままにして、手元の
+  Collector から転送する。
 - どの event にも、session の id、account の uuid、`user.email` などの標準の attribute が付く。
 
 送らないもの: prompt の本文(`OTEL_LOG_USER_PROMPTS`)、assistant の応答(`OTEL_LOG_ASSISTANT_RESPONSES`)、tool の出力の
@@ -295,7 +300,7 @@ template は出さない。`env` は object 全体を managed にするので、
   (header を出す script)で渡す。その配線は別の Issue で行う。
 - 止めるときは file を消して `chezmoi apply` する。profile ごと止めるなら capability を false にして apply する。
   work など `claude-settings` module を持たない profile へ切り替えた場合、apply では前の設定は消えない。
-  live の `settings.json` の `env` から、上の表の 6 つの変数を手で消す。ほかの設定は残す。
+  live の `settings.json` の `env` から、上の表の変数を手で消す。ほかの設定は残す。
 - doctor は送り先の file の有無だけを見る(値は読まない)。capability が true の表示は apply の後の状態を示す。
   apply までは前の `env` が残って送り続ける(managed drift の section に出る)。
 - capability が false のときは、live の `~/.claude/settings.json` に `"CLAUDE_CODE_ENABLE_TELEMETRY"` があるかを

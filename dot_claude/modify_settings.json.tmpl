@@ -218,8 +218,11 @@
        enableClaudeTelemetry (#523) emits an "env" block that turns on
        Claude Code's OpenTelemetry: metrics and events (logs) over OTLP/HTTP
        (http/protobuf), with tool details (Bash commands, skill / MCP names,
-       truncated tool input). Prompts, assistant responses, tool output, API
-       bodies and traces are not turned on (Claude Code's defaults are off).
+       truncated tool input) only when the endpoint's host is 127.0.0.1: the
+       local Collector there drops them before Loki and the archive (#564),
+       and any other endpoint would get them as they are (#573). Prompts,
+       assistant responses, tool output, API bodies and traces are not
+       turned on (Claude Code's defaults are off).
        The how is public and fixed here; the destination is not: the OTLP
        base endpoint is read at apply time from the untracked
        <destination>/.config/dotfiles/claude-telemetry.local (one line; #
@@ -380,8 +383,10 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
     "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp",
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": {{ $telemetryEndpoint | toJson }},
+    "OTEL_EXPORTER_OTLP_ENDPOINT": {{ $telemetryEndpoint | toJson }}
+{{- if regexMatch `^https?://127\.0\.0\.1(:[0-9]+)?(/.*)?$` $telemetryEndpoint }},
     "OTEL_LOG_TOOL_DETAILS": "1"
+{{- end }}
   },
 {{- end }}
 {{- if $launchBaseline }}

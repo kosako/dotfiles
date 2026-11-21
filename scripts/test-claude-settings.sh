@@ -39,8 +39,9 @@ set -euo pipefail
 # matcher, no async, Claude only); each capability adds exactly its own
 # entries, and all seven false -> no hooks key at all.
 # It also fixes the telemetry env (#523): enableClaudeTelemetry with an
-# endpoint file under the destination -> exactly the six telemetry
-# variables, the endpoint as the file holds it; no file, the capability off,
+# endpoint file under the destination -> exactly the telemetry variables,
+# the endpoint as the file holds it, and OTEL_LOG_TOOL_DETAILS only for an
+# endpoint at 127.0.0.1, the local Collector (#573); no file, the capability off,
 # or an apply over a stale env -> no env key; a malformed file -> the apply
 # fails and the live file is left as it was; the endpoint never reaches
 # jq's arguments.
@@ -1814,7 +1815,15 @@ tel_apply() {
   tel_rc=0
   render_personal_into "$source_dir" "$tel_root" || tel_rc=$?
 }
+# The env for an endpoint that is not the local Collector (no tool details,
+# #573), and for one at 127.0.0.1 (the five and OTEL_LOG_TOOL_DETAILS).
 tel_want="$(jq -cS -n --arg e 'https://otlp.example.test:4318/otlp' '{
+  CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+  OTEL_METRICS_EXPORTER: "otlp",
+  OTEL_LOGS_EXPORTER: "otlp",
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
+  OTEL_EXPORTER_OTLP_ENDPOINT: $e}')"
+tel_want_local="$(jq -cS -n --arg e 'http://127.0.0.1:4318' '{
   CLAUDE_CODE_ENABLE_TELEMETRY: "1",
   OTEL_METRICS_EXPORTER: "otlp",
   OTEL_LOGS_EXPORTER: "otlp",
@@ -1833,12 +1842,13 @@ else
 fi
 
 # T2) Capability on and an endpoint file with a comment, a blank line and
-#     surrounding blanks: exactly the six variables, the endpoint as the file
-#     holds it (trimmed), and every other key as in the default render.
+#     surrounding blanks: exactly the five variables of an endpoint that is
+#     not the local Collector (T2c), the endpoint as the file holds it
+#     (trimmed), and every other key as in the default render.
 tel_apply on "$tel_on_src" $'# the local otel-lgtm for now\n\n  https://otlp.example.test:4318/otlp  '
 tel_on_file="$tel_file"
 if [[ "$tel_rc" -eq 0 && "$(jq -cS '.env' "$tel_on_file" 2>/dev/null)" == "$tel_want" ]]; then
-  ok "test passed: an endpoint file -> exactly the six telemetry variables, endpoint from the file (prompts, responses, tool output, API bodies and traces stay off)"
+  ok "test passed: an endpoint file -> exactly the five telemetry variables, endpoint from the file (prompts, responses, tool details, tool output, API bodies and traces stay off for an endpoint that is not the local Collector)"
 else
   fail "test failed: telemetry env wrong (rc=$tel_rc env=$(jq -cS '.env' "$tel_on_file" 2>/dev/null))"
   status=1
@@ -1867,6 +1877,39 @@ for tel_good in 'http://127.0.0.1:65535' 'https://otlp-1.example.test' 'http://1
     ok "test passed: an endpoint of the accepted shape is used as written ($tel_good)"
   else
     fail "test failed: an endpoint of the accepted shape was refused or changed (rc=$tel_rc: $tel_good)"
+    status=1
+  fi
+done
+
+# T2c) Tool details only for the local Collector (#573). The Collector at
+#      127.0.0.1 drops the commands and the tool input before Loki and the
+#      archive (#564); an endpoint elsewhere would get them as they are. So an
+#      endpoint at 127.0.0.1 (any port, with or without a path) gets
+#      OTEL_LOG_TOOL_DETAILS next to the five, and a host that only looks like
+#      it, another address, a DNS name or localhost does not.
+tel_apply local "$tel_on_src" 'http://127.0.0.1:4318'
+if [[ "$tel_rc" -eq 0 && "$(jq -cS '.env' "$tel_file" 2>/dev/null)" == "$tel_want_local" ]]; then
+  ok "test passed: an endpoint at 127.0.0.1 (the local Collector) -> the five telemetry variables and OTEL_LOG_TOOL_DETAILS"
+else
+  fail "test failed: the env for an endpoint at 127.0.0.1 is wrong (rc=$tel_rc env=$(jq -cS '.env' "$tel_file" 2>/dev/null))"
+  status=1
+fi
+for tel_ep in 'https://127.0.0.1' 'http://127.0.0.1:65535/otlp/'; do
+  tel_apply local "$tel_on_src" "$tel_ep"
+  if [[ "$tel_rc" -eq 0 && "$(jq -r '.env.OTEL_LOG_TOOL_DETAILS' "$tel_file" 2>/dev/null)" == "1" ]]; then
+    ok "test passed: an endpoint at 127.0.0.1 keeps the tool details ($tel_ep)"
+  else
+    fail "test failed: an endpoint at 127.0.0.1 lost the tool details or failed (rc=$tel_rc: $tel_ep)"
+    status=1
+  fi
+done
+for tel_ep in 'http://127.0.0.10:4318' 'http://127.0.0.1.example.test:4318' 'http://10.0.0.1:1/otlp/' 'https://otlp-1.example.test' 'http://localhost:4318'; do
+  tel_apply remote "$tel_on_src" "$tel_ep"
+  if [[ "$tel_rc" -eq 0 && "$(jq -r '.env | has("OTEL_LOG_TOOL_DETAILS")' "$tel_file" 2>/dev/null)" == "false" \
+    && "$(jq -r '.env.OTEL_EXPORTER_OTLP_ENDPOINT' "$tel_file" 2>/dev/null)" == "$tel_ep" ]]; then
+    ok "test passed: an endpoint that is not the local Collector gets no tool details ($tel_ep)"
+  else
+    fail "test failed: an endpoint that is not the local Collector got the tool details or failed (rc=$tel_rc: $tel_ep)"
     status=1
   fi
 done

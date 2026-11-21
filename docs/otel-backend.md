@@ -808,6 +808,9 @@ compose file があるときは、実行時の状態と保管の directory を**
   読み戻すときに、手元で処理を通す前の file や data を外へ出すと、中身が送り先に出る(上の「読み戻すとき」)。早く
   消すには、保管の file と Loki の data を消すしかない(この repo の手順は持たない)。
 - #571 より前に受けた trace の `cwd` も、保管に残り 1 年かけて消える(Tempo は 30 日)。扱いは上の項と同じ。
+- 中身を落とす処理は手元の Collector にしか無い。外部の server へ移すときは、送り先を手元の Collector のままにして、
+  そこから転送する。Claude Code の送り先を `127.0.0.1` でない host に書き換えると、template は `OTEL_LOG_TOOL_DETAILS` を
+  出さなくなる。中身は出ないが、commit と PR の数の印も付かない([claude-settings](claude-settings.md) の telemetry。#573)。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。
