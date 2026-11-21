@@ -923,6 +923,9 @@ installed_inventory() {
     go_install)
       dir="$(go_bin_dir)" || return 1
       if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+        # Under a parent without search permission an existing dir looks
+        # absent too: that is unknown, not an empty inventory (#576).
+        absence_confirmed "$dir" || return 1
         return 0
       fi
       [[ -d "$dir" && -r "$dir" && -x "$dir" ]] || return 1
