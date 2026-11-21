@@ -19,8 +19,10 @@ set -euo pipefail
 # directory), every bind failing instead of being created in the VM, and
 # none of the keys that widen what the container can touch — (5) keep the
 # archive config to added */archive pipelines writing replayable files
-# kept for one year, and to the one transform that drops the agents' tool
-# content from the logs before both Loki and the archive (#564), (6) keep
+# kept for one year, to the transform that drops the agents' tool content
+# from the logs before both Loki and the archive (#564), and to the one
+# that drops the path a Codex span worked in before both Tempo and the
+# archive (#571), (6) keep
 # the dashboard provider pointed at the bound dashboards and closed to UI
 # edits, (7) keep each dashboard on the bundled datasources under its own
 # uid, with no other dashboard in the bound directory, and counting
@@ -424,13 +426,14 @@ section "otel-backend: archive config"
 
 # 5) The archive config ADDS */archive pipelines (it must not replace the
 #    image's own traces / metrics / logs ones), one per signal, each taking
-#    the otlp receiver's data into a file exporter: traces and metrics
-#    unprocessed, logs through the transform of 5b only. Of the image's own
-#    pipelines it sets only the processors of logs (#564), so what Loki
-#    keeps goes through the same transform: logs holds processors and no
+#    the otlp receiver's data into a file exporter: metrics unprocessed,
+#    logs through the transform of 5b only and traces through the one of
+#    5c only. Of the image's own pipelines it sets only the processors of
+#    logs (#564) and of traces (#571), so what Loki and Tempo keep goes
+#    through the same transform: each of the two holds processors and no
 #    other key (receivers or exporters there would replace the image's
 #    lists, as the Collector replaces lists when it layers configs), and
-#    the list is the transform, then the image's own batch.
+#    the list is its transform, then the image's own batch.
 #    Every exporter writes newline-delimited OTLP JSON in zstd under
 #    /archive as <signal>.jsonl.zst (#527; `zstd -d` gives back what a
 #    later Collector's otlpjsonfile receiver reads, with the gate of 4g),
@@ -444,16 +447,20 @@ archive_ok=1
 # sorted before it is compared.
 [[ "$(yq -r 'keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "exporters,processors,service" ]] || archive_ok=0
 [[ "$(yq -r '.service | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "pipelines" ]] || archive_ok=0
-[[ "$(yq -r '.service.pipelines | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "logs,logs/archive,metrics/archive,traces/archive" ]] || archive_ok=0
+[[ "$(yq -r '.service.pipelines | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "logs,logs/archive,metrics/archive,traces,traces/archive" ]] || archive_ok=0
 # Each list as "<keys of the pipeline>|<its tag>|<its items' tags>|<items>":
 # a string "[a, b]" is not a list, and a list of maps is not one of names.
 [[ "$(yq -r '.service.pipelines.logs | (keys | sort | join(",")) + "|" + (.processors | tag) + "|" + ([.processors[] | tag] | unique | join(",")) + "|" + (.processors | join(","))' "$archive_cfg" 2>/dev/null)" \
   == "processors|!!seq|!!str|transform/agent-tool-content,batch" ]] || archive_ok=0
+[[ "$(yq -r '.service.pipelines.traces | (keys | sort | join(",")) + "|" + (.processors | tag) + "|" + ([.processors[] | tag] | unique | join(",")) + "|" + (.processors | join(","))' "$archive_cfg" 2>/dev/null)" \
+  == "processors|!!seq|!!str|transform/agent-trace-paths,batch" ]] || archive_ok=0
 [[ "$(yq -r '.service.pipelines["logs/archive"].processors | (tag) + "|" + ([.[] | tag] | unique | join(",")) + "|" + (. | join(","))' "$archive_cfg" 2>/dev/null)" \
   == "!!seq|!!str|transform/agent-tool-content" ]] || archive_ok=0
-if ! bad_pipelines="$(yq -r '.service.pipelines | to_entries | .[] | select(.key != "logs")
-    | select(((.value | keys | sort | join(",")) != "exporters,receivers" and .key != "logs/archive")
-      or ((.value | keys | sort | join(",")) != "exporters,processors,receivers" and .key == "logs/archive")
+[[ "$(yq -r '.service.pipelines["traces/archive"].processors | (tag) + "|" + ([.[] | tag] | unique | join(",")) + "|" + (. | join(","))' "$archive_cfg" 2>/dev/null)" \
+  == "!!seq|!!str|transform/agent-trace-paths" ]] || archive_ok=0
+if ! bad_pipelines="$(yq -r '.service.pipelines | to_entries | .[] | select(.key != "logs" and .key != "traces")
+    | select(((.value | keys | sort | join(",")) != "exporters,receivers" and .key == "metrics/archive")
+      or ((.value | keys | sort | join(",")) != "exporters,processors,receivers" and .key != "metrics/archive")
       or (.value.receivers | tag) != "!!seq" or (.value.receivers | length) != 1
       or (.value.receivers[0] | tag) != "!!str" or .value.receivers[0] != "otlp"
       or (.value.exporters | tag) != "!!seq" or (.value.exporters | length) != 1
@@ -478,13 +485,13 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
 fi
 [[ "$(yq -r '[.exporters[].path] | unique | length' "$archive_cfg" 2>/dev/null)" == "3" ]] || archive_ok=0
 if [[ "$archive_ok" -eq 1 ]]; then
-  ok "test passed: the archive config adds one */archive pipeline per signal (logs through the tool-content transform, the others unprocessed), each to its own zstd JSON file under /archive kept for one year, and sets the image's logs processors to that transform then batch"
+  ok "test passed: the archive config adds one */archive pipeline per signal (logs through the tool-content transform, traces through the trace-paths one, metrics unprocessed), each to its own zstd JSON file under /archive kept for one year, and sets the image's logs and traces processors to their transform then batch"
 else
-  fail "test failed: the archive config must hold only processors, exporters and the pipelines logs (processors [transform/agent-tool-content, batch] and no other key) and three */archive ones (otlp -> one file exporter each, as lists; logs/archive with processors [transform/agent-tool-content]), with json files in zstd under /archive (*.jsonl.zst), rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
+  fail "test failed: the archive config must hold only processors, exporters and the pipelines logs (processors [transform/agent-tool-content, batch] and no other key), traces (processors [transform/agent-trace-paths, batch] and no other key) and three */archive ones (otlp -> one file exporter each, as lists; logs/archive with processors [transform/agent-tool-content], traces/archive with processors [transform/agent-trace-paths], metrics/archive with none), with json files in zstd under /archive (*.jsonl.zst), rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
   status=1
 fi
 
-# 5b) The one processor is the transform that drops what the agents put in
+# 5b) The logs processor is the transform that drops what the agents put in
 #     their tool events before Loki and the archive keep it (#564), after
 #     marking the Bash calls the dashboards count (7b). The statements are
 #     pinned in order: the marks read tool_input, so they come before it
@@ -503,15 +510,35 @@ delete_key(log.attributes, "tool_input")
 delete_key(log.attributes, "tool_parameters")
 delete_key(log.attributes, "arguments")'
 transform_ok=1
-[[ "$(yq -r '.processors | keys | join(",")' "$archive_cfg" 2>/dev/null)" == "transform/agent-tool-content" ]] || transform_ok=0
+[[ "$(yq -r '.processors | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "transform/agent-tool-content,transform/agent-trace-paths" ]] || transform_ok=0
 [[ "$(yq -r '.processors["transform/agent-tool-content"] | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "error_mode,log_statements" ]] || transform_ok=0
 [[ "$(yq -r '.processors["transform/agent-tool-content"].error_mode | (tag) + "|" + .' "$archive_cfg" 2>/dev/null)" == "!!str|ignore" ]] || transform_ok=0
 [[ "$(yq -r '.processors["transform/agent-tool-content"].log_statements | (tag) + "|" + ([.[] | tag] | unique | join(","))' "$archive_cfg" 2>/dev/null)" == "!!seq|!!str" ]] || transform_ok=0
 [[ "$(yq -r '.processors["transform/agent-tool-content"].log_statements[]' "$archive_cfg" 2>/dev/null)" == "$expected_statements" ]] || transform_ok=0
 if [[ "$transform_ok" -eq 1 ]]; then
-  ok "test passed: the one processor marks the counted Bash calls, then drops tool_input, tool_parameters, arguments and the tool events' error and output, keeping a record whose statement fails"
+  ok "test passed: the logs processor marks the counted Bash calls, then drops tool_input, tool_parameters, arguments and the tool events' error and output, keeping a record whose statement fails"
 else
-  fail "test failed: the only processor must be transform/agent-tool-content with error_mode ignore and exactly the pinned log_statements, in order (marks first, then the deletes)"
+  fail "test failed: the processors must be exactly transform/agent-tool-content and transform/agent-trace-paths, the first with error_mode ignore and exactly the pinned log_statements, in order (marks first, then the deletes)"
+  status=1
+fi
+
+# 5c) The traces processor drops the span attribute cwd (#571): the path a
+#     Codex span worked in, under the home directory and naming the
+#     repository (Codex's run_sampling_request spans carry it; in the
+#     archive, no other trace attribute held a path of this Mac). It goes
+#     from every span, and is the only statement. It is its own transform,
+#     so 5b's logs one stays as #564 pinned it. A change here is measured
+#     again on the image's Collector with a synthetic trace (the steps are
+#     in docs/otel-backend.md).
+trace_transform_ok=1
+[[ "$(yq -r '.processors["transform/agent-trace-paths"] | keys | sort | join(",")' "$archive_cfg" 2>/dev/null)" == "error_mode,trace_statements" ]] || trace_transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-trace-paths"].error_mode | (tag) + "|" + .' "$archive_cfg" 2>/dev/null)" == "!!str|ignore" ]] || trace_transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-trace-paths"].trace_statements | (tag) + "|" + ([.[] | tag] | unique | join(","))' "$archive_cfg" 2>/dev/null)" == "!!seq|!!str" ]] || trace_transform_ok=0
+[[ "$(yq -r '.processors["transform/agent-trace-paths"].trace_statements[]' "$archive_cfg" 2>/dev/null)" == 'delete_key(span.attributes, "cwd")' ]] || trace_transform_ok=0
+if [[ "$trace_transform_ok" -eq 1 ]]; then
+  ok "test passed: the traces processor drops the span attribute cwd and nothing else, keeping a span whose statement fails"
+else
+  fail "test failed: transform/agent-trace-paths must have error_mode ignore and exactly one trace_statement, delete_key(span.attributes, \"cwd\")"
   status=1
 fi
 

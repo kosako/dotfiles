@@ -17,7 +17,9 @@
 # and 14 days). The dashboards read neither for long ranges, and the archive
 # below keeps the raw telemetry for a year (the logs without what the agents
 # put in their tool events, which the Collector drops before Loki and the
-# archive keep it, #564). Pyroscope does not push its own
+# archive keep it, #564, and the traces without the path a Codex span worked
+# in, dropped the same way before Tempo and the archive, #571). Pyroscope
+# does not push its own
 # profiles, the only ones it received (#528).
 # Loki also answers one query over up to 366d1h (#532): the dashboards read
 # Loki, and its default limit of 30d1h refused a dashboard range of a year.

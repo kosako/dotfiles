@@ -2,13 +2,13 @@
 # Extra OpenTelemetry Collector config for the otel-lgtm container, layered
 # on the image's own otelcol-config.yaml through OTELCOL_EXTRA_ARGS
 # (--config=file:...). It ADDS pipelines (*/archive) next to the image's
-# traces / metrics / logs ones, and sets one thing of the image's own: the
-# processors of its logs pipeline (#564, below). Collector configs layer
-# maps key by key and replace lists, so the logs pipeline keeps the image's
-# receivers and exporters, and its processors become exactly this list,
-# which repeats the image's own batch (0.39.0). An image update checks that
-# the image's logs pipeline is still named logs with processors [batch]
-# (docs/otel-backend.md).
+# traces / metrics / logs ones, and sets two things of the image's own: the
+# processors of its logs pipeline (#564) and of its traces pipeline (#571),
+# below. Collector configs layer maps key by key and replace lists, so each
+# of the two keeps the image's receivers and exporters, and its processors
+# become exactly this list, which repeats the image's own batch (0.39.0).
+# An image update checks that the image's logs and traces pipelines are
+# still named so, with processors [batch] (docs/otel-backend.md).
 #
 # What the agents put in their tool events is dropped before Loki and the
 # archive keep it (#564): Claude Code's tool_input and tool_parameters (the
@@ -30,9 +30,15 @@
 # change is measured again with synthetic events on the image's Collector
 # (docs/otel-backend.md).
 #
-# Each archive pipeline takes what the otlp receiver got (logs/archive
-# through the processor above, traces and metrics unprocessed) and writes it
-# as newline-delimited OTLP JSON inside a standard zstd stream (#527:
+# The path a Codex span worked in is dropped the same way, before Tempo and
+# the archive keep it (#571): the span attribute cwd (a path under the home
+# directory, naming the repository; Codex's run_sampling_request spans
+# carry it). It goes from every span. The trace transform has its own
+# name, so the logs one stays as #564 pinned it.
+#
+# Each archive pipeline takes what the otlp receiver got (logs/archive and
+# traces/archive through the processors above, metrics unprocessed) and
+# writes it as newline-delimited OTLP JSON inside a standard zstd stream (#527:
 # Codex's traces are about 100MB a day uncompressed, about 21 times less in
 # zstd) to /archive, which compose binds to ~/.local/share/otel-lgtm/archive
 # on the host. That stream needs the Collector's
@@ -64,6 +70,10 @@ processors:
       - delete_key(log.attributes, "tool_input")
       - delete_key(log.attributes, "tool_parameters")
       - delete_key(log.attributes, "arguments")
+  transform/agent-trace-paths:
+    error_mode: ignore
+    trace_statements:
+      - delete_key(span.attributes, "cwd")
 
 exporters:
   file/archive-traces:
@@ -95,8 +105,11 @@ service:
   pipelines:
     logs:
       processors: [transform/agent-tool-content, batch]
+    traces:
+      processors: [transform/agent-trace-paths, batch]
     traces/archive:
       receivers: [otlp]
+      processors: [transform/agent-trace-paths]
       exporters: [file/archive-traces]
     metrics/archive:
       receivers: [otlp]

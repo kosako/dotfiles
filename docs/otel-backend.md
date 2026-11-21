@@ -16,7 +16,7 @@ upstream は、この image を開発・demo・検証向けとしている(produ
 | --- | --- | --- |
 | container runtime(`colima`・`docker`・`docker-compose`) | dotfiles の software catalog(#515) | `install-packages.sh --apply`(人が明示して実行) |
 | container の定義 `~/.config/otel-lgtm/compose.yaml` | dotfiles(`private_dot_config/otel-lgtm/compose.yaml`、静的 file) | `chezmoi apply` |
-| Collector の保管の設定 `~/.config/otel-lgtm/otelcol/archive.yaml`(tool の中身を落とす処理を含む) | dotfiles(#517・#564) | `chezmoi apply` |
+| Collector の保管の設定 `~/.config/otel-lgtm/otelcol/archive.yaml`(tool の中身と trace の path を落とす処理を含む) | dotfiles(#517・#564・#571) | `chezmoi apply` |
 | Grafana の dashboard と provider `~/.config/otel-lgtm/grafana/` | dotfiles(#517) | `chezmoi apply` |
 | 生データの保管の directory `~/.local/share/otel-lgtm/archive/` | 人(中身は Collector が書く。管理しない) | `mkdir`(初回の手順) |
 | Colima の VM と設定(`~/.colima/`)、docker の context(`~/.docker/config.json`) | Colima / docker(管理しない) | `colima start`(初回の引数は下記) |
@@ -38,7 +38,7 @@ compose file の定義:
 | `environment` | `PROMETHEUS_EXTRA_ARGS: --enable-feature=otlp-deltatocumulative --storage.tsdb.retention.time=30d` | 下の「metric の temporality」と「保存期間」 |
 | `environment` | `LOKI_EXTRA_ARGS` と `TEMPO_EXTRA_ARGS`(保持の指定。Loki は 1 回の問い合わせの上限も) | 下の「保存期間」と「dashboard で 1 回に見られる期間」 |
 | `environment` | `PYROSCOPE_EXTRA_ARGS: -self-profiling.disable-push=true` | 下の「保存期間」(Pyroscope が自分の profile を送らない) |
-| `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline と、tool の中身を落とす処理を重ねる。gate は保管の zstd に要る(下の「tool の中身を落とす」と「生データの保管と読み戻し」) |
+| `environment` | `OTELCOL_EXTRA_ARGS: --feature-gates=exporter.file.nativeCompression --config=file:/otel-lgtm/otelcol-archive.yaml` | image の Collector の設定に、保管の pipeline と、tool の中身と trace の path を落とす処理を重ねる。gate は保管の zstd に要る(下の「tool の中身を落とす」「trace の path を落とす」と「生データの保管と読み戻し」) |
 
 bind(どれも long syntax で `bind.create_host_path: false`):
 
@@ -275,17 +275,14 @@ image の設定への依存。image の `logs` pipeline の processor の list �
 残るもの。どの event にも付く `user.email`・account の id・session の id、Codex の `host.name`、MCP の server の名前
 (Codex の `codex.tool_result` の `mcp_server` と、Claude Code の `api_request` の `mcp_server_name`)、hook の名前、
 commit したときの branch の名前(`vcs.ref.head.name`)。数、時間、成否、token、cost も残る。trace と metric は
-この処理を通らない。Codex の trace の span の `cwd` には、作業した directory の path(home の下の path と repo の名前)が
-入る(2026-11-21 に、保管の trace の file 2 つの attribute を値を出さずに数えた。直近の回した file では 1,674,575 の span の
-うち 1,351 にあり、1,334 がこの Mac の home の下だった)。数えた中に、tool の中身ほど長い値は無かった(どの値も 140
-文字に満たない)。
+この処理を通らない。trace の `cwd` は、下の「trace の path を落とす」の処理が落とす。
 
 変更より前の data。Loki と保管には、変更の前に受けた分がそのまま残り、1 年かけて消えていく(下の「保存期間」)。
 早くは消さないと決めた(2026-11-21、#569)。消すと、変更より前の dashboard の履歴(token、cost、commit の数など)も
 なくなる。今は手元の外へ何も送っていない。保管の file を別の server に読み戻すときは、手元で同じ処理を通してから
 外へ出す(下の「生データの保管と読み戻し」)。dashboard の数え方は、その分も数えるため、`tool_input` の正規表現と印の
-両方を見る。古い分が消えた後(2027-11 の下旬)は、印だけにできる。`test-otel-backend.sh` が、`tool_input` を読む問い合わせを、印と組にした 3 つの数え方だけに
-限る。
+両方を見る。古い分が消えた後(2027-11 の下旬)は、印だけにできる。`test-otel-backend.sh` が、`tool_input` を読む
+問い合わせを、印と組にした 3 つの数え方だけに限る。
 
 確かめ方(2026-11-21、0.39.0 で実施):
 
@@ -297,6 +294,41 @@ commit したときの branch の名前(`vcs.ref.head.name`)。数、時間、�
    `error`、`codex.sse_event` の `output`)が残ることを確かめる。dashboard の数え方の LogQL も、その Loki で期待どおりの
    数を返した。
 4. container は `docker rm -f -v` で消す。
+
+## trace の path を落とす(#571)
+
+Codex の trace の span の `cwd`(作業した directory の path。home の下の path と repo の名前を含む)を、Tempo と保管に
+入る前に Collector が落とす。保管の設定の `transform/agent-trace-paths` が、image の `traces` pipeline と
+`traces/archive` の両方で動く。どの span からも落とし、ほかの attribute には触れない。statement が失敗しても span は
+捨てない(`error_mode: ignore`)。
+
+決めたこと(2026-11-21):
+
+- 保管の trace の file 10 本(約 590 万の span)の attribute を、値を出さずに数えた。resource、scope、span、span の
+  event と link のすべてを見た。path らしい値(`/Users/`・`/private/`・`/tmp/` などで始まるもの)があったのは、Codex の
+  `run_sampling_request` の span の `cwd` と、span の `code.file.path` だけだった。直近の回した file では、`cwd` の
+  1,351 のうち 1,334 がこの Mac の home の下で、`code.file.path` の 39 は Codex を build した machine の path だった。
+  tool の中身ほど長い値は無かった(どの値も 140 文字に満たない)。
+- #564 と同じ理由で、外部への転送を始める前に落とす。この Mac では仕事の repo も触るので、path に仕事の repo の名前が
+  入りうる。dashboard は `cwd` を使っていない。
+- logs の処理(`transform/agent-tool-content`)とは別の名前にした。#564 の statement を、そのままの形で固定しておく
+  ため。
+
+image の設定への依存。image の `traces` pipeline の processor の list を、`[transform/agent-trace-paths, batch]` に置き
+換える。0.39.0 では `traces` の processor は `batch` だけ。image を更新するときに確かめる(下の「image の更新」)。
+
+変更より前の trace。保管の file には、変更の前に受けた `cwd` が残り、1 年かけて消える。Tempo の分は 30 日で消える。
+#569 と同じく早くは消さず、読み戻すときに手元で同じ処理を通す(下の「生データの保管と読み戻し」)。
+
+確かめ方(2026-11-21、0.39.0 で実施):
+
+1. 上の「tool の中身を落とす」の確かめ方と同じ使い捨ての container を作る。
+2. Codex の `run_sampling_request` を模した span(`cwd` に canary を入れたもの)と、`cwd` の無い span(span の event
+   つき)を、OTLP の JSON で `/v1/traces` に送る。上の log の模した event も、同じ container に送る。
+3. Tempo(`/api/traces/<trace id>`)と保管の file のどちらにも canary が無く、`cwd` だけが消えて、ほかの attribute と
+   span の event が残ることを確かめる。log の canary が保管に残らないことも確かめる。
+4. 変更の前の設定で同じものを送ると、Tempo と保管の両方に `cwd` が残ることも確かめた。
+5. container は `docker rm -f -v` で消す。
 
 ## dashboard
 
@@ -502,8 +534,9 @@ host の disk にあり、1 年で約 2.3GB の見込み(下の「生データ�
 `~/.local/share/otel-lgtm/archive/` に書く(#517)。backend の volume や VM を作り直しても残る。
 
 - 書くのは image の Collector に重ねた 3 つの pipeline(`traces/archive`・`metrics/archive`・`logs/archive`)。receiver は
-  `otlp` だけ。trace と metric は processor を通さないので、送られたままの形になる。log は、上の「tool の中身を落とす」の
-  処理だけを通る。image の既存の pipeline は、`logs` の processor の list のほかは触れず、名前の違う pipeline を足す
+  `otlp` だけ。metric は processor を通さないので、送られたままの形になる。log は上の「tool の中身を落とす」の処理だけを、
+  trace は「trace の path を落とす」の処理だけを通る。image の既存の pipeline は、`logs` と `traces` の processor の list の
+  ほかは触れず、名前の違う pipeline を足す
   (Collector の設定の重ね方では、list は置き換わり、map は足される)。
 - file は signal ごとに `traces.jsonl.zst`・`metrics.jsonl.zst`・`logs.jsonl.zst`。中身は改行区切りの OTLP JSON(1 行が
   1 回の export)を、標準の zstd で圧縮したもの(#527)。`zstd -d` で元の改行区切りの JSON に戻る。
@@ -604,30 +637,44 @@ docker-compose -f ~/.config/otel-lgtm/compose.yaml up -d
   `archive.yaml` の `transform/agent-tool-content` の block をそのまま写して入れる。その Collector から送り先へ export
   するか、`file` exporter に書いた処理の後の file だけを送る。印もそこで付くので、読み戻した先の dashboard は印だけで
   数えられる。#564 の後の file に通しても、落とす項目がもう無いので変わらない。外へ出す前に、一度 `file` exporter に
-  書いて、上の「落とすもの」の表の項目が残っていないことを確かめる。trace と metric は、この処理の対象ではない(trace に
-  残る `cwd` は、上の「残るもの」)。
+  書いて、上の「落とすもの」の表の項目が残っていないことを確かめる。
+- trace も同じく、手元で上の「trace の path を落とす」と同じ処理を通してから外へ出す(#571)。#571 より前の file には、
+  span の `cwd` が入っている。読み戻し用の Collector の traces の pipeline に、`archive.yaml` の
+  `transform/agent-trace-paths` の block をそのまま写して入れ、外へ出す前に `cwd` が残っていないことを確かめる。metric は、
+  どちらの処理の対象でもない。
 
   ```yaml
   receivers:
     otlp_json_file/logs:
       include: [<zstd -d で展開した logs の file>]
       start_at: beginning
+    otlp_json_file/traces:
+      include: [<zstd -d で展開した traces の file>]
+      start_at: beginning
   processors:
     transform/agent-tool-content: # archive.yaml の同じ名前の block を写す
+    transform/agent-trace-paths: # 同じく
   service:
     pipelines:
       logs:
         receivers: [otlp_json_file/logs]
         processors: [transform/agent-tool-content]
         exporters: [<送り先の exporter>]
+      traces:
+        receivers: [otlp_json_file/traces]
+        processors: [transform/agent-trace-paths]
+        exporters: [<送り先の exporter>]
   ```
 
   確かめたこと(2026-11-21、0.39.0 の Collector で)。上の「tool の中身を落とす」の確かめ方と同じ模した event を、
   #564 より前の形(中身あり)で 1 行の file にした。network の無い使い捨ての container で、`otlp_json_file` から
   この処理を通して `file` exporter に書いた。11 件のどれにも canary が無く、印が付き、落とさない項目が残った。
-  `start_at` を外すと、file は 1 行も読まれなかった。
+  `start_at` を外すと、file は 1 行も読まれなかった。trace も、上の「trace の path を落とす」の模した span を `cwd`
+  入りの 1 行の file にし、上の例の形で通した(#571)。`cwd` だけが消え、ほかの attribute と span の event が残った。
+  receiver は、読んだ file の名前(path は含まない)を `log.file.name` として、log と span のどの record にも足した。
 
-保管の file には、Loki と同じ中身が入る(account の email などの attribute。#564 より前の file には tool の中身も)。
+保管の file には、Loki と同じ中身が入る(account の email などの attribute。#564 より前の file には tool の中身も、
+#571 より前の trace の file には `cwd` も)。
 directory は 0700 にし、file のままでは外へ出さない(読み戻すときも、上の処理を通した後のものだけを出す)。
 
 ## image の更新
@@ -645,10 +692,11 @@ directory は 0700 にし、file のままでは外へ出さない(読み戻す�
    通れば、その digest が upstream の repository の workflow で作られたものと分かる(0.39.0 で確認。digest を
    変えると失敗する)。依存先の中身の安全を示すものではない。
 3. 新しい image の Collector が保管の設定を受け付けるかを確かめる(`otlp` receiver の名前と、`file` exporter・
-   `transform` processor が在ること、zstd の gate が在ること)。image の設定の `service.pipelines.logs` が同じ名前で、
-   processor が `[batch]` だけであることも見る(`docker run --rm --entrypoint cat grafana/otel-lgtm@sha256:<digest>
-   /otel-lgtm/otelcol-config.yaml`)。違っていたら、保管の設定の `logs` の list を image に合わせ、上の「tool の中身を
-   落とす」の確かめ方で、canary が Loki と保管に残らないことを確かめる。
+   `transform` processor が在ること、zstd の gate が在ること)。image の設定の `service.pipelines.logs` と
+   `service.pipelines.traces` が同じ名前で、どちらも processor が `[batch]` だけであることも見る(`docker run --rm
+   --entrypoint cat grafana/otel-lgtm@sha256:<digest> /otel-lgtm/otelcol-config.yaml`)。違っていたら、保管の設定の
+   `logs` と `traces` の list を image に合わせる。上の「tool の中身を落とす」と「trace の path を落とす」の確かめ方で、
+   canary が Loki・Tempo と保管に残らないことを確かめる。
 
    ```sh
    docker run --rm -i --entrypoint sh grafana/otel-lgtm@sha256:<digest> -c \
@@ -753,10 +801,13 @@ compose file があるときは、実行時の状態と保管の directory を**
 - 1 年を過ぎた telemetry は、Loki からも保管からも消えていく(保管は回した file の単位で、今書いている file は期間
   では消えない)。将来の server へ読み戻せるのは、おおむね直近の 1 年分。
 - tool の中身は、attribute の名前で選んで落とす(上の「tool の中身を落とす」)。Claude Code や Codex が別の名前で中身を
-  送り始めたら、足すまでは残る。版を上げたときに、保管の file の tool の event の attribute の名前を見直す。
+  送り始めたら、足すまでは残る。版を上げたときに、保管の file の tool の event の attribute の名前を見直す。trace の
+  path も同じく `cwd` の名前で選ぶ(上の「trace の path を落とす」)。版を上げたときに、保管の trace の file の
+  attribute も、値を出さずに数えて見直す。
 - #564 より前に受けた tool の中身は、Loki と保管に残り、1 年かけて消える。早くは消さないと決めた(#569)。保管の file を
   読み戻すときに、手元で処理を通す前の file や data を外へ出すと、中身が送り先に出る(上の「読み戻すとき」)。早く
   消すには、保管の file と Loki の data を消すしかない(この repo の手順は持たない)。
+- #571 より前に受けた trace の `cwd` も、保管に残り 1 年かけて消える(Tempo は 30 日)。扱いは上の項と同じ。
 - image は 3.6GB あり、production 向けではない。
 - catalog は profile で分かれていないので、work の doctor には `not installed` の warning が 3 つ出る
   (report-only)。
@@ -770,8 +821,9 @@ byte 単位で不変)、managed-by の見出し(dashboard は description)、com
 書き込み可で、どれも `create_host_path: false`)、named volume の宣言の中身が空、Prometheus が delta の metric を
 変換する指定、Loki が 1 年・Prometheus と Tempo が 30 日残す指定と Pyroscope が自分の profile を送らない指定(引数ごとに完全一致)、Collector が zstd の gate を有効にして
 bind した保管の設定を読む指定、権限を広げる key(`privileged`・`network_mode` など)が無い、restart policy。保管の設定は、名前が `*/archive` の pipeline を signal ごとに 1 つずつ足し、`otlp` から
-file に書く(trace と metric は processor なし、log は tool の中身を落とす処理だけを通す)。image の `logs` pipeline に
-置くのは processor の list(その処理と `batch`)だけ。処理の statement は順番どおりに固定する。file は `/archive` の下の
+file に書く(metric は processor なし、log は tool の中身を落とす処理だけ、trace は path を落とす処理だけを通す)。image の
+`logs` と `traces` の pipeline に置くのは processor の list(それぞれの処理と `batch`)だけ。処理の statement は順番
+どおりに固定する。file は `/archive` の下の
 zstd の JSON(`*.jsonl.zst`、`compression: zstd`)、`max_days` が 365、`max_backups` が 0。dashboard の問い合わせが
 `tool_input` を読むのは、印と組にした commit と PR の 3 つの数え方だけで、`tool_parameters` と `arguments` は読まない。provider は
 bind した dashboard の directory を指し、UI での変更を拒む。dashboard は strict な JSON の object で、uid が決まっていて、
