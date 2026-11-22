@@ -7,7 +7,10 @@ set -euo pipefail
 # dir, so the real ~/.zcompdump is never read or written. The contract:
 #   - a missing dump, or one older than 24h, takes the slow path (compinit -u)
 #     and leaves a dump that the next 24h of shells treat as recent;
-#   - a recent dump takes the fast path (compinit -C) and is left untouched.
+#   - a recent dump takes the fast path (compinit -C) and is left untouched;
+#   - either path leaves completion working: compdef is defined and the
+#     completion table holds entries (a fast path that skipped compinit
+#     left the dump untouched too, so the mtime alone cannot tell; #585).
 # compinit rewrites an existing dump only when the number of completion files
 # or the zsh version changed, so without the mtime refresh a day-old dump
 # stayed old and every shell kept taking the slow path. `zsh -n` in CI cannot see that.
@@ -54,16 +57,19 @@ age() {
   HOME="$fixture/home" zsh -f -c 'zmodload zsh/datetime zsh/stat
 print -r -- $(( EPOCHSECONDS - $(zstat +mtime -- "$1") ))' zsh "$dump"
 }
-# open_shell — source the extracted block the way an interactive shell does.
+# open_shell — source the extracted block the way an interactive shell does,
+# then fail unless compinit really ran: compdef is a function and the
+# completion table ($_comps) is not empty (#585).
 open_shell() {
-  env -u ZDOTDIR HOME="$fixture/home" zsh -f -c 'source "$1"' zsh "$fixture/compinit.zsh" </dev/null
+  env -u ZDOTDIR HOME="$fixture/home" zsh -f -c 'source "$1" && (( ${+functions[compdef]} )) && (( ${#_comps} > 0 ))' \
+    zsh "$fixture/compinit.zsh" </dev/null
 }
 
 # 1. No dump yet: the slow path writes one, recent enough for the fast path.
 if open_shell && [[ -s "$dump" ]] && (( $(age) < 3600 )); then
-  ok "test passed: a missing dump is created and is recent"
+  ok "test passed: a missing dump is created and is recent, and completion is loaded"
 else
-  fail "test failed: a missing dump must be created by the slow path"
+  fail "test failed: a missing dump must be created by the slow path, with completion loaded"
   status=1
 fi
 
@@ -72,19 +78,20 @@ fi
 #    shell takes the slow path again.
 set_age $((5 * 86400))
 if open_shell && (( $(age) < 3600 )); then
-  ok "test passed: a day-old dump is refreshed by the slow path"
+  ok "test passed: a day-old dump is refreshed by the slow path, and completion is loaded"
 else
-  fail "test failed: a dump older than 24h must be refreshed by the slow path (age now $(age)s)"
+  fail "test failed: a dump older than 24h must be refreshed by the slow path, with completion loaded (age now $(age)s)"
   status=1
 fi
 
 # 3. A recent dump takes the fast path: it is left untouched (an hour old
-#    stays an hour old; the slow path would have refreshed it).
+#    stays an hour old; the slow path would have refreshed it), and the
+#    fast path still loads completion from it (open_shell checks that).
 set_age 3600
 if open_shell && (( $(age) >= 3600 )); then
-  ok "test passed: a recent dump takes the fast path and is left as is"
+  ok "test passed: a recent dump takes the fast path, is left as is, and completion is loaded"
 else
-  fail "test failed: a dump younger than 24h must take the fast path (age now $(age)s)"
+  fail "test failed: a dump younger than 24h must take the fast path and load completion (age now $(age)s)"
   status=1
 fi
 
