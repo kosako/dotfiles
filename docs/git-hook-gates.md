@@ -39,8 +39,11 @@ agent-tools が build / sync で配備し(実体 = agent-tools・配線 = dotfil
   `$HOME` は shim 実行時に sh が展開するため、render に実 home path は焼かれない)。
 - `core.hooksPath` は per-repo `.git/hooks` を完全置換する。dispatcher が gate 通過後に repo 自身の
   `.git/hooks/<stage>`(linked worktree でも common dir 側)へ chain するので、shim を置いた stage の既存
-  repo hook は動き続ける(契約の詳細は agent-tools 側 doc)。shim を置いていない stage の repo hook は、配線中は
-  **実行されない**(git は `core.hooksPath` の directory しか見ない)。
+  repo hook は動き続ける(契約の詳細は agent-tools 側 doc)。shim を置いていない 5 stage は、hook の呼ばれ方で
+  2 つに分かれる。`reference-transaction` / `post-index-change` / `push-to-checkout` / `proc-receive` の 4 つは、
+  git が `core.hooksPath` の directory だけで探す。このため、これらの repo hook は配線中は**実行されない**。
+  `fsmonitor-watchman` は影響を受けない。git はこれを hooks の directory から探さず、`core.fsmonitor` に書いた
+  path で呼ぶ。
 - shim は共通の template `.chezmoitemplates/git-hook-shim` から stage ごとに描く(source の file は stage 名を
   渡すだけの 1 行)。shim を置く stage の一覧の正本は `.chezmoidata/modules.yaml` の `git-hook-gates` の
   `paths:` で、doctor もここから読む。

@@ -11,8 +11,10 @@
        Two-key gate, same as the shims: enableGitHookGates (intent) AND the
        armed probe (readiness — the full agent-tools deploy is present;
        .chezmoitemplates/git-hook-gates-armed). hooksPath and the shims arm
-       and disarm TOGETHER: a hooksPath pointing at pruned shims would break
-       every commit (hooksPath has no fallback to .git/hooks), and shims
+       and disarm TOGETHER: a hooksPath pointing at pruned shims would not
+       stop a commit (git just skips a hook missing from the hooks
+       directory), but with no fallback to .git/hooks the gates AND the
+       repo's own hooks would silently stop running (fail-open); shims
        without hooksPath would be dead wiring.
 
        Template self-gate (not a module `requires`): an unmet key renders
@@ -24,9 +26,11 @@
 # hooks at the managed shim directory; the shims run the personal gates
 # (pre-commit / commit-msg, and git-identity alone in pre-merge-commit /
 # prepare-commit-msg) and chain to the repo's own .git/hooks/<stage>.
-# Repo hooks of the stages without a shim (reference-transaction,
-# post-index-change, push-to-checkout, proc-receive, fsmonitor-watchman) do
-# not run while this is set (docs/git-hook-gates.md).
+# Of the stages without a shim, the repo hooks of reference-transaction,
+# post-index-change, push-to-checkout and proc-receive do not run while this
+# is set (git looks for them only in the core.hooksPath directory).
+# fsmonitor-watchman is unaffected: git runs it from the path in
+# core.fsmonitor, not from the hooks directory (docs/git-hook-gates.md).
 [core]
 	hooksPath = ~/.config/git-hook-gates/hooks
 {{ end -}}

@@ -18,7 +18,9 @@
        / post-commit / post-merge, for one) (#361). Deliberately no shim
        (docs/git-hook-gates.md): push-to-checkout / proc-receive /
        fsmonitor-watchman (a hook there changes git's behaviour or must
-       answer in a fixed format; the dispatcher refuses them), and
+       answer in a fixed format; the dispatcher refuses them; of these,
+       fsmonitor-watchman is not dropped, since git runs it from the path
+       in core.fsmonitor, not from the hooks directory), and
        reference-transaction / post-index-change (git runs them on every ref
        update / index write, and a dispatcher start each time made git
        operations up to ~25x slower in the #361 measurement).
