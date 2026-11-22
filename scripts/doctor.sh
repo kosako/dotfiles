@@ -104,9 +104,11 @@ if command -v git >/dev/null 2>&1; then
   # app's op-ssh-sign, and the software catalog does not install the app
   # (#621): where it is missing or elsewhere, every commit or tag that asks
   # for signing fails. So doctor reads the signer from the deployed file, the
-  # one the ~/.gitconfig include gives git (--type=path expands ~/ as git
-  # does), rather than keep a copy of the path here, and only tests it; the
-  # signer is never run. A managed change not yet applied shows in the
+  # one the ~/.gitconfig include gives git, rather than keep a copy of the
+  # path here, and only tests it; the signer is never run. The value is read
+  # as written, not with --type=path: git 2.51 and later expand a leading ~
+  # in gpg.ssh.program, but earlier git runs it as written, so a ~ value is
+  # left unchecked rather than reported ok for a git that would fail. A managed change not yet applied shows in the
   # managed drift section. A context's local file (includeIf gitdir) or a
   # repository's config can set another gpg.ssh.program; doctor reads
   # neither. A missing file is reported only when its absence is confirmed
@@ -117,9 +119,11 @@ if command -v git >/dev/null 2>&1; then
       ok "enableGitSigning=true; SSH signing mechanism managed (signing.gitconfig); commit.gpgsign defaults off (managed), opt in per repo/context (local key + commit.gpgsign=true)"
       if [[ -f "$git_sign_file" && -r "$git_sign_file" ]]; then
         git_sign_rc=0
-        git_sign_program="$(git config --file "$git_sign_file" --type=path --get gpg.ssh.program 2>/dev/null)" || git_sign_rc=$?
+        git_sign_program="$(git config --file "$git_sign_file" --get gpg.ssh.program 2>/dev/null)" || git_sign_rc=$?
         if [[ "$git_sign_rc" -gt 1 ]]; then
           warn "SSH signer not checked: git cannot read gpg.ssh.program from $git_sign_file (value not shown)"
+        elif [[ "$git_sign_program" == "~"* ]]; then
+          warn "SSH signer not checked: gpg.ssh.program in $git_sign_file starts with ~, which git 2.51 and later expand but earlier git runs as written (value not shown; the managed file sets an absolute path, and a change shows in the managed drift section)"
         elif [[ "$git_sign_program" != /* ]]; then
           warn "SSH signer not checked: $git_sign_file sets no gpg.ssh.program, or one that is not an absolute path (the managed file sets an absolute one; a change shows in the managed drift section)"
         elif [[ -f "$git_sign_program" && -x "$git_sign_program" ]]; then

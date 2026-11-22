@@ -730,10 +730,12 @@ if [[ -e "$sg_mark" ]]; then
   fail "test failed: doctor ran the SSH signer (#621)"
   status=1
 fi
-#     SG-b) ~/ in the value -> expanded under HOME, as git does.
-# shellcheck disable=SC2088 # the value keeps ~/ for git (and doctor) to expand
+#     SG-b) ~/ in the value -> not checked, even with an executable file
+#     there: git before 2.51 runs the value as written, so doctor does not
+#     expand it (no ok for a git that would fail).
+# shellcheck disable=SC2088 # the value keeps ~/ as written in the file
 sg_point "~/signer/op-ssh-sign"
-sg_expect "a path under ~/" "[ok] SSH signer is an executable file: $sg_home/signer/op-ssh-sign $sg_tail"
+sg_expect "a path under ~/" "[warn] SSH signer not checked: gpg.ssh.program in $sg_file starts with ~, which git 2.51 and later expand but earlier git runs as written (value not shown; the managed file sets an absolute path, and a change shows in the managed drift section)"
 #     SG-c) the app is not there -> not found.
 sg_point "$sg_bin/1Password.app/Contents/MacOS/op-ssh-sign"
 sg_expect "app not there" "[warn] SSH signer not found: $sg_bin/1Password.app/Contents/MacOS/op-ssh-sign $sg_tail — $sg_fails until it is there; the managed file names the 1Password app's op-ssh-sign, which the software catalog does not install (docs/git-identity.md)"
