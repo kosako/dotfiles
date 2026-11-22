@@ -472,7 +472,9 @@ container runtime(Colima・docker の CLI・docker-compose)は software catalog 
   Colima は address を省いた公開を host の全 interface に転送する)、host の path は許可した bind だけ(compose の
   directory の下を読み取りだけで、保管の directory を書き込み可で。どれも `create_host_path: false`)、named
   volume の宣言は空、権限を広げる key を使わない、Prometheus が delta の metric を変換する。保管の設定は `*/archive`
-  の pipeline を足すだけで、file は 1 年残す。`test-otel-backend.sh` が pin する。
+  の pipeline を足し、image の `logs` と `traces` の pipeline の processors を、中身や path を落とす処理と `batch` に置き換える
+  (#564・#571)。置き換えは image の pipeline の名前と processor に頼るので、image を更新するときに確かめる([otel-backend](otel-backend.md)
+  の「image の更新」)。file は 1 年残す。`test-otel-backend.sh` が pin する。
 - Colima の VM は、host の directory を 2 つだけ mount する(`~/.config/otel-lgtm` を読み取りだけ、
   `~/.local/share/otel-lgtm/archive` を書き込み可)。`$HOME` 全体は見せない。
 - **保存期間は用途で決める**(#520、#528): dashboard が読む Loki と、生の telemetry を持つ保管の file は 1 年。dashboard が
