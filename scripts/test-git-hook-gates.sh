@@ -236,6 +236,24 @@ for stage in "${gate_stages[@]}"; do
     status=1
   fi
 done
+# doctor tells an overwritten shim from the managed one by its exec line
+# (git_hook_shim_managed in lib-policy.sh, #615): it must recognize every
+# rendered shim, so a change to the template's exec line cannot turn every
+# shim into "overwritten" in doctor unnoticed. A shim rendered for another
+# stage must not count, so the check stays per stage.
+shim_check_misses=""
+for stage in "${gate_stages[@]}"; do
+  git_hook_shim_managed "$gates_dir/hooks/$stage" "$stage" || shim_check_misses+=" $stage"
+done
+if [[ -n "$shim_check_misses" ]]; then
+  fail "test failed: doctor's managed-shim check does not recognize the rendered shim of:$shim_check_misses (keep git_hook_shim_managed in lib-policy.sh in step with .chezmoitemplates/git-hook-shim)"
+  status=1
+elif git_hook_shim_managed "$gates_dir/hooks/pre-push" pre-commit; then
+  fail "test failed: doctor's managed-shim check accepts the pre-push shim as the pre-commit one"
+  status=1
+else
+  ok "test passed: doctor's managed-shim check recognizes all ${#gate_stages[@]} rendered shims, each for its own stage only"
+fi
 
 hooks_gitconfig="$gates_dir/hooks.gitconfig"
 expected_gitconfig="$(printf '%s\n' \

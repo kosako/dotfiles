@@ -19,7 +19,22 @@
 
        Template self-gate (not a module `requires`): an unmet key renders
        EMPTY and chezmoi prunes the target, which un-sets the wiring on the
-       next apply (#184 lesson). */ -}}
+       next apply (#184 lesson).
+
+       Known limit (#615): tools that install hooks read core.hooksPath too,
+       so they aim at this SHARED shim directory instead of the repo's own
+       .git/hooks. Per their public implementation and docs (not reproduced
+       in #615: neither tool was installed where it was written):
+       git lfs install stops at a shim it did not write ("Hook already
+       exists") and suggests --force; pre-commit install refuses to run
+       while core.hooksPath is set. Never --force: every repo shares these
+       shims, so the LFS hooks would replace the pre-push / post-checkout /
+       post-commit / post-merge shims, and every repo would lose the gates
+       and the chain to its own .git/hooks for those stages. The tool's
+       hook belongs in the repo's .git/hooks/<stage>, which the shim chains
+       to; the exact per-tool steps are unverified (docs/git-hook-gates.md).
+       doctor warns when a shim no longer carries its dispatcher exec line,
+       and chezmoi apply restores it. */ -}}
 {{- if and (index $caps "enableGitHookGates") $armed -}}
 # Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).
 # Read via the unconditional [include] in ~/.gitconfig. Points every repo's

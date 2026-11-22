@@ -99,9 +99,10 @@ commit を止める**。つまり配備が不完全なマシンに配線だけ�
 - **配備が消えた**場合 → 次の apply が配線を可視に解除(disarm)する。apply
   するまでの間は fail-closed で commit が止まる(doctor が最も強く warn)。
 - `preflight` は apply **前**に 4 本の配備状態と「apply が武装するか」を報告する
-  (apply impact)。`doctor` は apply **後**の配線 chain(shim / hooksPath /
+  (apply impact)。`doctor` は apply **後**の配線 chain(shim とその中身 / hooksPath /
   4 script)を report-only で監視し、「配線済みなのに配備不完全 = commit が
-  止まっている」を最も強い警告にする。capability off で配線が残置していれば
+  止まっている」を最も強い警告にする(shim の中身の検査は下記「hook を入れる tool との衝突」)。
+  capability off で配線が残置していれば
   それも warn する(git-hook-gates module が active な profile で capability を off に
   した場合は apply で prune される。profile 切替で module 自体が非 active になった場合は
   apply では消えないので手で消す。doctor はこの場合、残っている file を `rm -i` する手順を出す。#201 / #258)。
@@ -149,6 +150,39 @@ enforcement boundary ではない:
 
 hard な床(credential 隔離 / egress / CI required checks / server-side protection)の
 代替にしない([ai-environment-boundary](ai-environment-boundary.md) と同じ前提)。
+
+## hook を入れる tool との衝突(#615)
+
+global の `core.hooksPath` は、全 repo の hook を共有の shim の directory(`~/.config/git-hook-gates/hooks/`)に
+向ける。hook を入れる tool も `core.hooksPath` を見るので、repo の `.git/hooks` ではなく、この共有の directory を
+入れ先にする。公開の実装と文書によると、次のようにふるまう。#615 の時点の手元には両方とも入っておらず、再現はしていない。
+
+- git-lfs(`git lfs install` など)は、入れ先を `core.hooksPath` から決める。入れ先に中身の違う hook があると
+  "Hook already exists" で止まり、`--force` で上書きするよう勧める。
+- pre-commit(`pre-commit install`)は、`core.hooksPath` が設定されていると install を拒む。
+
+勧めに従って `--force` で上書きしない。共有の directory の shim は全 repo が使う。上書きすると、pre-push・
+post-checkout・post-commit・post-merge の shim が LFS の hook に置き換わる。その stage では、どの repo でも gate が
+走らず、repo 自身の `.git/hooks` への chain も切れる。pre-commit の拒否を避けようと global の `core.hooksPath` を外すと、
+gate と chain の配線がすべて外れる。
+
+tool の hook は、repo 自身の `.git/hooks/<stage>` に置く。shim のある stage なら、dispatcher がそこへ chain するので、
+配線中も動く。置く手順は tool ごとに違い、#615 では確かめていない。次は文書から拾った候補で、どれも**未検証**。
+
+- (未検証)git-lfs の `git lfs update --manual` は、hook に足す行を表示するだけで、file には書かない。表示された行を、
+  repo の `.git/hooks/<stage>` に自分で書く。
+- (未検証)git-lfs の `git lfs install --skip-repo` は、hook に触れずに filter の設定だけを入れる。hook は上の方法で
+  別に置く。
+- pre-commit を repo の `.git/hooks` に入れる手順は、候補も確かめていない。
+
+doctor は、shim が在って実行できるとき、中身に dispatcher を exec する行があるかを見る。描画した shim には必ず
+`exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" <stage> "$@"` の行がある。この行が無ければ
+上書きされたとみなし、stage の名前を挙げて action を出す。中身は表示しない。手順は、`chezmoi apply` で shim を戻す
+ことと、tool の hook を repo の `.git/hooks` に入れ直すこと。読めない shim は、上書きと断定せずに warn にする。照合の行は
+`scripts/lib-policy.sh` の `git_hook_shim_managed` が持ち、`test-git-hook-gates.sh` が描画した 23 本で確かめる。
+
+shim を戻すと、共有の directory に入っていた tool の hook は消える。その tool を使う repo では、repo の `.git/hooks` に
+入れ直すまで、tool の hook は走らない。
 
 ## 導入・無効化
 
