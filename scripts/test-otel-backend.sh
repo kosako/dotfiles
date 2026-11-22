@@ -650,12 +650,25 @@ fi
 #    the end of today (now/d) in Asia/Tokyo, the zone the offset assumes
 #    (Codex review, PR #543). There must be daily panels to check, so the
 #    rule cannot pass by losing them.
+#    Every range window of a daily expr is checked, not just one (#589): a
+#    ratio or a counter delta has several, and one missing offset left the
+#    others to pass the old "contains [1d] offset -15h" test. The windows
+#    are the [...] outside the quoted strings (a LogQL regex such as
+#    "git( -C [^ ]+)?" has brackets too). Each is [1d], with offset -15h
+#    (the day of the point) or offset 9h (the day before: a Prometheus
+#    counter's delta subtracts it), and at least one is -15h.
 daily_panels=0
 daily_bad=""
 for dash_case in "${dashboard_cases[@]}"; do
   dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
   n="$(jq -r '[.panels[] | select(.interval == "1d")] | length' "$dash_file" 2>/dev/null || echo x)"
-  bad="$(jq -r '[.panels[] | select(.interval == "1d") | .targets[] | (.expr // "") | select(test("\\$__interval") or (test("\\[1d\\] offset -15h") | not))] | length' "$dash_file" 2>/dev/null || echo x)"
+  bad="$(jq -r '[.panels[] | select(.interval == "1d") | .targets[] | (.expr // "")
+      | (gsub("\"(\\\\.|[^\"\\\\])*\""; "\"\"") | gsub("`[^`]*`"; "``")) as $s
+      | select(test("\\$__interval")
+        or (([$s | match("\\[[^\\]]*\\]"; "g")] | length) as $windows
+          | ([$s | match("\\[1d\\] offset (-15h|9h)"; "g")] | length) as $daily
+          | ([$s | match("\\[1d\\] offset -15h"; "g")] | length) as $today
+          | $windows == 0 or $windows != $daily or $today == 0))] | length' "$dash_file" 2>/dev/null || echo x)"
   zone_end="$(jq -r '"\(.timezone) \(.time.to)"' "$dash_file" 2>/dev/null || echo x)"
   if [[ "$n" == x || "$bad" != 0 ]] || [[ "$n" != 0 && "$zone_end" != "Asia/Tokyo now/d" ]]; then
     daily_bad+="${dash_case%% *} "
@@ -664,9 +677,9 @@ for dash_case in "${dashboard_cases[@]}"; do
   fi
 done
 if [[ -z "$daily_bad" && "$daily_panels" -gt 0 ]]; then
-  ok "test passed: every daily panel ($daily_panels) counts Japan-time days with [1d] offset -15h, on dashboards in Asia/Tokyo that end at now/d"
+  ok "test passed: every daily panel ($daily_panels) counts Japan-time days: each range window is [1d] offset -15h (or offset 9h, the day before), at least one -15h, on dashboards in Asia/Tokyo that end at now/d"
 else
-  fail "test failed: daily panels must window [1d] offset -15h and not \$__interval, on a dashboard in Asia/Tokyo ending at now/d (offending: ${daily_bad:-none}; daily panels found: $daily_panels)"
+  fail "test failed: every range window of a daily panel must be [1d] offset -15h (or offset 9h for the day before, with at least one -15h), never \$__interval, on a dashboard in Asia/Tokyo ending at now/d (offending: ${daily_bad:-none}; daily panels found: $daily_panels)"
   status=1
 fi
 
