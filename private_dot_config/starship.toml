@@ -3,8 +3,9 @@
 # rich first line never crowds what you type. Language/runtime modules appear
 # only in relevant projects (starship's contextual default) and reflect the
 # mise-selected version on PATH. Symbols use starship defaults. Two of them
-# are private-use glyphs that need a Powerline / Nerd Font: git_branch (U+E0A0)
-# and nodejs (U+E718); a terminal font without them shows boxes there (#620).
+# are private-use glyphs: git_branch (U+E0A0) needs a Powerline or Nerd Font,
+# and nodejs (U+E718) needs a Nerd Font; a terminal font without them shows
+# boxes there (#620).
 # The other defaults used here are outside the private-use area: ASCII,
 # standard symbols (git_status's ⇡ ⇣ ⇕ », the prompt's ❯, for example) or
 # emoji, which common fonts show.
