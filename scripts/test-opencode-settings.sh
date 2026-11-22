@@ -70,13 +70,19 @@ fi
 #    throwaway render, same as the Codex hook paths in test-codex-settings.sh
 #    (OpenCode does not follow the `@` import in ~/.claude/CLAUDE.md, so the
 #    imported file is named here).
-autoupdate="$(yq -p json '.autoupdate' "$config_file")"
+#    Compared with their types (#592): autoupdate must be the boolean false
+#    (a string "false" printed the same through yq's scalar output), and
+#    instructions the array itself, as compact JSON (one entry per line in a
+#    command substitution lost a trailing empty entry).
+autoupdate="$(yq -p json -o json -I0 '.autoupdate' "$config_file")"
+autoupdate_tag="$(yq -p json '.autoupdate | tag' "$config_file")"
 share="$(yq -p json '.share' "$config_file")"
-instructions="$(yq -p json '.instructions[]' "$config_file")"
-if [[ "$autoupdate" == "false" && "$share" == "disabled" && "$instructions" == "$HOME/.claude/agent-tools/CLAUDE.md" ]]; then
+instructions="$(yq -p json -o json -I0 '.instructions' "$config_file")"
+expected_instructions="$(EXPECTED_PATH="$HOME/.claude/agent-tools/CLAUDE.md" yq -n -o json -I0 '[strenv(EXPECTED_PATH)]')"
+if [[ "$autoupdate" == "false" && "$autoupdate_tag" == "!!bool" && "$share" == "disabled" && "$instructions" == "$expected_instructions" ]]; then
   ok "test passed: autoupdate off, share disabled, instructions = exactly the agent-tools operating rules"
 else
-  fail "test failed: posture mismatch (autoupdate=$autoupdate share=$share instructions=$instructions)"
+  fail "test failed: posture mismatch (autoupdate=$autoupdate ($autoupdate_tag) share=$share instructions=$instructions, want false (!!bool), disabled, $expected_instructions)"
   status=1
 fi
 
