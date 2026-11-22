@@ -1229,25 +1229,35 @@ fi
 #     order, whitespace, line breaks), so a template change that only
 #     reformats the output would still pass them. For a fixed plain home (the
 #     one test-render.sh uses) the personal render with enableBridgeOneHook
-#     OFF must equal scripts/testdata/claude-settings.personal.json BYTE for
-#     byte. That file was rendered from main's template before #508, and off
-#     must leave the output unchanged. With the Bridge hook ON, the render
-#     must equal that file with exactly the Bridge One entry's lines inserted
-#     after the record hook's PermissionRequest entry (built here as text, not
-#     by a JSON tool). The file is the render with
-#     enableInstructionUpdateNoticeHook OFF too (#547 left it unchanged); with
-#     the notice ON the render must equal it with exactly the notice entry's
-#     lines appended to SessionStart and a UserPromptSubmit event holding the
-#     same entry right after SessionStart (also built as text). The committed
-#     render must equal the one of the four its profile selects (both on for
-#     personal since #510 / #547). To update the file after an INTENDED
-#     template change, render personal as this case does
+#     and enableInstructionUpdateNoticeHook OFF must equal
+#     scripts/testdata/claude-settings.personal.json BYTE for byte: the file
+#     is the render of the current template with Bridge One and the notice
+#     off. Its history is a separate matter. #508 first rendered it from
+#     main's template before #508, so the case also showed that the new
+#     capability left off does not change the output (#547 kept the file as
+#     it was, the same check for the notice). Intended template changes have
+#     re-rendered it since (#530 added the MCP login denies). With the Bridge
+#     hook ON, the render must equal that file with exactly the Bridge One
+#     entry's lines inserted after the record hook's PermissionRequest entry
+#     (built here as text, not by a JSON tool). With the notice ON the render
+#     must equal it with exactly the notice entry's lines appended to
+#     SessionStart and a UserPromptSubmit event holding the same entry right
+#     after SessionStart (also built as text). The committed render must
+#     equal the one of the four its profile selects (both on for personal
+#     since #510 / #547). To update the file after an INTENDED template
+#     change, render personal as this case does
 #     (HOME=/dotfiles-render-test-home, enableBridgeOneHook=false,
 #     enableInstructionUpdateNoticeHook=false, a throwaway destination) and
-#     copy its .claude/settings.json over the file.
+#     copy its .claude/settings.json over the file. Set the two capabilities
+#     in a copy of the source (make_flipped_source and
+#     flip_personal_capability), since the committed personal profile has
+#     both on. Only the off file is rendered: the on files come from the awk
+#     below (the Bridge entry insert and golden_add_notice), so a template
+#     change to the shape of the Bridge One or notice entry must change that
+#     awk too.
 golden_home="/dotfiles-render-test-home"
 golden_settings="$DOTFILES_ROOT/scripts/testdata/claude-settings.personal.json"
-golden_hint="if the template change is intended, render personal with HOME=$golden_home, enableBridgeOneHook=false and enableInstructionUpdateNoticeHook=false into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json (see 8i)"
+golden_hint="if the template change is intended, render personal with HOME=$golden_home, enableBridgeOneHook=false and enableInstructionUpdateNoticeHook=false (set in a copy of the source) into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json; if the change alters the Bridge One or notice entry, also update the awk that builds the on files from that file (see 8i)"
 golden_bridge_expected_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"
 tmp_roots+=("$golden_bridge_expected_root")
 golden_bridge_expected="$golden_bridge_expected_root/expected.json"

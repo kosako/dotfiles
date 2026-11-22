@@ -1113,7 +1113,9 @@ tool・広い rule・`*`・label 1 つ・末尾の `.`・port・崩れた label�
 足したものと同じ(#547)。commit された personal の render は、profile の値に合うものと byte で同じ(#510 / #547 で personal は両方 on)。
 hooks の組み合わせの検査も flag を明示して off にした render を基準にするので、test は commit された値に依らない。template を意図して
 変えたときは、同じ home と `enableBridgeOneHook=false`・`enableInstructionUpdateNoticeHook=false` で personal を使い捨ての destination に
-render し、その `.claude/settings.json` で期待値の file を置き換える。chezmoi と jq が必要(render job)。
+render し、その `.claude/settings.json` で期待値の file を置き換える。commit された personal は両方 on なので、2 つの flag は source の
+複製(`.chezmoidata/profiles.yaml`)の側で切り替える。on の期待値は render せず、test の awk が off の file に entry の行を足して組み立てる。
+そのため、Bridge One や通知の entry の形を template で変えたときは、その awk も直す。chezmoi と jq が必要(render job)。
 
 ## test-codex-settings.sh
 
