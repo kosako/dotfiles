@@ -66,43 +66,62 @@ fi
 
 # The classification below shows only if the prompt places it (#591): the
 # top-level format must name each of the three custom modules exactly once,
-# and each must keep its contract color (personal green, other yellow, none
-# red; docs/git-identity.md), print its output in that style, and not be
-# disabled. Needs tomllib, like the parse check (a skip locally, a failure
-# on CI through the gate above).
+# unescaped (starship prints "\${...}" as text, so an escaped reference
+# shows no module), and each must keep its contract color (personal green,
+# other yellow, none red; docs/git-identity.md), print its output in that
+# style, and not be disabled. A failure names each module and value that
+# is off. Needs tomllib, like the parse check (a skip locally, a failure on
+# CI through the gate above).
 if [[ "$has_tomllib" -eq 1 ]]; then
-  if python3 - "$STARSHIP_SRC" <<'PY'
+  wiring_rc=0
+  wiring_out="$(python3 - "$STARSHIP_SRC" <<'PY'
+import re
 import sys
 import tomllib
 
 with open(sys.argv[1], "rb") as f:
     config = tomllib.load(f)
 top = config.get("format")
-custom = config.get("custom", {})
+custom = config.get("custom")
+problems = []
+if not isinstance(top, str):
+    problems.append("format is not a string")
+    top = ""
+if not isinstance(custom, dict):
+    problems.append("no [custom] table")
+    custom = {}
 expected = {
     "git_ctx_personal": "bold green",
     "git_ctx_other": "bold yellow",
     "git_ctx_none": "bold red",
 }
-good = isinstance(top, str) and isinstance(custom, dict)
 for name, style in expected.items():
-    module = custom.get(name) if good else None
-    good = (
-        good
-        and isinstance(module, dict)
-        and top.count("${custom.%s}" % name) == 1
-        and module.get("style") == style
-        and module.get("format") == "[$output]($style) "
-        and module.get("disabled", False) is False
-    )
-sys.exit(0 if good else 1)
+    # A reference counts only after an even number of backslashes.
+    refs = len(re.findall(r"(?<!\\)(?:\\\\)*\$\{custom\." + name + r"\}", top))
+    if refs != 1:
+        problems.append(f"format references custom.{name} {refs} time(s), want 1")
+    module = custom.get(name)
+    if not isinstance(module, dict):
+        problems.append(f"custom.{name} is missing")
+        continue
+    if module.get("style") != style:
+        problems.append(f"custom.{name}.style is {module.get('style')!r}, want {style!r}")
+    if module.get("format") != "[$output]($style) ":
+        problems.append(f"custom.{name}.format is {module.get('format')!r}, want '[$output]($style) '")
+    if module.get("disabled", False) is not False:
+        problems.append(f"custom.{name}.disabled is {module.get('disabled')!r}, want false")
+print("; ".join(problems))
+sys.exit(1 if problems else 0)
 PY
-  then
-    ok "test passed: the prompt format places the three git identity modules once each, in their contract colors (green / yellow / red)"
+)" || wiring_rc=$?
+  if [[ "$wiring_rc" -eq 0 ]]; then
+    ok "test passed: the prompt format places the three git identity modules once each, unescaped, in their contract colors (green / yellow / red)"
   else
-    fail "test failed: format must name \${custom.git_ctx_personal}, \${custom.git_ctx_other} and \${custom.git_ctx_none} once each, and each module must keep style bold green / bold yellow / bold red, format \"[\$output](\$style) \" and not be disabled"
+    fail "test failed: the git identity modules are not wired into the prompt as contracted: ${wiring_out:-python3 exited $wiring_rc}"
     status=1
   fi
+else
+  warn "python3/tomllib not found; skipping the prompt format and style check of the git identity modules too"
 fi
 
 section "fixture checks: git identity classification"
