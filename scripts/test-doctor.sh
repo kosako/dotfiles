@@ -4715,7 +4715,9 @@ while IFS= read -r hg_decl; do
 done < <(module_paths git-hook-gates)
 # hg_setup WIRED SCRIPT... — a fresh HOME; WIRED=1 plants a shim for every
 # stage modules.yaml declares (#361) and core.hooksPath; each SCRIPT is
-# planted executable.
+# planted executable. A planted shim carries the managed shim's exec line for
+# its stage (the one line doctor matches, #615; test-git-hook-gates.sh pins
+# that the rendered shims carry it too), the rest of the template is left out.
 hg_setup() {
   local wired="$1" hg_script
   shift
@@ -4728,7 +4730,8 @@ hg_setup() {
   if [[ "$wired" -eq 1 ]]; then
     mkdir -p "$hg_shims"
     for hg_script in "${hg_stages[@]}"; do
-      printf '#!/bin/sh\nexit 0\n' > "$hg_shims/$hg_script"
+      printf '#!/bin/sh\n# Managed by chezmoi from kosako/dotfiles (git-hook-gates, #196).\nexec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" %s "$@"\n' \
+        "$hg_script" > "$hg_shims/$hg_script"
       chmod +x "$hg_shims/$hg_script"
     done
     printf '[core]\n\thooksPath = ~/.config/git-hook-gates/hooks\n' > "$hg_home/.gitconfig"
@@ -4755,20 +4758,65 @@ hg_expect() {
 hg_complete="[ok] agent-tools deploy complete: dispatcher + all three gates executable in $hg_deploy (bodies owned by agent-tools sync)"
 hg_wired_incomplete="[warn] agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and all three gates in $hg_deploy — or set enableGitHookGates=false and apply"
 hg_both_incomplete="[warn] agent-tools deploy incomplete (dispatcher and/or a gate missing in $hg_deploy; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
+hg_all_ok="[ok] shims present, executable and managed (each execs the dispatcher): all 23 declared stages in $hg_shims"
 # HG-1) wired + all four deployed -> one ok for all 23 declared shims (#361),
-#       hooksPath ok, deploy complete.
+#       hooksPath ok, deploy complete; no shim reads as overwritten (#615).
 hg_setup 1 "${hg_all[@]}"
 hg_expect "wired + complete deploy -> all ok" -- \
-  "[ok] shims present and executable: all 23 declared stages in $hg_shims" \
+  "$hg_all_ok" \
   "[ok] global core.hooksPath -> managed shim directory" \
-  "$hg_complete" ! "deploy INCOMPLETE" "deploy incomplete (" "shim missing"
+  "$hg_complete" ! "deploy INCOMPLETE" "deploy incomplete (" "shim missing" "shim overwritten" "shim not readable"
 # HG-1b) the same with one pass-through shim (pre-push) gone -> that shim is
 #        named, and the all-present line is not claimed.
 hg_setup 1 "${hg_all[@]}"
 rm -f "$hg_shims/pre-push"
 hg_expect "wired + one pass-through shim missing -> named" -- \
   "[warn] shim missing, not a regular file, or not executable: $hg_shims/pre-push (chezmoi apply arms it once the agent-tools deploy is complete)" \
-  ! "shims present and executable: all" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit"
+  ! "shims present, executable and managed" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit"
+# HG-1c) a hook installer followed core.hooksPath into the shared directory
+#        and replaced the pre-push and post-merge shims with LFS-like hooks
+#        (#615: git lfs install --force writes there). Two more do not count
+#        as managed either: post-checkout carries another stage's exec line,
+#        pre-commit only a commented-out copy of its own. All four are named
+#        in one action with the chezmoi apply step for exactly those paths;
+#        the all-ok line is not claimed, the bodies are not shown, and with
+#        the deploy complete nothing else changes.
+hg_setup 1 "${hg_all[@]}"
+hg_body_canary="canary-lfs-hook-body-8d1f"
+for hg_script in pre-push post-merge; do
+  printf '#!/bin/sh\n# %s\ncommand -v git-lfs >/dev/null 2>&1 || exit 2\ngit lfs %s "$@"\n' \
+    "$hg_body_canary" "$hg_script" > "$hg_shims/$hg_script"
+done
+printf '#!/bin/sh\nexec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" post-commit "$@"\n' > "$hg_shims/post-checkout"
+printf '#!/bin/sh\n# exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"\nexit 0\n' > "$hg_shims/pre-commit"
+hg_overwritten="[warn] shim overwritten (no dispatcher exec line, body not shown): pre-commit post-checkout post-merge pre-push in $hg_shims — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one); every repo now runs the replacement for these stages instead of the gates and the chain to its own .git/hooks"
+hg_expect "wired + shims replaced by another tool's hooks -> one action naming them" -- \
+  "$hg_overwritten" \
+  "        \$ chezmoi apply $(printf '%q' "$hg_shims/pre-commit") $(printf '%q' "$hg_shims/post-checkout") $(printf '%q' "$hg_shims/post-merge") $(printf '%q' "$hg_shims/pre-push")   # restores the managed shims" \
+  "        then put that tool's hook in each repo's own .git/hooks/<stage>, which the shim chains to, and never --force it into the shared directory (docs/git-hook-gates.md; the per-tool steps there are unverified)" \
+  "[ok] global core.hooksPath -> managed shim directory" \
+  "$hg_complete" \
+  ! "shims present, executable and managed" "shim missing" "shim not readable" "$hg_body_canary" "BLOCKED"
+# HG-1d) a shim doctor cannot read is reported as unknown, never as
+#        overwritten (its body may well be the managed one). Not as root:
+#        root reads it anyway.
+if [[ "$(id -u)" != "0" ]]; then
+  hg_setup 1 "${hg_all[@]}"
+  chmod 311 "$hg_shims/post-commit"
+  hg_expect "wired + an unreadable shim -> unknown, not overwritten" -- \
+    "[warn] shim not readable, so whether it is still the managed one is unknown: post-commit in $hg_shims" \
+    "$hg_complete" \
+    ! "shims present, executable and managed" "shim overwritten" "shim missing"
+  chmod 755 "$hg_shims/post-commit"
+fi
+# HG-1e) an overwritten shim leaves the wiring incomplete: with the deploy
+#        cut short too, doctor gives the both-incomplete line, not the
+#        commits-blocked one of a whole chain.
+hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
+printf '#!/bin/sh\ngit lfs pre-push "$@"\n' > "$hg_shims/pre-push"
+hg_expect "wired with an overwritten shim + an incomplete deploy -> both incomplete" -- \
+  "~shim overwritten (no dispatcher exec line, body not shown): pre-push in $hg_shims — " \
+  "$hg_both_incomplete" ! "$hg_wired_incomplete" "$hg_complete"
 # HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
 hg_expect "wired + pre-#281 deploy (identity gate missing) -> BLOCKED warning" -- \
@@ -4801,7 +4849,7 @@ hg_expect "a directory shim, a non-executable shim and a foreign hooksPath -> ea
   "[warn] shim missing, not a regular file, or not executable: $hg_shims/post-merge (chezmoi apply arms it once the agent-tools deploy is complete)" \
   "[warn] global core.hooksPath points somewhere else (value not shown); the managed gates are NOT on the commit path" \
   "$hg_complete" \
-  ! "shims present and executable: all" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit" "$hg_canary"
+  ! "shims present, executable and managed" "shim missing, not a regular file, or not executable: $hg_shims/pre-commit" "$hg_canary" "shim overwritten"
 # HG-4) nothing wired + the dispatcher alone -> both halves incomplete.
 hg_setup 0 personal-git-hook-dispatcher
 hg_expect "not wired + dispatcher only -> deploy and wiring both incomplete" -- \

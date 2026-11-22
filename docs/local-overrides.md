@@ -41,6 +41,10 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
     deploy された `~/.zshrc` に guard があるとき、その guard の関数(doctor が `zsh -f` で実行する)が読む。出すのは
     root の出どころ(既定か file か、使える root が無いか)と数、HOME と download の directory を断るかの判定だけで、
     root の path は出さない(#491。[shell](shell.md) の「agent の起動場所」)。
+  - git hook gates の shim(`~/.config/git-hook-gates/hooks/<stage>`。managed)は、`enableGitHookGates=true` で
+    `git-hook-gates` module が active な profile のとき、通常の file で実行できるものだけを読む。dispatcher を exec する
+    行があるかを、固定文字列の行の一致で見る。出すのは、上書きされたとみなした stage と読めなかった stage の名前と、
+    shim の path だけで、中身は表示しない(#615。[git-hook-gates](git-hook-gates.md) の「hook を入れる tool との衝突」)。
   - Git identity の local file(`~/.config/git/<context>.gitconfig`)は、在るときに git が parse できるかと、
     `user.name` / `user.email` に値があるかだけを見る(#202。[git-identity](git-identity.md) の「検査」)。
     ただし doctor を repo の中で実行すると、global の `core.hooksPath` と(`git-ignore` module が active な

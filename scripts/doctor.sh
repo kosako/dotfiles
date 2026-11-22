@@ -349,19 +349,51 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   if module_active_for_profile "$profile" git-hook-gates; then
     hook_gates_wired=1
     hook_gates_present=0
+    # A shim that is there can still have been replaced (#615): a hook
+    # installer follows the global core.hooksPath into this shared directory
+    # (git lfs install --force writes its pre-push / post-checkout /
+    # post-commit / post-merge hooks there), and every repo then runs that
+    # hook for the stage instead of the gates and the chain to its own
+    # .git/hooks. git_hook_shim_managed (lib-policy.sh) looks for the exec
+    # line every rendered shim carries; the body is never shown, only the
+    # stage names. A shim it cannot read is reported as such, not as
+    # overwritten.
+    hook_gates_overwritten=""
+    hook_gates_overwritten_steps=""
+    hook_gates_unreadable=""
     for hook_stage in ${hook_gates_stages[@]+"${hook_gates_stages[@]}"}; do
       if [[ -f "$hook_gates_dir/hooks/$hook_stage" && -x "$hook_gates_dir/hooks/$hook_stage" ]]; then
         hook_gates_present=$((hook_gates_present + 1))
+        hook_gates_shim_state=0
+        git_hook_shim_managed "$hook_gates_dir/hooks/$hook_stage" "$hook_stage" || hook_gates_shim_state=$?
+        case "$hook_gates_shim_state" in
+          0) ;;
+          1)
+            hook_gates_overwritten+=" $hook_stage"
+            hook_gates_overwritten_steps+=" $(shell_quote_safe "$hook_gates_dir/hooks/$hook_stage")"
+            ;;
+          *) hook_gates_unreadable+=" $hook_stage" ;;
+        esac
       else
         warn "shim missing, not a regular file, or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
         hook_gates_wired=0
       fi
     done
+    if [[ -n "$hook_gates_overwritten" ]]; then
+      action "shim overwritten (no dispatcher exec line, body not shown):$hook_gates_overwritten in $hook_gates_dir/hooks — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one); every repo now runs the replacement for these stages instead of the gates and the chain to its own .git/hooks" \
+        "\$ chezmoi apply$hook_gates_overwritten_steps   # restores the managed shims" \
+        "then put that tool's hook in each repo's own .git/hooks/<stage>, which the shim chains to, and never --force it into the shared directory (docs/git-hook-gates.md; the per-tool steps there are unverified)"
+      hook_gates_wired=0
+    fi
+    if [[ -n "$hook_gates_unreadable" ]]; then
+      warn "shim not readable, so whether it is still the managed one is unknown:$hook_gates_unreadable in $hook_gates_dir/hooks"
+      hook_gates_wired=0
+    fi
     if [[ "${#hook_gates_stages[@]}" -eq 0 ]]; then
       warn "no shim declared for the git-hook-gates module in modules.yaml; the hooks are not wired"
       hook_gates_wired=0
-    elif [[ "$hook_gates_present" -eq "${#hook_gates_stages[@]}" ]]; then
-      ok "shims present and executable: all $hook_gates_present declared stages in $hook_gates_dir/hooks"
+    elif [[ "$hook_gates_present" -eq "${#hook_gates_stages[@]}" && -z "$hook_gates_overwritten$hook_gates_unreadable" ]]; then
+      ok "shims present, executable and managed (each execs the dispatcher): all $hook_gates_present declared stages in $hook_gates_dir/hooks"
     fi
     if command -v git >/dev/null 2>&1; then
       # --includes is load-bearing: the value lives in the INCLUDED

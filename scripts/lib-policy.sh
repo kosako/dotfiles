@@ -1374,6 +1374,23 @@ git_excludes_file_setting() {
   printf 'unset\n'
 }
 
+# git_hook_shim_managed SHIM STAGE — whether the file SHIM is still the
+# managed git-hook-gates shim for STAGE (#615). Every shim rendered from
+# .chezmoitemplates/git-hook-shim carries the one exec line built below; a
+# hook installer that follows the global core.hooksPath into the shared
+# directory (git lfs install --force, for one) replaces the file with its own
+# hook, which lacks it. Only that line is matched (fixed string, whole line),
+# so the rest of the template is not copied here and chezmoi is not run.
+# Returns 0 when the line is there, 1 when SHIM was read and it is not, and
+# 2 or more when SHIM could not be read: the caller must not call that
+# overwritten. test-git-hook-gates.sh runs this on every rendered shim, so
+# the template and this line cannot drift apart unnoticed.
+git_hook_shim_managed() {
+  local line
+  line="exec \"\$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher\" $2 \"\$@\""
+  LC_ALL=C grep -Fxq -- "$line" "$1" 2>/dev/null
+}
+
 # Print names of remotes whose URL embeds password-like userinfo
 # (scheme://user:password@host). Covers pushurl too — a credential can hide
 # in remote.<name>.pushurl with a clean fetch url (#144). Each remote is
