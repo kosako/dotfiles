@@ -653,21 +653,23 @@ fi
 #    Every range window of a daily expr is checked, not just one (#589): a
 #    ratio or a counter delta has several, and one missing offset left the
 #    others to pass the old "contains [1d] offset -15h" test. The windows
-#    are the [...] outside the quoted strings (a LogQL regex such as
-#    "git( -C [^ ]+)?" has brackets too). Each is [1d], with offset -15h
-#    (the day of the point) or offset 9h (the day before: a Prometheus
-#    counter's delta subtracts it), and at least one is -15h.
+#    are the [...] outside the quoted strings (double, single or backtick:
+#    a regex such as "git( -C [^ ]+)?" has brackets too). Each is [1d],
+#    with offset exactly -15h (the day of the point) or 9h (the day before:
+#    a Prometheus counter's delta subtracts it; -15h30m is neither), and at
+#    least one is -15h.
 daily_panels=0
 daily_bad=""
 for dash_case in "${dashboard_cases[@]}"; do
   dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
   n="$(jq -r '[.panels[] | select(.interval == "1d")] | length' "$dash_file" 2>/dev/null || echo x)"
   bad="$(jq -r '[.panels[] | select(.interval == "1d") | .targets[] | (.expr // "")
-      | (gsub("\"(\\\\.|[^\"\\\\])*\""; "\"\"") | gsub("`[^`]*`"; "``")) as $s
+      | (gsub("\"(\\\\.|[^\"\\\\])*\""; "\"\"") | gsub("\u0027(\\\\.|[^\u0027\\\\])*\u0027"; "\u0027\u0027")
+        | gsub("`[^`]*`"; "``")) as $s
       | select(test("\\$__interval")
         or (([$s | match("\\[[^\\]]*\\]"; "g")] | length) as $windows
-          | ([$s | match("\\[1d\\] offset (-15h|9h)"; "g")] | length) as $daily
-          | ([$s | match("\\[1d\\] offset -15h"; "g")] | length) as $today
+          | ([$s | match("\\[1d\\] offset (-15h|9h)(?![0-9A-Za-z])"; "g")] | length) as $daily
+          | ([$s | match("\\[1d\\] offset -15h(?![0-9A-Za-z])"; "g")] | length) as $today
           | $windows == 0 or $windows != $daily or $today == 0))] | length' "$dash_file" 2>/dev/null || echo x)"
   zone_end="$(jq -r '"\(.timezone) \(.time.to)"' "$dash_file" 2>/dev/null || echo x)"
   if [[ "$n" == x || "$bad" != 0 ]] || [[ "$n" != 0 && "$zone_end" != "Asia/Tokyo now/d" ]]; then
