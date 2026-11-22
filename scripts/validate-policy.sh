@@ -328,14 +328,11 @@ validate_packages() {
       continue
     fi
     names+="$name"$'\n'
-    case "$track_only" in
-      true | false | "") ;;
-      *)
-        fail "package track_only must be true or false: $name: $track_only"
-        status=1
-        entry_ok=0
-        ;;
-    esac
+    if ! catalog_track_only_valid "$track_only"; then
+      fail "package track_only must be true or false: $name: $track_only"
+      status=1
+      entry_ok=0
+    fi
     if [[ "$track_only" != "true" && -z "$pkg" ]]; then
       case "$source" in
         go_install | mas)

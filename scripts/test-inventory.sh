@@ -396,3 +396,36 @@ if [[ "$install_exit" -ne 1 ]] || ! grep -Fxq '[warn] install failed: fixture-ma
   exit 1
 fi
 ok "a failed install is reported, counted and fails the run after the other entries install"
+
+# #577: validate-policy refuses a track_only that is not true or false, but the
+# installer read every other value as "not track-only" and installed the
+# entry. A mistyped value in an uncommitted edit (tru) is now refused there
+# too: neither planned nor installed, counted as failed (exit 1), while the
+# other entries still install.
+cat >> "$fixture/repo/.chezmoidata/packages.yaml" <<'YAML'
+  - {name: fixture-typo, source: brew_formula, track_only: tru}
+YAML
+for mode in dry-run apply; do
+  args=("$installer")
+  [[ "$mode" = apply ]] && args+=(--apply)
+  : > "$fixture/installs"
+  if output="$(INVENTORY_TEST_STATE=empty run_fixture "${args[@]}" 2>&1)"; then
+    typo_exit=0
+  else
+    typo_exit=$?
+  fi
+  if [[ "$typo_exit" -ne 1 ]] \
+    || ! grep -Fxq "[warn] skip fixture-typo: track_only must be true or false, not 'tru'; refusing to install (run validate-policy)" <<< "$output" \
+    || grep -Fq 'install: fixture-typo' <<< "$output" || grep -Fq 'fixture-typo' "$fixture/installs"; then
+    printf '%s\n' "$output" >&2
+    fail "an entry whose track_only is not true or false must be refused, never planned or installed ($mode)"
+    exit 1
+  fi
+done
+if ! grep -Fxq '[ok] done: 5 installed, 2 skipped, 1 failed' <<< "$output" \
+  || [[ "$(awk 'END { print NR }' "$fixture/installs")" != 5 ]]; then
+  printf '%s\n' "$output" >&2
+  fail "the other entries must still install next to a refused track_only"
+  exit 1
+fi
+ok "an entry with a mistyped track_only is refused (exit 1) and never planned or installed; the others install"

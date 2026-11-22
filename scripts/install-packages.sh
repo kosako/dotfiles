@@ -128,6 +128,15 @@ main() {
     canonical="${pkg:-$name}"
     bincmd="${bin:-$name}"
 
+    # validate-policy refuses a track_only that is not true or false. Check it
+    # again here, whether or not the validator ran first (as the profile is,
+    # #357): a mistyped value is not "false", so the entry is never installed
+    # on it (#577).
+    if ! catalog_track_only_valid "$track_only"; then
+      warn "skip $name: track_only must be true or false, not '$track_only'; refusing to install (run validate-policy)"
+      failed=$((failed + 1)); continue
+    fi
+
     # track-only / manual: inventory only, never installed by tooling.
     if [[ "$track_only" == "true" || "$source" == "manual" ]]; then
       item "skip $name: track-only ($source)"
