@@ -12,8 +12,8 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
 - doctor は local override file の存在を report-only で表示してよい。中身は読まないことを原則とし、
   例外は検査に要る次の項目だけにする(ほかの `~/.zprofile.local`・`~/.ssh/config.local`・
   `~/.config/dotfiles/*.local`・`~/.config/agent-tools/checks.local.json` などは存在だけを見る)。
-  例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)
-  だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
+  例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)、数(rule の行や
+  登録の数、root の数)だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
   中身を読む検査を足すときは、この一覧も直す。
   - `~/.claude/settings.json` は、`enableClaudeTelemetry=false` のとき、telemetry の残置を調べる。
     profile が file を管理していなくても、`"CLAUDE_CODE_ENABLE_TELEMETRY"` を固定文字列で探す(#556)。
