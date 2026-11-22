@@ -244,9 +244,11 @@ expected_gitconfig="$(printf '%s\n' \
   '# hooks at the managed shim directory; the shims run the personal gates' \
   '# (pre-commit / commit-msg, and git-identity alone in pre-merge-commit /' \
   '# prepare-commit-msg) and chain to the repo'"'"'s own .git/hooks/<stage>.' \
-  '# Repo hooks of the stages without a shim (reference-transaction,' \
-  '# post-index-change, push-to-checkout, proc-receive, fsmonitor-watchman) do' \
-  '# not run while this is set (docs/git-hook-gates.md).' \
+  '# Of the stages without a shim, the repo hooks of reference-transaction,' \
+  '# post-index-change, push-to-checkout and proc-receive do not run while this' \
+  '# is set (git looks for them only in the core.hooksPath directory).' \
+  '# fsmonitor-watchman is unaffected: git runs it from the path in' \
+  '# core.fsmonitor, not from the hooks directory (docs/git-hook-gates.md).' \
   '[core]' \
   $'\thooksPath = ~/.config/git-hook-gates/hooks')"
 if [[ ! -f "$hooks_gitconfig" ]]; then
