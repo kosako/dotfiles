@@ -8,6 +8,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 - **global(baseline)**: project の外でも動く必要があるグローバル CLI のための *最小 baseline runtime* だけを宣言する。具体例: npm global tool(例 `@openai/codex`)は node を、`go install` 由来の tool(例 `goreleaser`)は go を、どの project にいなくても要求する。これらが動く下地を出すのが global の役割。なお `claude`(Claude Code)は npm-global ではなく native installer で `~/.local/bin` に入れるため、この node baseline には依存しない(`docs/supply-chain-npm.md`)。
   - baseline は `lts` / major 線で宣言する(例: `node = "lts"`、`go = "1.26"`)。**再現性のための exact pin ではない**。
+  - 例外は uv で、版の線を持たない `uv = "latest"` で宣言する(下の「uv の扱い」)。
 - **project(override)**: 各 project の `.mise.toml` が **exact version** で pin し、global baseline を override する(例: `[tools]` に `python = "3.13.5"` のような exact pin)。再現性の責務は project 側にある。
 
 この分界は意図的な決定(2026-06-18、#54)。以前は「global に tool version を置かない」方針だったが、global CLI(npm global / go install 由来)が project 外でも runtime を要するため、global に最小 baseline を置く形へ改めた。global は「再現性 pin の置き場」ではなく「グローバルツールの稼働基盤」と位置づける。
@@ -16,6 +17,10 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 - `uv` は **Python の tool/package manager(tool)** であって、言語 runtime の管理ではない。グローバル CLI として使うため mise の tool として供給する。
 - **Python runtime の pin は別 scope**。global mise config に python を baseline 宣言しない(必要になったら別途方針を決める)。
+- global の uv は `uv = "latest"` で宣言する。baseline を `lts` / major 線で宣言する方針の例外で、版の線を持たない。
+  - machine に入る版は、明示の `mise install` か `mise upgrade` を走らせたときに決まる。repo は uv の版を記録しないので、machine ごとに違うことがある。
+  - 上げるときは、明示の `mise upgrade uv` で行う。`mise upgrade` は自動では走らせない(`docs/update-policy.md`)。
+  - 版の線で揃える必要が出たら、uv の線を宣言する変更として Issue と PR で扱う。
 
 ## 方針
 
@@ -38,7 +43,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 ## update policy との関係
 
-runtime の upgrade は project 側の pin 変更、または global baseline 線の明示的な変更として行う。global での自動 upgrade はしない(`docs/update-policy.md`)。
+runtime の upgrade は project 側の pin 変更、または global baseline 線の明示的な変更として行う。global での自動 upgrade はしない(`docs/update-policy.md`)。線を持たない uv は、明示の `mise upgrade uv` で上げる(上の「uv の扱い」)。
 
 ## 移行手順(brew → mise)
 
