@@ -452,7 +452,8 @@ Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。t
 
 - Loki は dashboard のほぼすべての panel が読む(下の「dashboard で 1 回に見られる期間」)。1 日に約 0.3MB で、1 年でも約
   0.1GB。
-- Prometheus は dashboard が読んでいない(数は log から数える。上の「dashboard」)。1 日に約 25MB 増え、1 年なら約 9GB に
+- Prometheus を dashboard が読むのは、「生産」の dashboard の 3 つの panel(Claude Code の `lines_of_code` と `code_edit_tool.decision` の
+  metric。30 日まで)だけ。ほかの数は log から数える(上の「dashboard」)。1 日に約 25MB 増え、1 年なら約 9GB に
   なる見込みだった。sample の数の約 7 割は、image の Collector が自分を 1 秒ごとに測った metric(`prometheus/collector` の
   scrape)。30 日なら
   約 0.75GB。所要時間の分布などは、直近の 30 日を Explore で見る。
@@ -491,13 +492,15 @@ Claude Code と Codex を同じ画面に並べ、日ごとの推移を見る。t
 
 ### dashboard で 1 回に見られる期間
 
-dashboard の panel は、trace の 1 つを除いて Loki を読む。表示期間を「Last 1 year」にしても見られるように、Loki の
-1 回の問い合わせの上限を 1 年に広げる(#532)。
+dashboard の panel は、ほとんどが Loki を読む。例外は、Codex の「trace (最近のもの)」(Tempo)と、「生産」の dashboard の
+3 つの panel(Prometheus)だけ。表示期間を「Last 1 year」にしても Loki の panel が見られるように、Loki の 1 回の問い合わせの
+上限を 1 年に広げる(#532)。保持と問い合わせの上限は別のもので、保持は上の「保存期間」。
 
 | 対象 | 上限 | 指定 |
 | --- | --- | --- |
-| Loki(trace 以外の panel) | 366 日と 1 時間 | `LOKI_EXTRA_ARGS` に `-store.max-query-length=366d1h` |
+| Loki(下の 2 つ以外の panel) | 366 日と 1 時間 | `LOKI_EXTRA_ARGS` に `-store.max-query-length=366d1h` |
 | Tempo(Codex の「trace (最近のもの)」) | 7 日 | image の既定(`query_frontend.search.max_duration: 168h`)のまま |
+| Prometheus(「生産」の 3 つの panel) | 上限は設けない。持つのが 30 日分なので、それより前は空 | image の既定のまま |
 
 - Loki の既定の上限は 30 日と 1 時間で、image の Loki の設定は `limits_config` を持たない。2026-11-14 に container の中から
   問い合わせると、29 日は通り、31 日と 365 日は `the query time range exceeds the limit` で拒まれた。366 日と 1 時間に
@@ -510,7 +513,8 @@ dashboard の panel は、trace の 1 つを除いて Loki を読む。表示期
 - Tempo の検索は、8 日以上を `range specified by start and end exceeds 168h0m0s` で拒む。trace の panel は直近の
   trace を見るためのもので、表示期間を 7 日より長くすると、この panel だけがエラーになる。古い trace は、Grafana の
   Explore で 7 日以内の期間を指定して探す。Tempo が持つのは 30 日分(上の表)で、それより前は保管の file から読み戻す。
-- dashboard の既定の表示期間は 24 時間のまま。
+- 既定の表示期間は dashboard ごとに違う。「AI agents (Codex)」と「AI agents (Claude Code)」は 24 時間、「session ごと」は
+  7 日、「token の消費」「生産」「消費と生産の比」「使い方の内訳」の 4 つは今日を含む 30 日(`now-29d/d` から)。
 - 実効の値の確かめ方(container の中から):
 
   ```sh
