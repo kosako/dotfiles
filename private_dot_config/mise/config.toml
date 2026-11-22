@@ -11,8 +11,19 @@
 # Python runtime pinning is a separate scope and is not declared here.
 
 [settings]
-# Do not auto-install missing runtimes when a shim is invoked.
-# Installs happen only via an explicit `mise install`.
+# No automatic installs at all (#626). Installs happen only via an
+# explicit `mise install`. mise has one switch per entry point and each
+# defaults to true, so all four are off:
+#   auto_install            any command that needs a missing tool
+#   exec_auto_install       `mise exec` / `mise x`
+#   task.run_auto_install   `mise run`, before a task runs
+#   not_found_auto_install  the shell's command-not-found handler
+# To use a version that is not installed, even once (e.g.
+# `mise exec node@20 -- node -v`), run `mise install node@20` first.
+# mise does not fetch it for you.
+auto_install = false
+exec_auto_install = false
+task.run_auto_install = false
 not_found_auto_install = false
 # Leave GOBIN unset so `go install` uses Go's own default,
 # ${GOPATH:-$HOME/go}/bin (= ~/go/bin), not the toolchain's install dir
