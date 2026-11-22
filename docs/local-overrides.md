@@ -18,6 +18,13 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
   - `~/.claude/settings.json` は、`enableClaudeTelemetry=false` のとき、telemetry の残置を調べる。
     profile が file を管理していなくても、`"CLAUDE_CODE_ENABLE_TELEMETRY"` を固定文字列で探す(#556)。
     JSON の解釈や値の判定はせず、値は表示しない。通常の file でない、読めない、存在を確かめられない場合は warn にする。
+  - `~/.claude/settings.json` は、Claude Code の起動の基準(`claudeLaunchBaseline`)の data を持つ profile のとき、live の
+    `model` と `effortLevel` の 2 つだけを選んで基準と比べる。ほかの key と値は表示しない(#539。[claude-settings](claude-settings.md))。
+  - 管理外の `~/.claude/settings.json`(work)は、`enableBridgeOneHook=true` で `claude-settings` module が非 active な work の
+    profile のとき、厳密な JSON の object として読み、PermissionRequest の command に Bridge One の起動用の script の path が
+    何回現れるかだけを数える。中身は表示しない(#512。[policy-model](policy-model.md) の Bridge One の節)。
+  - local の allow の file(`~/.config/dotfiles/claude-permissions-allow.local`)は、`claude-settings` module が active な
+    profile のとき、rule の行(空行と `#` の行を除く)の数だけを数える。rule は表示しない(#538。下の「Claude Code の local の allow」)。
   - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`。
     `opencode-settings` module が非 active な profile では managed でない `~/.config/opencode/opencode.json` も)は、
     agent-tools の plugin(`~/.config/opencode/plugins/personal-*.js`)が配置されているときだけ JSON として
