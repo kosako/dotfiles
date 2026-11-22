@@ -4,9 +4,10 @@ set -euo pipefail
 # Behavior tests for the gclone helper in dot_zshrc (#177). The function is
 # extracted by its begin/end markers and run under `zsh -f` in a fixture HOME,
 # always with -n (resolve-and-print, no clone), so no network or git is
-# touched. Contract under test: context resolution order (managed kosako rule
-# -> local mapping -> fail-closed abort), URL form parsing, and the
-# destination guards.
+# touched. Contract under test: context resolution order (a local repo line
+# "<owner>/<repo> <context>" -> the managed kosako rule -> a local owner
+# line -> the interactive prompt on a TTY, else the fail-closed abort; #260),
+# URL form parsing, and the destination guards.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
