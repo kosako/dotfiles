@@ -5,9 +5,11 @@
 # mise-selected version on PATH. Symbols use starship defaults. Two of them
 # are private-use glyphs that need a Powerline / Nerd Font: git_branch (U+E0A0)
 # and nodejs (U+E718); a terminal font without them shows boxes there (#620).
-# The other defaults used here are ASCII or emoji. The git-identity context
-# segment is added separately (#96 PR3) so its identity-value-free,
-# public-safe mapping gets isolated review.
+# The other defaults used here are outside the private-use area: ASCII,
+# standard symbols (git_status's ⇡ ⇣ ⇕ », the prompt's ❯, for example) or
+# emoji, which common fonts show.
+# The git-identity context segment is added separately (#96 PR3) so its
+# identity-value-free, public-safe mapping gets isolated review.
 
 add_newline = true
 
