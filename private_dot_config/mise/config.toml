@@ -11,8 +11,9 @@
 # Python runtime pinning is a separate scope and is not declared here.
 
 [settings]
-# No automatic installs at all (#626). Installs happen only via an
-# explicit `mise install`. mise has one switch per entry point and each
+# No automatic installs at all (#626). Installs happen only when someone
+# runs an explicit command (`mise install`, or `mise use`, which also
+# installs what it adds). mise has one switch per entry point and each
 # defaults to true, so all four are off:
 #   auto_install            any command that needs a missing tool
 #   exec_auto_install       `mise exec` / `mise x`

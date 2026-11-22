@@ -19,7 +19,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 ## 方針
 
-- runtime の自動 install はしない(#626)。install は明示的な `mise install` だけで行う。baseline を宣言しても、shim や `mise exec`、`mise run` で勝手に runtime を取りに行かない。
+- runtime の自動 install はしない(#626)。install は、人が明示の command (`mise install`、版を足す `mise use` など) を走らせたときだけ起きる。baseline を宣言しても、shim や `mise exec`、`mise run` で勝手に runtime を取りに行かない。
   - mise は自動 install の設定を入口ごとに持ち、どれも既定は true になっている。managed な mise config は次の 4 つをすべて false にする。
     - `auto_install`(tool を要する command 全般)
     - `exec_auto_install`(`mise exec` / `mise x`)
