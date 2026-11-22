@@ -128,7 +128,8 @@ while IFS= read -r profile; do
       fail "test failed: mise config does not set go.set_gobin = false for $profile"
       status=1
     fi
-    # #333 (F39), #626: runtime は明示の `mise install` でだけ入れる。mise は自動
+    # #333 (F39), #626: runtime は、人が明示の command (`mise install`、版を足す
+    # `mise use` など) を走らせたときだけ入れる。mise は自動
     # install の設定を入口ごとに持ち、既定はどれも true なので、4 つとも false で
     # あることを見る (docs/runtime.md)。
     for mise_key in auto_install exec_auto_install task.run_auto_install not_found_auto_install; do
