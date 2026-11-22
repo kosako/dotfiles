@@ -44,11 +44,21 @@
          to allow-all), and `gh api` stays ask whatever the method because
          short-flag forms (`-XPOST`, `-ftitle=x`) defeat flag matching and
          GraphQL reads POST anyway. `gh auth status` is allowed only in its
-         bare form: `--show-token` / `-t` print the token, and `gh auth
-         token` exists for that alone, so those are deny (Codex review, PR
-         #249). Rules are last-match-wins, so the deny rules (env dump, gh
-         secret / secrets API, token display, ssh keys) come LAST: an
-         earlier deny would be overridden by a later, broader ask. The ask
+         bare form: `--show-token` / `-t` (and the `-at` bundle) print the
+         token, and `gh auth token` exists for that alone, so those are deny
+         (Codex review, PR #249). So is `gh auth` with an option before or
+         right after `auth` (`gh -* auth *` / `gh auth -*`, #315): those
+         reach the same subcommand, and listing flag placements one by one
+         does not converge. The 1Password CLI is ask as a whole (`op *`,
+         #315): its reads (op read, op item get, op run, ...) take global
+         options in any position, so the rule is per program, and ask, not
+         deny, since a human does direct those reads at times.
+         Rules are last-match-wins, so the deny rules (env dump, gh secret /
+         secrets API, token display and the option-placed gh auth, ssh keys,
+         the keychain password reads / dump / export, i.e. security
+         find-generic-password / find-internet-password / dump-keychain /
+         export, also behind a leading option such as -q, #315) come LAST:
+         an earlier deny would be overridden by a later, broader ask. The ask
          patterns end in a bare `*` with no space before it on purpose: `*`
          matches zero or more characters, so `git push*` covers both the
          argument-less `git push` (upstream set) and `git push origin main`,
@@ -98,8 +108,16 @@
          edit rules is not stated in its docs and not verified against a
          running OpenCode; the two patterns cover both forms under the
          documented glob. Writes from bash are not covered.
+       - external_directory ask (#315), pinned rather than left to
+         OpenCode's default (also ask): the read deny binds the read tool
+         only (grep and glob have permissions of their own that ignore it),
+         so this is the guard for paths outside the project. Inside the
+         project grep still reads .env and the like, so do not start
+         OpenCode with home as the project root (docs/opencode-settings.md).
        - autoupdate off: update-policy (no self-updating tools; updates are
-         deliberate, via the catalog source).
+         deliberate, via the catalog source). It stops the self-update only:
+         OpenCode still npm-installs @opencode-ai/plugin into its config dir
+         at startup, plugins configured or not (docs/opencode-settings.md).
        - share disabled: no session upload surface (public safety).
        - instructions: agent-tools' operating rules. OpenCode reads
          ~/.claude/CLAUDE.md for Claude Code compatibility but does not follow
