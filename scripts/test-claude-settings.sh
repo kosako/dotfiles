@@ -1227,8 +1227,9 @@ fi
 
 # 8i) Byte-exact render (#508): the compares above normalize the JSON (key
 #     order, whitespace, line breaks), so a template change that only
-#     reformats the output would still pass them. For a fixed plain home (the
-#     one test-render.sh uses) the personal render with enableBridgeOneHook
+#     reformats the output would still pass them. For the fixed plain home
+#     RENDER_TEST_HOME (test-lib.sh, shared with test-render.sh and
+#     test-codex-settings.sh) the personal render with enableBridgeOneHook
 #     and enableInstructionUpdateNoticeHook OFF must equal
 #     scripts/testdata/claude-settings.personal.json BYTE for byte: the file
 #     is the render of the current template with Bridge One and the notice
@@ -1246,7 +1247,7 @@ fi
 #     equal the one of the four its profile selects (both on for personal
 #     since #510 / #547). To update the file after an INTENDED template
 #     change, render personal as this case does
-#     (HOME=/dotfiles-render-test-home, enableBridgeOneHook=false,
+#     (HOME set to RENDER_TEST_HOME, enableBridgeOneHook=false,
 #     enableInstructionUpdateNoticeHook=false, a throwaway destination) and
 #     copy its .claude/settings.json over the file. Set the two capabilities
 #     in a copy of the source (make_flipped_source and
@@ -1255,7 +1256,7 @@ fi
 #     below (the Bridge entry insert and golden_add_notice), so a template
 #     change to the shape of the Bridge One or notice entry must change that
 #     awk too.
-golden_home="/dotfiles-render-test-home"
+golden_home="$RENDER_TEST_HOME"
 golden_settings="$DOTFILES_ROOT/scripts/testdata/claude-settings.personal.json"
 golden_hint="if the template change is intended, render personal with HOME=$golden_home, enableBridgeOneHook=false and enableInstructionUpdateNoticeHook=false (set in a copy of the source) into a throwaway destination and copy its .claude/settings.json over scripts/testdata/claude-settings.personal.json; if the change alters the Bridge One or notice entry, also update the awk that builds the on files from that file (see 8i)"
 golden_bridge_expected_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-claude-settings.XXXXXX")"

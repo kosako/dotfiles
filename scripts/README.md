@@ -243,6 +243,9 @@ cleanup 登録する caller-creates-root 契約 — `$(...)` 内で mktemp す�
 repo copy)、`strict_json_object`(file がちょうど 1 つの JSON の object であることを jq で確かめる。yq の JSON の reader は
 object の先頭・末尾の comma、member の間の comma の抜け、複数の document、空の file を受け付けるので、JSON の妥当性の
 検査はこちらで行い、中身は yq で読む、#478)。
+`RENDER_TEST_HOME`(`/dotfiles-render-test-home`)は、home の path を期待値に含む render の固定の home。test-render.sh の
+通常の home の command の比較と、test-claude-settings.sh / test-codex-settings.sh の byte の比較(期待値の file はこの home で
+render したもの)が、この 1 つの変数を参照する(#616)。
 
 CI で飛ばしてはいけない case の gate(#484): `ci_gate PROBE...` は、PROBE(1 つの command と引数)が通れば `run`、
 通らなければ CI(`CI=true`)では `fail`、それ以外では `skip` を出す。CI での skip は case が走らなかったことなので、

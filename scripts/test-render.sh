@@ -670,10 +670,12 @@ check_home_render() {
   fi
 }
 
-# A normal home renders every command exactly as before the quoting: a fixed
-# plain home, so the expectation does not depend on the host's $HOME (chezmoi
+# A normal home renders every command exactly as before the quoting: the fixed
+# plain home RENDER_TEST_HOME (test-lib.sh; the expected files of
+# test-claude-settings.sh and test-codex-settings.sh are rendered for the same
+# one), so the expectation does not depend on the host's $HOME (chezmoi
 # renders for it without creating it; the destination is the fixture).
-plain_home="/dotfiles-render-test-home"
+plain_home="$RENDER_TEST_HOME"
 make_root
 write_config personal
 if HOME="$plain_home" throwaway_chezmoi apply >/dev/null 2>&1; then

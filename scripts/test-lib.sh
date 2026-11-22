@@ -84,6 +84,20 @@ render_profile_into() {
 }
 render_personal_into() { render_profile_into "$1" "$2" personal; }
 
+# RENDER_TEST_HOME — the fixed home of the renders whose expected strings
+# hold the home path: test-render.sh's plain-home command strings, and the
+# byte-exact renders of test-claude-settings.sh (8i) and
+# test-codex-settings.sh (2f), whose expected files
+# scripts/testdata/claude-settings.personal.json and
+# scripts/testdata/codex-hooks.personal.json were rendered for it. One value
+# for the three suites, so they cannot drift apart (#616). Fixed, so the
+# expectations do not depend on the host's $HOME, and plain characters only,
+# so the command strings hold it unquoted. chezmoi renders for it without
+# creating it (the destination is the fixture). Changing it means rendering
+# both expected files again.
+# shellcheck disable=SC2034 # read by the sourcing suites
+RENDER_TEST_HOME="/dotfiles-render-test-home"
+
 # make_flipped_source DEST_PARENT
 # Copy the source tree into DEST_PARENT/src (without .git) so a test
 # can flip capabilities without touching the real data files. DEST_PARENT

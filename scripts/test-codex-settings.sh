@@ -370,15 +370,16 @@ else
 fi
 
 # 2f) Byte-exact render (#508): 2e compares within this branch, so a template
-#     change that reformats hooks.json in every render would pass it. For a
-#     fixed plain home (the one test-render.sh uses) the committed personal
+#     change that reformats hooks.json in every render would pass it. For the
+#     fixed plain home RENDER_TEST_HOME (test-lib.sh, shared with
+#     test-render.sh and test-claude-settings.sh) the committed personal
 #     ~/.codex/hooks.json must equal scripts/testdata/codex-hooks.personal.json
 #     BYTE for byte, and so must the renders with enableBridgeOneHook on and
 #     off (Claude-only). The file was rendered from main's template before
 #     #508. To update it after an INTENDED template change, render personal as
-#     this case does (HOME=/dotfiles-render-test-home, a throwaway destination)
+#     this case does (HOME set to RENDER_TEST_HOME, a throwaway destination)
 #     and copy its .codex/hooks.json over the file.
-golden_home="/dotfiles-render-test-home"
+golden_home="$RENDER_TEST_HOME"
 golden_hooks="$DOTFILES_ROOT/scripts/testdata/codex-hooks.personal.json"
 golden_hint="if the template change is intended, render personal with HOME=$golden_home into a throwaway destination and copy its .codex/hooks.json over scripts/testdata/codex-hooks.personal.json (see 2f)"
 for golden_case in committed bridge-on bridge-off; do
