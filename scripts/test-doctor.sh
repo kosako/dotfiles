@@ -4809,13 +4809,27 @@ if [[ "$(id -u)" != "0" ]]; then
     ! "shims present, executable and managed" "shim overwritten" "shim missing"
   chmod 755 "$hg_shims/post-commit"
 fi
-# HG-1e) an overwritten shim leaves the wiring incomplete: with the deploy
-#        cut short too, doctor gives the both-incomplete line, not the
-#        commits-blocked one of a whole chain.
+# HG-1e) whether commits are blocked follows the commit stages only: with
+#        the deploy cut short, an overwritten pre-push and a missing
+#        post-merge leave pre-commit / prepare-commit-msg / commit-msg managed,
+#        so every commit still stops fail-closed and doctor keeps the
+#        commits-blocked line (#615 review), next to the named shims.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
 printf '#!/bin/sh\ngit lfs pre-push "$@"\n' > "$hg_shims/pre-push"
-hg_expect "wired with an overwritten shim + an incomplete deploy -> both incomplete" -- \
+rm -f "$hg_shims/post-merge"
+hg_expect "wired with a pass-through shim overwritten and one missing + an incomplete deploy -> commits blocked" -- \
   "~shim overwritten (no dispatcher exec line, body not shown): pre-push in $hg_shims — " \
+  "[warn] shim missing, not a regular file, or not executable: $hg_shims/post-merge (chezmoi apply arms it once the agent-tools deploy is complete)" \
+  "$hg_wired_incomplete" ! "$hg_both_incomplete" "$hg_complete"
+# HG-1f) with no commit stage left managed (two replaced, one missing) a
+#        commit no longer reaches the dispatcher, so the incomplete deploy
+#        gives the both-incomplete line, not the commits-blocked one.
+hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate
+printf '#!/bin/sh\nexit 0\n' > "$hg_shims/pre-commit"
+printf '#!/bin/sh\nexit 0\n' > "$hg_shims/prepare-commit-msg"
+rm -f "$hg_shims/commit-msg"
+hg_expect "wired with no commit stage managed + an incomplete deploy -> both incomplete" -- \
+  "~shim overwritten (no dispatcher exec line, body not shown): pre-commit prepare-commit-msg in $hg_shims — " \
   "$hg_both_incomplete" ! "$hg_wired_incomplete" "$hg_complete"
 # HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate

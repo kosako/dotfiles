@@ -347,7 +347,16 @@ while IFS= read -r hook_gates_decl; do
 done < <(module_paths git-hook-gates)
 if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
   if module_active_for_profile "$profile" git-hook-gates; then
+    # Two separate questions. hook_gates_wired: is the global core.hooksPath
+    # at the managed shim directory. hook_gates_commit_armed: does git commit
+    # still reach a managed shim, i.e. is one of the stages every commit runs
+    # (pre-commit, prepare-commit-msg, commit-msg) present, executable and
+    # managed. With the deploy incomplete, both together mean commits are
+    # blocked fail-closed, however many other shims are missing or replaced
+    # (#615 review: an overwritten pre-push must not soften that warning).
     hook_gates_wired=1
+    hook_gates_commit_armed=0
+    hook_gates_all_shims_ok=1
     hook_gates_present=0
     # A shim that is there can still have been replaced (#615): a hook
     # installer follows the global core.hooksPath into this shared directory
@@ -367,7 +376,11 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
         hook_gates_shim_state=0
         git_hook_shim_managed "$hook_gates_dir/hooks/$hook_stage" "$hook_stage" || hook_gates_shim_state=$?
         case "$hook_gates_shim_state" in
-          0) ;;
+          0)
+            case "$hook_stage" in
+              pre-commit | prepare-commit-msg | commit-msg) hook_gates_commit_armed=1 ;;
+            esac
+            ;;
           1)
             hook_gates_overwritten+=" $hook_stage"
             hook_gates_overwritten_steps+=" $(shell_quote_safe "$hook_gates_dir/hooks/$hook_stage")"
@@ -376,23 +389,22 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
         esac
       else
         warn "shim missing, not a regular file, or not executable: $hook_gates_dir/hooks/$hook_stage (chezmoi apply arms it once the agent-tools deploy is complete)"
-        hook_gates_wired=0
+        hook_gates_all_shims_ok=0
       fi
     done
     if [[ -n "$hook_gates_overwritten" ]]; then
       action "shim overwritten (no dispatcher exec line, body not shown):$hook_gates_overwritten in $hook_gates_dir/hooks — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one); every repo now runs the replacement for these stages instead of the gates and the chain to its own .git/hooks" \
         "\$ chezmoi apply$hook_gates_overwritten_steps   # restores the managed shims" \
         "then put that tool's hook in each repo's own .git/hooks/<stage>, which the shim chains to, and never --force it into the shared directory (docs/git-hook-gates.md; the per-tool steps there are unverified)"
-      hook_gates_wired=0
+      hook_gates_all_shims_ok=0
     fi
     if [[ -n "$hook_gates_unreadable" ]]; then
       warn "shim not readable, so whether it is still the managed one is unknown:$hook_gates_unreadable in $hook_gates_dir/hooks"
-      hook_gates_wired=0
+      hook_gates_all_shims_ok=0
     fi
     if [[ "${#hook_gates_stages[@]}" -eq 0 ]]; then
       warn "no shim declared for the git-hook-gates module in modules.yaml; the hooks are not wired"
-      hook_gates_wired=0
-    elif [[ "$hook_gates_present" -eq "${#hook_gates_stages[@]}" && -z "$hook_gates_overwritten$hook_gates_unreadable" ]]; then
+    elif [[ "$hook_gates_all_shims_ok" -eq 1 ]]; then
       ok "shims present, executable and managed (each execs the dispatcher): all $hook_gates_present declared stages in $hook_gates_dir/hooks"
     fi
     if command -v git >/dev/null 2>&1; then
@@ -422,7 +434,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     fi
     if [[ "$hook_gates_deploy_complete" -eq 1 ]]; then
       ok "agent-tools deploy complete: dispatcher + all three gates executable in $hook_gates_deploy_dir (bodies owned by agent-tools sync)"
-    elif [[ "$hook_gates_wired" -eq 1 ]]; then
+    elif [[ "$hook_gates_wired" -eq 1 && "$hook_gates_commit_armed" -eq 1 ]]; then
       warn "agent-tools deploy INCOMPLETE while the hooks are wired: git commit is BLOCKED fail-closed until agent-tools sync restores the dispatcher and all three gates in $hook_gates_deploy_dir — or set enableGitHookGates=false and apply"
     else
       warn "agent-tools deploy incomplete (dispatcher and/or a gate missing in $hook_gates_deploy_dir; agent-tools sync deploys them) and the wiring is also incomplete — commit behavior may be stage-dependent or blocked until sync and apply both complete"
