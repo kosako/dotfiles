@@ -106,10 +106,13 @@ file が無い、読めない、値が空、形式が違うときは flag を足
 advisor (#553): 基準を足す場面では `--advisor fable` も足す。値は関数に固定で、基準の file と同じ条件
 (file が正しいときだけ) で足す。`/advisor` で選んだ値は settings の `advisorModel` に残るが、起動の flag が強いので次の起動は fable に戻る。
 
-- `--advisor` / `--advisor=…` の明示は advisor の追加だけを止める (`--advisor off` も同じ)。
+- `--advisor` / `--advisor=…` の明示は advisor の追加だけを止める。ただし Claude Code は `off` を advisor の値として受け付けない
+  (2.1.330 で、`claude --advisor off` は `The model "off" cannot be used as an advisor` で終わる。#600)。advisor を外して起動するときは、
+  関数を通さない `command claude` を使う。session の中で外すなら `/advisor` の「No advisor」。どちらも、次に `claude` で起動すると fable に戻る。
 - `-p` / `--print` には足さない。agent が入れ子で起動する `claude -p` (probe や review) に、呼ぶたびに会話の全文を読む費用を乗せないため。
 - 再開と subcommand と `--version` / `--help` には、model や effort と同じく足さない。
 - 起動が error で終わる条件 (docs 参照): main の model が advisor に対応しない、Fable の usage credits の同意が未了、`availableModels` が除いている。
+  同意が未了で止まるときは、`command claude` で起動して `/model fable` で 1 回同意してから、`claude` で起動し直す。
   `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` や、flag の取得を止める `DISABLE_TELEMETRY` のような env があると advisor は効かない。
 
 一覧と版 (#566): subcommand の一覧と `value_options` は、`.chezmoidata/cli-checked-versions.yaml` の
