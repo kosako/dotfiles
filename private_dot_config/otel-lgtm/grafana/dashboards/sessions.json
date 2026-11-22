@@ -42,7 +42,7 @@
       "title": "",
       "options": {
         "mode": "markdown",
-        "content": "**見ること**: どの session が重かったか。token をたくさん使ったのに編集や commit が少ない session を見つける。\n\n- Claude Code は session_id、Codex は conversation_id ごとに集めています。表の列の名前を押すと並べ替えられます。\n- session の event は Explore で session_id を絞ると読めます。command と file の中身は残していません (#564)。"
+        "content": "**見ること**: どの session が重かったか。token をたくさん使ったのに編集や commit が少ない session を見つける。\n\n- Claude Code は session_id、Codex は conversation_id ごとに集めています。表の列の名前を押すと並べ替えられます。\n- session の event は Explore で session_id を絞ると読めます。command と file の中身は、2026-11-21 に #564 を配備した後の event には残っていません。それより前の event には残っていて、1 年かけて消えます (#569)。"
       },
       "transparent": true,
       "id": 1,
