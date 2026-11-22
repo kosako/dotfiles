@@ -33,6 +33,6 @@ go = "1.26"
 # Exception to the lts / major lines: uv has no declared line. The
 # version on a machine is set when someone runs an explicit `mise install`
 # or `mise upgrade`; this repo does not record it. Upgrade it explicitly
-# with `mise upgrade uv` (`mise upgrade` never runs automatically,
+# with `mise upgrade --global uv` (`mise upgrade` never runs automatically,
 # docs/update-policy.md).
 uv = "latest"

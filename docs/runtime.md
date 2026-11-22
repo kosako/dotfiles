@@ -19,7 +19,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 - **Python runtime の pin は別 scope**。global mise config に python を baseline 宣言しない(必要になったら別途方針を決める)。
 - global の uv は `uv = "latest"` で宣言する。baseline を `lts` / major 線で宣言する方針の例外で、版の線を持たない。
   - machine に入る版は、明示の `mise install` か `mise upgrade` を走らせたときに決まる。repo は uv の版を記録しないので、machine ごとに違うことがある。
-  - 上げるときは、明示の `mise upgrade uv` で行う。`mise upgrade` は自動では走らせない(`docs/update-policy.md`)。
+  - 上げるときは、明示の `mise upgrade --global uv` で行う。`mise upgrade` は自動では走らせない(`docs/update-policy.md`)。
   - 版の線で揃える必要が出たら、uv の線を宣言する変更として Issue と PR で扱う。
 
 ## 方針
@@ -43,7 +43,7 @@ global の mise config(`~/.config/mise/config.toml`)と project の `.mise.toml`
 
 ## update policy との関係
 
-runtime の upgrade は project 側の pin 変更、または global baseline 線の明示的な変更として行う。global での自動 upgrade はしない(`docs/update-policy.md`)。線を持たない uv は、明示の `mise upgrade uv` で上げる(上の「uv の扱い」)。
+runtime の upgrade は project 側の pin 変更、または global baseline 線の明示的な変更として行う。global での自動 upgrade はしない(`docs/update-policy.md`)。線を持たない uv は、明示の `mise upgrade --global uv` で上げる(上の「uv の扱い」)。
 
 ## 移行手順(brew → mise)
 
