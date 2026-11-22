@@ -121,6 +121,10 @@ section "ssh -G resolution (Include is global, managed-wins)"
 #    assert ssh resolves it (proves the Include is global) and that github.com
 #    still gets the managed agent (proves managed-wins). Relative Include paths
 #    resolve under ~/.ssh, so rewrite to an absolute path for an isolated test.
+#    The config.local host must also get config.local's own agent, not the
+#    1Password one: the agent is scoped to github.com (docs/ssh.md), and moving
+#    IdentityAgent out of that block (under Match all, say) passed every check
+#    above, because they only look at the text and at github.com (#578).
 if ! command -v ssh >/dev/null 2>&1; then
   item "ssh not found; skipping ssh -G resolution check"
 elif [[ -f "$on_cfg" ]]; then
@@ -138,6 +142,7 @@ EOF
   # IdentityAgent paths contain a space ("Group Containers"), so capture the
   # whole value after the keyword rather than a single field.
   probe_host="$(ssh -G -F "$probe_cfg" probe-vm 2>/dev/null | sed -n 's/^hostname //p')"
+  probe_agent="$(ssh -G -F "$probe_cfg" probe-vm 2>/dev/null | sed -n 's/^identityagent //p')"
   gh_agent="$(ssh -G -F "$probe_cfg" github.com 2>/dev/null | sed -n 's/^identityagent //p')"
 
   if [[ "$probe_host" != "10.9.8.7" ]]; then
@@ -146,8 +151,11 @@ EOF
   elif [[ "$gh_agent" != *"1password/t/agent.sock" ]]; then
     fail "test failed: github.com did not keep the managed agent (managed-wins broken): identityagent=$gh_agent"
     status=1
+  elif [[ "$probe_agent" != "/tmp/probe-local.sock" ]]; then
+    fail "test failed: a config.local host did not get config.local's agent (the 1Password agent is not scoped to github.com): identityagent=$probe_agent"
+    status=1
   else
-    ok "test passed: ssh resolves a config.local-only host (global Include) and github.com keeps the managed agent (managed-wins)"
+    ok "test passed: ssh resolves a config.local-only host (global Include) with its own agent, and github.com keeps the managed agent (managed-wins, agent scoped)"
   fi
 fi
 
