@@ -484,10 +484,23 @@ if ! bad_exporters="$(yq -r '.exporters | to_entries | .[]
   archive_ok=0
 fi
 [[ "$(yq -r '[.exporters[].path] | unique | length' "$archive_cfg" 2>/dev/null)" == "3" ]] || archive_ok=0
+# Each */archive pipeline writes its own signal's file. The checks above hold
+# for any wiring, so swapping the exporters of two pipelines, or the paths of
+# two exporters, still passed, while docs/otel-backend.md names the file of
+# each signal and reading the archive back picks a file by that name (#579).
+# So the pipeline, its exporter and that exporter's path are pinned as one
+# row each.
+archive_wiring="$(yq -r '. as $root | .service.pipelines | to_entries | .[] | select(.key | test("/archive$"))
+    | .key + "|" + (.value.exporters | join(",")) + "|" + ([.value.exporters[] as $e | $root.exporters[$e].path] | join(","))' \
+  "$archive_cfg" 2>/dev/null | LC_ALL=C sort || true)"
+[[ "$archive_wiring" == "$(printf '%s\n' \
+  'logs/archive|file/archive-logs|/archive/logs.jsonl.zst' \
+  'metrics/archive|file/archive-metrics|/archive/metrics.jsonl.zst' \
+  'traces/archive|file/archive-traces|/archive/traces.jsonl.zst')" ]] || archive_ok=0
 if [[ "$archive_ok" -eq 1 ]]; then
-  ok "test passed: the archive config adds one */archive pipeline per signal (logs through the tool-content transform, traces through the trace-paths one, metrics unprocessed), each to its own zstd JSON file under /archive kept for one year, and sets the image's logs and traces processors to their transform then batch"
+  ok "test passed: the archive config adds one */archive pipeline per signal (logs through the tool-content transform, traces through the trace-paths one, metrics unprocessed), each to its own zstd JSON file under /archive (<signal>.jsonl.zst through file/archive-<signal>) kept for one year, and sets the image's logs and traces processors to their transform then batch"
 else
-  fail "test failed: the archive config must hold only processors, exporters and the pipelines logs (processors [transform/agent-tool-content, batch] and no other key), traces (processors [transform/agent-trace-paths, batch] and no other key) and three */archive ones (otlp -> one file exporter each, as lists; logs/archive with processors [transform/agent-tool-content], traces/archive with processors [transform/agent-trace-paths], metrics/archive with none), with json files in zstd under /archive (*.jsonl.zst), rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
+  fail "test failed: the archive config must hold only processors, exporters and the pipelines logs (processors [transform/agent-tool-content, batch] and no other key), traces (processors [transform/agent-trace-paths, batch] and no other key) and three */archive ones (otlp -> one file exporter each, as lists; logs/archive with processors [transform/agent-tool-content], traces/archive with processors [transform/agent-trace-paths], metrics/archive with none), with json files in zstd under /archive (each */archive pipeline writing its own signal: <signal>/archive -> file/archive-<signal> -> /archive/<signal>.jsonl.zst), rotation by size (max_megabytes an integer in 1..1024), max_days 365 and max_backups 0"
   status=1
 fi
 
