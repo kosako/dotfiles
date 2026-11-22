@@ -672,7 +672,8 @@ fi
 #     into the fixture (git config --file writes it). Each case wants one
 #     signer line and none of the other kinds: an executable file -> ok, and
 #     the fake signer leaves no mark (doctor never runs it); a ~/ path ->
-#     expanded as git does; a file under an app directory that is not there
+#     not checked, even with an executable file there (git before 2.51
+#     runs the value as written); a file under an app directory that is not there
 #     (a machine without the 1Password app) -> not found; a file without the
 #     execute bit and a directory -> not an executable file; a file under a
 #     directory that cannot be entered -> not checked, never "not found"

@@ -575,7 +575,7 @@ bash32 job は、part ごとの group(doctor-1〜3)で並列に回す。`TEST_DO
   `env -i` で hermetic。
 - git signing / SSH(1Password): capability true + module active は managed、module 除去は dangling(signer の行は出さない)。
   signer(#621): 配備した `signing.gitconfig` の program を fixture に向け、実行できる file は ok(fake の signer が走らない
-  ことも確かめる)、`~/` の path は HOME の下に展開、app の dir が無い path は not found、実行の bit の無い file と dir は
+  ことも確かめる)、`~/` で始まる path は展開せずに未確認(先に実行できる file があっても ok にしない)、app の dir が無い path は not found、実行の bit の無い file と dir は
   実行できない file、入れない dir の下は未確認(root では skip)、key が無ければ未確認、file が無ければ `chezmoi apply` の
   action(next actions にも出る)。どの case も signer の行は 1 種類だけで、どの run も exit 0。
 - GitHub injection guard(#119 / #137): secret floor の常時 deny 宣言と managed drift への案内(旧 active 文言は出さない)、`gateGitHubMcp` / `enableGitHubIsolatedReader`
