@@ -1017,7 +1017,7 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   home に書いた entry がすべて managed target 一覧に含まれること(work では `~/.config/opencode` が作られない、など。
   空に render される managed target は書かれないので、一致ではなく包含を見る)。
 - render した mise config が `go.set_gobin = false`(GOBIN を設定させない)で、`.zshenv` が `~/go/bin` を PATH の末尾に足すこと(#305)。
-- render した mise config が `not_found_auto_install = false` で、shim が無い runtime を勝手に install しないこと(#333)。
+- render した mise config が `auto_install`・`exec_auto_install`・`task.run_auto_install`・`not_found_auto_install` をすべて false にし、入っていない runtime を勝手に install しないこと(#333、#626)。
 - allowlist 契約(#207): source の複製に未宣言の root file / subtree / 宣言済み directory 配下の
   sibling を置いても、全 profile で managed set が期待値のままで、apply がそれらを作らず、
   home に既にある未管理 file にも触れないこと。

@@ -128,14 +128,18 @@ while IFS= read -r profile; do
       fail "test failed: mise config does not set go.set_gobin = false for $profile"
       status=1
     fi
-    # #333 (F39): runtime は明示の `mise install` でだけ入れる。shim が無い runtime を
-    # 勝手に取りに行かない (docs/runtime.md)。
-    if [[ "$(yq -p toml -o json '.settings.not_found_auto_install' "$root/home/.config/mise/config.toml" 2>/dev/null)" == "false" ]]; then
-      ok "test passed: mise config does not auto-install a missing runtime (not_found_auto_install = false) for $profile"
-    else
-      fail "test failed: mise config does not set not_found_auto_install = false for $profile"
-      status=1
-    fi
+    # #333 (F39), #626: runtime は、人が明示の command (`mise install`、版を足す
+    # `mise use` など) を走らせたときだけ入れる。mise は自動
+    # install の設定を入口ごとに持ち、既定はどれも true なので、4 つとも false で
+    # あることを見る (docs/runtime.md)。
+    for mise_key in auto_install exec_auto_install task.run_auto_install not_found_auto_install; do
+      if [[ "$(yq -p toml -o json ".settings.$mise_key" "$root/home/.config/mise/config.toml" 2>/dev/null)" == "false" ]]; then
+        ok "test passed: mise config does not auto-install a missing runtime ($mise_key = false) for $profile"
+      else
+        fail "test failed: mise config does not set $mise_key = false for $profile"
+        status=1
+      fi
+    done
   fi
   if [[ -f "$root/home/.zshenv" ]]; then
     # shellcheck disable=SC2016 # the literal line, not an expansion
