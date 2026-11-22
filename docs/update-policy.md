@@ -59,7 +59,9 @@ install と update を分けても、install の時点で「どの版が入る�
 - PR は自動では merge しない。人が release notes と差分を確かめてから merge する(Dependabot の PR は AI の trailer を
   持たないので、AI 同士の相互 review には回らない)。
 - CI が版と sha256 を固定して取る binary(yq / age / chezmoi / codex。`validate.yml` の `env`)は Dependabot の対象外。
-  更新は版と sha256 を変える PR で行う。
+  更新は版と sha256 を変える PR で行う。codex の版を上げるときは、CI の execpolicy の検査をその版で確かめ、
+  `.chezmoidata/cli-checked-versions.yaml` の `cliCheckedVersions.codex` も同じ版にする(`test-cli-checked-versions.sh` が
+  `CODEX_VERSION` との一致を確かめる。#566、#584)。
 
 ## Rationale
 
