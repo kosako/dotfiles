@@ -46,13 +46,17 @@ op run --env-file=.env.tmpl -- <command>
 
 ## capability gate
 
-secret 供給が有効になるのは `allowSecretsAccess=true` の profile に限る。
+`allowSecretsAccess` は、その profile で secret を扱ってよいかの宣言。効き方は用途で 2 つに分かれる(#574)。
 
-- `allowSecretsAccess` は [policy-model](policy-model.md) の environmentKind 不変条件により、**work / client / sandbox / agent では `false` 必須**(`validate-policy.sh` が hard fail で強制)。供給規約が効くのは `personal` 等に限られる。
+- **実行時に拒む**: private-backup(`backup` / `verify` / `restore`)。実 profile を chezmoi config から fail-closed に解決し、`true` 以外では実行を拒否する([private-backup](private-backup.md))。
+- **運用の約束(実行時には止めない)**: op + direnv による供給。dotfiles は `.envrc` の評価にも `op` の呼び出しにも割り込まない。`false` の profile でも、allow 済みの `.envrc` と `op` の sign-in があれば、供給はそのまま動く。`false` の profile では本 doc の供給規約を使わない、という約束で、守るのは利用者。
+
+dotfiles がこの宣言について確かめるのは、次の 2 つだけ。
+
+- `allowSecretsAccess` は [policy-model](policy-model.md) の environmentKind 不変条件により、**work / client / sandbox / agent では `false` 必須**(`validate-policy.sh` が profile の宣言を hard fail で確かめる)。供給規約を使ってよいのは `personal` 等に限られる。
 - `doctor` の `1Password` section は `allowSecretsAccess=true` のときだけ `op` の存在と sign-in を report-only で確認する。secret 値そのものは読まない。`false` の profile では「secret access disabled」と報告して終わる。sign-in 確認の `op whoami` は 5 秒の期限付き・stdin `/dev/null` で回し(未ログインの `op` は対話 unlock を待って応答しないことがある、#231)、期限内に答えが無ければ「sign-in 未確認」と warn して次の section へ進む(「not signed in」とは断定しない)。
-- private-backup(`backup` / `verify` / `restore`)の runtime gate も `allowSecretsAccess` を使う。実 profile を chezmoi config から fail-closed に解決し、`true` 以外では実行を拒否する([private-backup](private-backup.md))。
 
-この gate は **secret を扱う用途**(op による供給と private-backup)だけを縛る。direnv 一般の利用(後述)はこの gate の外で、ここでは縛らない。
+この宣言が関わるのは **secret を扱う用途**(op による供給と private-backup)だけ。direnv 一般の利用(後述)はこの宣言の外にある。op の供給にも実行時の止めを足すなら、op を使わない `.envrc` まで止めない形を、別に設計する(#574 では足さないと決めた)。
 
 ## identity は別ルール(二層)
 
@@ -72,8 +76,8 @@ secret 全般は op + direnv で供給してよいが、**Git identity は対象
 
 direnv には 2 つの用途がある。本 doc が扱うのは後者(secret 供給)だけ。
 
-- **project env(PATH / runtime 切り替え等、secret 無関係)**: direnv が入っていれば `~/.zshrc` が hook を登録し、allow 済みの `.envrc` を読む。`enableDirenv` capability は doctor が direnv を検査するかだけを決め、hook の on / off は制御しない([runtime](runtime.md)、#401)。`work` のように `enableDirenv=true` かつ `allowSecretsAccess=false` の構成があり得る(direnv は使うが secret 注入はしない)。
-- **secret 供給**: 本 doc の規約。`allowSecretsAccess` で別途 gate する。
+- **project env(PATH / runtime 切り替え等、secret 無関係)**: direnv が入っていれば `~/.zshrc` が hook を登録し、allow 済みの `.envrc` を読む。`enableDirenv` capability は doctor が direnv を検査するかだけを決め、hook の on / off は制御しない([runtime](runtime.md)、#401)。`work` のように `enableDirenv=true` かつ `allowSecretsAccess=false` の構成があり得る(direnv は使うが、secret は注入しない約束)。
+- **secret 供給**: 本 doc の規約。使ってよいかは `allowSecretsAccess` で宣言する。宣言は運用の約束で、hook も `.envrc` の評価も止めない(上の「capability gate」)。
 
 `direnv allow` / `mise trust` は自動化しない([runtime](runtime.md))。direnv の有効化と secret 供給の許可は独立した判断とする。
 
