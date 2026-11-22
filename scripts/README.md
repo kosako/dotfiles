@@ -320,7 +320,8 @@ dump が 24h 以内の扱いになること(compinit は補完 file の数と zs
 `dot_zshenv` と `dot_zshrc` を丸ごと、fixture の HOME・fake の mise・fixture の HOMEBREW_PREFIX(stub の brew bin と
 plugin)を持つ隔離 zsh(`zsh -f`、`env -i`)で対話 login shell の起動順(`~/.zshenv` → `brew shellenv` → `~/.zshrc`)
 どおりに source し、PATH の順序と読込順を固定する(#333)。実 HOME・実 mise・実 brew・実 `~/.zshrc.local` には触れない。
-判定は最終 PATH の文字列ではなく「どの `claude` が勝つか」(`command -v claude` の解決先)と order log で行う。
+判定は最終 PATH の文字列ではなく「どの `claude` が勝つか」(`whence -p claude` の解決先)と order log で行う。`~/.zshrc` は
+`claude` を関数として定義するので、zsh の `command -v claude` は関数の名前を返す。PATH の上の実体を引くために `whence -p` を使う。
 
 - 非対話(`~/.zshenv` のみ): `~/.local/bin` が mise の shims より前(shims が PATH に届いていることを先に確かめ、
   shims 不在での空振りを防ぐ)。
