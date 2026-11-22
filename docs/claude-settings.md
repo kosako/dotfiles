@@ -48,6 +48,10 @@ herdr の直接起動や script など、zsh の関数を通さない起動に�
 doctor は profile の基準と配布 file の状態を表示する。
 live settings から選ぶ key は `model` と `effortLevel` だけで、値そのものや他の key は表示しない。
 基準との違いや読めない状態は情報表示だけに留め、fail にしない。
+基準を持たない profile では配布 file の有無だけを見て、残っていれば warn と消し方を出す (#625)。
+zsh の `claude` 関数は profile を見ずに file を読み、残った file から flag を足し続けるため。
+消し方は、この module が active なら `chezmoi apply`、active でない profile (work) なら手で消す。
+親の directory に入れず有無を確かめられないときは、不在と言わずに warn にする。
 
 ## public-safety
 

@@ -5564,7 +5564,7 @@ doctor_expect "Claude launch baseline matches profile and live settings" al_doct
   "~Claude launch baseline: model=opus[1m] effort=xhigh" \
   "~Claude launch baseline file: matches profile" \
   "~Claude live settings model: matches baseline" \
-  "~Claude live settings effortLevel: matches baseline" ! "DO_NOT_SHOW_BASELINE_CANARY"
+  "~Claude live settings effortLevel: matches baseline" ! "DO_NOT_SHOW_BASELINE_CANARY" ! "lingers at"
 printf 'sonnet\nlow\n' > "$cb_file"
 printf '{"model":"fable","effortLevel":"low"}\n' > "$al_home/.claude/settings.json"
 doctor_expect "Claude launch baseline drift is informational" al_doctor "$PATH" -- \
@@ -5581,6 +5581,70 @@ rm "$cb_file" "$al_home/.claude/settings.json"
 doctor_expect "Claude launch baseline missing files" al_doctor "$PATH" -- \
   "~Claude launch baseline file: absent" \
   "~Claude live settings model / effortLevel: not checked"
+# CB-L) #625: a profile without the baseline (work) in a HOME where another
+#       profile left the file. The zsh claude function reads it whatever the
+#       profile, so doctor names it as an action: by hand where claude-settings
+#       is inactive (work), chezmoi apply where it is active (CB-L5, after
+#       AL-10). Only presence counts; the values are not shown, the file is
+#       not touched, and no file (or a parent doctor can enter) says nothing.
+cb_reason="Claude launch baseline file lingers at $cb_file although this profile has no baseline: the zsh claude function reads it whatever the profile, and adds --model / --effort / --advisor while it holds a valid pair"
+cb_by_hand="$cb_reason (applied by another profile; this profile does not manage the file, so apply will not remove it); remove it by hand, and the shell adds no flags from the next launch"
+cb_rm_step="        \$ rm -i $(shell_quote_safe "$cb_file")"
+cb_unchecked="[warn] Claude launch baseline is not configured for this profile, but whether $cb_file exists cannot be told (a parent directory could not be entered), so a leftover file there is unchecked"
+cb_not_configured="[info] - Claude launch baseline: not configured for this profile"
+# cb_doctor ROOT PROFILE [ARG...] — one hermetic doctor run in the AL HOME.
+cb_doctor() {
+  local root="$1"
+  shift
+  env -i PATH="$PATH" HOME="$al_home" GIT_CONFIG_NOSYSTEM=1 "$root/scripts/doctor.sh" "$@"
+}
+# cb_action_step LABEL STEP ROOT PROFILE — under --actions-only, STEP is the
+# line right after the numbered lingering-baseline reason, and doctor exits 0.
+cb_action_step() {
+  local label="$1" step="$2" out rc=0
+  shift 2
+  out="$(cb_doctor "$@" --actions-only 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    doctor_exit_fail "$label" "$rc" "$out"
+  elif grep -E -A1 '^\[info\] [0-9]+\. Claude launch baseline file lingers at ' <<< "$out" | sed -n 2p | grep -Fxq -- "$step"; then
+    ok "test passed: $label"
+  else
+    printf '%s\n' "$out" >&2
+    fail "test failed: $label"
+    status=1
+  fi
+}
+#     CB-L1) work, a valid pair left -> the by-hand action, values not shown.
+printf 'CANARY_CB_MODEL\nCANARY_CB_EFFORT\n' > "$cb_file"
+cp "$cb_file" "$fixture_home/cb-before"
+doctor_expect "Claude launch baseline left on work -> action to remove it by hand" cb_doctor "$DOTFILES_ROOT" work -- \
+  "$cb_not_configured" "[warn] $cb_by_hand" "~. $cb_by_hand" "$cb_rm_step" ! "CANARY_CB_" ! "$cb_unchecked"
+cb_action_step "Claude launch baseline left on work -> the rm step under --actions-only" "$cb_rm_step" "$DOTFILES_ROOT" work
+if cmp -s "$cb_file" "$fixture_home/cb-before"; then
+  ok "test passed: doctor leaves a lingering Claude launch baseline file as it was"
+else
+  fail "test failed: doctor changed or removed a lingering Claude launch baseline file"
+  status=1
+fi
+rm -f "$cb_file" "$fixture_home/cb-before"
+#     CB-L2) work, a broken symlink in its place -> the same action.
+ln -s "$al_home/cb-missing-target" "$cb_file"
+doctor_expect "Claude launch baseline as a broken symlink on work -> the same action" cb_doctor "$DOTFILES_ROOT" work -- \
+  "[warn] $cb_by_hand" "$cb_rm_step"
+rm -f "$cb_file"
+#     CB-L3) work, no file -> nothing beyond the not-configured item.
+doctor_expect "Claude launch baseline absent on work -> no warn" cb_doctor "$DOTFILES_ROOT" work -- \
+  "$cb_not_configured" ! "lingers at" ! "[warn] Claude launch baseline"
+#     CB-L4) work, ~/.config/dotfiles cannot be entered -> not checked, never
+#            reported as absent.
+if [[ "$(id -u)" -ne 0 ]]; then
+  chmod 000 "${cb_file%/*}"
+  doctor_expect "Claude launch baseline under a parent that cannot be entered -> warn not checked" cb_doctor "$DOTFILES_ROOT" work -- \
+    "$cb_not_configured" "$cb_unchecked" ! "lingers at"
+  chmod 755 "${cb_file%/*}"
+else
+  item "skipped Claude launch baseline parent not enterable (root bypasses permissions)"
+fi
 
 # AL-2) a roots file with two roots (one a canary), Desktop present too ->
 #       ok with the count, the canary never shown.
@@ -5688,6 +5752,15 @@ yq -i 'del(.profiles.personal.claudeLaunchBaseline)' "$al_nomod/.chezmoidata/pro
 doctor_expect "agent launch guard on a profile without shell-extra -> item not managed" al_doctor "$PATH" "$al_nomod" -- \
   "[info] - agent launch guard not managed for this profile (shell-extra module inactive)" \
   "[info] - Claude launch baseline: not configured for this profile" ! "[ok] agent launch guard"
+#     CB-L5) the same profile (claude-settings active, the baseline removed)
+#            with the file left -> the action runs chezmoi apply, whose empty
+#            render removes it.
+printf 'CANARY_CB_MODEL\nCANARY_CB_EFFORT\n' > "$cb_file"
+doctor_expect "Claude launch baseline left where claude-settings is active -> action chezmoi apply" al_doctor "$PATH" "$al_nomod" -- \
+  "$cb_not_configured" "[warn] $cb_reason (this profile manages the file); run chezmoi apply to remove it" ! "CANARY_CB_" ! "$cb_by_hand"
+cb_action_step "Claude launch baseline left where claude-settings is active -> the apply step under --actions-only" \
+  "        \$ chezmoi apply" "$al_nomod" personal
+rm -f "$cb_file"
 
 # AIP) AI policy — Codex permission surface (#139). doctor watches the two
 #      accumulation channels report-only: (1) a fixed probe list of outward/
