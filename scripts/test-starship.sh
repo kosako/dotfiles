@@ -64,6 +64,47 @@ else
   warn "python3/tomllib not found; skipping TOML parse check (fixtures use awk)"
 fi
 
+# The classification below shows only if the prompt places it (#591): the
+# top-level format must name each of the three custom modules exactly once,
+# and each must keep its contract color (personal green, other yellow, none
+# red; docs/git-identity.md), print its output in that style, and not be
+# disabled. Needs tomllib, like the parse check (a skip locally, a failure
+# on CI through the gate above).
+if [[ "$has_tomllib" -eq 1 ]]; then
+  if python3 - "$STARSHIP_SRC" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as f:
+    config = tomllib.load(f)
+top = config.get("format")
+custom = config.get("custom", {})
+expected = {
+    "git_ctx_personal": "bold green",
+    "git_ctx_other": "bold yellow",
+    "git_ctx_none": "bold red",
+}
+good = isinstance(top, str) and isinstance(custom, dict)
+for name, style in expected.items():
+    module = custom.get(name) if good else None
+    good = (
+        good
+        and isinstance(module, dict)
+        and top.count("${custom.%s}" % name) == 1
+        and module.get("style") == style
+        and module.get("format") == "[$output]($style) "
+        and module.get("disabled", False) is False
+    )
+sys.exit(0 if good else 1)
+PY
+  then
+    ok "test passed: the prompt format places the three git identity modules once each, in their contract colors (green / yellow / red)"
+  else
+    fail "test failed: format must name \${custom.git_ctx_personal}, \${custom.git_ctx_other} and \${custom.git_ctx_none} once each, and each module must keep style bold green / bold yellow / bold red, format \"[\$output](\$style) \" and not be disabled"
+    status=1
+  fi
+fi
+
 section "fixture checks: git identity classification"
 
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-starship-test.XXXXXX")"
