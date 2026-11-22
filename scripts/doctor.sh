@@ -100,9 +100,45 @@ if command -v git >/dev/null 2>&1; then
   # AGENTS.md requires a capability to drive a doctor section. The signing KEY
   # (user.signingkey) and the per-context commit.gpgsign opt-in live in the
   # local identity files (docs/git-identity.md), never in the managed mechanism.
+  # The managed file fixes the signer (gpg.ssh.program) at the 1Password
+  # app's op-ssh-sign, and the software catalog does not install the app
+  # (#621): where it is missing or elsewhere, every commit or tag that asks
+  # for signing fails. So doctor reads the signer from the deployed file, the
+  # one the ~/.gitconfig include gives git (--type=path expands ~/ as git
+  # does), rather than keep a copy of the path here, and only tests it; the
+  # signer is never run. A managed change not yet applied shows in the
+  # managed drift section. A context's local file (includeIf gitdir) or a
+  # repository's config can set another gpg.ssh.program; doctor reads
+  # neither. A missing file is reported only when its absence is confirmed
+  # (absence_confirmed, #414).
+  git_sign_file="$HOME/.config/git/signing.gitconfig"
   if [[ "$(capability_value "$profile" enableGitSigning)" == "true" ]]; then
     if module_active_for_profile "$profile" git-signing; then
       ok "enableGitSigning=true; SSH signing mechanism managed (signing.gitconfig); commit.gpgsign defaults off (managed), opt in per repo/context (local key + commit.gpgsign=true)"
+      if [[ -f "$git_sign_file" && -r "$git_sign_file" ]]; then
+        git_sign_rc=0
+        git_sign_program="$(git config --file "$git_sign_file" --type=path --get gpg.ssh.program 2>/dev/null)" || git_sign_rc=$?
+        if [[ "$git_sign_rc" -gt 1 ]]; then
+          warn "SSH signer not checked: git cannot read gpg.ssh.program from $git_sign_file (value not shown)"
+        elif [[ "$git_sign_program" != /* ]]; then
+          warn "SSH signer not checked: $git_sign_file sets no gpg.ssh.program, or one that is not an absolute path (the managed file sets an absolute one; a change shows in the managed drift section)"
+        elif [[ -f "$git_sign_program" && -x "$git_sign_program" ]]; then
+          ok "SSH signer is an executable file: $(display_safe "$git_sign_program") (gpg.ssh.program in $git_sign_file)"
+        elif [[ -e "$git_sign_program" || -L "$git_sign_program" ]]; then
+          warn "SSH signer is not an executable file: $(display_safe "$git_sign_program") (gpg.ssh.program in $git_sign_file) — a commit or tag that asks for signing (commit.gpgsign=true, -S) fails"
+        elif absence_confirmed "$git_sign_program"; then
+          warn "SSH signer not found: $(display_safe "$git_sign_program") (gpg.ssh.program in $git_sign_file) — a commit or tag that asks for signing (commit.gpgsign=true, -S) fails until it is there; the managed file names the 1Password app's op-ssh-sign, which the software catalog does not install (docs/git-identity.md)"
+        else
+          warn "whether the SSH signer $(display_safe "$git_sign_program") exists is not checked (a directory on its path cannot be entered)"
+        fi
+      elif [[ -e "$git_sign_file" || -L "$git_sign_file" ]]; then
+        warn "SSH signer not checked: $git_sign_file is not a readable regular file"
+      elif absence_confirmed "$git_sign_file"; then
+        action "SSH signing mechanism not deployed yet: $git_sign_file missing (git-signing module), so a commit that asks for signing does not use the SSH signer" \
+          "\$ chezmoi apply"
+      else
+        warn "whether $git_sign_file exists is not checked (a directory on its path cannot be entered), so the SSH signer is not checked"
+      fi
     else
       warn "enableGitSigning=true but the git-signing module is inactive for this profile (signing mechanism not managed)"
     fi
