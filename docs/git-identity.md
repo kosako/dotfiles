@@ -208,6 +208,12 @@ commit / tag は 1Password の op-ssh-sign で **SSH 署名**できるが、**�
   プログラム `/Applications/1Password.app/Contents/MacOS/op-ssh-sign`)を、`git-signing` module かつ
   `enableGitSigning=true` のときだけ配備する。`dot_gitconfig` は常時 `[include]` し、ファイル不在時
   は git が無視(no-op)。signer パスは public-safe(`/Applications` 配下・ユーザー名なし)。
+- signer は 1Password の app の中にあり、app は software catalog に無い(catalog が入れるのは `op` CLI
+  だけ)。app が無い machine や別の場所に入れた machine では、署名を求める commit / tag が失敗する。
+  そこで doctor は、module が active のとき、配備した `signing.gitconfig` の `gpg.ssh.program` が実行
+  できる file かを見る(#621)。無い・実行できないなら warn、file が無ければ `chezmoi apply` の action に
+  する。signer は実行しない。context の local file や repo の設定が別の signer を指していても、doctor は
+  そこまで読まない。
 - **鍵は context 別 local、gpgsign の opt-in も local か per-repo**: `user.signingkey`(どの鍵)は
   `~/.config/git/<context>.gitconfig` に置く。**managed 側には鍵を置かず、gpgsign は false の既定
   だけ置く**(`true` の opt-in は repo-local の `git config commit.gpgsign true`、または常時署名したい

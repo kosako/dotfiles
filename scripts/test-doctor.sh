@@ -665,11 +665,112 @@ else
   status=1
 fi
 
+# SG) The signer (#621): with the module active, doctor reads gpg.ssh.program
+#     from the deployed ~/.config/git/signing.gitconfig and only tests it.
+#     A HOME of its own leaves the fixture HOME's ~/.config/git to the other
+#     cases. The deployed file is the managed one with its program pointed
+#     into the fixture (git config --file writes it). Each case wants one
+#     signer line and none of the other kinds: an executable file -> ok, and
+#     the fake signer leaves no mark (doctor never runs it); a ~/ path ->
+#     not checked, even with an executable file there (git before 2.51
+#     runs the value as written); a file under an app directory that is not there
+#     (a machine without the 1Password app) -> not found; a file without the
+#     execute bit and a directory -> not an executable file; a file under a
+#     directory that cannot be entered -> not checked, never "not found"
+#     (#414; skipped as root, which enters it); no program -> not checked;
+#     no deployed file -> the chezmoi apply action. Every run stays exit 0.
+sg_home="$fixture_home/sg"
+sg_file="$sg_home/.config/git/signing.gitconfig"
+sg_bin="$fixture_home/sg-signer"
+sg_mark="$fixture_home/sg-signer-ran"
+mkdir -p "${sg_file%/*}" "$sg_home/signer" "$sg_bin/locked" "$sg_bin/adir"
+printf '#!/bin/sh\n: > %s\n' "$(shell_single_quote "$sg_mark")" > "$sg_bin/op-ssh-sign"
+chmod 755 "$sg_bin/op-ssh-sign"
+cp "$sg_bin/op-ssh-sign" "$sg_home/signer/op-ssh-sign"
+cp "$sg_bin/op-ssh-sign" "$sg_bin/locked/op-ssh-sign"
+printf '#!/bin/sh\n' > "$sg_bin/plain"
+chmod 644 "$sg_bin/plain"
+# sg_point PROGRAM — deploy the managed signing.gitconfig with gpg.ssh.program
+# set to PROGRAM, or with the key removed when PROGRAM is empty.
+sg_point() {
+  cp "$DOTFILES_ROOT/private_dot_config/git/signing.gitconfig" "$sg_file"
+  if [[ -n "$1" ]]; then
+    HOME="$sg_home" git config --file "$sg_file" gpg.ssh.program "$1"
+  else
+    HOME="$sg_home" git config --file "$sg_file" --unset gpg.ssh.program
+  fi
+}
+sg_doctor() {
+  HOME="$sg_home" "$sign_root/scripts/doctor.sh" personal
+}
+sg_kinds=(
+  "[ok] SSH signer is an executable file: "
+  "[warn] SSH signer is not an executable file: "
+  "[warn] SSH signer not found: "
+  "[warn] whether the SSH signer "
+  "[warn] SSH signer not checked: "
+  "SSH signing mechanism not deployed yet"
+  "[warn] whether $sg_file exists"
+)
+# sg_expect LABEL WANT [EXPECT...] — doctor prints the line WANT (and every
+# EXPECT, in doctor_expect's form) and no signer line of another kind.
+sg_expect() {
+  local label="$1" want="$2" kind absent=()
+  shift 2
+  for kind in "${sg_kinds[@]}"; do
+    [[ "$want" == *"$kind"* ]] || absent+=("$kind")
+  done
+  doctor_expect "SSH signer ($label, #621)" sg_doctor -- "$want" "$@" ! "${absent[@]}"
+}
+sg_tail="(gpg.ssh.program in $sg_file)"
+sg_fails="a commit or tag that asks for signing (commit.gpgsign=true, -S) fails"
+#     SG-a) an executable file -> ok; doctor did not run it.
+sg_point "$sg_bin/op-ssh-sign"
+sg_expect "executable file" "[ok] SSH signer is an executable file: $sg_bin/op-ssh-sign $sg_tail"
+if [[ -e "$sg_mark" ]]; then
+  fail "test failed: doctor ran the SSH signer (#621)"
+  status=1
+fi
+#     SG-b) ~/ in the value -> not checked, even with an executable file
+#     there: git before 2.51 runs the value as written, so doctor does not
+#     expand it (no ok for a git that would fail).
+# shellcheck disable=SC2088 # the value keeps ~/ as written in the file
+sg_point "~/signer/op-ssh-sign"
+sg_expect "a path under ~/" "[warn] SSH signer not checked: gpg.ssh.program in $sg_file starts with ~, which git 2.51 and later expand but earlier git runs as written (value not shown; the managed file sets an absolute path, and a change shows in the managed drift section)"
+#     SG-c) the app is not there -> not found.
+sg_point "$sg_bin/1Password.app/Contents/MacOS/op-ssh-sign"
+sg_expect "app not there" "[warn] SSH signer not found: $sg_bin/1Password.app/Contents/MacOS/op-ssh-sign $sg_tail — $sg_fails until it is there; the managed file names the 1Password app's op-ssh-sign, which the software catalog does not install (docs/git-identity.md)"
+#     SG-d) no execute bit, and a directory -> not an executable file.
+sg_point "$sg_bin/plain"
+sg_expect "no execute bit" "[warn] SSH signer is not an executable file: $sg_bin/plain $sg_tail — $sg_fails"
+sg_point "$sg_bin/adir"
+sg_expect "directory" "[warn] SSH signer is not an executable file: $sg_bin/adir $sg_tail — $sg_fails"
+#     SG-e) a directory on the path that cannot be entered -> not checked.
+if [[ "$(id -u)" != "0" ]]; then
+  sg_point "$sg_bin/locked/op-ssh-sign"
+  chmod 000 "$sg_bin/locked"
+  sg_expect "directory not enterable" "[warn] whether the SSH signer $sg_bin/locked/op-ssh-sign exists is not checked (a directory on its path cannot be entered)"
+  chmod 755 "$sg_bin/locked"
+fi
+#     SG-f) no gpg.ssh.program -> not checked.
+sg_point ""
+sg_expect "no program" "[warn] SSH signer not checked: $sg_file sets no gpg.ssh.program, or one that is not an absolute path (the managed file sets an absolute one; a change shows in the managed drift section)"
+#     SG-g) no deployed file -> the chezmoi apply action (in next actions too).
+rm -f "$sg_file"
+sg_expect "no deployed file" "[warn] SSH signing mechanism not deployed yet: $sg_file missing (git-signing module), so a commit that asks for signing does not use the SSH signer" \
+  "~. SSH signing mechanism not deployed yet: $sg_file missing"
+if [[ -e "$sg_mark" ]]; then
+  fail "test failed: doctor ran the SSH signer (#621)"
+  status=1
+fi
+
 # M) enableGitSigning=true but the git-signing module removed -> dangling warning,
-#    still exit 0.
+#    still exit 0, and no signer line: an inactive module manages no signer.
 remove_module_all "$sign_root" git-signing
 if sg_out="$(HOME="$fixture_home" "$sign_root/scripts/doctor.sh" personal 2>&1)"; then
-  if grep -Fq "git-signing module is inactive" <<< "$sg_out"; then
+  if grep -Fq "git-signing module is inactive" <<< "$sg_out" \
+    && ! grep -Fq "SSH signer" <<< "$sg_out" \
+    && ! grep -Fq "SSH signing mechanism not deployed" <<< "$sg_out"; then
     ok "test passed: enableGitSigning=true with module inactive is reported as dangling"
   else
     printf '%s\n' "$sg_out" >&2
