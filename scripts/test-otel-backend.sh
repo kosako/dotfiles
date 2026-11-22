@@ -670,6 +670,43 @@ else
   status=1
 fi
 
+#    A stacked panel that shows both Codex's output and reasoning tokens
+#    must stack output minus reasoning: reasoning_token_count is part of
+#    output_token_count, so stacking both counted the reasoning twice
+#    (#588). Every target there that unwraps output_token_count subtracts
+#    a sum that unwraps reasoning_token_count ("- sum ... unwrap
+#    reasoning_token_count"). One grouped by a label ("sum by (...)") must
+#    also fall back to the output alone ("... or sum by (...) (... unwrap
+#    output_token_count"): a group whose interval has no reasoning value
+#    has no right-hand series, and the subtraction alone drops its point.
+#    There must be such a panel to check, so the rule cannot pass by losing
+#    them.
+stack_panels=0
+stack_bad=""
+for dash_case in "${dashboard_cases[@]}"; do
+  dash_file="$personal_root/home/$dashboards_rel/${dash_case%% *}"
+  counts="$(jq -r '[.panels[] | select(.targets != null)
+      | select((.fieldConfig.defaults.custom.stacking.mode // "none") != "none")
+      | [.targets[] | (.expr // "")] as $exprs
+      | select(($exprs | any(test("unwrap reasoning_token_count"))) and ($exprs | any(test("unwrap output_token_count"))))
+      | [$exprs[] | select(test("unwrap output_token_count"))
+        | select((test("- *sum( by \\([^)]*\\))? \\(sum_over_time\\([^\\[]*unwrap reasoning_token_count") | not)
+          or (test("sum by \\(") and (test("\\) or sum by \\([^)]*\\) \\(sum_over_time\\([^\\[]*unwrap output_token_count") | not)))]
+      | length]
+    | "\(length) \(map(select(. > 0)) | length)"' "$dash_file" 2>/dev/null || echo "x x")"
+  if [[ "${counts#* }" != 0 ]]; then
+    stack_bad+="${dash_case%% *} "
+  elif [[ "${counts%% *}" != x ]]; then
+    stack_panels=$((stack_panels + ${counts%% *}))
+  fi
+done
+if [[ -z "$stack_bad" && "$stack_panels" -gt 0 ]]; then
+  ok "test passed: the stacked panels with Codex's output and reasoning tokens ($stack_panels) stack output minus reasoning (with the output as the fallback where grouped), so reasoning is not counted twice"
+else
+  fail "test failed: a stacked panel with Codex's reasoning tokens must subtract them from output, and fall back to the output where grouped by a label (offending: ${stack_bad:-none}; such panels found: $stack_panels)"
+  status=1
+fi
+
 # 8) Modes under the stock umask pinned above: files 0644 in 0755 directories.
 modes_ok=1
 for rel in "$managed_rel" "$archive_rel" "$provider_rel" "${dashboard_rels[@]}"; do
