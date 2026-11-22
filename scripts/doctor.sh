@@ -1844,12 +1844,34 @@ else
 fi
 
 section "Claude launch baseline (report-only)"
+# A profile without the baseline does not place the file, but one applied by
+# another profile in the same HOME stays, and the zsh claude function reads
+# it whatever the profile (#625). Only presence is looked at here: the values
+# are not read. The same shape as report_lingering_telemetry (#556): apply
+# removes it where claude-settings is active (the template renders empty),
+# elsewhere it goes by hand. Nothing is removed here.
+report_lingering_launch_baseline() {
+  local file="$HOME/.config/dotfiles/claude-launch-baseline"
+  local reason="Claude launch baseline file lingers at $file although this profile has no baseline: the zsh claude function reads it whatever the profile, and adds --model / --effort / --advisor while it holds a valid pair"
+  if [[ -e "$file" || -L "$file" ]]; then
+    if module_active_for_profile "$profile" claude-settings; then
+      action "$reason (this profile manages the file); run chezmoi apply to remove it" \
+        "\$ chezmoi apply"
+    else
+      action "$reason (applied by another profile; this profile does not manage the file, so apply will not remove it); remove it by hand, and the shell adds no flags from the next launch" \
+        "\$ rm -i $(shell_quote_safe "$file")"
+    fi
+  elif ! absence_confirmed "$file"; then
+    warn "Claude launch baseline is not configured for this profile, but whether $file exists cannot be told (a parent directory could not be entered), so a leftover file there is unchecked"
+  fi
+}
 report_claude_launch_baseline() {
   local model effort file file_model file_effort extra live key expected comparison
   model="$(p="$profile" yq '.profiles[strenv(p)].claudeLaunchBaseline.model // ""' "$PROFILES_FILE")"
   effort="$(p="$profile" yq '.profiles[strenv(p)].claudeLaunchBaseline.effort // ""' "$PROFILES_FILE")"
   if [[ -z "$model" || -z "$effort" ]]; then
     item "Claude launch baseline: not configured for this profile"
+    report_lingering_launch_baseline
     return
   fi
   item "Claude launch baseline: model=$(display_safe "$model") effort=$(display_safe "$effort")"

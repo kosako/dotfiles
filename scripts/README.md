@@ -1285,8 +1285,12 @@ Claude の起動基準(#539)は stub が受け取った argv で検証する。
 `test-claude-settings.sh` は同じ profile data の変更が settings.json と配布 file の両方に届くことを確かめる。
 既存の personal golden は byte で維持する。`test-render.sh` は配布 file を含む managed 一覧を確かめる。
 `test-doctor.sh` の part 3 は基準との一致・差分・欠落・壊れた file を情報表示し、exit 0 を保つことを確かめる。
+基準の無い profile に残った file (#625) も確かめる。work では手で消す action (`rm -i`。壊れた symlink も同じ)、
+`claude-settings` が active で基準を消した profile では `chezmoi apply` の action になる。手順は `--actions-only` にも出る。
+値を出さず、file を変えないこと、file が無ければ warn を出さず、親に入れなければ未確認の warn になることも見る。
 doctor の「Claude launch baseline」は基準、`~/.config/dotfiles/claude-launch-baseline` の状態、
 live settings の `model` / `effortLevel` との違いだけを報告する。他の key や live の値は表示しない。
+基準の無い profile では file の有無だけを見て、残っていれば action にする (値は読まない)。
 起動 flag の追加は zsh の関数を通るときだけで、herdr の直接起動や script には効かない([shell](../docs/shell.md))。
 
 dot_zshrc の agent launch guard(#491)をマーカー抽出 + fixture HOME + `zsh -f` で検証する。`claude` / `codex` /

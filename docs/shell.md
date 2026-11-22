@@ -86,7 +86,10 @@
 基準の正本は `.chezmoidata/profiles.yaml` の `claudeLaunchBaseline`。personal は `opus[1m]` / `xhigh`。
 同じ data から settings.json の既定と `~/.config/dotfiles/claude-launch-baseline` を render する。
 後者は model、effort の順の 2 行で、各行の末尾に改行を持つ。関数は起動のたびに値だけを読み、shell code として実行しない。
-file が無い、読めない、値が空、形式が違うときは flag を足さない。data を持たない profile にも足さない。
+file が無い、読めない、値が空、形式が違うときは flag を足さない。
+file は data を持つ profile でだけ置かれるが、関数は profile を見ずに file を読む。
+同じ home で data を持たない profile (work など) に切り替えても、前の apply が置いた file は残る。
+関数は残った file から flag を足し続けるので、doctor がこの残りを知らせる (#625。下の doctor の説明)。
 
 - `--model` / `--model=…` の明示は model の追加だけを止める。`--effort` / `--effort=…` も独立に扱う。
 - `-r` / `--resume` / `--resume=…` / `-c` / `--continue` / `--from-pr` / `--from-pr=…` /
@@ -134,6 +137,10 @@ session 内の `/model` や `/effort` による変更を使えるままにする
 関数を通さない `command claude`、herdr が直接起動する形、script、desktop app、IDE からの起動には効かない。
 doctor の「Claude launch baseline」は基準、file の状態、live settings の 2 key との違いを情報として表示する。
 違いで fail にはしない。apply 後の実機確認は、session の値を変更して保存し、新しく起動した `/status` で基準に戻るかを見る。
+data を持たない profile では file の有無だけを見る (値は読まない)。
+残っていれば warn にし、消し方を next action に出す (#625)。
+`claude-settings` module が active な profile では `chezmoi apply` が消す。
+active でない profile (work) では apply が触れないので、`rm -i` で手で消す。消した後の起動から、関数は flag を足さない。
 
 ### 出力のコピー(AI 連携)
 
