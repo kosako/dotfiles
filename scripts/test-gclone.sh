@@ -7,8 +7,9 @@ set -euo pipefail
 # touched. Contract under test: context resolution order (a local repo line
 # "<owner>/<repo> <context>" -> the managed kosako rule -> a local owner
 # line -> the fail-closed abort; #260), URL form parsing, and the
-# destination guards. On a TTY the function asks for a context before it
-# aborts; every case here runs without one, so that prompt is not tested.
+# destination guards. On a TTY the function first asks for a context, goes
+# on with a valid answer and aborts on an empty one; every case here runs
+# without a TTY, so that prompt is not tested.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-policy.sh
