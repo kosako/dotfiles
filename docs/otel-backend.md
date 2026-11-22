@@ -821,7 +821,8 @@ compose file があるときは、実行時の状態と保管の directory を**
 
 ## 検証
 
-`scripts/test-otel-backend.sh`: personal で 4 つの file が apply され work ではされない(work が持つ自前の file は
+`scripts/test-otel-backend.sh`: personal で設定の 3 つの file(compose、保管の設定、dashboard の provider)と、一覧の dashboard の
+すべて(今は 7 つ)が apply され work ではされない(work が持つ自前の file は
 byte 単位で不変)、managed-by の見出し(dashboard は description)、compose file が YAML として parse でき定義が pin
 どおり。pin とは別に、定義が守る性質も確かめる: image が版と digest の両方で固定、すべての port が `127.0.0.1`
 だけ、host の path は許可した bind だけ(compose の directory の下を読み取りだけで、保管の directory を `/archive` に
