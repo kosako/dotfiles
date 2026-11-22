@@ -466,7 +466,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "token (model ごと)",
-      "description": "response.completed の token の数を、model と種類ごとに区間で足したもの",
+      "description": "response.completed の token の数を、model と種類ごとに区間で足したもの。reasoning は output の内数なので、output は reasoning を引いた分を積む (reasoning の値が無い区間は output のまま)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -490,8 +490,8 @@
         },
         {
           "refId": "B",
-          "expr": "sum by (model) (sum_over_time({service_name=~\"$service\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [$__interval]))",
-          "legendFormat": "{{model}} output",
+          "expr": "(sum by (model) (sum_over_time({service_name=~\"$service\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [$__interval])) - sum by (model) (sum_over_time({service_name=~\"$service\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap reasoning_token_count [$__interval]))) or sum by (model) (sum_over_time({service_name=~\"$service\"} | event_name=\"codex.sse_event\" | event_kind=\"response.completed\" | unwrap output_token_count [$__interval]))",
+          "legendFormat": "{{model}} output (reasoning 以外)",
           "queryType": "range",
           "datasource": {
             "type": "loki",
