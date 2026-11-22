@@ -12,12 +12,19 @@ VS Code は未使用のため管理しない(#16。将来採用する場合の�
 - doctor は local override file の存在を report-only で表示してよい。中身は読まないことを原則とし、
   例外は検査に要る次の項目だけにする(ほかの `~/.zprofile.local`・`~/.ssh/config.local`・
   `~/.config/dotfiles/*.local`・`~/.config/agent-tools/checks.local.json` などは存在だけを見る)。
-  例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)
-  だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
+  例外でも、出すのは判定と file の path、照合に使った名前(doctor が持つ key や probe、配置中の plugin)、数(rule の行や
+  登録の数、root の数)だけで、読んだ値は表示しない(唯一、下の Git identity の項にある `core.excludesFile` の path は表示する)。
   中身を読む検査を足すときは、この一覧も直す。
   - `~/.claude/settings.json` は、`enableClaudeTelemetry=false` のとき、telemetry の残置を調べる。
     profile が file を管理していなくても、`"CLAUDE_CODE_ENABLE_TELEMETRY"` を固定文字列で探す(#556)。
     JSON の解釈や値の判定はせず、値は表示しない。通常の file でない、読めない、存在を確かめられない場合は warn にする。
+  - `~/.claude/settings.json` は、Claude Code の起動の基準(`claudeLaunchBaseline`)の data を持つ profile のとき、live の
+    `model` と `effortLevel` の 2 つだけを選んで基準と比べる。ほかの key と値は表示しない(#539。[claude-settings](claude-settings.md))。
+  - 管理外の `~/.claude/settings.json`(work)は、`enableBridgeOneHook=true` で `claude-settings` module が非 active な work の
+    profile のとき、厳密な JSON の object として読み、PermissionRequest の command に Bridge One の起動用の script の path が
+    何回現れるかだけを数える。中身は表示しない(#512。[policy-model](policy-model.md) の Bridge One の節)。
+  - local の allow の file(`~/.config/dotfiles/claude-permissions-allow.local`)は、`claude-settings` module が active な
+    profile のとき、rule の行(空行と `#` の行を除く)の数だけを数える。rule は表示しない(#538。下の「Claude Code の local の allow」)。
   - OpenCode の local 設定(`OPENCODE_CONFIG` が指す file と `~/.config/opencode/opencode.local.json`。
     `opencode-settings` module が非 active な profile では managed でない `~/.config/opencode/opencode.json` も)は、
     agent-tools の plugin(`~/.config/opencode/plugins/personal-*.js`)が配置されているときだけ JSON として
