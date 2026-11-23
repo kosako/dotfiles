@@ -6196,13 +6196,13 @@ trust_level = "trusted"
 TOML
 aip_probe_log="$fixture_home/.codex-probe-log"
 : > "$aip_probe_log"
-expected_probes=$'curl https://example.invalid\nenv\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nop item get example\nop read op://example/item/field\nprintenv\nsecurity -q find-generic-password -s example.invalid -w\nsecurity dump-keychain\nsecurity export -k login.keychain\nsecurity find-generic-password -s example.invalid -w\nsecurity find-internet-password -s example.invalid -w\nsudo -v\nwget https://example.invalid'
+expected_probes=$'aws configure export-credentials\naws sso get-role-credentials --role-name example\ncurl https://example.invalid\nenv\ngh api --method POST repos/o/r/issues\ngh auth login\ngh auth status --show-token\ngh auth status -t\ngh auth token\ngh issue close\ngh issue comment\ngh issue create\ngh issue delete\ngh issue edit\ngh issue transfer\ngh pr close\ngh pr comment\ngh pr create\ngh pr edit\ngh pr merge\ngh release create\ngh release delete\ngh release edit\ngh release upload\ngh repo archive\ngh repo delete\ngh repo edit\ngh repo rename\ngh secret set\ngit clone https://example.invalid/repo\ngit push\nop item get example\nop read op://example/item/field\nprintenv\nsecurity -q find-generic-password -s example.invalid -w\nsecurity dump-keychain\nsecurity export -k login.keychain\nsecurity find-generic-password -s example.invalid -w\nsecurity find-internet-password -s example.invalid -w\nsudo -v\nwget https://example.invalid'
 aip_run CODEX_FAKE_ALLOWS="" CODEX_FAKE_LOG="$aip_probe_log"
 if [[ "$aip_rc" -ne 0 ]]; then
   doctor_exit_fail "Codex permission surface, clean" "$aip_rc" "$aip_out"
 else
   if grep -Fxq "[ok] Codex approval-rules baseline managed: ~/.codex/rules/default.rules (accumulated grants show as drift; apply resets to the vetted read-only baseline)" <<< "$aip_out" \
-    && grep -Fxq "[ok] no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (39 probes over 1 rules file(s) via codex execpolicy; read-only baseline holding)" <<< "$aip_out" \
+    && grep -Fxq "[ok] no outward/escalation/credential-display probe is auto-allowed by the live Codex rules (41 probes over 1 rules file(s) via codex execpolicy; read-only baseline holding)" <<< "$aip_out" \
     && grep -Fq "1 path(s) trusted" <<< "$aip_out" \
     && ! grep -Fq "outward/escalation/credential-display probe auto-allowed" <<< "$aip_out" \
     && ! grep -Fq "WHOLE home directory" <<< "$aip_out" \
@@ -6214,7 +6214,7 @@ else
     status=1
   fi
   if probe_diff="$(diff <(printf '%s\n' "$expected_probes") <(sort "$aip_probe_log"))"; then
-    ok "test passed: doctor evaluated exactly the pinned outward/escalation/credential-display/secret-read probe set (39 probes)"
+    ok "test passed: doctor evaluated exactly the pinned outward/escalation/credential-display/secret-read probe set (41 probes)"
   else
     printf '%s\n' "$probe_diff" >&2
     fail "test failed: outward/escalation/credential-display probe set drifted from the pinned contract (update both doctor.sh and this pin deliberately)"

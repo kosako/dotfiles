@@ -14,7 +14,7 @@ tool-specific config template(agent-tools 側の責務)とは別物
 | 対象 | 置き場所 | 管理 |
 | --- | --- | --- |
 | personal・public-safe な `settings.json`(model の既定 / effort / public plugin(第三者の marketplace は tag に固定・`autoUpdate: false`。[update-policy](update-policy.md))/ 通知 / statusLine / tui / workflow 警告抑止 / `switchModelsOnFlag` 等の global preference) | public repo(`dot_claude/modify_settings.json.tmpl`。chezmoi の modify script。下記「apply の仕組み」) | ✅ chezmoi(**personal profile のみ**) |
-| permission ブロック(#119): secret floor の無条件 deny 30 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315))、1Password の CLI 全体(`op *`)の無条件 ask(#315)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、MCP のログインの tool の無条件 deny 2 件(#530)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 22 件(#341・#530。どちらも personal 既定 true で deny は計 59 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505。local の file に書いた `WebFetch(domain:<host>)` を後ろに足す。#538、下記「local の allow」)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
+| permission ブロック(#119): secret floor の無条件 deny 33 件(`~/.ssh` 読取 / credential-store 読取(Codex・OpenCode の `auth.json` を含む・#234)/ env dump / gh secret 系 / gh token の表示と keychain の password の読み出し・dump・export(#315)/ AWS の認証情報の表示と `~/.aws` の下の file の表示(#639))、1Password の CLI 全体(`op *`)の無条件 ask(#315)と AWS CLI 全体(`aws *`)の無条件 ask(#639)、作業を捨てる git の無条件 ask と hook の skip・参照先 note への書き込みの無条件 deny(#304)、MCP のログインの tool の無条件 deny 2 件(#530)、`gateGitHubMcp` の `mcp__github` deny、`gateUnusedClaudeMcp` の日常で使わない MCP の deny 22 件(#341・#530。どちらも personal 既定 true で deny は計 62 件)、`allow`(`mcp__pencil` と、merge 済みの branch を片付ける script の 1 本。#505。local の file に書いた `WebFetch(domain:<host>)` を後ろに足す。#538、下記「local の allow」)、`enforceAiSandbox` 連動の human-legit gate | 同上(template が capability で gate して出力) | ✅ chezmoi(内容の回帰は `test-claude-settings.sh` が exact-set で固定) |
 | hooks **登録**(#137 / #199 / #225 / #353 / #497 / #505 / #508 / #547): `enableGitHubIsolatedReader` 連動で PreToolUse / matcher `Bash` に agent-tools 配布の `personal-safe-gh-hook` を絶対 path で 1 本登録(fail-open steering)。`enableQualityLoopHooks` 連動で PostToolUse / matcher `Edit\|Write` に `personal-fast-edit-check`、matcher なしの Stop に `personal-changed-scope-qa` を登録(品質ループ。repo 単位 opt-in の `~/.config/agent-tools/checks.local.json` が無ければ無言 no-op)。`enableHerdrIntegration` 連動で SessionStart / matcher `^(startup\|resume\|clear\|compact\|fork)$`(herdr 0.9.3 の integration v10 と同じ。#274)に herdr が配置する `~/.claude/hooks/herdr-agent-state.sh` を installer と同一形(`bash '<path>' session`、timeout 10)で 1 本登録(session id の報告。body は `herdr integration install claude` が配置・版管理、#225)。`enableToolCallRecordHook` 連動(#353、agent-tools#454)で SessionStart(matcher なし)と PreToolUse / PostToolUse / PostToolUseFailure / PermissionDenied / PermissionRequest(matcher `*`。PermissionRequest は確認の回数を実測するため。#505、agent-tools#639)に agent-tools 配布の `personal-tool-call-record-hook` を `async: true`・timeout 10 で登録(tool 呼び出しの記録。引数は key だけ・fail-open。既存の entry の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない)。`enableJaReplyGuardHook` 連動(#497、agent-tools#588)で matcher なしの Stop に agent-tools 配布の `personal-ja-reply-guard` を timeout 10 で登録(最後の答えが英語に逸れたら 1 回だけ止めて日本語で書き直させる。fail-open で、`stop_hook_active` のときは止めない。`personal-changed-scope-qa` の後ろに 2 つ目の entry として足す。Claude だけで Codex には出さない。英語で答えさせたい session は env の `AGENT_TOOLS_JA_GUARD_DISABLE` で止める)。`enableBridgeOneHook` 連動(#508。personal は #510 で on、work は off)で PermissionRequest / matcher `*` に Bridge One の起動用の script `~/.local/share/bridge-one/hook/current/bin/permission-request` を timeout 600 で登録(`async` と `onFailure` は付けない。command は path を single quote で囲み ` 2>/dev/null` を付けた、Bridge One の `tools/hook-deploy/deploy.mjs` が表示するものと同じ文字列。記録 hook の後ろに 2 つ目の entry として足す。ほかの hook と違い決定 (allow / deny) を返しうる: Bridge One の host が答えたときだけ返し、host が動いていない間・起動用の script が無いときは何も出力せず、承認は端末の dialog に戻る。dotfiles が出す PermissionRequest の hook で決定を返しうるのはこれだけで、決定を返す hook を手で足したものとの併存は dotfiles の範囲の外。Claude だけで Codex には出さない。配備は Bridge One の repo が行う)。`enableInstructionUpdateNoticeHook` 連動(#547、agent-tools#688)で、matcher なしの SessionStart の最後(herdr と記録 hook の後ろ)と UserPromptSubmit に、agent-tools 配布の `personal-instruction-update-notice` を timeout 10 で登録(配備した運用 instruction の更新を、配備の前から続いている session に 1 回だけ知らせて読み直しを促す。exit 0 固定で止めない。Claude だけで Codex には出さない。Codex は global の AGENTS.md を request ごとに読み直すため)。hooks object は `.chezmoitemplates/agent-hooks-json` で Codex と共有。スクリプト実体は agent-tools(herdr hook は herdr)の責務([config-ownership](config-ownership.md)、capability は [policy-model](policy-model.md)) | 同上(template が capability で gate して出力) | ✅ chezmoi(登録の構造は `test-claude-settings.sh` が exact に固定) |
 | telemetry の `env`(#523): `enableClaudeTelemetry` 連動で、Claude Code の OpenTelemetry(metric と event を OTLP/HTTP で送る)の変数を出す。送り先は管理外の local file から apply のときに読む(下記「telemetry」) | 方式は public repo(`dot_claude/modify_settings.json.tmpl`)、送り先は `~/.config/dotfiles/claude-telemetry.local`(非コミット) | ✅ chezmoi(**personal profile のみ**。file が無ければ出さない) |
 | 手元だけの key: `/model` で選んだ `model`(template の値は file に無いときの既定だけ)、`modelSettings`(model ごとの effort)、`autoMode`(auto mode の environment。repository 名などを含み public に出さない)、Claude Code が後から足す key | live の `~/.claude/settings.json` | ⚪ 管理外だが apply で消さない(modify script がそのまま残す。#360) |
@@ -151,22 +151,29 @@ managed set でこの gate を回帰固定している。
 ## permissions(#119: secret floor / GitHub guard)
 
 `permissions.deny` には capability 非依存の **secret floor**(never-legit な secret 読取
-30 件: `Read(~/.ssh/**)` と credential-store 読取 `Read(~/.aws/**)` / `Read(~/.config/gh/**)`
+33 件: `Read(~/.ssh/**)` と credential-store 読取 `Read(~/.aws/**)` / `Read(~/.config/gh/**)`
 (gh の OAuth token)/ `Read(~/.netrc)` / `Read(~/.codex/auth.json)` /
-`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat ~/.ssh/*)` /
+`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat ~/.ssh/*)` / `Bash(cat ~/.aws/*)`(#639)/
 `gh secret` / `gh api *secrets*` / `env` / `printenv` 系、gh の token の表示 `gh auth token` /
 `gh auth status --show-token|-t|-at`、`auth` の前か直後に option を置いた `gh auth`(`gh -* auth *` /
 `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)と、keychain の password の読み出し・dump・export(`security
 find-generic-password` / `find-internet-password` / `dump-keychain` / `export`。`-q` などの前置 option を
-挟む形も)— 後の 2 群は #315 で OpenCode の床に揃え、#334 で Codex の rules の床と doctor の Codex rules の probe にも同じ種類を足した)を常時出力する。**Read 側 deny を
+挟む形も)— 後の 2 群は #315 で OpenCode の床に揃え、#334 で Codex の rules の床と doctor の Codex rules の probe にも同じ種類を足した)、
+AWS の認証情報の表示(`aws configure export-credentials` / `aws sso get-role-credentials`。#639)を常時出力する。
+AWS CLI は global option(`--profile` など)を subcommand の前にも間にも置ける。そこで git の ask と同じ形の
+`Bash(aws *configure* export-credentials*)` / `Bash(aws *sso* get-role-credentials*)` にし、
+`aws --profile x configure export-credentials` のような置き方も拾う。**Read 側 deny を
 主軸**とする(Read tool はコマンド経由でない読取にも効く。Bash matcher は `head` / `xxd` /
 `python open()` 等の等価経路で迂回できる leaky steering なので、path ごとの Bash 列挙は
 意図的にしない。#136)。`gateGitHubMcp=true`(personal 既定)で
-`mcp__github`(server 全体)の deny を足して計 37 件(下の #304 の 4 件と #530 の 2 件を含む)、`gateUnusedClaudeMcp=true`(personal 既定。#341)で claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs / Notion(#530)の connector(server 全体)と Notion の書込 tool 17 個の deny を足して計 59 件、`enforceAiSandbox=true` で human-legit gate
+`mcp__github`(server 全体)の deny を足して計 40 件(下の #304 の 4 件と #530 の 2 件を含む)、`gateUnusedClaudeMcp=true`(personal 既定。#341)で claude.ai の Gmail / Google Calendar / Google Drive / Claude Docs / Notion(#530)の connector(server 全体)と Notion の書込 tool 17 個の deny を足して計 62 件、`enforceAiSandbox=true` で human-legit gate
 (`.env` 読取 / main・master への push の deny、release / branch-protection の ask)を
 追加する。`permissions.ask` には、1Password の CLI 全体(`Bash(op *)`)を常時出力する(`op read` / `op item get` /
 `op run` などの読み出し系は global option をどこにでも置けるので、subcommand の列挙ではなく program 単位にする。人が private-backup の `--identity-command` などで指示する
-場面があるので deny ではなく承認、#315)。`permissions.allow` は `mcp__pencil` と、下の片付けの script の 1 本だけ。
+場面があるので deny ではなく承認、#315)。AWS CLI 全体(`Bash(aws *)`)も常時 ask にする(#639)。SSO の session
+(`aws sso login`)がある間は、どの `aws` の command も本人として account に効く。global option はどこにでも置けるので、
+これも program 単位にし、profile は問わない。`aws sts assume-role` などはこの ask に入り、個別には止めない。
+認証情報の表示は上の deny が先に当たる(deny は ask より先に見る)。`permissions.allow` は `mcp__pencil` と、下の片付けの script の 1 本だけ。
 
 **merge 済みの branch の片付け(#505)**: squash merge の branch は `git branch -d` では消せず、`git branch -D` と
 `git push --delete` は下の ask に当たる。直近 30 日で ask に当たった Git の呼び出し 226 回のうち 56% がこの片付けだった。
