@@ -71,6 +71,11 @@ packages:
   # The otel archive is written as standard zstd (#527): reading it back
   # (`zstd -d`, and collectors that recount from the archive) needs the CLI.
   - { name: zstd, source: brew_formula }
+  # AWS CLI v2 (#637): homebrew-core formula (bottled); the command is aws.
+  # Credentials (~/.aws) are not managed here. The managed Claude / OpenCode
+  # settings deny only their Read tools under ~/.aws (docs/claude-settings.md);
+  # that deny does not cover a shell command (cat, aws configure ...).
+  - { name: awscli, source: brew_formula, bin: aws }
   - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: iterm2, source: brew_cask }
   - { name: swiftbar, source: brew_cask }
