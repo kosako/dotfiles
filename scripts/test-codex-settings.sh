@@ -451,7 +451,9 @@ section "codex approval-rules baseline (#139)"
 #    / am / pull, then #334's secret floor (forbidden for env dumps, gh
 #    token display and keychain password read / dump / export, also behind
 #    `security -q` / `-v`; prompt for the whole security program, the whole
-#    `gh auth` and the 1Password CLI). They only tighten:
+#    `gh auth` and the 1Password CLI), then #639's AWS rules (forbidden for
+#    the credential display right after `aws`, prompt for the whole AWS
+#    CLI). They only tighten:
 #    no new allow. #502 adds read-only allows after the gh reads: the
 #    deployed personal-safe-gh (absolute path) and herdr status / agent
 #    list / pane current / list / process-info / read. Pinned as the EXACT ordered file
@@ -461,7 +463,7 @@ section "codex approval-rules baseline (#139)"
 #    just "some rules exist".
 rules_file="${home:-}/.codex/rules/default.rules"
 expected_rules_head=$'prefix_rule(pattern=["git", "commit"], decision="allow")\nprefix_rule(pattern=["git", "add"], decision="allow")\nprefix_rule(pattern=["git", "checkout"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "view"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "list"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "diff"], decision="allow")\nprefix_rule(pattern=["gh", "pr", "checks"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "view"], decision="allow")\nprefix_rule(pattern=["gh", "issue", "list"], decision="allow")'
-expected_rules_tail=$'prefix_rule(pattern=["herdr", "status"], decision="allow")\nprefix_rule(pattern=["herdr", "agent", "list"], decision="allow")\nprefix_rule(pattern=["herdr", "pane", ["current", "list", "process-info", "read"]], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu", "--mirror", "--delete", "-d"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd", "-M"]], decision="prompt")\nprefix_rule(pattern=["git", "stash", ["drop", "clear"]], decision="prompt")\nprefix_rule(pattern=["git", "worktree", "remove", ["--force", "-f"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")\nprefix_rule(pattern=["env"], decision="forbidden")\nprefix_rule(pattern=["printenv"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")\nprefix_rule(pattern=["gh", "auth"], decision="prompt")\nprefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security"], decision="prompt")\nprefix_rule(pattern=["op"], decision="prompt")'
+expected_rules_tail=$'prefix_rule(pattern=["herdr", "status"], decision="allow")\nprefix_rule(pattern=["herdr", "agent", "list"], decision="allow")\nprefix_rule(pattern=["herdr", "pane", ["current", "list", "process-info", "read"]], decision="allow")\nprefix_rule(pattern=["git", "reset", "--hard"], decision="prompt")\nprefix_rule(pattern=["git", "clean"], decision="prompt")\nprefix_rule(pattern=["git", "checkout", ["--", ".", "-f", "--force", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "switch", ["-f", "--force", "--discard-changes", "-qf", "-fq"]], decision="prompt")\nprefix_rule(pattern=["git", "restore"], decision="prompt")\nprefix_rule(pattern=["git", "push", ["--force", "-f", "-uf", "-fu", "--mirror", "--delete", "-d"]], decision="prompt")\nprefix_rule(pattern=["git", "branch", ["-D", "--force", "-f", "-df", "-fd", "-M"]], decision="prompt")\nprefix_rule(pattern=["git", "stash", ["drop", "clear"]], decision="prompt")\nprefix_rule(pattern=["git", "worktree", "remove", ["--force", "-f"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["-nm", "-an", "-anm"]], decision="prompt")\nprefix_rule(pattern=["git", "commit", ["--no-verify", "-n"]], decision="forbidden")\nprefix_rule(pattern=["git", "push", "--no-verify"], decision="forbidden")\nprefix_rule(pattern=["git", ["merge", "rebase", "am", "pull"], "--no-verify"], decision="prompt")\nprefix_rule(pattern=["env"], decision="forbidden")\nprefix_rule(pattern=["printenv"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "token"], decision="forbidden")\nprefix_rule(pattern=["gh", "auth", "status", ["--show-token", "-t", "-at"]], decision="forbidden")\nprefix_rule(pattern=["gh", "auth"], decision="prompt")\nprefix_rule(pattern=["security", ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")\nprefix_rule(pattern=["security"], decision="prompt")\nprefix_rule(pattern=["op"], decision="prompt")\nprefix_rule(pattern=["aws", "configure", "export-credentials"], decision="forbidden")\nprefix_rule(pattern=["aws", "sso", "get-role-credentials"], decision="forbidden")\nprefix_rule(pattern=["aws"], decision="prompt")'
 # The safe-gh allow names the deployed wrapper by its absolute path, built
 # from the home the template renders with (#502), as a rules string literal
 # (the template's printf "%q": a backslash or a double quote in the home is
@@ -474,7 +476,7 @@ if [[ ! -f "$rules_file" ]]; then
   fail "test failed: committed personal did not render ~/.codex/rules/default.rules (enableAiPolicy is ON)"
   status=1
 elif [[ "$(cat "$rules_file")" == "$expected_rules" ]]; then
-  ok "test passed: committed personal renders exactly the rules baseline (13 read-only / local allow rules, then #304 / #334's 10 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, ordered; no outward/escalation/credential-display allow, no git clone)"
+  ok "test passed: committed personal renders exactly the rules baseline (13 read-only / local allow rules, then #304 / #334's 10 prompt, 2 forbidden and 1 more prompt git rules, then #334's secret floor of 6 forbidden and 3 prompt rules, then #639's 2 forbidden and 1 prompt AWS rules, ordered; no outward/escalation/credential-display allow, no git clone)"
 else
   fail "test failed: rules baseline content mismatch; rendered was:"
   cat "$rules_file" >&2
@@ -490,7 +492,9 @@ fi
 #     prefix gaps (an option after other arguments, global options) -> not
 #     caught. The gh read allows' gap is pinned the same way: a later
 #     `--jq env` stays allow by the user's decision (#504), so a change
-#     to that is a deliberate one. The render job and the bash32 job's render group (macOS, #382)
+#     to that is a deliberate one. The AWS credential display behind a
+#     global option (#639) is not forbidden but still prompts: the whole
+#     AWS CLI is prompt and has no allow to override it. The render job and the bash32 job's render group (macOS, #382)
 #     install a pinned codex for this (#332 F36);
 #     where codex is not installed this is reported and skipped locally (the
 #     exact pin above still holds the content) and fails on CI (ci_gate).
@@ -627,6 +631,20 @@ prompt|gh auth status
 prompt|gh auth login
 prompt|op read op://example/item/field
 prompt|op item get example
+forbidden|aws configure export-credentials
+forbidden|aws configure export-credentials --profile example --format env
+forbidden|aws sso get-role-credentials --role-name example
+prompt|aws --profile example configure export-credentials
+prompt|aws --profile=example configure export-credentials
+prompt|aws configure --profile example export-credentials
+prompt|aws --profile example sso get-role-credentials --role-name example
+prompt|aws sts assume-role --role-arn example --role-session-name example
+prompt|aws sts get-caller-identity
+prompt|aws sso login --profile example
+prompt|aws configure list
+prompt|aws s3 ls
+prompt|aws
+none|awsx s3 ls
 allow|git commit -m x
 allow|git commit --amend --no-edit
 allow|git checkout main

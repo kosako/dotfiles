@@ -206,10 +206,19 @@ fi
 #    after `git commit` / `git push` deny, last. OpenCode has no rule that
 #    makes a trailing " *" match the bare command, so those denies list the
 #    bare form too.
-expected_bash=$'*=ask\nls=allow\nls *=allow\npwd=allow\npwd *=allow\ncat=allow\ncat *=allow\nhead=allow\nhead *=allow\ntail=allow\ntail *=allow\nwc=allow\nwc *=allow\nfile=allow\nfile *=allow\nstat=allow\nstat *=allow\ndu=allow\ndu *=allow\ntree=allow\ntree *=allow\nwhich=allow\nwhich *=allow\ndiff=allow\ndiff *=allow\ncmp=allow\ncmp *=allow\ncut=allow\ncut *=allow\nuniq=allow\nuniq *=allow\ngrep=allow\ngrep *=allow\nrg=allow\nrg *=allow\necho=allow\necho *=allow\nbasename=allow\nbasename *=allow\ndirname=allow\ndirname *=allow\nrealpath=allow\nrealpath *=allow\ngit status=allow\ngit status *=allow\ngit diff=allow\ngit diff *=allow\ngit log=allow\ngit log *=allow\ngit show=allow\ngit show *=allow\ngit rev-parse=allow\ngit rev-parse *=allow\ngit ls-files=allow\ngit ls-files *=allow\ngit blame=allow\ngit blame *=allow\ngit describe=allow\ngit describe *=allow\ngit branch=allow\ngit branch *=allow\ngit tag=allow\ngit tag *=allow\ngit add=allow\ngit add *=allow\ngit commit=allow\ngit commit *=allow\ngit checkout=allow\ngit checkout *=allow\ngit switch=allow\ngit switch *=allow\ngit reset=allow\ngit reset *=allow\ngit stash=allow\ngit stash *=allow\ngit worktree=allow\ngit worktree *=allow\ngit remote=allow\ngit remote -v=allow\nrg *--pre*=ask\nrg *--hostname-bin*=ask\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *push* :*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *push* --mirror=ask\ngit *push* --mirror *=ask\ngit *push* --delete=ask\ngit *push* --delete *=ask\ngit *push* -d=ask\ngit *push* -d *=ask\ngit *branch* -M=ask\ngit *branch* -M *=ask\ngit *stash* drop=ask\ngit *stash* drop *=ask\ngit *stash* clear=ask\ngit *stash* clear *=ask\ngit *worktree remove* --force=ask\ngit *worktree remove* --force *=ask\ngit *worktree remove* -f=ask\ngit *worktree remove* -f *=ask\ngit *--no-verify*=ask\ngh *env*=ask\ngh *ENV*=ask\ncat ~/.ssh/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
+#    #639 adds the whole AWS CLI as ask (`aws *`, next to `op *`) and, among
+#    the denies, `cat *~/.aws/*` (options such as -n / -- or other files
+#    before the path too; it must come after the `cat *` allow, Codex
+#    review, PR #640) and the AWS credential display with global options
+#    before or between the words (`aws *configure* export-credentials*`,
+#    `aws *sso* get-role-credentials*`). Their `*` spans spaces, so a
+#    command that only names one of the two words as a value (`aws
+#    configure list --profile export-credentials`) is denied too: an
+#    intended over-match on the safe side, pinned in 4b.
+expected_bash=$'*=ask\nls=allow\nls *=allow\npwd=allow\npwd *=allow\ncat=allow\ncat *=allow\nhead=allow\nhead *=allow\ntail=allow\ntail *=allow\nwc=allow\nwc *=allow\nfile=allow\nfile *=allow\nstat=allow\nstat *=allow\ndu=allow\ndu *=allow\ntree=allow\ntree *=allow\nwhich=allow\nwhich *=allow\ndiff=allow\ndiff *=allow\ncmp=allow\ncmp *=allow\ncut=allow\ncut *=allow\nuniq=allow\nuniq *=allow\ngrep=allow\ngrep *=allow\nrg=allow\nrg *=allow\necho=allow\necho *=allow\nbasename=allow\nbasename *=allow\ndirname=allow\ndirname *=allow\nrealpath=allow\nrealpath *=allow\ngit status=allow\ngit status *=allow\ngit diff=allow\ngit diff *=allow\ngit log=allow\ngit log *=allow\ngit show=allow\ngit show *=allow\ngit rev-parse=allow\ngit rev-parse *=allow\ngit ls-files=allow\ngit ls-files *=allow\ngit blame=allow\ngit blame *=allow\ngit describe=allow\ngit describe *=allow\ngit branch=allow\ngit branch *=allow\ngit tag=allow\ngit tag *=allow\ngit add=allow\ngit add *=allow\ngit commit=allow\ngit commit *=allow\ngit checkout=allow\ngit checkout *=allow\ngit switch=allow\ngit switch *=allow\ngit reset=allow\ngit reset *=allow\ngit stash=allow\ngit stash *=allow\ngit worktree=allow\ngit worktree *=allow\ngit remote=allow\ngit remote -v=allow\nrg *--pre*=ask\nrg *--hostname-bin*=ask\ngit push*=ask\ngit clone*=ask\ngh *=ask\ngh pr view=allow\ngh pr view *=allow\ngh pr list=allow\ngh pr list *=allow\ngh pr diff=allow\ngh pr diff *=allow\ngh pr checks=allow\ngh pr checks *=allow\ngh pr status=allow\ngh pr status *=allow\ngh issue view=allow\ngh issue view *=allow\ngh issue list=allow\ngh issue list *=allow\ngh issue status=allow\ngh issue status *=allow\ngh repo view=allow\ngh repo view *=allow\ngh release view=allow\ngh release view *=allow\ngh release list=allow\ngh release list *=allow\ngh run view=allow\ngh run view *=allow\ngh run list=allow\ngh run list *=allow\ngh workflow view=allow\ngh workflow view *=allow\ngh workflow list=allow\ngh workflow list *=allow\ngh label list=allow\ngh label list *=allow\ngh gist view=allow\ngh gist view *=allow\ngh gist list=allow\ngh gist list *=allow\ngh search *=allow\ngh status=allow\ngh status *=allow\ngh auth status=allow\ngh --version=allow\ngh version=allow\ngh help=allow\ngh help *=allow\nsudo*=ask\ncurl*=ask\nwget*=ask\nop *=ask\naws *=ask\ngit clean *=ask\ngit * clean *=ask\ngit restore *=ask\ngit * restore *=ask\ngit *checkout* -- *=ask\ngit *checkout* .=ask\ngit *push* +*=ask\ngit *push* :*=ask\ngit *reset* --hard=ask\ngit *reset* --hard *=ask\ngit *checkout* --force=ask\ngit *checkout* --force *=ask\ngit *checkout* -f=ask\ngit *checkout* -f *=ask\ngit *checkout* -qf=ask\ngit *checkout* -qf *=ask\ngit *checkout* -fq=ask\ngit *checkout* -fq *=ask\ngit *switch* --force=ask\ngit *switch* --force *=ask\ngit *switch* --discard-changes=ask\ngit *switch* --discard-changes *=ask\ngit *switch* -f=ask\ngit *switch* -f *=ask\ngit *switch* -qf=ask\ngit *switch* -qf *=ask\ngit *switch* -fq=ask\ngit *switch* -fq *=ask\ngit *push* --force=ask\ngit *push* --force *=ask\ngit *push* -f=ask\ngit *push* -f *=ask\ngit *push* -uf=ask\ngit *push* -uf *=ask\ngit *push* -fu=ask\ngit *push* -fu *=ask\ngit *branch* -D=ask\ngit *branch* -D *=ask\ngit *branch* --force=ask\ngit *branch* --force *=ask\ngit *branch* -f=ask\ngit *branch* -f *=ask\ngit *branch* -df=ask\ngit *branch* -df *=ask\ngit *branch* -fd=ask\ngit *branch* -fd *=ask\ngit *commit* -n=ask\ngit *commit* -n *=ask\ngit *commit* -nm=ask\ngit *commit* -nm *=ask\ngit *commit* -an=ask\ngit *commit* -an *=ask\ngit *commit* -anm=ask\ngit *commit* -anm *=ask\ngit *push* --mirror=ask\ngit *push* --mirror *=ask\ngit *push* --delete=ask\ngit *push* --delete *=ask\ngit *push* -d=ask\ngit *push* -d *=ask\ngit *branch* -M=ask\ngit *branch* -M *=ask\ngit *stash* drop=ask\ngit *stash* drop *=ask\ngit *stash* clear=ask\ngit *stash* clear *=ask\ngit *worktree remove* --force=ask\ngit *worktree remove* --force *=ask\ngit *worktree remove* -f=ask\ngit *worktree remove* -f *=ask\ngit *--no-verify*=ask\ngh *env*=ask\ngh *ENV*=ask\ncat ~/.ssh/*=deny\ncat *~/.aws/*=deny\ngh secret *=deny\ngh api *secrets*=deny\ngh auth token*=deny\ngh auth status*--show-token*=deny\ngh auth status* -t*=deny\ngh auth status* -at*=deny\ngh -* auth *=deny\ngh auth -*=deny\nenv=deny\nenv *=deny\nprintenv=deny\nprintenv *=deny\nsecurity find-generic-password*=deny\nsecurity * find-generic-password*=deny\nsecurity find-internet-password*=deny\nsecurity * find-internet-password*=deny\nsecurity dump-keychain*=deny\nsecurity * dump-keychain*=deny\nsecurity export*=deny\nsecurity * export*=deny\naws *configure* export-credentials*=deny\naws *sso* get-role-credentials*=deny\ngit commit --no-verify=deny\ngit commit --no-verify *=deny\ngit push --no-verify=deny\ngit push --no-verify *=deny\ngit commit -n=deny\ngit commit -n *=deny'
 actual_bash="$(yq -p json '.permission.bash | to_entries | .[] | .key + "=" + .value' "$config_file")"
 if [[ "$actual_bash" == "$expected_bash" ]]; then
-  ok "test passed: permission.bash is exactly the pinned floor (ask base, #381's 38 local commands allowed back as 76 exact + '... *' allows + git remote / git remote -v + the rg --pre / --hostname-bin asks, then 7 ask incl. gh default and the whole 1Password CLI, 44 read allow-backs as exact + '... *' pairs, #304 / #334's 71 work-discarding git / hook-skip asks, #504's 2 asks for a gh command reading the environment, 27 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, keychain password read / dump / export with and without leading options, and #304's hook skips right after git commit / git push; ordered)"
+  ok "test passed: permission.bash is exactly the pinned floor (ask base, #381's 38 local commands allowed back as 76 exact + '... *' allows + git remote / git remote -v + the rg --pre / --hostname-bin asks, then 8 ask incl. gh default and the whole 1Password and AWS CLIs, 44 read allow-backs as exact + '... *' pairs, #304 / #334's 71 work-discarding git / hook-skip asks, #504's 2 asks for a gh command reading the environment, 30 deny last incl. the gh token display bundle -at, gh auth with options before or right after auth, keychain password read / dump / export with and without leading options, #639's AWS credential display and cat under ~/.aws, and #304's hook skips right after git commit / git push; ordered)"
 else
   fail "test failed: permission.bash drifted from the pinned floor; was:"
   printf '%s\n' "$actual_bash" >&2
@@ -461,6 +470,30 @@ deny	security -q dump-keychain -d
 deny	security -q export -k login.keychain
 ask	security find-identity -v -p codesigning
 ask	security -q find-identity -v -p codesigning
+deny	aws configure export-credentials
+deny	aws configure export-credentials --profile example --format env
+deny	aws --profile example configure export-credentials
+deny	aws --profile=example --region us-east-1 configure export-credentials --format process
+deny	aws configure --profile example export-credentials
+deny	aws sso get-role-credentials --role-name example
+deny	aws --profile example sso get-role-credentials --role-name example
+deny	cat ~/.aws/credentials
+deny	cat ~/.aws/sso/cache/example.json
+deny	cat -n ~/.aws/credentials
+deny	cat -- ~/.aws/credentials
+deny	cat README.md ~/.aws/credentials
+allow	cat ~/.awsrc
+allow	cat ~/.awsx/config
+deny	aws configure list --profile export-credentials
+deny	aws sso login --profile get-role-credentials
+ask	aws
+ask	aws sts get-caller-identity
+ask	aws sts assume-role --role-arn example --role-session-name example
+ask	aws sso login --profile example
+ask	aws configure list
+ask	aws configure get region
+ask	aws s3 ls
+ask	aws --profile example s3 ls
 allow	git status
 allow	git commit -m x
 ask	git fetch origin
@@ -580,6 +613,19 @@ ask	git -C /tmp/x status
 allow	git commit -m "tidy cleanup"
 CASES
 if [[ "$decision_failures" -gt 0 ]]; then
+  status=1
+fi
+
+# 4b2) #639's cat deny must come after the `cat *` allow (last match wins):
+#      every `cat ... ~/.aws/...` row above also matches that allow, so the
+#      deny decides only from the later position (Codex review, PR #640).
+cat_allow_line="$(grep -nFx $'cat *\tallow' <<< "$rule_rows" | cut -d: -f1 || true)"
+cat_aws_deny_line="$(grep -nFx $'cat *~/.aws/*\tdeny' <<< "$rule_rows" | cut -d: -f1 || true)"
+if [[ "$cat_allow_line" =~ ^[0-9]+$ && "$cat_aws_deny_line" =~ ^[0-9]+$ ]] \
+  && (( cat_aws_deny_line > cat_allow_line )); then
+  ok "test passed: the cat deny under ~/.aws comes after the cat * allow (rule $cat_aws_deny_line > $cat_allow_line), so it wins"
+else
+  fail "test failed: the cat deny under ~/.aws must come once, after the cat * allow (lines: allow=${cat_allow_line:-none} deny=${cat_aws_deny_line:-none})"
   status=1
 fi
 

@@ -1305,8 +1305,11 @@ fi
 # in docs/ai-policy.md names, plus the raw-write escape hatches (gh api POST,
 # gh secret) and credential-display commands; then the secret-reading
 # families the Claude / OpenCode floors stop (env dump, keychain password
-# read / dump / export, the 1Password CLI). Fixed strings, split into argv
-# tokens where evaluated. test-doctor.sh pins the Codex set (both lists).
+# read / dump / export, the 1Password CLI, the AWS credential display of
+# #639). Fixed strings, split into argv tokens where evaluated.
+# test-doctor.sh pins the Codex set (both lists). Claude's project allows
+# are probed with the outward list only: the managed floor denies or asks
+# for every secret-reading probe, and a deny / ask beats any allow.
 outward_probe_commands=(
   "git push"
   "git clone https://example.invalid/repo"
@@ -1349,6 +1352,8 @@ secret_read_probe_commands=(
   "security find-internet-password -s example.invalid -w"
   "security dump-keychain"
   "security export -k login.keychain"
+  "aws configure export-credentials"
+  "aws sso get-role-credentials --role-name example"
 )
 
 # Codex permission-surface watchers (#139), extracted as functions: the AI

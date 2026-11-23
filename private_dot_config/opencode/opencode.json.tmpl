@@ -52,12 +52,27 @@
          does not converge. The 1Password CLI is ask as a whole (`op *`,
          #315): its reads (op read, op item get, op run, ...) take global
          options in any position, so the rule is per program, and ask, not
-         deny, since a human does direct those reads at times.
+         deny, since a human does direct those reads at times. The AWS CLI
+         is ask as a whole as well (`aws *`, #639), whatever the profile:
+         while an SSO session lasts, every aws command acts on the account
+         as the user, and its global options (--profile, ...) go anywhere.
+         The base `*` already asks; the rule states it, as `op *` does
+         (the bare `aws` falls to the base). The aws denies below take the
+         git ask rules' shape (`aws *configure* export-credentials*`): the
+         `*` spans spaces, so a command that only names the word as a value
+         (`aws configure list --profile export-credentials`) is denied too,
+         an over-match on the safe side, accepted (Codex review, PR #640).
+         The cat deny puts a `*` before the path (`cat *~/.aws/*`, the `*`
+         empty included), so `cat -n`, `cat --` and other files before the
+         path are caught too; it comes after the `cat *` allow, so it wins.
          Rules are last-match-wins, so the deny rules (env dump, gh secret /
          secrets API, token display and the option-placed gh auth, ssh keys,
          the keychain password reads / dump / export, i.e. security
          find-generic-password / find-internet-password / dump-keychain /
-         export, also behind a leading option such as -q, #315) come LAST:
+         export, also behind a leading option such as -q, #315, and the AWS
+         credential display, aws configure export-credentials / aws sso
+         get-role-credentials with global options before or between the
+         words too, plus cat of a file under ~/.aws, #639) come LAST:
          an earlier deny would be overridden by a later, broader ask. The ask
          patterns end in a bare `*` with no space before it on purpose: `*`
          matches zero or more characters, so `git push*` covers both the
@@ -218,6 +233,7 @@
       "curl*": "ask",
       "wget*": "ask",
       "op *": "ask",
+      "aws *": "ask",
 {{- range list "git clean *" "git * clean *" "git restore *" "git * restore *" "git *checkout* -- *" "git *checkout* ." "git *push* +*" "git *push* :*" }}
       {{ . | toJson }}: "ask",
 {{- end }}
@@ -229,6 +245,7 @@
       "gh *env*": "ask",
       "gh *ENV*": "ask",
       "cat ~/.ssh/*": "deny",
+      "cat *~/.aws/*": "deny",
       "gh secret *": "deny",
       "gh api *secrets*": "deny",
       "gh auth token*": "deny",
@@ -249,6 +266,8 @@
       "security * dump-keychain*": "deny",
       "security export*": "deny",
       "security * export*": "deny",
+      "aws *configure* export-credentials*": "deny",
+      "aws *sso* get-role-credentials*": "deny",
       "git commit --no-verify": "deny",
       "git commit --no-verify *": "deny",
       "git push --no-verify": "deny",

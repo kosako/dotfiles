@@ -73,8 +73,11 @@ packages:
   - { name: zstd, source: brew_formula }
   # AWS CLI v2 (#637): homebrew-core formula (bottled); the command is aws.
   # Credentials (~/.aws) are not managed here. The managed Claude / OpenCode
-  # settings deny only their Read tools under ~/.aws (docs/claude-settings.md);
-  # that deny does not cover a shell command (cat, aws configure ...).
+  # floors deny their Read tools under ~/.aws, `cat *~/.aws/*` and the
+  # credential display (aws configure export-credentials, aws sso
+  # get-role-credentials), and ask before every other aws command; the Codex
+  # rules forbid the display and prompt for the rest (#639,
+  # docs/ai-policy.md). Other ways to read a file stay open (steering).
   - { name: awscli, source: brew_formula, bin: aws }
   - { name: 1password-cli, source: brew_cask, bin: op }
   - { name: iterm2, source: brew_cask }

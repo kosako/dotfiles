@@ -137,7 +137,8 @@ GitHub runtime prompt-injection 防御(epic #119)の capability 2 本。射程�
   secret 読取(`~/.ssh` と credential-store の `~/.aws` / `~/.config/gh` / `~/.netrc` /
   `~/.codex/auth.json`(#136)/ `~/.local/share/opencode/auth.json`(#234)/ `printenv` /
   `env` / `gh secret` / `gh api *secrets*` / gh token の表示(`gh auth token` / `gh auth status --show-token` など)/
-  keychain の password の読み出し・dump・export(`security`)(#315))は **無条件 deny**(`enforceAiSandbox` を待たず常時。
+  keychain の password の読み出し・dump・export(`security`)(#315)/ AWS の認証情報の表示(`aws configure export-credentials` /
+  `aws sso get-role-credentials` / `cat *~/.aws/*`)(#639))は **無条件 deny**(`enforceAiSandbox` を待たず常時。
   正確な一覧は [claude-settings](claude-settings.md))。file 系は **Read 側 deny を主軸**とし、
   Bash matcher の path 列挙はしない(等価経路で迂回できる leaky steering。#136)。main / master 直 push と `.env` 読取 deny + release /
   branch-protection ask は **`enforceAiSandbox` に相乗り**(human-legit ゆえ常時 ON にしない)。

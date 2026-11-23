@@ -78,6 +78,27 @@
        the Claude floor denies as a whole, stay uncovered here: prompting
        the whole `gh` would override the read-only gh allows above. doctor's Codex rules probes include
        these families, so an allow piled up for them is reported.
+       AWS (#639, the Claude / OpenCode floors' aws rules): printing
+       credentials (`aws configure export-credentials`, `aws sso
+       get-role-credentials`) is "forbidden", and every other aws command
+       is "prompt" (while an SSO session lasts, aws acts on the account as
+       the user; sts assume-role and the like ride on that prompt). The
+       AWS CLI takes global options anywhere, and a prefix cannot skip
+       `--profile x` (two tokens, one of them a free value), so a
+       credential display behind an option (`aws --profile x configure
+       export-credentials`) is caught by the program-level "prompt"
+       instead. That is enough here, unlike the gh case above: there is no
+       aws allow for the prompt to override, so no aws command runs
+       without approval (checked with `codex execpolicy check` on
+       0.171.0). doctor probes the two credential displays. So the Codex
+       side covers these commands only (the two forbidden displays and the
+       aws prompt): reading a file under ~/.aws from the shell is NOT
+       stopped by these rules. A prefix rule matches fixed tokens (or a
+       list of fixed tokens), with no wildcard for a path, and the SSO
+       cache files (~/.aws/sso/cache/<hash>.json) have no fixed names, so
+       listing paths would not guard them; the other floors' cat deny has
+       no counterpart here, as `cat ~/.ssh/*` has none (Codex review, PR
+       #640).
 
        Gating (template self-gate, NOT a module `requires` — #184 lesson):
        enableAiPolicy=false renders EMPTY and chezmoi removes the managed target
@@ -119,4 +140,7 @@ prefix_rule(pattern=["security", ["find-generic-password", "find-internet-passwo
 prefix_rule(pattern=["security", ["-q", "-v"], ["find-generic-password", "find-internet-password", "dump-keychain", "export"]], decision="forbidden")
 prefix_rule(pattern=["security"], decision="prompt")
 prefix_rule(pattern=["op"], decision="prompt")
+prefix_rule(pattern=["aws", "configure", "export-credentials"], decision="forbidden")
+prefix_rule(pattern=["aws", "sso", "get-role-credentials"], decision="forbidden")
+prefix_rule(pattern=["aws"], decision="prompt")
 {{ end -}}

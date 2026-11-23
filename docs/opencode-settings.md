@@ -52,13 +52,17 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     allow-all に落ちた。`gh api` は method に関わらず ask — 短縮 flag `-XPOST` / `-ftitle=x` は flag 照合を
     すり抜け、GraphQL は read でも POST を使う)。1Password の CLI は **`op` の全 subcommand を ask**(`op read` /
     `op item get` / `op run` などの読み出し系は global option をどこにでも置けるので、subcommand の列挙ではなく program
-    単位にする。人が指示する場面があるので deny にしない、#315)。deny(env dump `env` / `printenv`、`gh secret` /
+    単位にする。人が指示する場面があるので deny にしない、#315)。AWS CLI も **`aws` の全 subcommand を ask**
+    (`aws *`、#639。SSO の session がある間は、どの command も本人として account に効き、global option はどこにでも
+    置けるので program 単位。profile は問わない)。既定の `*` でも ask だが、`op *` と同じく rule として書く。
+    bare の `aws` は既定の ask に落ちる。deny(env dump `env` / `printenv`、`gh secret` /
     `gh api *secrets*`、token 表示 `gh auth token` / `gh auth status --show-token` / `-t` / `-at` と、`auth` の前か直後に
     option を置いた `gh auth`(`gh -* auth *` / `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)、
     `cat ~/.ssh/*`、keychain の password の読み出し・dump・
     export `security find-generic-password` / `find-internet-password` / `dump-keychain` / `export`(`-q` などの前置
-    option を挟む形も。#315))は **map の末尾**に置く(last-match-wins で、
-    後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315)。
+    option を挟む形も。#315)、`cat *~/.aws/*`(`cat -n` や `cat --` も拾う。`cat *` の allow より後に置く)と AWS の認証情報の表示(`aws *configure* export-credentials*` /
+    `aws *sso* get-role-credentials*`。global option を前や間に置く形も。#639))は **map の末尾**に置く(last-match-wins で、
+    後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315・#639)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
     read の allow に戻した gh は、後ろに置いた `--jq` の式も通す。gh の jq は環境変数(`env` / `$ENV`。`GH_TOKEN` を含む)を
     読めるので、`env` か `ENV` の文字を含む gh の command(`gh *env*` / `gh *ENV*`)を **ask** にする(#504)。read の
@@ -156,14 +160,14 @@ work / client には配らない(`opencode-settings` module を持たない。cl
 - `scripts/test-opencode-settings.sh`: render した `opencode.json` の exact pin(read / bash / edit の rule map を順序込みで、
   `external_directory`、autoupdate / share / instructions、top-level key の集合、secret / email らしき文字列の不在。work で render されないことは test-render.sh の managed set が固定する)。
   加えて bash の rule map を OpenCode の意味論(glob・last-match-wins)で固定の command 集合に当てて判定を
-  assert する(#240): doctor の Codex probe 39 本(外向き・昇格 27 + 認証情報の表示 3、#287 + secret の読み出し 9、#334。secret の読み出しは期待する判定つき)に、短縮 flag / alias / read 形、
+  assert する(#240): doctor の Codex probe 41 本(外向き・昇格 27 + 認証情報の表示 3、#287 + secret の読み出し 11、#334 / #639。secret の読み出しは期待する判定つき)に、短縮 flag / alias / read 形、
   #381 の既定 ask(allow に戻した local の読み取りと git、名前の似た command(`lsx` など)、外向き・別 program を起動する
   command(`ssh` / `npm publish` / `python3 -c` / `find -exec` / `rg --pre` / `rg --hostname-bin` / `git merge -s` / `git fetch` など)が ask に落ちること)、
-  認証情報を扱う command の置き方(#315)、#304 の git の形を足した集合。doctor.sh の 2 つの配列を literal に読み出し、全 probe がこの集合の行にあることも機械的に確かめる(#332)。edit の rule map も同じ glob で、参照先 note と
+  認証情報を扱う command の置き方(#315・#639 の `aws`)、#304 の git の形を足した集合。doctor.sh の 2 つの配列を literal に読み出し、全 probe がこの集合の行にあることも機械的に確かめる(#332)。edit の rule map も同じ glob で、参照先 note と
   名前の似た file の path に当てて判定する(#304)。期待値は
   ai-policy から手で固定し、map から導かない。rule に `*` 以外の pattern 文字(`?` `[` `]` `\`)が入ると fail
   (bash `case` との意味の乖離を避ける)。
 - `scripts/test-claude-settings.sh`: Claude 側 secret floor に `Read(~/.local/share/opencode/auth.json)` が入っている
-  こと(secret floor 30 件 + #304 の hook の skip と note の deny 4 件 + #530 の MCP のログインの tool 2 件 + personal 既定の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)で計 59 件の deny と、
-  1Password の CLI 全体・#334 / #381 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 76 件を順序込みで
+  こと(secret floor 33 件 + #304 の hook の skip と note の deny 4 件 + #530 の MCP のログインの tool 2 件 + personal 既定の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)で計 62 件の deny と、
+  1Password の CLI 全体・AWS CLI 全体(#639)・#334 / #381 の設定 file の読み取り・#304 / #334 の作業を捨てる git と hook の skip の ask 77 件を順序込みで
   exact pin。#315 / #304 / #334)。

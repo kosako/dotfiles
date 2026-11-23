@@ -269,25 +269,29 @@ fi
 section "claude settings GitHub injection guard (#119)"
 
 # 4) Committed personal render: the never-legit secret floor is UNCONDITIONAL
-#    (30 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
+#    (33 entries: ssh-key / credential-store / env-dump / gh-secret reads; the
 #    credential-store files — gh OAuth token, AWS keys, ~/.netrc, Codex
 #    auth.json — joined in #136, OpenCode auth.json in #234; the credential
 #    display forms `gh auth token` / `gh auth status --show-token|-t|-at`
 #    plus `gh auth` with options before or right after `auth`, and the
 #    keychain password read / dump / export, each also behind leading
-#    `security` options, in #315, symmetric with OpenCode) and gateGitHubMcp
-#    is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
+#    `security` options, in #315, symmetric with OpenCode; `cat *~/.aws/*`
+#    and the AWS credential display `aws configure export-credentials` /
+#    `aws sso get-role-credentials`, global options before or between the
+#    words included, in #639) and gateGitHubMcp is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
 #    one position argument data cannot take (--no-verify or -n right after
 #    `git commit`, --no-verify right after `git push`) and the Edit deny on
 #    any .agent-context.local.md, and #530 the two MCP login tools of every
 #    server (mcp__*__authenticate / mcp__*__complete_authentication), so the
-#    deny is those 36 + mcp__github = 37, followed by gateUnusedClaudeMcp's
+#    deny is those 39 + mcp__github = 40, followed by gateUnusedClaudeMcp's
 #    22 (#341, ON for personal: the five claude.ai connectors as whole
-#    servers, Notion joining in #530, then 17 Notion write tools) = 59
+#    servers, Notion joining in #530, then 17 Notion write tools) = 62
 #    (the floor present even with enforceAiSandbox off is
 #    the core of Phase 2 task B). The ask block is the whole 1Password CLI
 #    (`op *`: global options can sit anywhere, so the program is the unit;
-#    #315: human-directed uses exist, so approval rather than deny) followed
+#    #315: human-directed uses exist, so approval rather than deny) and the
+#    whole AWS CLI (`aws *`, #639: an SSO session lets every aws command act
+#    on the account, and its global options also sit anywhere) followed
 #    by #334's asks for reading the config files that may hold secrets (4)
 #    and the git asks of #304 / #334 (71): the work-discarding git forms,
 #    each option as a word of its own after its subcommand, and the hook
@@ -309,13 +313,13 @@ expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp_
 for notion_tool in notion-create-comment notion-create-attachment notion-create-database notion-create-view notion-update-view notion-update-data-source notion-create-folder notion-update-folder notion-restore-pages notion-convert-page-to-skill notion-upload-skill notion-spawn-session notion-send-message-to-session notion-stop-session notion-move-pages notion-duplicate-page notion-create-file-upload; do
   expected_unused_mcp+=$'\nmcp__plugin_Notion_notion__'"$notion_tool"
 done
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\n'"$expected_git_deny"$'\n'"$expected_login_deny"$'\nmcp__github\n'"$expected_unused_mcp"
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(cat *~/.aws/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nBash(aws *configure* export-credentials*)\nBash(aws *sso* get-role-credentials*)\n'"$expected_git_deny"$'\n'"$expected_login_deny"$'\nmcp__github\n'"$expected_unused_mcp"
 actual_deny="$(yq -p json -o yaml '.permissions.deny[]' "$off_file")"
-expected_ask=$'Bash(op *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
+expected_ask=$'Bash(op *)\nBash(aws *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
 ask_default="$(yq -p json -o yaml '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 rest_default="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" && "$rest_default" == "$expected_allow" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + #530 MCP login tools + github MCP + #341's unused MCP (59, ordered); ask is exactly the whole 1Password CLI, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (76, ordered); allow is exactly mcp__pencil and the merged-branch cleanup script, and permissions holds nothing else (enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + #530 MCP login tools + github MCP + #341's unused MCP (62, ordered); ask is exactly the whole 1Password and AWS CLIs, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (77, ordered); allow is exactly mcp__pencil and the merged-branch cleanup script, and permissions holds nothing else (enforceAiSandbox off)"
 else
   fail "test failed: committed personal permissions unexpected (allow and the rest=$rest_default ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -559,6 +563,58 @@ else
   status=1
 fi
 
+# 4c-aws) What the committed rules decide for the AWS CLI and ~/.aws (#639),
+#     read the same way: printing credentials denies, with global options
+#     before the first word or between the two (the AWS CLI takes them
+#     anywhere), and so does cat of a file under ~/.aws, with options
+#     (`-n`, `--`) or other files before it too (Codex review, PR #640);
+#     every other aws command asks (sts assume-role included), whatever
+#     the profile; a look-alike program or path is left alone. Intended
+#     over-match: the `*` spans spaces, so a command that only names
+#     export-credentials / get-role-credentials as a value (`aws configure
+#     list --profile export-credentials`, `aws sso login --profile
+#     get-role-credentials`) is denied as well, on the safe side.
+aws_misses=""
+while IFS='|' read -r want cmd; do
+  [[ -n "$want" ]] || continue
+  got="$(claude_decision "$cmd")"
+  [[ "$got" == "$want" ]] || aws_misses+="  $cmd -> $got (expected $want)"$'\n'
+done <<'CASES'
+deny|aws configure export-credentials
+deny|aws configure export-credentials --profile example --format env
+deny|aws --profile example configure export-credentials
+deny|aws --profile=example --region us-east-1 configure export-credentials --format process
+deny|aws configure --profile example export-credentials
+deny|aws sso get-role-credentials --role-name example
+deny|aws --profile example sso get-role-credentials --role-name example
+deny|cat ~/.aws/credentials
+deny|cat ~/.aws/sso/cache/example.json
+deny|cat -n ~/.aws/credentials
+deny|cat -- ~/.aws/credentials
+deny|cat README.md ~/.aws/credentials
+deny|aws configure list --profile export-credentials
+deny|aws sso login --profile get-role-credentials
+ask|aws
+ask|aws sts get-caller-identity
+ask|aws sts assume-role --role-arn example --role-session-name example
+ask|aws sso login --profile example
+ask|aws configure list
+ask|aws configure get region
+ask|aws s3 ls
+ask|aws --profile example s3 ls
+none|awsx s3 ls
+none|cat ~/.awsrc
+none|cat ~/.awsx/config
+none|cat README.md
+CASES
+if [[ -z "$aws_misses" ]]; then
+  ok "test passed: the committed rules deny the AWS credential display (options before or between the words too) and cat under ~/.aws (options or other files before the path too), ask for every other aws command, and leave look-alikes alone; the over-match on a value named export-credentials / get-role-credentials is deny (per the documented matching)"
+else
+  fail "test failed: committed rules decide aws commands unexpectedly:"
+  printf '%s' "$aws_misses" >&2
+  status=1
+fi
+
 # 4c-allow) The one Bash rule in allow (#505, agent-tools#640), read the same
 #     way. Ask comes before allow, so the deny / ask rules must leave the
 #     script's own invocation alone (the last case above). The rule itself
@@ -657,6 +713,7 @@ deny|$claude_read_home/.ssh/id_ed25519
 deny|$claude_read_home/.codex/auth.json
 deny|$claude_read_home/.config/gh/hosts.yml
 deny|$claude_read_home/.netrc
+deny|$claude_read_home/.aws/sso/cache/example.json
 CASES
 if [[ -z "$read_misses" ]]; then
   ok "test passed: the committed Read rules ask for the secret-bearing config files, deny the credential stores, and leave look-alikes alone (per the documented path rules)"
@@ -728,7 +785,7 @@ actual_deny_on="$(yq -p json -o yaml '.permissions.deny[]' "$on_file")"
 actual_ask_on="$(yq -p json -o yaml '.permissions.ask[]' "$on_file" 2>/dev/null || true)"
 actual_rest_on="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$on_file" 2>/dev/null || true)"
 if [[ "$actual_deny_on" == "$expected_deny_on" && "$actual_ask_on" == "$expected_ask_on" && "$actual_rest_on" == "$expected_allow" ]]; then
-  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the whole 1Password CLI + release/protection as ask (ordered), and allow is exactly mcp__pencil and the merged-branch cleanup script"
+  ok "test passed: enforceAiSandbox=true is exactly the secret floor + github MCP + human-legit gate (main/master push, .env read) as deny, and the whole 1Password and AWS CLIs + release/protection as ask (ordered), and allow is exactly mcp__pencil and the merged-branch cleanup script"
 else
   fail "test failed: enforceAiSandbox=true permissions unexpected; deny / ask / allow and the rest were:"
   printf '%s\n' "$actual_deny_on" "---" "$actual_ask_on" "---" "$actual_rest_on" >&2
