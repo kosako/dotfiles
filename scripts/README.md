@@ -1080,7 +1080,7 @@ capability(`enforceAiSandbox` / `gateGitHubMcp` / `gateUnusedClaudeMcp`)を flip
 33 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件と #530 の MCP のログインの tool(`mcp__*__authenticate` / `mcp__*__complete_authentication`)の deny 2 件が
 順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)を足して計 62 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
-含めて追加、#639 で `cat ~/.aws/*` と AWS の認証情報の表示 2 件を追加)、1Password の CLI 全体(1 件)と AWS CLI 全体(1 件、#639)と
+含めて追加、#639 で `cat *~/.aws/*` と AWS の認証情報の表示 2 件を追加)、1Password の CLI 全体(1 件)と AWS CLI 全体(1 件、#639)と
 #334 / #381 の secret を含みうる設定 file の読み取り(4 件)と #304 / #334 の作業を捨てる git と
 hook の skip(71 件)の計 77 件の無条件 ask、`allow` が `mcp__pencil` と片付けの script の 1 本(#505)だけで permissions にほかの key が無いこと(key の順には依らない)、その allow の rule が配備した script の path だけに語の境界まで一致すること、deny と ask の rule を Claude Code の
 docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一の ` *` は bare の command にも一致、deny → ask の順)で git の

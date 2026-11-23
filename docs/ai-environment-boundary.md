@@ -206,7 +206,7 @@ live 化した。`enforceAiSandbox` は全 profile false 継続。有効化し�
     (`printenv` / `env`)・GitHub Actions secret
     (`gh secret` / `gh api *secrets*`)・gh token の表示(`gh auth token` / `--show-token`)・keychain の
     password の読み出し / dump / export(`security`、#315)・AWS の認証情報の表示(`aws configure
-    export-credentials` / `aws sso get-role-credentials` / `cat ~/.aws/*`、#639)は誰も Claude に正規に頼まず、deny は Claude の
+    export-credentials` / `aws sso get-role-credentials` / `cat *~/.aws/*`、#639)は誰も Claude に正規に頼まず、deny は Claude の
     tool call にしか効かない(人間のターミナル非影響)ので、`enforceAiSandbox` を待たず
     常時 deny する(personal で今日 live)。file 系は **Read 側 deny を主軸**とし、Bash
     matcher の path 列挙はしない(等価経路で迂回できる leaky steering。tier 全体が

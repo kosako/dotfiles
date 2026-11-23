@@ -275,7 +275,7 @@ section "claude settings GitHub injection guard (#119)"
 #    display forms `gh auth token` / `gh auth status --show-token|-t|-at`
 #    plus `gh auth` with options before or right after `auth`, and the
 #    keychain password read / dump / export, each also behind leading
-#    `security` options, in #315, symmetric with OpenCode; `cat ~/.aws/*`
+#    `security` options, in #315, symmetric with OpenCode; `cat *~/.aws/*`
 #    and the AWS credential display `aws configure export-credentials` /
 #    `aws sso get-role-credentials`, global options before or between the
 #    words included, in #639) and gateGitHubMcp is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
@@ -313,7 +313,7 @@ expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp_
 for notion_tool in notion-create-comment notion-create-attachment notion-create-database notion-create-view notion-update-view notion-update-data-source notion-create-folder notion-update-folder notion-restore-pages notion-convert-page-to-skill notion-upload-skill notion-spawn-session notion-send-message-to-session notion-stop-session notion-move-pages notion-duplicate-page notion-create-file-upload; do
   expected_unused_mcp+=$'\nmcp__plugin_Notion_notion__'"$notion_tool"
 done
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(cat ~/.aws/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nBash(aws *configure* export-credentials*)\nBash(aws *sso* get-role-credentials*)\n'"$expected_git_deny"$'\n'"$expected_login_deny"$'\nmcp__github\n'"$expected_unused_mcp"
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(cat *~/.aws/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nBash(aws *configure* export-credentials*)\nBash(aws *sso* get-role-credentials*)\n'"$expected_git_deny"$'\n'"$expected_login_deny"$'\nmcp__github\n'"$expected_unused_mcp"
 actual_deny="$(yq -p json -o yaml '.permissions.deny[]' "$off_file")"
 expected_ask=$'Bash(op *)\nBash(aws *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
 ask_default="$(yq -p json -o yaml '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
@@ -566,9 +566,14 @@ fi
 # 4c-aws) What the committed rules decide for the AWS CLI and ~/.aws (#639),
 #     read the same way: printing credentials denies, with global options
 #     before the first word or between the two (the AWS CLI takes them
-#     anywhere), and so does cat of a file under ~/.aws; every other aws
-#     command asks (sts assume-role included), whatever the profile; a
-#     look-alike program or path is left alone.
+#     anywhere), and so does cat of a file under ~/.aws, with options
+#     (`-n`, `--`) or other files before it too (Codex review, PR #640);
+#     every other aws command asks (sts assume-role included), whatever
+#     the profile; a look-alike program or path is left alone. Intended
+#     over-match: the `*` spans spaces, so a command that only names
+#     export-credentials / get-role-credentials as a value (`aws configure
+#     list --profile export-credentials`, `aws sso login --profile
+#     get-role-credentials`) is denied as well, on the safe side.
 aws_misses=""
 while IFS='|' read -r want cmd; do
   [[ -n "$want" ]] || continue
@@ -584,6 +589,11 @@ deny|aws sso get-role-credentials --role-name example
 deny|aws --profile example sso get-role-credentials --role-name example
 deny|cat ~/.aws/credentials
 deny|cat ~/.aws/sso/cache/example.json
+deny|cat -n ~/.aws/credentials
+deny|cat -- ~/.aws/credentials
+deny|cat README.md ~/.aws/credentials
+deny|aws configure list --profile export-credentials
+deny|aws sso login --profile get-role-credentials
 ask|aws
 ask|aws sts get-caller-identity
 ask|aws sts assume-role --role-arn example --role-session-name example
@@ -594,9 +604,11 @@ ask|aws s3 ls
 ask|aws --profile example s3 ls
 none|awsx s3 ls
 none|cat ~/.awsrc
+none|cat ~/.awsx/config
+none|cat README.md
 CASES
 if [[ -z "$aws_misses" ]]; then
-  ok "test passed: the committed rules deny the AWS credential display (options before or between the words too) and cat under ~/.aws, ask for every other aws command, and leave look-alikes alone (per the documented matching)"
+  ok "test passed: the committed rules deny the AWS credential display (options before or between the words too) and cat under ~/.aws (options or other files before the path too), ask for every other aws command, and leave look-alikes alone; the over-match on a value named export-credentials / get-role-credentials is deny (per the documented matching)"
 else
   fail "test failed: committed rules decide aws commands unexpectedly:"
   printf '%s' "$aws_misses" >&2

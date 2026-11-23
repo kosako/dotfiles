@@ -153,7 +153,7 @@ managed set でこの gate を回帰固定している。
 `permissions.deny` には capability 非依存の **secret floor**(never-legit な secret 読取
 33 件: `Read(~/.ssh/**)` と credential-store 読取 `Read(~/.aws/**)` / `Read(~/.config/gh/**)`
 (gh の OAuth token)/ `Read(~/.netrc)` / `Read(~/.codex/auth.json)` /
-`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat ~/.ssh/*)` / `Bash(cat ~/.aws/*)`(#639)/
+`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat ~/.ssh/*)` / `Bash(cat *~/.aws/*)`(#639。path の前の `*` で `cat -n` や `cat --` も拾う)/
 `gh secret` / `gh api *secrets*` / `env` / `printenv` 系、gh の token の表示 `gh auth token` /
 `gh auth status --show-token|-t|-at`、`auth` の前か直後に option を置いた `gh auth`(`gh -* auth *` /
 `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)と、keychain の password の読み出し・dump・export(`security
@@ -162,7 +162,9 @@ find-generic-password` / `find-internet-password` / `dump-keychain` / `export`�
 AWS の認証情報の表示(`aws configure export-credentials` / `aws sso get-role-credentials`。#639)を常時出力する。
 AWS CLI は global option(`--profile` など)を subcommand の前にも間にも置ける。そこで git の ask と同じ形の
 `Bash(aws *configure* export-credentials*)` / `Bash(aws *sso* get-role-credentials*)` にし、
-`aws --profile x configure export-credentials` のような置き方も拾う。**Read 側 deny を
+`aws --profile x configure export-credentials` のような置き方も拾う。`*` は空白もまたぐので、
+`aws configure list --profile export-credentials` のように語を値として書いただけの command も deny になる。
+安全な側に倒れる過剰な一致として受け入れる。**Read 側 deny を
 主軸**とする(Read tool はコマンド経由でない読取にも効く。Bash matcher は `head` / `xxd` /
 `python open()` 等の等価経路で迂回できる leaky steering なので、path ごとの Bash 列挙は
 意図的にしない。#136)。`gateGitHubMcp=true`(personal 既定)で

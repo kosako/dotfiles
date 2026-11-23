@@ -60,7 +60,7 @@ work / client には配らない(`opencode-settings` module を持たない。cl
     option を置いた `gh auth`(`gh -* auth *` / `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)、
     `cat ~/.ssh/*`、keychain の password の読み出し・dump・
     export `security find-generic-password` / `find-internet-password` / `dump-keychain` / `export`(`-q` などの前置
-    option を挟む形も。#315)、`cat ~/.aws/*` と AWS の認証情報の表示(`aws *configure* export-credentials*` /
+    option を挟む形も。#315)、`cat *~/.aws/*`(`cat -n` や `cat --` も拾う。`cat *` の allow より後に置く)と AWS の認証情報の表示(`aws *configure* export-credentials*` /
     `aws *sso* get-role-credentials*`。global option を前や間に置く形も。#639))は **map の末尾**に置く(last-match-wins で、
     後続の広い ask に deny を弱めさせないため)。Claude の secret floor と同じ集合(#315・#639)。
     ([ai-policy](ai-policy.md): ローカル完結の read は無確認、外向きと昇格は都度承認。)
