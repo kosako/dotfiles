@@ -153,7 +153,7 @@ managed set でこの gate を回帰固定している。
 `permissions.deny` には capability 非依存の **secret floor**(never-legit な secret 読取
 33 件: `Read(~/.ssh/**)` と credential-store 読取 `Read(~/.aws/**)` / `Read(~/.config/gh/**)`
 (gh の OAuth token)/ `Read(~/.netrc)` / `Read(~/.codex/auth.json)` /
-`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat ~/.ssh/*)` / `Bash(cat *~/.aws/*)`(#639。path の前の `*` で `cat -n` や `cat --` も拾う)/
+`Read(~/.local/share/opencode/auth.json)`(#234)、`Bash(cat *~/.ssh/*)`(#641)/ `Bash(cat *~/.aws/*)`(#639。どちらも path の前の `*` で `cat -n` や `cat --` も拾う)/
 `gh secret` / `gh api *secrets*` / `env` / `printenv` 系、gh の token の表示 `gh auth token` /
 `gh auth status --show-token|-t|-at`、`auth` の前か直後に option を置いた `gh auth`(`gh -* auth *` /
 `gh auth -*`。同じ subcommand に届く置き方なので丸ごと deny)と、keychain の password の読み出し・dump・export(`security

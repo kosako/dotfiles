@@ -278,7 +278,8 @@ section "claude settings GitHub injection guard (#119)"
 #    `security` options, in #315, symmetric with OpenCode; `cat *~/.aws/*`
 #    and the AWS credential display `aws configure export-credentials` /
 #    `aws sso get-role-credentials`, global options before or between the
-#    words included, in #639) and gateGitHubMcp is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
+#    words included, in #639; the ssh cat took the shape of the aws one,
+#    `cat *~/.ssh/*`, in #641) and gateGitHubMcp is ON (Phase 2). #304 adds, unconditionally, the hook-skip deny in the
 #    one position argument data cannot take (--no-verify or -n right after
 #    `git commit`, --no-verify right after `git push`) and the Edit deny on
 #    any .agent-context.local.md, and #530 the two MCP login tools of every
@@ -313,7 +314,7 @@ expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp_
 for notion_tool in notion-create-comment notion-create-attachment notion-create-database notion-create-view notion-update-view notion-update-data-source notion-create-folder notion-update-folder notion-restore-pages notion-convert-page-to-skill notion-upload-skill notion-spawn-session notion-send-message-to-session notion-stop-session notion-move-pages notion-duplicate-page notion-create-file-upload; do
   expected_unused_mcp+=$'\nmcp__plugin_Notion_notion__'"$notion_tool"
 done
-expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat ~/.ssh/*)\nBash(cat *~/.aws/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nBash(aws *configure* export-credentials*)\nBash(aws *sso* get-role-credentials*)\n'"$expected_git_deny"$'\n'"$expected_login_deny"$'\nmcp__github\n'"$expected_unused_mcp"
+expected_deny=$'Read(~/.ssh/**)\nRead(~/.aws/**)\nRead(~/.config/gh/**)\nRead(~/.netrc)\nRead(~/.codex/auth.json)\nRead(~/.local/share/opencode/auth.json)\nBash(cat *~/.ssh/*)\nBash(cat *~/.aws/*)\nBash(gh secret *)\nBash(gh api *secrets*)\nBash(env)\nBash(env *)\nBash(printenv)\nBash(printenv *)\nBash(gh auth token)\nBash(gh auth token *)\nBash(gh auth status *--show-token*)\nBash(gh auth status -t*)\nBash(gh auth status * -t*)\nBash(gh auth status -at*)\nBash(gh auth status * -at*)\nBash(gh -* auth *)\nBash(gh auth -*)\nBash(security find-generic-password *)\nBash(security * find-generic-password *)\nBash(security find-internet-password *)\nBash(security * find-internet-password *)\nBash(security dump-keychain*)\nBash(security * dump-keychain*)\nBash(security export *)\nBash(security * export *)\nBash(aws *configure* export-credentials*)\nBash(aws *sso* get-role-credentials*)\n'"$expected_git_deny"$'\n'"$expected_login_deny"$'\nmcp__github\n'"$expected_unused_mcp"
 actual_deny="$(yq -p json -o yaml '.permissions.deny[]' "$off_file")"
 expected_ask=$'Bash(op *)\nBash(aws *)\nRead(~/.codex/config.toml)\nRead(~/.zshrc.local)\nRead(~/.zprofile.local)\nRead(~/.config/opencode/opencode.local.json)\n'"$expected_git_ask"
 ask_default="$(yq -p json -o yaml '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
@@ -612,6 +613,32 @@ if [[ -z "$aws_misses" ]]; then
 else
   fail "test failed: committed rules decide aws commands unexpectedly:"
   printf '%s' "$aws_misses" >&2
+  status=1
+fi
+
+# 4c-ssh) What the committed rules decide for cat under ~/.ssh (#641), read
+#     the same way: deny with nothing, options (`-n`, `--`) or other files
+#     before the path, as under ~/.aws above; a look-alike path is left
+#     alone.
+ssh_misses=""
+while IFS='|' read -r want cmd; do
+  [[ -n "$want" ]] || continue
+  got="$(claude_decision "$cmd")"
+  [[ "$got" == "$want" ]] || ssh_misses+="  $cmd -> $got (expected $want)"$'\n'
+done <<'CASES'
+deny|cat ~/.ssh/id_ed25519
+deny|cat -n ~/.ssh/id_ed25519
+deny|cat -- ~/.ssh/id_ed25519
+deny|cat README.md ~/.ssh/id_ed25519
+none|cat ~/.sshrc
+none|cat ~/.sshx/config
+none|cat README.md
+CASES
+if [[ -z "$ssh_misses" ]]; then
+  ok "test passed: the committed rules deny cat under ~/.ssh (options or other files before the path too) and leave look-alikes alone"
+else
+  fail "test failed: committed rules decide cat under ~/.ssh unexpectedly:"
+  printf '%s' "$ssh_misses" >&2
   status=1
 fi
 

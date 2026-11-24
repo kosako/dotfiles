@@ -97,7 +97,7 @@
        list of fixed tokens), with no wildcard for a path, and the SSO
        cache files (~/.aws/sso/cache/<hash>.json) have no fixed names, so
        listing paths would not guard them; the other floors' cat deny has
-       no counterpart here, as `cat ~/.ssh/*` has none (Codex review, PR
+       no counterpart here, as `cat *~/.ssh/*` has none (Codex review, PR
        #640).
 
        Gating (template self-gate, NOT a module `requires` — #184 lesson):

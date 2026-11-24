@@ -1080,7 +1080,7 @@ capability(`enforceAiSandbox` / `gateGitHubMcp` / `gateUnusedClaudeMcp`)を flip
 33 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件と #530 の MCP のログインの tool(`mcp__*__authenticate` / `mcp__*__complete_authentication`)の deny 2 件が
 順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)を足して計 62 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
-含めて追加、#639 で `cat *~/.aws/*` と AWS の認証情報の表示 2 件を追加)、1Password の CLI 全体(1 件)と AWS CLI 全体(1 件、#639)と
+含めて追加、#639 で `cat *~/.aws/*` と AWS の認証情報の表示 2 件を追加し、#641 で ssh 鍵の `cat` も同じ形の `cat *~/.ssh/*` にした)、1Password の CLI 全体(1 件)と AWS CLI 全体(1 件、#639)と
 #334 / #381 の secret を含みうる設定 file の読み取り(4 件)と #304 / #334 の作業を捨てる git と
 hook の skip(71 件)の計 77 件の無条件 ask、`allow` が `mcp__pencil` と片付けの script の 1 本(#505)だけで permissions にほかの key が無いこと(key の順には依らない)、その allow の rule が配備した script の path だけに語の境界まで一致すること、deny と ask の rule を Claude Code の
 docs の照合規則(`*` は空白を含む任意の文字列、末尾の唯一の ` *` は bare の command にも一致、deny → ask の順)で git の
@@ -1090,7 +1090,8 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 `cleanup` / `restored` のように語の一部として含む commit message はどちらでもない。独立した語(`add clean support`)
 として含む message は ask になりうる)、同じ照合で `aws` の command の集合に当てた判定(認証情報の表示は global option を
 前や間に置く形も含めて deny、`~/.aws` の下の file の `cat` も deny、それ以外の `aws` は ask、名前の似た program と path は
-どちらでもない。#639)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで、allow も exact pin。`gateGitHubMcp` / `gateUnusedClaudeMcp` を false にした render は既定の render から、`gateGitHubMcp=false` と `enforceAiSandbox=true` を合わせた render は `enforceAiSandbox=true` の render から、その gate の deny を除いたものと JSON 全体で一致すること)、#93 で
+どちらでもない。#639)、`~/.ssh` の下の file の `cat` の判定(option や別の file を path の前に置く形も deny、名前の似た path は
+どちらでもない。#641)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで、allow も exact pin。`gateGitHubMcp` / `gateUnusedClaudeMcp` を false にした render は既定の render から、`gateGitHubMcp=false` と `enforceAiSandbox=true` を合わせた render は `enforceAiSandbox=true` の render から、その gate の deny を除いたものと JSON 全体で一致すること)、#93 で
 取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart / `enableToolCallRecordHook` の記録の hook / `enableJaReplyGuardHook` の Stop の 2 つ目の entry / `enableBridgeOneHook` の PermissionRequest の 2 つ目の entry(決定を返しうる PermissionRequest の hook はこれだけで、HOME が変わった path でも command は 1 語) / `enableInstructionUpdateNoticeHook` の SessionStart の最後の entry と UserPromptSubmit の唯一の entry(timeout 10、matcher と async なし。記録 hook と herdr のどちらが off でも、両方 off でも同じ形で、HOME が変わった path でも command は 1 語)。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225 / #353 / #497 / #508 / #547)を exact に確認する(personal 既定の render では `hooks` の object 全体を pin するので、entry に足された key(safe-gh の `async` や `timeout` など)も落ちる)。
 managed file は modify script(#360)なので、live の file がある home への apply も確かめる: `autoMode` / `modelSettings` /
