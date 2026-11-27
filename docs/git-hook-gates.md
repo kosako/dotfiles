@@ -175,11 +175,14 @@ tool の hook は、repo 自身の `.git/hooks/<stage>` に置く。shim のあ�
   別に置く。
 - pre-commit を repo の `.git/hooks` に入れる手順は、候補も確かめていない。
 
-doctor は、shim が在って実行できるとき、中身に dispatcher を exec する行があるかを見る。描画した shim には必ず
-`exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" <stage> "$@"` の行がある。この行が無ければ
-上書きされたとみなし、stage の名前を挙げて action を出す。中身は表示しない。手順は、`chezmoi apply` で shim を戻す
-ことと、tool の hook を repo の `.git/hooks` に入れ直すこと。読めない shim は、上書きと断定せずに warn にする。照合の行は
-`scripts/lib-policy.sh` の `git_hook_shim_managed` が持ち、`test-git-hook-gates.sh` が描画した 23 本で確かめる。
+doctor は、shim が在って実行できるとき、中身の形を見る。描画した shim は、`#!/bin/sh` の行、comment の行、
+`exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" <stage> "$@"` の行 1 つだけでできている。
+1 行目が `#!/bin/sh` でない、exec の行が無いか 2 つ以上ある、comment と空行のほかに行がある、のどれかなら、上書きか
+書き換えとみなし、stage の名前を挙げて action を出す。exec の行を残したまま、その前で `exit 0` するように手で
+書き換えた shim も、gate が動かないので数える (#646)。中身は表示しない。手順は、`chezmoi apply` で shim を戻す
+ことと、tool の hook を repo の `.git/hooks` に入れ直すこと。読めない shim は、上書きと断定せずに warn にする。形の
+照合は `scripts/lib-policy.sh` の `git_hook_shim_managed` が持ち (template の文面は写さない)、`test-git-hook-gates.sh`
+が描画した 23 本と、形の違う対照で確かめる。
 
 shim を戻すと、共有の directory に入っていた tool の hook は消える。その tool を使う repo では、repo の `.git/hooks` に
 入れ直すまで、tool の hook は走らない。
