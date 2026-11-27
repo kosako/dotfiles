@@ -4890,7 +4890,7 @@ for hg_script in pre-push post-merge; do
 done
 printf '#!/bin/sh\nexec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" post-commit "$@"\n' > "$hg_shims/post-checkout"
 printf '#!/bin/sh\n# exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"\nexit 0\n' > "$hg_shims/pre-commit"
-hg_overwritten="[warn] shim overwritten (no dispatcher exec line, body not shown): pre-commit post-checkout post-merge pre-push in $hg_shims — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one); every repo now runs the replacement for these stages instead of the gates and the chain to its own .git/hooks"
+hg_overwritten="[warn] shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown): pre-commit post-checkout post-merge pre-push in $hg_shims — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one), or a hand edit; every repo now runs that file for these stages instead of the gates and the chain to its own .git/hooks"
 hg_expect "wired + shims replaced by another tool's hooks -> one action naming them" -- \
   "$hg_overwritten" \
   "        \$ chezmoi apply $(printf '%q' "$hg_shims/pre-commit") $(printf '%q' "$hg_shims/post-checkout") $(printf '%q' "$hg_shims/post-merge") $(printf '%q' "$hg_shims/pre-push")   # restores the managed shims" \
@@ -4898,6 +4898,15 @@ hg_expect "wired + shims replaced by another tool's hooks -> one action naming t
   "[ok] global core.hooksPath -> managed shim directory" \
   "$hg_complete" \
   ! "shims present, executable and managed" "shim missing" "shim not readable" "$hg_body_canary" "BLOCKED"
+# HG-1c2) a shim that keeps its exec line but exits before it is not the
+#         managed one either (#646): the gates no longer run, so it is named
+#         like a replaced one and the all-ok line is not claimed.
+hg_setup 1 "${hg_all[@]}"
+printf '#!/bin/sh\nexit 0\nexec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"\n' > "$hg_shims/pre-commit"
+hg_expect "wired + a shim that exits before its exec line -> named as edited" -- \
+  "~shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown): pre-commit in $hg_shims — " \
+  "$hg_complete" \
+  ! "shims present, executable and managed" "shim missing" "shim not readable"
 # HG-1d) a shim doctor cannot read is reported as unknown, never as
 #        overwritten (its body may well be the managed one). Not as root:
 #        root reads it anyway.
@@ -4919,7 +4928,7 @@ hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-
 printf '#!/bin/sh\ngit lfs pre-push "$@"\n' > "$hg_shims/pre-push"
 rm -f "$hg_shims/post-merge"
 hg_expect "wired with a pass-through shim overwritten and one missing + an incomplete deploy -> commits blocked" -- \
-  "~shim overwritten (no dispatcher exec line, body not shown): pre-push in $hg_shims — " \
+  "~shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown): pre-push in $hg_shims — " \
   "[warn] shim missing, not a regular file, or not executable: $hg_shims/post-merge (chezmoi apply arms it once the agent-tools deploy is complete)" \
   "$hg_wired_incomplete" ! "$hg_both_incomplete" "$hg_complete"
 # HG-1f) with no commit stage left managed (two replaced, one missing) a
@@ -4930,7 +4939,7 @@ printf '#!/bin/sh\nexit 0\n' > "$hg_shims/pre-commit"
 printf '#!/bin/sh\nexit 0\n' > "$hg_shims/prepare-commit-msg"
 rm -f "$hg_shims/commit-msg"
 hg_expect "wired with no commit stage managed + an incomplete deploy -> both incomplete" -- \
-  "~shim overwritten (no dispatcher exec line, body not shown): pre-commit prepare-commit-msg in $hg_shims — " \
+  "~shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown): pre-commit prepare-commit-msg in $hg_shims — " \
   "$hg_both_incomplete" ! "$hg_wired_incomplete" "$hg_complete"
 # HG-2) wired + the pre-#281 deploy (identity gate missing) -> commits blocked.
 hg_setup 1 personal-git-hook-dispatcher personal-public-safety-gate personal-ai-trailer-gate

@@ -236,8 +236,8 @@ for stage in "${gate_stages[@]}"; do
     status=1
   fi
 done
-# doctor tells an overwritten shim from the managed one by its exec line
-# (git_hook_shim_managed in lib-policy.sh, #615): it must recognize every
+# doctor tells an overwritten shim from the managed one by its shape
+# (git_hook_shim_managed in lib-policy.sh, #615, #646): it must recognize every
 # rendered shim, so a change to the template's exec line cannot turn every
 # shim into "overwritten" in doctor unnoticed. A shim rendered for another
 # stage must not count, so the check stays per stage.
@@ -253,6 +253,51 @@ elif git_hook_shim_managed "$gates_dir/hooks/pre-push" pre-commit; then
   status=1
 else
   ok "test passed: doctor's managed-shim check recognizes all ${#gate_stages[@]} rendered shims, each for its own stage only"
+fi
+# The check reads the shape, not just the exec line (#646): a shim that
+# keeps the line but runs anything else (an exit above it, a command after
+# it, a second exec, another interpreter) is not the managed one, while
+# added comments and blank lines are; an unreadable shim is 2, never 1.
+shape_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-shape.XXXXXX")"
+tmp_roots+=("$shape_root")
+shape_exec='exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"'
+shape_misses=""
+shape_case() {
+  local want="$1" label="$2" got=0
+  shift 2
+  printf '%s\n' "$@" > "$shape_root/pre-commit"
+  git_hook_shim_managed "$shape_root/pre-commit" pre-commit || got=$?
+  [[ "$got" == "$want" ]] || shape_misses+="  $label -> $got (expected $want)"$'\n'
+}
+shape_case 0 "comments and blank lines added" '#!/bin/sh' '# a note' '' '   # indented note' "$shape_exec" ''
+shape_case 1 "exit 0 above the exec line" '#!/bin/sh' 'exit 0' "$shape_exec"
+shape_case 1 "a command after the exec line" '#!/bin/sh' "$shape_exec" 'echo after'
+shape_case 1 "the exec line twice" '#!/bin/sh' "$shape_exec" "$shape_exec"
+shape_case 1 "another interpreter line" '#!/usr/bin/false' "$shape_exec"
+shape_case 1 "no interpreter line" "$shape_exec"
+shape_case 1 "the exec line indented" '#!/bin/sh' "  $shape_exec"
+printf '#!/bin/sh\n%s' "$shape_exec" > "$shape_root/pre-commit"
+shape_got=0
+git_hook_shim_managed "$shape_root/pre-commit" pre-commit || shape_got=$?
+[[ "$shape_got" == 0 ]] || shape_misses+="  no newline after the exec line -> $shape_got (expected 0)"$'\n'
+shape_got=0
+git_hook_shim_managed "$shape_root/absent" pre-commit || shape_got=$?
+[[ "$shape_got" == 2 ]] || shape_misses+="  a missing file -> $shape_got (expected 2)"$'\n'
+# Not as root: root reads it anyway.
+if [[ "$(id -u)" != "0" ]]; then
+  printf '#!/bin/sh\n%s\n' "$shape_exec" > "$shape_root/pre-commit"
+  chmod 311 "$shape_root/pre-commit"
+  shape_got=0
+  shape_err="$(git_hook_shim_managed "$shape_root/pre-commit" pre-commit 2>&1)" || shape_got=$?
+  [[ "$shape_got" == 2 && -z "$shape_err" ]] || shape_misses+="  an unreadable shim -> $shape_got, stderr '$shape_err' (expected 2, silent)"$'\n'
+  chmod 644 "$shape_root/pre-commit"
+fi
+if [[ -z "$shape_misses" ]]; then
+  ok "test passed: doctor's managed-shim check takes only #!/bin/sh, comments, blank lines and one exec line, and reports an unreadable shim as unreadable"
+else
+  fail "test failed: doctor's managed-shim check misreads a shim's shape:"
+  printf '%s' "$shape_misses" >&2
+  status=1
 fi
 
 hooks_gitconfig="$gates_dir/hooks.gitconfig"

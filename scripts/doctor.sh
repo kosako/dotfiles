@@ -403,8 +403,10 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
     # (git lfs install --force writes its pre-push / post-checkout /
     # post-commit / post-merge hooks there), and every repo then runs that
     # hook for the stage instead of the gates and the chain to its own
-    # .git/hooks. git_hook_shim_managed (lib-policy.sh) looks for the exec
-    # line every rendered shim carries; the body is never shown, only the
+    # .git/hooks. git_hook_shim_managed (lib-policy.sh) checks the shape
+    # every rendered shim has (#!/bin/sh, comments and the one dispatcher
+    # exec line), so a hand edit that exits or runs something else before
+    # the exec line counts too (#646); the body is never shown, only the
     # stage names. A shim it cannot read is reported as such, not as
     # overwritten.
     hook_gates_overwritten=""
@@ -433,7 +435,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       fi
     done
     if [[ -n "$hook_gates_overwritten" ]]; then
-      action "shim overwritten (no dispatcher exec line, body not shown):$hook_gates_overwritten in $hook_gates_dir/hooks — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one); every repo now runs the replacement for these stages instead of the gates and the chain to its own .git/hooks" \
+      action "shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown):$hook_gates_overwritten in $hook_gates_dir/hooks — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one), or a hand edit; every repo now runs that file for these stages instead of the gates and the chain to its own .git/hooks" \
         "\$ chezmoi apply$hook_gates_overwritten_steps   # restores the managed shims" \
         "then put that tool's hook in each repo's own .git/hooks/<stage>, which the shim chains to, and never --force it into the shared directory (docs/git-hook-gates.md; the per-tool steps there are unverified)"
       hook_gates_all_shims_ok=0

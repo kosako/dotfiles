@@ -1375,20 +1375,41 @@ git_excludes_file_setting() {
 }
 
 # git_hook_shim_managed SHIM STAGE — whether the file SHIM is still the
-# managed git-hook-gates shim for STAGE (#615). Every shim rendered from
-# .chezmoitemplates/git-hook-shim carries the one exec line built below; a
-# hook installer that follows the global core.hooksPath into the shared
-# directory (git lfs install --force, for one) replaces the file with its own
-# hook, which lacks it. Only that line is matched (fixed string, whole line),
-# so the rest of the template is not copied here and chezmoi is not run.
-# Returns 0 when the line is there, 1 when SHIM was read and it is not, and
-# 2 or more when SHIM could not be read: the caller must not call that
+# managed git-hook-gates shim for STAGE (#615, #646). Every shim rendered from
+# .chezmoitemplates/git-hook-shim is a `#!/bin/sh` line, comment lines and the
+# one exec line built below; a hook installer that follows the global
+# core.hooksPath into the shared directory (git lfs install --force, for one)
+# replaces the file with its own hook, which lacks that line. The shape is
+# checked, not the text, so the template is not copied here and chezmoi is not
+# run: the first line is exactly `#!/bin/sh`, the exec line is there exactly
+# once (fixed string, whole line), and every other line is blank or a
+# comment. A shim that runs anything else, before the exec line or after it,
+# is not taken as managed (#646: an `exit 0` above a kept exec line turned the
+# gates off while the line alone still matched).
+# Returns 0 when SHIM has that shape, 1 when SHIM was read and it does not,
+# and 2 when SHIM could not be read: the caller must not call that
 # overwritten. test-git-hook-gates.sh runs this on every rendered shim, so
-# the template and this line cannot drift apart unnoticed.
+# the template and this check cannot drift apart unnoticed.
 git_hook_shim_managed() {
-  local line
-  line="exec \"\$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher\" $2 \"\$@\""
-  LC_ALL=C grep -Fxq -- "$line" "$1" 2>/dev/null
+  local shim="$1" exec_line line trimmed n=0 execs=0
+  exec_line="exec \"\$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher\" $2 \"\$@\""
+  [[ -f "$shim" && -r "$shim" ]] || return 2
+  # stderr goes to /dev/null before the file is opened, so a shim that
+  # turned unreadable after the test above prints nothing and returns 2.
+  {
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      n=$((n + 1))
+      if [[ "$n" -eq 1 ]]; then
+        [[ "$line" == '#!/bin/sh' ]] || return 1
+      elif [[ "$line" == "$exec_line" ]]; then
+        execs=$((execs + 1))
+      else
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        [[ -z "$trimmed" || "$trimmed" == \#* ]] || return 1
+      fi
+    done
+  } 2>/dev/null < "$shim" || return 2
+  [[ "$execs" -eq 1 ]]
 }
 
 # Print names of remotes whose URL embeds password-like userinfo
