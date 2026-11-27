@@ -1385,13 +1385,16 @@ git_excludes_file_setting() {
 # once (fixed string, whole line), and every other line is blank or a
 # comment. A shim that runs anything else, before the exec line or after it,
 # is not taken as managed (#646: an `exit 0` above a kept exec line turned the
-# gates off while the line alone still matched).
+# gates off while the line alone still matched). Only spaces and tabs count
+# as the blanks before a `#`: sh does not skip a vertical tab or a CR there,
+# so `<VT># …; exit 0` is a command to sh and must not pass as a comment
+# (Codex review on PR #651).
 # Returns 0 when SHIM has that shape, 1 when SHIM was read and it does not,
 # and 2 when SHIM could not be read: the caller must not call that
 # overwritten. test-git-hook-gates.sh runs this on every rendered shim, so
 # the template and this check cannot drift apart unnoticed.
 git_hook_shim_managed() {
-  local shim="$1" exec_line line trimmed n=0 execs=0
+  local shim="$1" exec_line line trimmed n=0 execs=0 blank=$' \t'
   exec_line="exec \"\$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher\" $2 \"\$@\""
   [[ -f "$shim" && -r "$shim" ]] || return 2
   # stderr goes to /dev/null before the file is opened, so a shim that
@@ -1404,7 +1407,7 @@ git_hook_shim_managed() {
       elif [[ "$line" == "$exec_line" ]]; then
         execs=$((execs + 1))
       else
-        trimmed="${line#"${line%%[![:space:]]*}"}"
+        trimmed="${line#"${line%%[!$blank]*}"}"
         [[ -z "$trimmed" || "$trimmed" == \#* ]] || return 1
       fi
     done

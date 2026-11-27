@@ -4890,7 +4890,7 @@ for hg_script in pre-push post-merge; do
 done
 printf '#!/bin/sh\nexec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" post-commit "$@"\n' > "$hg_shims/post-checkout"
 printf '#!/bin/sh\n# exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"\nexit 0\n' > "$hg_shims/pre-commit"
-hg_overwritten="[warn] shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown): pre-commit post-checkout post-merge pre-push in $hg_shims — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one), or a hand edit; every repo now runs that file for these stages instead of the gates and the chain to its own .git/hooks"
+hg_overwritten="[warn] shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown): pre-commit post-checkout post-merge pre-push in $hg_shims — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one), or a hand edit; these stages may no longer run the gates and the chain to each repo's own .git/hooks"
 hg_expect "wired + shims replaced by another tool's hooks -> one action naming them" -- \
   "$hg_overwritten" \
   "        \$ chezmoi apply $(printf '%q' "$hg_shims/pre-commit") $(printf '%q' "$hg_shims/post-checkout") $(printf '%q' "$hg_shims/post-merge") $(printf '%q' "$hg_shims/pre-push")   # restores the managed shims" \

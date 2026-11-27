@@ -257,7 +257,9 @@ fi
 # The check reads the shape, not just the exec line (#646): a shim that
 # keeps the line but runs anything else (an exit above it, a command after
 # it, a second exec, another interpreter) is not the managed one, while
-# added comments and blank lines are; an unreadable shim is 2, never 1.
+# added comments and blank lines are; an unreadable shim is 2, never 1. Only
+# a space or a tab may sit before a comment's `#`: sh runs a line that starts
+# with a vertical tab or a CR (Codex review on PR #651).
 shape_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-git-hook-gates-shape.XXXXXX")"
 tmp_roots+=("$shape_root")
 shape_exec='exec "$HOME/.claude/agent-tools/scripts/personal-git-hook-dispatcher" pre-commit "$@"'
@@ -276,6 +278,9 @@ shape_case 1 "the exec line twice" '#!/bin/sh' "$shape_exec" "$shape_exec"
 shape_case 1 "another interpreter line" '#!/usr/bin/false' "$shape_exec"
 shape_case 1 "no interpreter line" "$shape_exec"
 shape_case 1 "the exec line indented" '#!/bin/sh' "  $shape_exec"
+shape_case 0 "a comment after spaces and a tab" '#!/bin/sh' $' \t# note' "$shape_exec"
+shape_case 1 "a vertical tab before a #" '#!/bin/sh' $'\v# 2>/dev/null; exit 0' "$shape_exec"
+shape_case 1 "a CR before a #" '#!/bin/sh' $'\r# 2>/dev/null; exit 0' "$shape_exec"
 printf '#!/bin/sh\n%s' "$shape_exec" > "$shape_root/pre-commit"
 shape_got=0
 git_hook_shim_managed "$shape_root/pre-commit" pre-commit || shape_got=$?

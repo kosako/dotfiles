@@ -435,7 +435,7 @@ if [[ "$(capability_value "$profile" enableGitHookGates)" == "true" ]]; then
       fi
     done
     if [[ -n "$hook_gates_overwritten" ]]; then
-      action "shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown):$hook_gates_overwritten in $hook_gates_dir/hooks — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one), or a hand edit; every repo now runs that file for these stages instead of the gates and the chain to its own .git/hooks" \
+      action "shim overwritten or edited (not just #!/bin/sh, comments and the one dispatcher exec line; body not shown):$hook_gates_overwritten in $hook_gates_dir/hooks — likely a hook installer that wrote into the shared core.hooksPath directory (git lfs install --force, for one), or a hand edit; these stages may no longer run the gates and the chain to each repo's own .git/hooks" \
         "\$ chezmoi apply$hook_gates_overwritten_steps   # restores the managed shims" \
         "then put that tool's hook in each repo's own .git/hooks/<stage>, which the shim chains to, and never --force it into the shared directory (docs/git-hook-gates.md; the per-tool steps there are unverified)"
       hook_gates_all_shims_ok=0
