@@ -1079,7 +1079,7 @@ chezmoi と jq と git が必要(chezmoi は CI では version pin して導入�
 managed `~/.claude/settings.json` の rendered content を検証する。throwaway repo copy で
 capability(`enforceAiSandbox` / `gateGitHubMcp` / `gateUnusedClaudeMcp`)を flip し、secret floor の無条件 deny
 33 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件と #530 の MCP のログインの tool(`mcp__*__authenticate` / `mcp__*__complete_authentication`)の deny 2 件と #642 の `/` と home を起点にする `find` の deny 6 件(home の絶対 path で書いた 2 件は、home の path が英数字と `.` `_` `-` `/` だけのとき)が
-順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)を足して計 68 件。#136 で credential-store 読取 4 件、#234 で
+順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)を足して計 68 件。home の path に特殊な文字があると 66 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
 含めて追加、#639 で `cat *~/.aws/*` と AWS の認証情報の表示 2 件を追加し、#641 で ssh 鍵の `cat` も同じ形の `cat *~/.ssh/*` にした)、1Password の CLI 全体(1 件)と AWS CLI 全体(1 件、#639)と
 #334 / #381 の secret を含みうる設定 file の読み取り(4 件)と #304 / #334 の作業を捨てる git と

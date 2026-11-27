@@ -287,7 +287,7 @@ section "claude settings GitHub injection guard (#119)"
 #    #642 the find that starts from / or the home directory (4, then 2
 #    naming the home by its absolute path, rendered only for a home of
 #    letters, digits, `.`, `_`, `-` and `/`; the check below applies the
-#    same test to $HOME, which is what chezmoi renders for here), so the
+#    same test to the home chezmoi rendered for), so the
 #    deny is those 45 + mcp__github = 46, followed by gateUnusedClaudeMcp's
 #    22 (#341, ON for personal: the five claude.ai connectors as whole
 #    servers, Notion joining in #530, then 17 Notion write tools) = 68
@@ -314,10 +314,21 @@ expected_allow='{"allow":["mcp__pencil","Bash(~/.claude/agent-tools/scripts/pers
 expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
 expected_login_deny=$'mcp__*__authenticate\nmcp__*__complete_authentication'
 expected_find_deny=$'Bash(find / *)\nBash(find ~ *)\nBash(find ~/ *)\nBash(find $HOME *)'
+# The home chezmoi rendered for, asked from chezmoi with the same config:
+# it cleans $HOME first (no trailing slash, `//`, `.` or `..`), so the raw
+# $HOME would expect rules a correct render does not hold (Codex review on
+# PR #645).
+find_home=""
+if ! find_home="$(chezmoi --config "$off_root/chezmoi.toml" --source "$DOTFILES_ROOT" \
+  --destination "$off_root/home" execute-template '{{ .chezmoi.homeDir }}' 2>/dev/null)" || [[ -z "$find_home" ]]; then
+  fail "test failed: could not read the home chezmoi renders for, so the find pins below use \$HOME as it is"
+  status=1
+  find_home="$HOME"
+fi
 find_home_plain=no
-if [[ "$HOME" =~ ^(/[A-Za-z0-9._-]+)+$ ]]; then
+if [[ "$find_home" =~ ^(/[A-Za-z0-9._-]+)+$ ]]; then
   find_home_plain=yes
-  expected_find_deny+=$'\nBash(find '"$HOME"$' *)\nBash(find '"$HOME"$'/ *)'
+  expected_find_deny+=$'\nBash(find '"$find_home"$' *)\nBash(find '"$find_home"$'/ *)'
 fi
 expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :**)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
 expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp__claude_ai_Google_Drive\nmcp__claude_ai_Claude_Docs\nmcp__claude_ai_Notion'
@@ -660,14 +671,15 @@ fi
 #     command behind cd, a pipe, $(...) and the like, as /usr/bin/find and
 #     with the start point quoted (docs/claude-settings.md); this reading
 #     does not split commands or drop quotes, so those forms are not pinned.
-#     <home> stands for $HOME; a home that is not plain gets no rule of its
-#     own (the pin above), so its absolute path is expected to pass.
+#     <home> stands for the home chezmoi rendered for (find_home above); a
+#     home that is not plain gets no rule of its own (the pin above), so its
+#     absolute path is expected to pass.
 #     The last group is what the rules do not reach.
 find_misses=""
 while IFS='|' read -r want cmd; do
   [[ -n "$want" ]] || continue
   if [[ "$cmd" == *'<home>'* ]]; then
-    cmd="${cmd//<home>/$HOME}"
+    cmd="${cmd//<home>/$find_home}"
     [[ "$find_home_plain" == yes ]] || want=none
   fi
   got="$(claude_decision "$cmd")"
