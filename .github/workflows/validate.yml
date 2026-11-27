@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to a PR cancels the run still going for its older commit
+# (#648): this workflow only validates, and the old run would only hold a
+# runner the new one waits for. A push to main gets a group of its own run
+# (head_ref is empty there), so no merge commit's run is cancelled, nor
+# replaced while pending, which GitHub does to a pending run in the same
+# group by default.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 # Retries keep version pins and checksum verification, so different content is rejected.
 env:
   YQ_VERSION: 4.54.1
