@@ -532,7 +532,16 @@ function claude {
     # advisor は非対話 (-p / --print) の入れ子の起動には足さない (呼ぶたびに会話の全文を読む費用が乗るため。#553)。
     (( has_advisor || is_print )) || baseline+=(--advisor fable)
   fi
-  command claude "${baseline[@]}" "$@"
+  # Inside Herdr, Claude Code does not take the terminal for one that can
+  # draw images, so the terminal-artifact-viewer plugin's images do not show
+  # (#652). Herdr puts HERDR_ENV in its panes; force images for the Claude
+  # Code started here only, not for the pane's other commands. `command
+  # claude` skips this function and so this too.
+  if [[ -n ${HERDR_ENV-} ]]; then
+    CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 command claude "${baseline[@]}" "$@"
+  else
+    command claude "${baseline[@]}" "$@"
+  fi
 }
 function codex { _agent_launch_guard codex || return; command codex "$@" }
 function opencode { _agent_launch_guard opencode || return; command opencode "$@" }

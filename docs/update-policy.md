@@ -48,6 +48,8 @@ install と update を分けても、install の時点で「どの版が入る�
 - 公式の marketplace(`claude-plugins-official`)は Claude Code の既定で auto-update が on。Anthropic 由来で、
   claude-code 本体の自己更新(上記の例外)と同じ扱いとし、固定しない。
 - 固定と `autoUpdate: false` は `scripts/test-claude-settings.sh` が全 entry について確認する。
+- 自分の repo の plugin (terminal-artifact-viewer。#652) も同じく tag に固定する。新しい版は、その repo で tag を打ってから
+  `ref` を上げる。
 
 ## GitHub Actions(CI)の更新
 

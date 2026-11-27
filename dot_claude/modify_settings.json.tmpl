@@ -448,7 +448,8 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
   "enabledPlugins": {
     "skill-creator@claude-plugins-official": true,
     "codex@openai-codex": true,
-    "notion@claude-plugins-official": true
+    "notion@claude-plugins-official": true,
+    "terminal-artifact-viewer@terminal-artifact-viewer": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
@@ -456,6 +457,14 @@ managed=$(cat <<'CLAUDE_SETTINGS_JSON'
         "source": "github",
         "repo": "openai/codex-plugin-cc",
         "ref": "v1.0.4"
+      },
+      "autoUpdate": false
+    },
+    "terminal-artifact-viewer": {
+      "source": {
+        "source": "github",
+        "repo": "kosako/terminal-artifact-viewer",
+        "ref": "v0.1.0"
       },
       "autoUpdate": false
     }
