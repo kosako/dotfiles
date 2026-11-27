@@ -284,10 +284,13 @@ section "claude settings GitHub injection guard (#119)"
 #    `git commit`, --no-verify right after `git push`) and the Edit deny on
 #    any .agent-context.local.md, #530 the two MCP login tools of every
 #    server (mcp__*__authenticate / mcp__*__complete_authentication), and
-#    #642 the find that starts from / or the home directory (4), so the
-#    deny is those 43 + mcp__github = 44, followed by gateUnusedClaudeMcp's
+#    #642 the find that starts from / or the home directory (4, then 2
+#    naming the home by its absolute path, rendered only for a home of
+#    letters, digits, `.`, `_`, `-` and `/`; the check below applies the
+#    same test to $HOME, which is what chezmoi renders for here), so the
+#    deny is those 45 + mcp__github = 46, followed by gateUnusedClaudeMcp's
 #    22 (#341, ON for personal: the five claude.ai connectors as whole
-#    servers, Notion joining in #530, then 17 Notion write tools) = 66
+#    servers, Notion joining in #530, then 17 Notion write tools) = 68
 #    (the floor present even with enforceAiSandbox off is
 #    the core of Phase 2 task B). The ask block is the whole 1Password CLI
 #    (`op *`: global options can sit anywhere, so the program is the unit;
@@ -311,6 +314,11 @@ expected_allow='{"allow":["mcp__pencil","Bash(~/.claude/agent-tools/scripts/pers
 expected_git_deny=$'Bash(git commit --no-verify *)\nBash(git push --no-verify *)\nBash(git commit -n *)\nEdit(//**/.agent-context.local.md)'
 expected_login_deny=$'mcp__*__authenticate\nmcp__*__complete_authentication'
 expected_find_deny=$'Bash(find / *)\nBash(find ~ *)\nBash(find ~/ *)\nBash(find $HOME *)'
+find_home_plain=no
+if [[ "$HOME" =~ ^(/[A-Za-z0-9._-]+)+$ ]]; then
+  find_home_plain=yes
+  expected_find_deny+=$'\nBash(find '"$HOME"$' *)\nBash(find '"$HOME"$'/ *)'
+fi
 expected_git_ask=$'Bash(git clean *)\nBash(git * clean *)\nBash(git restore *)\nBash(git * restore *)\nBash(git *checkout* -- *)\nBash(git *checkout* .)\nBash(git *push* +*)\nBash(git *push* :**)\nBash(git *reset* --hard)\nBash(git *reset* --hard *)\nBash(git *checkout* --force)\nBash(git *checkout* --force *)\nBash(git *checkout* -f)\nBash(git *checkout* -f *)\nBash(git *checkout* -qf)\nBash(git *checkout* -qf *)\nBash(git *checkout* -fq)\nBash(git *checkout* -fq *)\nBash(git *switch* --force)\nBash(git *switch* --force *)\nBash(git *switch* --discard-changes)\nBash(git *switch* --discard-changes *)\nBash(git *switch* -f)\nBash(git *switch* -f *)\nBash(git *switch* -qf)\nBash(git *switch* -qf *)\nBash(git *switch* -fq)\nBash(git *switch* -fq *)\nBash(git *push* --force)\nBash(git *push* --force *)\nBash(git *push* -f)\nBash(git *push* -f *)\nBash(git *push* -uf)\nBash(git *push* -uf *)\nBash(git *push* -fu)\nBash(git *push* -fu *)\nBash(git *branch* -D)\nBash(git *branch* -D *)\nBash(git *branch* --force)\nBash(git *branch* --force *)\nBash(git *branch* -f)\nBash(git *branch* -f *)\nBash(git *branch* -df)\nBash(git *branch* -df *)\nBash(git *branch* -fd)\nBash(git *branch* -fd *)\nBash(git *commit* -n)\nBash(git *commit* -n *)\nBash(git *commit* -nm)\nBash(git *commit* -nm *)\nBash(git *commit* -an)\nBash(git *commit* -an *)\nBash(git *commit* -anm)\nBash(git *commit* -anm *)\nBash(git *push* --mirror)\nBash(git *push* --mirror *)\nBash(git *push* --delete)\nBash(git *push* --delete *)\nBash(git *push* -d)\nBash(git *push* -d *)\nBash(git *branch* -M)\nBash(git *branch* -M *)\nBash(git *stash* drop)\nBash(git *stash* drop *)\nBash(git *stash* clear)\nBash(git *stash* clear *)\nBash(git *worktree remove* --force)\nBash(git *worktree remove* --force *)\nBash(git *worktree remove* -f)\nBash(git *worktree remove* -f *)\nBash(git *--no-verify*)'
 expected_unused_mcp=$'mcp__claude_ai_Gmail\nmcp__claude_ai_Google_Calendar\nmcp__claude_ai_Google_Drive\nmcp__claude_ai_Claude_Docs\nmcp__claude_ai_Notion'
 for notion_tool in notion-create-comment notion-create-attachment notion-create-database notion-create-view notion-update-view notion-update-data-source notion-create-folder notion-update-folder notion-restore-pages notion-convert-page-to-skill notion-upload-skill notion-spawn-session notion-send-message-to-session notion-stop-session notion-move-pages notion-duplicate-page notion-create-file-upload; do
@@ -322,7 +330,7 @@ expected_ask=$'Bash(op *)\nBash(aws *)\nRead(~/.codex/config.toml)\nRead(~/.zshr
 ask_default="$(yq -p json -o yaml '.permissions.ask[]' "$off_file" 2>/dev/null || true)"
 rest_default="$(yq -p json -o json -I0 '.permissions | del(.deny, .ask)' "$off_file" 2>/dev/null || true)"
 if [[ "$actual_deny" == "$expected_deny" && "$ask_default" == "$expected_ask" && "$rest_default" == "$expected_allow" ]]; then
-  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + #530 MCP login tools + #642's find from / or home + github MCP + #341's unused MCP (66, ordered); ask is exactly the whole 1Password and AWS CLIs, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (77, ordered); allow is exactly mcp__pencil and the merged-branch cleanup script, and permissions holds nothing else (enforceAiSandbox off)"
+  ok "test passed: committed personal deny is exactly the secret floor + #304 hook-skip / note deny + #530 MCP login tools + #642's find from / or home + github MCP + #341's unused MCP (68 with a plain home path, ordered); ask is exactly the whole 1Password and AWS CLIs, #334's reads of secret-bearing config files, and the work-discarding git and hook skips of #304 / #334 (77, ordered); allow is exactly mcp__pencil and the merged-branch cleanup script, and permissions holds nothing else (enforceAiSandbox off)"
 else
   fail "test failed: committed personal permissions unexpected (allow and the rest=$rest_default ask=$ask_default); deny was:"
   printf '%s\n' "$actual_deny" >&2
@@ -652,10 +660,16 @@ fi
 #     command behind cd, a pipe, $(...) and the like, as /usr/bin/find and
 #     with the start point quoted (docs/claude-settings.md); this reading
 #     does not split commands or drop quotes, so those forms are not pinned.
+#     <home> stands for $HOME; a home that is not plain gets no rule of its
+#     own (the pin above), so its absolute path is expected to pass.
 #     The last group is what the rules do not reach.
 find_misses=""
 while IFS='|' read -r want cmd; do
   [[ -n "$want" ]] || continue
+  if [[ "$cmd" == *'<home>'* ]]; then
+    cmd="${cmd//<home>/$HOME}"
+    [[ "$find_home_plain" == yes ]] || want=none
+  fi
   got="$(claude_decision "$cmd")"
   [[ "$got" == "$want" ]] || find_misses+="  $cmd -> $got (expected $want)"$'\n'
 done <<'CASES'
@@ -669,6 +683,10 @@ deny|find ~/
 deny|find ~/ -name x
 deny|find $HOME
 deny|find $HOME -maxdepth 2 -type f
+deny|find <home>
+deny|find <home> -maxdepth 4 -name x -path *agent-tools*
+deny|find <home>/
+deny|find <home>/ -name x
 none|find .
 none|find . -name x
 none|find src -name x
@@ -677,15 +695,19 @@ none|find /private/tmp/x -name y
 none|find ~/src -name x
 none|find ~/.claude -name x
 none|find $HOME/src -name x
+none|find <home>/.claude -name x
+none|find <home>/src -name x
+none|find <home>x -name x
 none|find $HOMEX -name x
 none|find ~other -name x
 none|findx / -name y
 none|find -L / -name x
 none|find . / -name x
 none|find ${HOME} -name x
+none|find /Users -name x
 CASES
 if [[ -z "$find_misses" ]]; then
-  ok "test passed: the committed rules deny find from / or the home directory and leave find from a narrower directory and look-alikes alone"
+  ok "test passed: the committed rules deny find from / or the home directory (also by its absolute path when plain) and leave find from a narrower directory and look-alikes alone"
 else
   fail "test failed: committed rules decide find unexpectedly:"
   printf '%s' "$find_misses" >&2

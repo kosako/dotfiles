@@ -1062,7 +1062,8 @@ chezmoi で各 profile を throwaway destination に render(apply)し、managed 
   1 つの JSON の object(`strict_json_object`)で、statusLine と各 hook の command を shell が意図した単語(path は
   1 語)に分けること。OpenCode の instructions の path も一致すること。通常の文字だけの home(固定の `/dotfiles-render-test-home`。host の `$HOME` に
   依らない。chezmoi はこの dir を作らない)では、statusLine・各 hook の command・instructions が引用符なしの
-  以前と同じ文字列であること。test-claude-settings / test-codex-settings の hook の期待値は、test-lib の
+  以前と同じ文字列であること。Claude の `find` の deny は、通常の home では home の絶対 path で書いた 2 件を含み、特殊な
+  文字の home では含まないこと(#642)。test-claude-settings / test-codex-settings の hook の期待値は、test-lib の
   `shell_word` / `shell_single_quote`(template と同じ規則)で host の `$HOME` から作る。
 - GitHub の HTTPS の credential helper(#492): work の apply は、chezmoi の PATH に gh があり、その path が引用の要らない
   絶対 path のときだけ `~/.config/git/gh-credential.gitconfig` を出し、github.com と gist.github.com の helper の list を
@@ -1077,8 +1078,8 @@ chezmoi と jq と git が必要(chezmoi は CI では version pin して導入�
 
 managed `~/.claude/settings.json` の rendered content を検証する。throwaway repo copy で
 capability(`enforceAiSandbox` / `gateGitHubMcp` / `gateUnusedClaudeMcp`)を flip し、secret floor の無条件 deny
-33 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件と #530 の MCP のログインの tool(`mcp__*__authenticate` / `mcp__*__complete_authentication`)の deny 2 件と #642 の `/` と home を起点にする `find` の deny 4 件が
-順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)を足して計 66 件。#136 で credential-store 読取 4 件、#234 で
+33 件と #304 の hook の skip(`git commit` / `git push` 直後の `--no-verify`・`git commit -n`)と参照先 note への Edit の deny 4 件と #530 の MCP のログインの tool(`mcp__*__authenticate` / `mcp__*__complete_authentication`)の deny 2 件と #642 の `/` と home を起点にする `find` の deny 6 件(home の絶対 path で書いた 2 件は、home の path が英数字と `.` `_` `-` `/` だけのとき)が
+順序込みで常時出力されること(personal 既定では `gateGitHubMcp` の `mcp__github` と `gateUnusedClaudeMcp` の 22 件(#341・#530)を足して計 68 件。#136 で credential-store 読取 4 件、#234 で
 OpenCode の `auth.json`、#315 で gh token の表示と keychain の password の読み出し・dump・export を option の置き方の違いも
 含めて追加、#639 で `cat *~/.aws/*` と AWS の認証情報の表示 2 件を追加し、#641 で ssh 鍵の `cat` も同じ形の `cat *~/.ssh/*` にした)、1Password の CLI 全体(1 件)と AWS CLI 全体(1 件、#639)と
 #334 / #381 の secret を含みうる設定 file の読み取り(4 件)と #304 / #334 の作業を捨てる git と
@@ -1091,7 +1092,7 @@ command の集合に当てた判定(作業を捨てる形と代表的な束ね(`
 として含む message は ask になりうる)、同じ照合で `aws` の command の集合に当てた判定(認証情報の表示は global option を
 前や間に置く形も含めて deny、`~/.aws` の下の file の `cat` も deny、それ以外の `aws` は ask、名前の似た program と path は
 どちらでもない。#639)、`~/.ssh` の下の file の `cat` の判定(option や別の file を path の前に置く形も deny、名前の似た path は
-どちらでもない。#641)、`find` の判定(`/` と home を起点にする形は deny、絞った起点と名前の似た program は
+どちらでもない。#641)、`find` の判定(`/` と home を起点にする形は、home を絶対 path で書いた形も含めて deny、絞った起点と名前の似た program は
 どちらでもない。#642)、gate 系 deny/ask ブロックが capability に応じて出る/出ないこと(`enforceAiSandbox=true` の deny / ask も順序込みで、allow も exact pin。`gateGitHubMcp` / `gateUnusedClaudeMcp` を false にした render は既定の render から、`gateGitHubMcp=false` と `enforceAiSandbox=true` を合わせた render は `enforceAiSandbox=true` の render から、その gate の deny を除いたものと JSON 全体で一致すること)、#93 で
 取り込んだ global preference キーの保持、statusLine が `<home>/go/bin/tacho statusline` を走らせる command 型で padding 0 であること(#305 / #333)、第三者の plugin marketplace がすべて `ref` を固定し `autoUpdate: false` であること(#317)、hooks 登録(`enableGitHubIsolatedReader` の PreToolUse / `enableQualityLoopHooks` の
 PostToolUse + Stop / `enableHerdrIntegration` の SessionStart / `enableToolCallRecordHook` の記録の hook / `enableJaReplyGuardHook` の Stop の 2 つ目の entry / `enableBridgeOneHook` の PermissionRequest の 2 つ目の entry(決定を返しうる PermissionRequest の hook はこれだけで、HOME が変わった path でも command は 1 語) / `enableInstructionUpdateNoticeHook` の SessionStart の最後の entry と UserPromptSubmit の唯一の entry(timeout 10、matcher と async なし。記録 hook と herdr のどちらが off でも、両方 off でも同じ形で、HOME が変わった path でも command は 1 語)。各 capability が自分の event だけを足し、全部 false で `hooks` キーが消えること。#137 / #199 / #225 / #353 / #497 / #508 / #547)を exact に確認する(personal 既定の render では `hooks` の object 全体を pin するので、entry に足された key(safe-gh の `async` や `timeout` など)も落ちる)。

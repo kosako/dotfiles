@@ -674,6 +674,25 @@ check_home_render() {
   fi
 }
 
+# check_find_deny LABEL ROOT [HOME] — the Claude find deny (#642): the four
+# fixed forms, then, when HOME is given, the two naming that home by its
+# absolute path (the template writes them only for a home of letters, digits,
+# `.`, `_`, `-` and `/`, so the unusual home must get none: a rule is matched
+# as text with `*` as a wildcard, and that home cannot be written as one).
+check_find_deny() {
+  local label="$1" root="$2" home="${3-}" got want
+  got="$(yq -p json -o yaml '.permissions.deny[] | select(test("^Bash\\(find "))' "$root/home/.claude/settings.json")"
+  want=$'Bash(find / *)\nBash(find ~ *)\nBash(find ~/ *)\nBash(find $HOME *)'
+  [[ -z "$home" ]] || want+=$'\nBash(find '"$home"$' *)\nBash(find '"$home"$'/ *)'
+  if [[ "$got" == "$want" ]]; then
+    ok "test passed: $label gets the Claude find deny it should (#642)"
+  else
+    printf 'got:\n%s\nwant:\n%s\n' "$got" "$want" >&2
+    fail "test failed: the Claude find deny differs for $label"
+    status=1
+  fi
+}
+
 # A normal home renders every command exactly as before the quoting: the fixed
 # plain home RENDER_TEST_HOME (test-lib.sh; the expected files of
 # test-claude-settings.sh and test-codex-settings.sh are rendered for the same
@@ -704,6 +723,7 @@ if HOME="$plain_home" throwaway_chezmoi apply >/dev/null 2>&1; then
     fail "test failed: a command string changed for a normal home"
     status=1
   fi
+  check_find_deny "a normal home" "$root" "$plain_home"
 else
   fail "test failed: personal apply did not render (normal home)"
   status=1
@@ -724,6 +744,7 @@ else
 fi
 if HOME="$odd_home" throwaway_chezmoi apply >/dev/null 2>&1; then
   check_home_render "$root" "$odd_home"
+  check_find_deny "an unusual home" "$root"
 else
   fail "test failed: personal apply with an unusual home path did not render"
   status=1

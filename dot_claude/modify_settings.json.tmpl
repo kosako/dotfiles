@@ -146,9 +146,20 @@
        subshell / a loop / a second line / LC_ALL=C / timeout / command, as
        /usr/bin/find, and with the start point quoted; find from a narrower
        directory, and the words in a heredoc or a commit message, were let
-       through. Spelling variants are not enumerated (the #315 lesson), so
-       find -L /, find . /, the home directory by an absolute or relative
-       path, ${HOME}, ~/Library, bash -c and xargs stay open.
+       through. The home directory by its absolute path joined later (two
+       rules, with and without a trailing slash): the next prompt after the
+       four went in came from `find <home> -maxdepth 4`, a form sessions had
+       used three times in the month of logs. It is rendered from
+       .chezmoi.homeDir, and only for a home made of letters, digits, `.`,
+       `_`, `-` and `/`: a rule is matched as text with `*` as a wildcard, so
+       a home holding a space, a quote or a wildcard character cannot be
+       written as a rule that means only that path, and such a home keeps the
+       four rules alone. Measured the same way: denied quoted, behind cd &&,
+       after a `;` and with doubled spaces; <home>/.claude, <home>/src, a
+       longer name and /Users let through. Spelling variants are not
+       enumerated (the #315 lesson), so find -L /, find . /, the home
+       directory by a relative path, /Users, ${HOME}, ~/Library, bash -c and
+       xargs stay open.
        3. enforceAiSandbox (human-legit, stays gated): git push to main/master and
           reading .env are things the human does legitimately direct Claude to do,
           so they ride on enforceAiSandbox — which personal keeps false because its
@@ -294,6 +305,7 @@
        never the rule. No file: allow is the two rules below, byte for
        byte. */ -}}
 {{- $deny := list "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gh/**)" "Read(~/.netrc)" "Read(~/.codex/auth.json)" "Read(~/.local/share/opencode/auth.json)" "Bash(cat *~/.ssh/*)" "Bash(cat *~/.aws/*)" "Bash(gh secret *)" "Bash(gh api *secrets*)" "Bash(env)" "Bash(env *)" "Bash(printenv)" "Bash(printenv *)" "Bash(gh auth token)" "Bash(gh auth token *)" "Bash(gh auth status *--show-token*)" "Bash(gh auth status -t*)" "Bash(gh auth status * -t*)" "Bash(gh auth status -at*)" "Bash(gh auth status * -at*)" "Bash(gh -* auth *)" "Bash(gh auth -*)" "Bash(security find-generic-password *)" "Bash(security * find-generic-password *)" "Bash(security find-internet-password *)" "Bash(security * find-internet-password *)" "Bash(security dump-keychain*)" "Bash(security * dump-keychain*)" "Bash(security export *)" "Bash(security * export *)" "Bash(aws *configure* export-credentials*)" "Bash(aws *sso* get-role-credentials*)" "Bash(git commit --no-verify *)" "Bash(git push --no-verify *)" "Bash(git commit -n *)" "Edit(//**/.agent-context.local.md)" "mcp__*__authenticate" "mcp__*__complete_authentication" "Bash(find / *)" "Bash(find ~ *)" "Bash(find ~/ *)" "Bash(find $HOME *)" -}}
+{{- if regexMatch `^(/[A-Za-z0-9._-]+)+$` .chezmoi.homeDir -}}{{- $deny = concat $deny (list (printf "Bash(find %s *)" .chezmoi.homeDir) (printf "Bash(find %s/ *)" .chezmoi.homeDir)) -}}{{- end -}}
 {{- if index $caps "gateGitHubMcp" -}}{{- $deny = concat $deny (list "mcp__github") -}}{{- end -}}
 {{- if index $caps "gateUnusedClaudeMcp" -}}
 {{- $deny = concat $deny (list "mcp__claude_ai_Gmail" "mcp__claude_ai_Google_Calendar" "mcp__claude_ai_Google_Drive" "mcp__claude_ai_Claude_Docs" "mcp__claude_ai_Notion") -}}
