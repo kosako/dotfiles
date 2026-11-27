@@ -613,14 +613,17 @@ done
 section "make_flipped_source copies what git would commit (#647)"
 
 # A fixture repo with every kind of entry: tracked (a plain file, an
-# executable, a symlink), tracked but deleted in the working tree, untracked
+# executable, a symlink), a submodule (a gitlink whose directory holds a .git
+# file and another file), tracked but deleted in the working tree, untracked
 # and not ignored, ignored by the repo's .gitignore (a file pattern and two
 # directories) and ignored only by the global excludes. The copy must hold the
 # tracked and the untracked-not-ignored entries, with the executable bit and
-# the symlink kept, and nothing else. GIT_DIR / GIT_INDEX_FILE are exported
-# at an unrelated path, as a hook running the suite would (#389): the listing
-# must still read the fixture repo. HOME is a fixture home whose global
-# excludes are honoured, so the real home's are not in play.
+# the symlink kept, the submodule as an empty directory, and nothing else.
+# GIT_DIR / GIT_INDEX_FILE are exported at an unrelated path, as a hook
+# running the suite would (#389): the listing must still read the fixture
+# repo. HOME, the global config (empty) and the system config (off) are the
+# fixture's, so the global excludes are the fixture home's and the host's
+# config cannot add an excludesFile.
 mfs_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-render-test.XXXXXX")"
 tmp_roots+=("$mfs_root")
 mfs_repo="$mfs_root/repo"
@@ -643,21 +646,27 @@ if mfs_git init -q && mfs_git add -A && mfs_git -c user.name=t -c user.email=t@e
   printf 'i\n' > "$mfs_repo/ignored-dir/x"
   printf 's\n' > "$mfs_repo/note.secret"
   printf 'g\n' > "$mfs_repo/local.globalignored"
+  mkdir "$mfs_repo/module"
+  printf 'gitdir: ../elsewhere\n' > "$mfs_repo/module/.git"
+  printf 'm\n' > "$mfs_repo/module/inside.txt"
+  mfs_git update-index --add --cacheinfo "160000,$(mfs_git rev-parse HEAD),module"
   mkdir "$mfs_root/dest"
   mfs_status=0
   (
     DOTFILES_ROOT="$mfs_repo"
     HOME="$mfs_home"
     XDG_CONFIG_HOME="$mfs_home/.config"
+    GIT_CONFIG_GLOBAL="$mfs_root/gitconfig"
+    GIT_CONFIG_NOSYSTEM=1
     GIT_DIR="$mfs_root/elsewhere.git"
     GIT_INDEX_FILE="$mfs_root/elsewhere.index"
-    export HOME XDG_CONFIG_HOME GIT_DIR GIT_INDEX_FILE
+    export HOME XDG_CONFIG_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM GIT_DIR GIT_INDEX_FILE
     make_flipped_source "$mfs_root/dest"
   ) || mfs_status=$?
   mfs_got="$(cd "$mfs_root/dest/src" 2>/dev/null && find . \( -type f -o -type l \) | LC_ALL=C sort)"
   mfs_want="$(printf '%s\n' ./.gitignore ./link ./sub/run.sh ./tracked.txt ./untracked.txt)"
-  if [[ "$mfs_status" -eq 0 && "$mfs_got" == "$mfs_want" && -x "$mfs_root/dest/src/sub/run.sh" && -L "$mfs_root/dest/src/link" ]]; then
-    ok "test passed: make_flipped_source copies the tracked and the untracked-not-ignored files (mode and symlink kept) and leaves out .git, ignored and deleted files, under an exported GIT_DIR"
+  if [[ "$mfs_status" -eq 0 && "$mfs_got" == "$mfs_want" && -x "$mfs_root/dest/src/sub/run.sh" && -L "$mfs_root/dest/src/link" && -d "$mfs_root/dest/src/module" ]]; then
+    ok "test passed: make_flipped_source copies the tracked and the untracked-not-ignored files (mode and symlink kept, a submodule as an empty directory) and leaves out .git, ignored and deleted files, under an exported GIT_DIR"
   else
     printf 'status=%s\ngot:\n%s\nwant:\n%s\n' "$mfs_status" "$mfs_got" "$mfs_want" >&2
     fail "test failed: make_flipped_source copied the wrong set of files"

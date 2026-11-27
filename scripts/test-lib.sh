@@ -111,14 +111,20 @@ RENDER_TEST_HOME="/dotfiles-render-test-home"
 # session progress, local settings) is not copied into temp space (#647).
 # Nor is .git: a main worktree's .git (tens of MB) made each copy take about
 # 1 s, and the render suites call this dozens of times per run. A tracked
-# file deleted in the working tree is skipped. The listing drops the
-# repository-selecting variables a hook may export (the #389 trap) but keeps
-# HOME, so the global excludes still apply. One tar pipe, not a cp per file;
-# PIPESTATUS is read inside a group whose failure is caught, so the check
-# holds whether or not the caller set errexit and pipefail.
+# file deleted in the working tree is skipped. A submodule is listed as its
+# directory, so tar runs with --no-recursion: the directory is made empty and
+# nothing inside it (its .git, its ignored files) is copied. The listing drops
+# the repository-selecting variables a hook may export (the #389 trap) but
+# keeps HOME, so the global excludes still apply. One tar pipe, not a cp per
+# file; PIPESTATUS is read inside a group whose failure is caught, and so is
+# mkdir, so a failure returns 1 whether or not the caller set errexit and
+# pipefail (an existing src is a failure too: the copy must not mix with it).
 make_flipped_source() {
   local dest_parent="$1" entry statuses=""
-  mkdir "$dest_parent/src"
+  if ! mkdir "$dest_parent/src"; then
+    fail "make_flipped_source: could not create $dest_parent/src"
+    return 1
+  fi
   {
     (
       cd "$DOTFILES_ROOT" &&
@@ -130,7 +136,7 @@ make_flipped_source() {
       if [[ -e "$DOTFILES_ROOT/$entry" || -L "$DOTFILES_ROOT/$entry" ]]; then
         printf '%s\0' "$entry"
       fi
-    done | (cd "$DOTFILES_ROOT" && tar -cf - --null -T -) | (cd "$dest_parent/src" && tar -xf -)
+    done | (cd "$DOTFILES_ROOT" && tar -cf - --no-recursion --null -T -) | (cd "$dest_parent/src" && tar -xf -)
     statuses="${PIPESTATUS[*]}"
   } || true
   if [[ "$statuses" != "0 0 0 0" ]]; then
