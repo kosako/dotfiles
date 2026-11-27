@@ -79,17 +79,20 @@ mkdir -p "$stub_bin"
 # Stubs that record the name and each argument in brackets, one call per
 # line, and exit 3: "-p" "a b" and "-p a b" (or a dropped empty argument)
 # record differently (Codex review R1). Not write_call_recorders, which
-# records "$*".
+# records "$*". Each call also records CLAUDE_CODE_FORCE_TERMINAL_IMAGES as it
+# reached the command ("unset" when absent) in calls.env (#652).
 for name in claude codex opencode; do
-  printf '#!/bin/sh\nprintf %%s %s >> %s\nfor a in "$@"; do printf " [%%s]" "$a" >> %s; done\necho >> %s\nexit 3\n' \
+  printf '#!/bin/sh\nprintf %%s %s >> %s\nfor a in "$@"; do printf " [%%s]" "$a" >> %s; done\necho >> %s\nprintf "%%s\\n" "${CLAUDE_CODE_FORCE_TERMINAL_IMAGES-unset}" >> %s\nexit 3\n' \
     "$(shell_single_quote "$name")" "$(shell_single_quote "$calls")" \
-    "$(shell_single_quote "$calls")" "$(shell_single_quote "$calls")" > "$stub_bin/$name"
+    "$(shell_single_quote "$calls")" "$(shell_single_quote "$calls")" \
+    "$(shell_single_quote "$calls.env")" > "$stub_bin/$name"
   chmod +x "$stub_bin/$name"
 done
 
 # guard_run DIR WORD... — run WORD... in DIR (a zsh `cd`, so a symlink in DIR
 # stays in the logical path) with the block loaded. Sets run_rc, run_out
-# (stdout), run_err (stderr), run_calls (the recorder log, then cleared).
+# (stdout), run_err (stderr), run_calls (the recorder log, then cleared) and
+# run_env (the recorded CLAUDE_CODE_FORCE_TERMINAL_IMAGES, then cleared).
 guard_run() {
   local dir="$1"
   shift
@@ -102,6 +105,11 @@ guard_run() {
   if [[ -f "$calls" ]]; then
     run_calls="$(cat "$calls")"
     rm -f "$calls"
+  fi
+  run_env=""
+  if [[ -f "$calls.env" ]]; then
+    run_env="$(cat "$calls.env")"
+    rm -f "$calls.env"
   fi
 }
 
@@ -328,6 +336,37 @@ expect_claude_args "option with a digit in its name takes a value" "$base [--pre
 expect_claude_args "another option with a digit takes a value" "$both [--deep-link-cwd-b64] [-p]" --deep-link-cwd-b64 -p
 expect_claude_args "model value -p is not print" ' [--effort] [xhigh] [--advisor] [fable] [--model] [-p]' --model -p
 expect_refused "baseline does not bypass guard" "$h/Downloads/site" claude "$(refused_line claude "~/Downloads/site" "$default_roots")"
+
+# 10. Inside Herdr (HERDR_ENV in the pane) the claude wrapper starts Claude
+#     Code with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, so the
+#     terminal-artifact-viewer plugin's images show (#652); arguments and exit
+#     status stay as without it. Outside Herdr (absent or empty) nothing is
+#     added, `command claude` skips the wrapper, and codex never gets it. The
+#     suite may itself run inside Herdr, so both variables are set or unset
+#     here explicitly.
+unset CLAUDE_CODE_FORCE_TERMINAL_IMAGES
+herdr_case() {
+  local label="$1" herdr="$2" want_calls="$3" want_env="$4"
+  shift 4
+  if [[ "$herdr" == "<unset>" ]]; then
+    unset HERDR_ENV
+  else
+    export HERDR_ENV="$herdr"
+  fi
+  guard_run "$h/src/personal/repo" "$@"
+  unset HERDR_ENV
+  if [[ "$run_rc" == 3 && "$run_calls" == "$want_calls" && "$run_env" == "$want_env" && -z "$run_err" ]]; then
+    pass "$label"
+  else
+    miss "$label (rc=$run_rc calls=$run_calls env=$run_env err=$run_err)"
+  fi
+}
+herdr_case "claude inside Herdr gets CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1" 1 "claude$both" 1 claude
+herdr_case "claude inside Herdr keeps its arguments and print mode" 1 "claude$base [-p] [a b] []" 1 claude -p 'a b' ''
+herdr_case "claude outside Herdr gets nothing added" '<unset>' "claude$both" unset claude
+herdr_case "an empty HERDR_ENV counts as outside Herdr" '' "claude$both" unset claude
+herdr_case "command claude inside Herdr skips the wrapper and gets nothing added" 1 "claude [--version]" unset command claude --version
+herdr_case "codex inside Herdr gets nothing added" 1 "codex [a]" unset codex a
 printf 'sonnet\nlow\n' > "$baseline_file"
 expect_claude_args "read changed baseline on each launch" ' [--model] [sonnet] [--effort] [low] [--advisor] [fable]'
 for contents in '' $'opus[1m]\n' $'\nxhigh\n' $'opus[1m]\n\n' $'opus[1m]\nxhigh\nextra' $'opus[1m]\nxhigh\n\n' $'opus[1m]\nxhigh\r\n'; do

@@ -142,6 +142,16 @@ data を持たない profile では file の有無だけを見る (値は読ま�
 `claude-settings` module が active な profile では `chezmoi apply` が消す。
 active でない profile (work) では apply が触れないので、`rm -i` で手で消す。消した後の起動から、関数は flag を足さない。
 
+### Herdr の中の画像(#652)
+
+Herdr の中では、Claude Code が端末を「画像を描ける」と判定しない。そのため、terminal-artifact-viewer の plugin
+([claude-settings](claude-settings.md))が送った画像を描けない。`claude` 関数は、Herdr が pane に置く `HERDR_ENV` が
+空でないときだけ、起動する Claude Code に `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` を付ける。
+
+- `~/.zshrc` で export しないので、Herdr の pane で動くほかの command や、script が中で起動する `claude -p` には渡らない。
+- iTerm2 の直下 (Herdr の外) では付けない。関数を通らない `command claude` にも付かない。
+- plugin の側からは設定できない (起動の後にも、起動時の hook からも、変えて効かないことを確かめた。#652)。
+
 ### 出力のコピー(AI 連携)
 
 - `Ctrl-O` … **Enter の代わりに**押すと、そのコマンドを実行しつつ「`$ コマンド` + 出力 + `[exit status]`」をクリップボードへコピーする(AI チャットに貼って相談する用途)。普段は今までどおり Enter、コピーしたいコマンドだけ Ctrl-O。`&&` 連結 / pipe / 複数行コマンドも行全体を捕捉する。

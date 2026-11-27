@@ -390,6 +390,25 @@ locale の grep で数えるので、空白は template と同じ ASCII の空�
 personal にしか入らないので、file を置くことが opt-in になる。module の入らない profile では、file があれば「使わない」
 と出す。Codex には同じ口を作らない(Codex の rules は command の承認で、WebFetch にあたる口が無いため)。
 
+## terminal-artifact-viewer の plugin(#652)
+
+`SendUserFile` で送った PNG と JPEG を、会話の中に画像として描く Claude Code の plugin(自分の repo
+`kosako/terminal-artifact-viewer`)を、ほかの plugin と同じく template で入れて有効にする。
+
+- 取得元は GitHub の tag に固定する(`extraKnownMarketplaces` の `ref` が `v0.1.0`、`autoUpdate: false`)。自分の repo でも、
+  第三者の marketplace と同じ扱いにする([update-policy](update-policy.md))。手元の clone の folder を取得元にすると、
+  作業中の未 commit の変更や別の branch が、全部の session にそのまま効くため。
+- 新しい版を使うときは、plugin の repo で tag を打ってから、template の `ref` を上げる PR を出す。tag を打つ前に `ref` を
+  上げない(Claude Code が取ってこられない)。開発中の変更を試すときは、その session だけ
+  `claude --plugin-dir <clone の folder>` で読む。
+- capability は持たない(`codex` の plugin と同じく、personal の profile で常に有効)。claude-settings の module は
+  personal にしか入らないので、work には配られない。
+- Herdr の中では、Claude Code が端末を「画像を描ける」と判定しないので、`claude` 関数が Herdr の pane でだけ
+  `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` を付ける([shell](shell.md) の「Herdr の中の画像」)。
+- 戻し方: template の `enabledPlugins` と `extraKnownMarketplaces` の 2 つの entry を消す PR を出して apply する。
+  apply の前に一時的に止めるなら `/plugin` で無効にする(managed な `settings.json` に書かれ、次の apply で戻る)。
+  手で入れる場合の手順と外し方は、plugin の repo の README にある。
+
 ## 後日 / 対象外
 
 - work / client の settings を新マシンで復元する手段は現状無い(#60 の暗号化バックアップは
