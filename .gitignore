@@ -5,3 +5,9 @@
 worklog/
 .agent-context.local.md
 .agent-packets/
+# Agent session progress and Claude Code's local settings. The global
+# excludes cover them too, but not before the first apply or on a machine
+# without them; make_flipped_source leaves ignored files out of its copies
+# (#647).
+.agent-session-progress/
+.claude/settings.local.json

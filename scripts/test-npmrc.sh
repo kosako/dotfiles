@@ -278,11 +278,13 @@ else
   # leave the managed set entirely (not render as an empty file).
   flip_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-flip.XXXXXX")"
   tmp_roots+=("$flip_root")
-  cp -R "$DOTFILES_ROOT/." "$flip_root/repo"
-  set_capability_all "$flip_root/repo" npmHardeningMode report
+  # make_flipped_source, not a copy of the whole tree: .git and the ignored
+  # local files of the working tree stay out of temp space (#647).
+  make_flipped_source "$flip_root"
+  set_capability_all "$flip_root/src" npmHardeningMode report
   report_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-npmrc-render.XXXXXX")"
   tmp_roots+=("$report_root")
-  if render_personal_into "$flip_root/repo" "$report_root"; then
+  if render_personal_into "$flip_root/src" "$report_root"; then
     if [[ -e "$report_root/home/.npmrc" ]]; then
       fail "test failed: npmHardeningMode=report must not manage ~/.npmrc"
       status=1
