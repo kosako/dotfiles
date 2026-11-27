@@ -610,6 +610,64 @@ for enum_cap in codexReviewEffort codexWorkerEffort npmHardeningMode; do
   done
 done
 
+section "make_flipped_source copies what git would commit (#647)"
+
+# A fixture repo with every kind of entry: tracked (a plain file, an
+# executable, a symlink), tracked but deleted in the working tree, untracked
+# and not ignored, ignored by the repo's .gitignore (a file pattern and two
+# directories) and ignored only by the global excludes. The copy must hold the
+# tracked and the untracked-not-ignored entries, with the executable bit and
+# the symlink kept, and nothing else. GIT_DIR / GIT_INDEX_FILE are exported
+# at an unrelated path, as a hook running the suite would (#389): the listing
+# must still read the fixture repo. HOME is a fixture home whose global
+# excludes are honoured, so the real home's are not in play.
+mfs_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-render-test.XXXXXX")"
+tmp_roots+=("$mfs_root")
+mfs_repo="$mfs_root/repo"
+mfs_home="$mfs_root/home"
+mkdir -p "$mfs_repo/sub" "$mfs_home/.config/git"
+: > "$mfs_root/gitconfig"
+printf '*.globalignored\n' > "$mfs_home/.config/git/ignore"
+printf 'tracked\n' > "$mfs_repo/tracked.txt"
+printf '#!/bin/sh\n' > "$mfs_repo/sub/run.sh"
+chmod 755 "$mfs_repo/sub/run.sh"
+ln -s tracked.txt "$mfs_repo/link"
+printf 'gone\n' > "$mfs_repo/deleted.txt"
+printf '.agent-packets/\nignored-dir/\n*.secret\n' > "$mfs_repo/.gitignore"
+mfs_git() { fixture_git_env "$mfs_home" "$mfs_root/gitconfig" -- git -C "$mfs_repo" "$@"; }
+if mfs_git init -q && mfs_git add -A && mfs_git -c user.name=t -c user.email=t@example.invalid commit -qm fixture; then
+  rm "$mfs_repo/deleted.txt"
+  mkdir -p "$mfs_repo/.agent-packets" "$mfs_repo/ignored-dir"
+  printf 'u\n' > "$mfs_repo/untracked.txt"
+  printf 'p\n' > "$mfs_repo/.agent-packets/1.md"
+  printf 'i\n' > "$mfs_repo/ignored-dir/x"
+  printf 's\n' > "$mfs_repo/note.secret"
+  printf 'g\n' > "$mfs_repo/local.globalignored"
+  mkdir "$mfs_root/dest"
+  mfs_status=0
+  (
+    DOTFILES_ROOT="$mfs_repo"
+    HOME="$mfs_home"
+    XDG_CONFIG_HOME="$mfs_home/.config"
+    GIT_DIR="$mfs_root/elsewhere.git"
+    GIT_INDEX_FILE="$mfs_root/elsewhere.index"
+    export HOME XDG_CONFIG_HOME GIT_DIR GIT_INDEX_FILE
+    make_flipped_source "$mfs_root/dest"
+  ) || mfs_status=$?
+  mfs_got="$(cd "$mfs_root/dest/src" 2>/dev/null && find . \( -type f -o -type l \) | LC_ALL=C sort)"
+  mfs_want="$(printf '%s\n' ./.gitignore ./link ./sub/run.sh ./tracked.txt ./untracked.txt)"
+  if [[ "$mfs_status" -eq 0 && "$mfs_got" == "$mfs_want" && -x "$mfs_root/dest/src/sub/run.sh" && -L "$mfs_root/dest/src/link" ]]; then
+    ok "test passed: make_flipped_source copies the tracked and the untracked-not-ignored files (mode and symlink kept) and leaves out .git, ignored and deleted files, under an exported GIT_DIR"
+  else
+    printf 'status=%s\ngot:\n%s\nwant:\n%s\n' "$mfs_status" "$mfs_got" "$mfs_want" >&2
+    fail "test failed: make_flipped_source copied the wrong set of files"
+    status=1
+  fi
+else
+  fail "test failed: could not build the make_flipped_source fixture repo"
+  status=1
+fi
+
 section "home path in the JSON settings and their command strings (#329)"
 
 # The home path reaches three JSON files: the Claude statusLine and hook

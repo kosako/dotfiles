@@ -99,24 +99,44 @@ render_personal_into() { render_profile_into "$1" "$2" personal; }
 RENDER_TEST_HOME="/dotfiles-render-test-home"
 
 # make_flipped_source DEST_PARENT
-# Copy the source tree into DEST_PARENT/src (without .git) so a test
-# can flip capabilities without touching the real data files. DEST_PARENT
-# is created and registered for cleanup by the caller. Call as a plain
-# statement, never inside $(...) (the subshell would hide caller-side
-# cleanup registration — same trap as render_personal_into).
-# Entry by entry so .git is never copied: a main worktree's .git (a
-# directory of tens of MB) made each call take about 1 s, and the render
-# suites call this dozens of times per run. The three globs cover every
-# name but . and .. (untracked files are copied too, as before); a
-# linked worktree's .git file is skipped the same way.
+# Copy the source tree into DEST_PARENT/src so a test can flip capabilities
+# without touching the real data files. DEST_PARENT is created and
+# registered for cleanup by the caller. Call as a plain statement, never
+# inside $(...) (the subshell would hide caller-side cleanup registration —
+# same trap as render_personal_into).
+# Only what git would commit is copied: the tracked files and the untracked
+# ones no ignore rule covers (.gitignore, .git/info/exclude, the global
+# excludes), so a new file not yet committed is still tested, while the
+# ignored local material of the working tree (the agent note, packets,
+# session progress, local settings) is not copied into temp space (#647).
+# Nor is .git: a main worktree's .git (tens of MB) made each copy take about
+# 1 s, and the render suites call this dozens of times per run. A tracked
+# file deleted in the working tree is skipped. The listing drops the
+# repository-selecting variables a hook may export (the #389 trap) but keeps
+# HOME, so the global excludes still apply. One tar pipe, not a cp per file;
+# PIPESTATUS is read inside a group whose failure is caught, so the check
+# holds whether or not the caller set errexit and pipefail.
 make_flipped_source() {
-  local dest_parent="$1" entry
+  local dest_parent="$1" entry statuses=""
   mkdir "$dest_parent/src"
-  for entry in "$DOTFILES_ROOT"/* "$DOTFILES_ROOT"/.[!.]* "$DOTFILES_ROOT"/..?*; do
-    [[ -e "$entry" || -L "$entry" ]] || continue
-    [[ "${entry##*/}" != .git ]] || continue
-    cp -R "$entry" "$dest_parent/src/"
-  done
+  {
+    (
+      cd "$DOTFILES_ROOT" &&
+        env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
+          -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE \
+          -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS \
+          git ls-files -z --cached --others --exclude-standard
+    ) | while IFS= read -r -d '' entry; do
+      if [[ -e "$DOTFILES_ROOT/$entry" || -L "$DOTFILES_ROOT/$entry" ]]; then
+        printf '%s\0' "$entry"
+      fi
+    done | (cd "$DOTFILES_ROOT" && tar -cf - --null -T -) | (cd "$dest_parent/src" && tar -xf -)
+    statuses="${PIPESTATUS[*]}"
+  } || true
+  if [[ "$statuses" != "0 0 0 0" ]]; then
+    fail "make_flipped_source: could not copy the files git lists in $DOTFILES_ROOT (pipe status: $statuses)"
+    return 1
+  fi
 }
 
 # flip_personal_capability SRC CAP VALUE
